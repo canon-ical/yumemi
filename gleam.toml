@@ -1,0 +1,6 @@
+name = "musearch_framework"
+version = "0.2.0"
+target = "javascript"
+
+[dependencies]
+gleam_stdlib = ">= 0.44.0 and < 2.0.0"
