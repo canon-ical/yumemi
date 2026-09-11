@@ -47,5 +47,6 @@ fn codepoints(raw: String) -> Int
 
 @external(javascript, "./spec_ffi.mjs", "validInteger")
 fn valid_integer(raw: String, min: Int, max: Int) -> Bool
+
 @external(javascript, "./spec_ffi.mjs", "validUrl")
 fn valid_url(raw: String) -> Bool

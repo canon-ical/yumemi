@@ -1,4 +1,5 @@
 //// Requirements are evaluated after argument decoding.
+
 pub type Requirement(args) {
   Adult
   Use
