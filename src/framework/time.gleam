@@ -60,3 +60,40 @@ fn add_days_raw(value: String, days: Int) -> String
 pub fn add_days(value: Datetime, days: Int) -> Datetime {
   Datetime(add_days_raw(value.value, days))
 }
+
+@external(javascript, "./time_ffi.mjs", "toDate")
+fn to_date_raw(value: String) -> String
+
+/// Convert an instant to the calendar date observed in Asia/Tokyo.
+pub fn to_date(value: Datetime) -> Date {
+  Date(to_date_raw(value.value))
+}
+
+@external(javascript, "./time_ffi.mjs", "dateLe")
+fn date_le_raw(left: String, right: String) -> Bool
+
+pub fn date_le(left: Date, right: Date) -> Bool {
+  date_le_raw(left.value, right.value)
+}
+
+@external(javascript, "./time_ffi.mjs", "datetimeLt")
+fn datetime_lt_raw(left: String, right: String) -> Bool
+
+pub fn datetime_lt(left: Datetime, right: Datetime) -> Bool {
+  datetime_lt_raw(left.value, right.value)
+}
+
+@external(javascript, "./time_ffi.mjs", "datetimeLe")
+fn datetime_le_raw(left: String, right: String) -> Bool
+
+pub fn datetime_le(left: Datetime, right: Datetime) -> Bool {
+  datetime_le_raw(left.value, right.value)
+}
+
+@external(javascript, "./time_ffi.mjs", "quarterAligned")
+fn quarter_aligned_raw(value: String) -> Bool
+
+/// True only on an absolute 15-minute boundary with zero seconds.
+pub fn quarter_aligned(value: Datetime) -> Bool {
+  quarter_aligned_raw(value.value)
+}
