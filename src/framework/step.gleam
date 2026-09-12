@@ -123,9 +123,9 @@ pub fn resume(
 /// A failed save rejects the promise and is mapped to infrastructure failure.
 pub fn reject(operation: Verb(value), error: err) -> Step(out, err, state) {
   Step(fn(context) {
-    use _ <- io.then(io.reject(context, fn(isolated) {
-      verb.stage(operation, isolated)
-    }))
+    use _ <- io.then(
+      io.reject(context, fn(isolated) { verb.stage(operation, isolated) }),
+    )
     io.resolve(Fail(error))
   })
 }
