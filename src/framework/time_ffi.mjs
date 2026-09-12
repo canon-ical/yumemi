@@ -22,5 +22,7 @@ export const quarterAligned = value => {
   const time = Date.parse(value);
   if (!Number.isFinite(time)) return false;
   const date = new Date(time);
-  return date.getUTCSeconds() === 0 && date.getUTCMilliseconds() === 0 && time % (15 * 60 * 1000) === 0;
+  const fraction = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:(?:\d{2})(?:\.(\d+))?/.exec(value)?.[1];
+  const zeroFraction = fraction === undefined || /^0+$/.test(fraction);
+  return zeroFraction && date.getUTCSeconds() === 0 && date.getUTCMilliseconds() === 0 && time % (15 * 60 * 1000) === 0;
 };
