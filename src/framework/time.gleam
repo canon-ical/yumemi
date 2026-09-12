@@ -53,3 +53,10 @@ pub fn date_to_string(value: Date) -> String {
 pub fn time_to_string(value: Time) -> String {
   value.value
 }
+
+@external(javascript, "./time_ffi.mjs", "addDays")
+fn add_days_raw(value: String, days: Int) -> String
+
+pub fn add_days(value: Datetime, days: Int) -> Datetime {
+  Datetime(add_days_raw(value.value, days))
+}

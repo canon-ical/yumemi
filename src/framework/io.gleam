@@ -15,3 +15,6 @@ pub fn commit(context: Context, carry: carry) -> Promise(Bool)
 
 @external(javascript, "./io_ffi.mjs", "finish")
 pub fn finish(context: Context) -> Promise(Nil)
+
+@external(javascript, "./io_ffi.mjs", "reject")
+pub fn reject(context: Context, stage: fn(Context) -> Promise(value)) -> Promise(Nil)

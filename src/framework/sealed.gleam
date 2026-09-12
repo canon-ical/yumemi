@@ -1,7 +1,8 @@
-//// Encrypted payload proof; unsealing belongs to the storage boundary.
+//// Opaque request to seal plaintext at the storage boundary. No plaintext encoder.
 
 pub type StaffKey
 
-pub opaque type Sealed(value, key) {
-  Sealed(ciphertext: String, key_id: String)
-}
+pub type Sealed(value, key)
+
+@external(javascript, "./sealed_ffi.mjs", "forStaff")
+pub fn for_staff(value: String) -> Sealed(String, StaffKey)
