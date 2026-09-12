@@ -11,6 +11,7 @@ pub type Operand(parameter, field, value) {
 }
 
 pub type Cond(field, arrow, operand) {
+  CurrentVersion(field, field)
   Eq(field, operand)
   Ne(field, operand)
   Lt(field, operand)
@@ -53,7 +54,8 @@ pub type Group(field, arrow) {
   Via(arrow)
 }
 
-pub type Order(field, aggregate) {
+pub type Order(field, aggregate, operand) {
+  Nearest(field, operand)
   Asc(field)
   Desc(field)
   AscAgg(aggregate)
@@ -61,6 +63,7 @@ pub type Order(field, aggregate) {
 }
 
 pub type Along(aggregate, group) {
+  Distance
   Rank(per: Option(group))
   Running(aggregate, per: Option(group))
 }
