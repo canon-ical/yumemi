@@ -1,6 +1,10 @@
-name = "musearch_framework"
+name = "yumemi"
 version = "0.2.0"
 target = "javascript"
+description = "Have a sweet Gleam. A framework for Gleam on Cloudflare Workers: write the design, the code follows."
+# licences は未裁定(人見)。hex へ出すときに要る
+# licences = ["Apache-2.0"]
+repository = { type = "github", user = "canon-ical", repo = "yumemi" }
 
 [dependencies]
 gleam_stdlib = ">= 0.44.0 and < 2.0.0"
