@@ -57,10 +57,7 @@ fn last_segment(path: String) -> String {
 }
 
 /// 型の在処。同じ module の型は None を返す。
-fn module_of_type(
-  annotation: glance.Type,
-  imports: Imports,
-) -> Option(String) {
+fn module_of_type(annotation: glance.Type, imports: Imports) -> Option(String) {
   case annotation {
     glance.NamedType(name: name, module: module, ..) ->
       case module {
@@ -278,9 +275,11 @@ fn prop_kind(
       }
       #(optional, repeated, kind)
     }
-    _ -> #(optional, repeated, model.ValueProp(
-      model.TypeRef(module: None, name: "String"),
-    ))
+    _ -> #(
+      optional,
+      repeated,
+      model.ValueProp(model.TypeRef(module: None, name: "String")),
+    )
   }
 }
 
@@ -313,7 +312,11 @@ fn fields_of(
       let base = entity_name <> naming.pascal(prop.name)
       case prop.kind {
         model.RelProp(kind: model.Multi, ..) -> []
-        model.RelProp(target_module: target_module, target_type: target_type, ..) -> [
+        model.RelProp(
+          target_module: target_module,
+          target_type: target_type,
+          ..,
+        ) -> [
           model.FieldDef(
             name: base,
             entity_name: entity_name,
@@ -430,9 +433,8 @@ fn service_of(unit: Unit) -> Result(model.Service, Error) {
     |> list.filter(fn(definition) {
       let constant = definition.definition
       case constant.publicity, constant.annotation {
-        glance.Public, Some(annotation) -> g.type_name(annotation) == Some(
-          "Select",
-        )
+        glance.Public, Some(annotation) ->
+          g.type_name(annotation) == Some("Select")
         _, _ -> False
       }
     })
@@ -487,10 +489,7 @@ fn labelled_list(
   }
 }
 
-fn arrow_names(
-  expression: glance.Expression,
-  label: String,
-) -> List(String) {
+fn arrow_names(expression: glance.Expression, label: String) -> List(String) {
   labelled_list(expression, label)
   |> list.filter_map(fn(item) { g.ctor_name(item) |> option.to_result(Nil) })
 }
@@ -514,7 +513,10 @@ fn operand(expression: glance.Expression) -> model.Operand {
     "At", [item] -> model.OpAt(field_name(item))
     "Col", [item] -> model.OpCol(field_name(item))
     _, [item] ->
-      case string.starts_with(name, "PhaseOf"), string.starts_with(name, "KeyOf") {
+      case
+        string.starts_with(name, "PhaseOf"),
+        string.starts_with(name, "KeyOf")
+      {
         True, _ ->
           model.OpPhase(
             entity: string.drop_start(name, 7),
@@ -555,9 +557,8 @@ fn cond(expression: glance.Expression) -> Option(model.Cond) {
 }
 
 fn conds_of(expression: glance.Expression) -> List(model.Cond) {
-  g.list_elements(expression) |> list.filter_map(fn(item) {
-    cond(item) |> option.to_result(Nil)
-  })
+  g.list_elements(expression)
+  |> list.filter_map(fn(item) { cond(item) |> option.to_result(Nil) })
 }
 
 fn conds(expression: glance.Expression, label: String) -> List(model.Cond) {
@@ -657,7 +658,9 @@ fn limit(expression: glance.Expression) -> model.Limit {
             [value] ->
               model.LFirst(
                 g.int_value(value)
-                |> option.then(fn(text) { int.parse(text) |> option.from_result })
+                |> option.then(fn(text) {
+                  int.parse(text) |> option.from_result
+                })
                 |> option.unwrap(1),
               )
             _ -> model.LFirst(1)

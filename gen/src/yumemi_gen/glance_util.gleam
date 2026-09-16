@@ -60,8 +60,9 @@ pub fn labelled(
       case
         list.find_map(arguments, fn(field) {
           case field {
-            glance.LabelledField(label: found, item: item, ..) if found == label ->
-              Ok(item)
+            glance.LabelledField(label: found, item: item, ..)
+              if found == label
+            -> Ok(item)
             _ -> Error(Nil)
           }
         })

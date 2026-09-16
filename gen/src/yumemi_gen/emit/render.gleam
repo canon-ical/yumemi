@@ -38,7 +38,11 @@ pub fn ty(style: Style, value: Ty) -> String {
 }
 
 /// 型の木から import 行を起こす。extra は型に現れない import(framework/step など)。
-pub fn imports(style: Style, values: List(Ty), extra: List(#(String, List(String)))) -> String {
+pub fn imports(
+  style: Style,
+  values: List(Ty),
+  extra: List(#(String, List(String))),
+) -> String {
   let from_types =
     list.fold(values, dict.new(), fn(acc, value) { walk(style, value, acc) })
   let all =

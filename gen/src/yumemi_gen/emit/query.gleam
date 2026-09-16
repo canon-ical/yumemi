@@ -38,7 +38,8 @@ pub fn collisions(app: App) -> List(String) {
 }
 
 fn text(app: App) -> String {
-  let entities = list.sort(app.entities, fn(a, b) { string.compare(a.module, b.module) })
+  let entities =
+    list.sort(app.entities, fn(a, b) { string.compare(a.module, b.module) })
   let lifecycles = list.filter(entities, model.has_lifecycle)
   let imports =
     list.flatten([
@@ -128,8 +129,7 @@ fn text(app: App) -> String {
     ]),
     "\n",
     block("Along", [
-      "Distance", "Rank(per: Option(Group))",
-      "Running(Agg, per: Option(Group))",
+      "Distance", "Rank(per: Option(Group))", "Running(Agg, per: Option(Group))",
     ]),
     "\n",
     block("Limit(p)", [

@@ -192,12 +192,10 @@ pub fn out(app: App, select: Select) -> Ty {
       }
     groups, aggs ->
       list_of(
-        TyTuple(
-          list.append(
-            list.map(groups, group_ty(app, _)),
-            list.map(aggs, agg_ty(app, _)),
-          ),
-        ),
+        TyTuple(list.append(
+          list.map(groups, group_ty(app, _)),
+          list.map(aggs, agg_ty(app, _)),
+        )),
       )
   }
 }

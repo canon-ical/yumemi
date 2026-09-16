@@ -38,10 +38,7 @@ pub fn capitalise(word: String) -> String {
 }
 
 fn is_digit(char: String) -> Bool {
-  list.contains(
-    ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"],
-    char,
-  )
+  list.contains(["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"], char)
 }
 
 fn is_upper(char: String) -> Bool {

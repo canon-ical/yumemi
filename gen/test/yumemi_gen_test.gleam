@@ -31,8 +31,7 @@ fn files() -> List(#(String, String)) {
 }
 
 fn text(path: String) -> String {
-  let assert Ok(#(_, found)) =
-    list.find(files(), fn(entry) { entry.0 == path })
+  let assert Ok(#(_, found)) = list.find(files(), fn(entry) { entry.0 == path })
   found
 }
 
@@ -80,13 +79,19 @@ pub fn generated_type_wraps_the_spec_test() {
 
 pub fn from_has_one_variant_per_entity_test() {
   let found = text("src/gen/query.gleam")
-  string.contains(found, "pub type From {\n  Article\n  Category\n  Staff\n  Tag\n}")
+  string.contains(
+    found,
+    "pub type From {\n  Article\n  Category\n  Staff\n  Tag\n}",
+  )
   |> should.be_true
 }
 
 pub fn arrow_has_one_variant_per_relation_test() {
   let found = text("src/gen/query.gleam")
-  string.contains(found, "pub type Arrow {\n  ArticleToCategory\n  ArticleToTags\n}")
+  string.contains(
+    found,
+    "pub type Arrow {\n  ArticleToCategory\n  ArticleToTags\n}",
+  )
   |> should.be_true
 }
 
@@ -99,8 +104,12 @@ pub fn to_many_relation_is_not_a_column_test() {
 
 pub fn phase_and_arrival_columns_are_generated_test() {
   let found = text("src/gen/query.gleam")
-  ["ArticlePhase", "ArticleEnteredDraft", "ArticleEnteredPublished",
-   "ArticleEnteredRetracted"]
+  [
+    "ArticlePhase",
+    "ArticleEnteredDraft",
+    "ArticleEnteredPublished",
+    "ArticleEnteredRetracted",
+  ]
   |> list.each(fn(name) { string.contains(found, name) |> should.be_true })
 }
 

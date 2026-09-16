@@ -46,7 +46,9 @@ pub fn generate(app_dir: String) -> Result(List(types.File), String) {
   let diagnostics =
     list.append(
       list.map(query.collisions(app), fn(name) {
-        "名前の衝突 gen/query.gleam: " <> name <> "(From / Field / Arrow / Operand は同じ名前空間)"
+        "名前の衝突 gen/query.gleam: "
+        <> name
+        <> "(From / Field / Arrow / Operand は同じ名前空間)"
       }),
       sql.notes(app),
     )

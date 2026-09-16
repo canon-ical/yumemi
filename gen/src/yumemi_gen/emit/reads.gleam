@@ -4,8 +4,8 @@
 import gleam/list
 import gleam/string
 import yumemi_gen/emit/render.{type Style, Style}
-import yumemi_gen/emit/typing.{type Ty}
 import yumemi_gen/emit/types.{type File, File}
+import yumemi_gen/emit/typing.{type Ty}
 import yumemi_gen/model.{type App, type NamedQuery, type Service}
 
 pub fn emit(app: App) -> List(File) {
@@ -15,7 +15,8 @@ pub fn emit(app: App) -> List(File) {
 }
 
 fn one(app: App, service: Service) -> File {
-  let outs = list.map(service.queries, fn(query) { typing.out(app, query.select) })
+  let outs =
+    list.map(service.queries, fn(query) { typing.out(app, query.select) })
   let params =
     list.flat_map(service.queries, fn(query) {
       typing.params(app, query.select)
@@ -26,8 +27,7 @@ fn one(app: App, service: Service) -> File {
     |> list.flat_map(typing.entity_modules)
     |> list.unique
   let style = Style(qualified: qualified)
-  let all_types =
-    list.append(outs, list.map(params, fn(param) { param.ty }))
+  let all_types = list.append(outs, list.map(params, fn(param) { param.ty }))
   let imports =
     render.imports(style, all_types, [
       #("framework/io", ["Context", "Promise"]),
@@ -60,8 +60,7 @@ fn header(service: Service) -> String {
       <> "."
       <> single.name
       <> " — 手で編集しない\n"
-    _ ->
-      "//// GENERATED from service." <> service.module <> " — 手で編集しない\n"
+    _ -> "//// GENERATED from service." <> service.module <> " — 手で編集しない\n"
   }
 }
 

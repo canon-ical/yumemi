@@ -21,7 +21,12 @@ pub fn emit(app: App) -> List(File) {
 pub fn notes(app: App) -> List(String) {
   let #(_, skipped) = build(app)
   list.map(skipped, fn(entry) {
-    "SQL を出さなかった " <> entry.service <> "/" <> entry.query <> ": " <> entry.reason
+    "SQL を出さなかった "
+    <> entry.service
+    <> "/"
+    <> entry.query
+    <> ": "
+    <> entry.reason
   })
 }
 
@@ -99,9 +104,9 @@ const reserved = [
   "table", "column", "default", "check", "references", "primary", "key", "end",
   "all", "any", "as", "case", "cast", "constraint", "create", "do", "else",
   "for", "foreign", "grant", "having", "in", "into", "is", "join", "left",
-  "like", "natural", "not", "null", "on", "only", "or", "outer", "right",
-  "some", "then", "to", "true", "false", "union", "unique", "using", "when",
-  "with", "desc", "asc", "distinct", "values", "window", "returning",
+  "like", "natural", "not", "null", "on", "only", "or", "outer", "right", "some",
+  "then", "to", "true", "false", "union", "unique", "using", "when", "with",
+  "desc", "asc", "distinct", "values", "window", "returning",
 ]
 
 fn quoted(column: String) -> String {
@@ -174,17 +179,16 @@ type Column {
   Column(reference: String, kind: String, optional: Bool)
 }
 
-fn column(app: App, scope: Scope, field_name: String) -> Result(Column, String) {
+fn column(
+  app: App,
+  scope: Scope,
+  field_name: String,
+) -> Result(Column, String) {
   case model.field_by_name(app.entities, field_name) {
     None -> Error("列 " <> field_name <> " が Entity 宣言に無い")
     Some(field) ->
       case alias_of(scope, field.entity_name) {
-        None ->
-          Error(
-            "列 "
-            <> field_name
-            <> " の Entity が from にも join にも無い",
-          )
+        None -> Error("列 " <> field_name <> " の Entity が from にも join にも無い")
         Some(alias) ->
           Ok(Column(
             reference: alias <> "." <> quoted(field.column),
@@ -200,7 +204,7 @@ fn column(app: App, scope: Scope, field_name: String) -> Result(Column, String) 
 fn statement(app: App, select: Select) -> Result(String, String) {
   use from <- try(
     model.entity_by_name(app.entities, select.from)
-      |> option.to_result("from の Entity が無い: " <> select.from),
+    |> option.to_result("from の Entity が無い: " <> select.from),
   )
   use _ <- try(case select.with {
     [] -> Ok(Nil)
@@ -257,10 +261,7 @@ fn statement(app: App, select: Select) -> Result(String, String) {
   )
 }
 
-fn try(
-  result: Result(a, e),
-  next: fn(a) -> Result(b, e),
-) -> Result(b, e) {
+fn try(result: Result(a, e), next: fn(a) -> Result(b, e)) -> Result(b, e) {
   case result {
     Ok(value) -> next(value)
     Error(error) -> Error(error)
@@ -276,35 +277,38 @@ fn join_clauses(
     let #(current, clauses) = acc
     use arrow <- try(
       model.arrow_by_name(app.arrows, arrow_name)
-        |> option.to_result("矢印が無い: " <> arrow_name),
+      |> option.to_result("矢印が無い: " <> arrow_name),
     )
     use target <- try(
       model.entity_by_name(app.entities, arrow.target_entity)
-        |> option.to_result("矢印の先が無い: " <> arrow.target_entity),
+      |> option.to_result("矢印の先が無い: " <> arrow.target_entity),
     )
     use owner <- try(
       alias_of(current, arrow.from_entity)
-        |> option.to_result("矢印の元が from に無い: " <> arrow.from_entity),
+      |> option.to_result("矢印の元が from に無い: " <> arrow.from_entity),
     )
     let next = assign(current, target)
     use alias <- try(
       alias_of(next, target.name)
-        |> option.to_result("別名が付かない: " <> target.name),
+      |> option.to_result("別名が付かない: " <> target.name),
     )
-    Ok(#(next, list.append(clauses, [
-      "JOIN app."
-      <> target.table
-      <> " "
-      <> alias
-      <> " ON "
-      <> alias
-      <> "."
-      <> quoted(target.key_column)
-      <> "="
-      <> owner
-      <> "."
-      <> quoted(arrow.prop <> "_id"),
-    ])))
+    Ok(#(
+      next,
+      list.append(clauses, [
+        "JOIN app."
+        <> target.table
+        <> " "
+        <> alias
+        <> " ON "
+        <> alias
+        <> "."
+        <> quoted(target.key_column)
+        <> "="
+        <> owner
+        <> "."
+        <> quoted(arrow.prop <> "_id"),
+      ]),
+    ))
   })
 }
 
@@ -347,10 +351,7 @@ fn select_list(
           })
         _ -> []
       }
-      Ok(string.join(
-        list.flatten([[alias <> ".*"], joined, distance]),
-        ",",
-      ))
+      Ok(string.join(list.flatten([[alias <> ".*"], joined, distance]), ","))
     }
     groups, aggs -> {
       use group_cols <- try(
@@ -413,8 +414,7 @@ fn wrap(
   field: String,
 ) -> Result(String, String) {
   case column(app, scope, field) {
-    Ok(found) ->
-      Ok(name <> "(" <> found.reference <> ") AS " <> name)
+    Ok(found) -> Ok(name <> "(" <> found.reference <> ") AS " <> name)
     Error(reason) -> Error(reason)
   }
 }
@@ -481,8 +481,7 @@ fn where_one(
         Error(reason), _ -> Error(reason)
         _, Error(reason) -> Error(reason)
       }
-    model.CHas(..) | model.CHasNone(..) ->
-      Error("Has / HasNone(関係の有無)は未実装")
+    model.CHas(..) | model.CHasNone(..) -> Error("Has / HasNone(関係の有無)は未実装")
   }
 }
 
@@ -729,9 +728,7 @@ fn keyset_clause(
           case ways {
             [single] -> {
               use columns <- try(
-                list.try_map(directions, fn(pair) {
-                  column(app, scope, pair.0)
-                }),
+                list.try_map(directions, fn(pair) { column(app, scope, pair.0) }),
               )
               let alias = option.unwrap(alias_of(scope, from.name), "t")
               let key_reference = alias <> "." <> quoted(from.key_column)
@@ -767,10 +764,9 @@ fn keyset_clause(
                 <> head_cast
                 <> " IS NULL OR ("
                 <> string.join(
-                  list.append(
-                    list.map(columns, fn(found) { found.reference }),
-                    [key_reference],
-                  ),
+                  list.append(list.map(columns, fn(found) { found.reference }), [
+                    key_reference,
+                  ]),
                   ",",
                 )
                 <> ")"
@@ -780,10 +776,7 @@ fn keyset_clause(
                 <> "))"
               Ok(#(Scope(..scope, next_param: first + count), [text]))
             }
-            _ ->
-              Error(
-                "向きの混じった order の keyset は未実装(行比較が成立しない)",
-              )
+            _ -> Error("向きの混じった order の keyset は未実装(行比較が成立しない)")
           }
         }
       }
