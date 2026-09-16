@@ -18,6 +18,8 @@ def read(path):
 
 
 def body(text):
+    """先頭の GENERATED 行を落とす。gen-2 から header に入力ハッシュが入るので、
+    完全一致(バイト)は 0 に落ちる ── 一致は本文一致で見る。"""
     lines = text.split("\n")
     if lines and ("GENERATED" in lines[0]):
         lines = lines[1:]
@@ -101,13 +103,25 @@ def compare_bundle(title, out_dir, app_dir, rel, suffix):
     }
 
 
+# 束2 は 2026-09-16 の裁定で 3 module に割れた。手書き ▲ は 1 module のまま。
+QUERY_PARTS = ["src/gen/query.gleam", "src/gen/query/from.gleam",
+               "src/gen/query/field.gleam"]
+
+
 def compare_one(title, out_dir, app_dir, path):
-    mine = read(os.path.join(out_dir, path)).split("\n")
-    yours = read(os.path.join(app_dir, path)).split("\n")
+    """束2 ── 生成は 3 module、手書きは 1 module。割れた分を分けて出す。"""
+    parts = [p for p in QUERY_PARTS if os.path.exists(os.path.join(out_dir, p))]
+    mine = []
     print(f"## {title}")
-    print(f"  行数: 生成 {len(mine)} / 手書き {len(yours)}")
+    for part in parts:
+        lines = read(os.path.join(out_dir, part)).split("\n")
+        print(f"  生成 {part}: {len(lines)} 行")
+        mine += lines
+    yours = read(os.path.join(app_dir, path)).split("\n")
+    print(f"  行数: 生成 {len(mine)}(module {len(parts)} 本の合計) / 手書き {len(yours)}(1 本)")
     print(f"  手書きだけの行: {len([l for l in yours if l not in mine])}")
     print(f"  生成だけの行: {len([l for l in mine if l not in yours])}")
+    print("  ※ module が割れた分 ── 生成側に header / import / 型別名の行が増える")
     print()
 
 
@@ -133,7 +147,12 @@ def variants(text):
 
 def compare_query(out_dir, app_dir):
     path = "src/gen/query.gleam"
-    mine = variants(read(os.path.join(out_dir, path)))
+    mine = {}
+    for part in QUERY_PARTS:
+        full = os.path.join(out_dir, part)
+        if os.path.exists(full):
+            for name, items in variants(read(full)).items():
+                mine.setdefault(name, items)
     yours = variants(read(os.path.join(app_dir, path)))
     print("## 束2 src/gen/query.gleam ── 型ごとの variant")
     print("| 型 | 生成 | 手書き | 両方 | 生成だけ | 手書きだけ |")
