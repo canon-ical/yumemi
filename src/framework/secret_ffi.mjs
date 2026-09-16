@@ -9,6 +9,8 @@ export function hmac(value) {
  return request;
 }
 
+// Internal storage adapters may consume the value; there is no Gleam-level
+// decoder or encoder for it.
 export function value(request) {
  if(!inputs.has(request)) throw new Error('Invalid secret input');
  return inputs.get(request);
