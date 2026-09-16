@@ -6,32 +6,52 @@ import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
+import yumemi_gen/emit/hash
 import yumemi_gen/emit/types.{type File, File}
 import yumemi_gen/model.{type App, type Entity, type Select}
 import yumemi_gen/naming
+import yumemi_gen/stop
 
-pub type Skipped {
-  Skipped(service: String, query: String, reason: String)
+/// SQL を出せない理由。`class` は 20 の exit code 表(`stop`)へそのまま写る。
+pub type Reason {
+  Reason(class: stop.Class, text: String)
 }
 
-pub fn emit(app: App) -> List(File) {
-  let #(files, _) = build(app)
+fn undone(text: String) -> Reason {
+  Reason(class: stop.NotImplemented, text: text)
+}
+
+fn clash(text: String) -> Reason {
+  Reason(class: stop.Conflict, text: text)
+}
+
+pub type Skipped {
+  Skipped(service: String, query: String, reason: Reason)
+}
+
+pub fn emit(app: App, hashes: hash.Hashes) -> List(File) {
+  let #(files, _) = build(app, hashes)
   files
 }
 
-pub fn notes(app: App) -> List(String) {
-  let #(_, skipped) = build(app)
+/// 出せなかった SQL を 20 の exit code つきで返す。**1本でも出ていなければ 0 で終われない**
+/// ── reads の関数だけ在って SQL が無い状態は、実行時に必ず落ちる不整合(柏木 P2-2)。
+pub fn notes(app: App, hashes: hash.Hashes) -> List(stop.Note) {
+  let #(_, skipped) = build(app, hashes)
   list.map(skipped, fn(entry) {
-    "SQL を出さなかった "
-    <> entry.service
-    <> "/"
-    <> entry.query
-    <> ": "
-    <> entry.reason
+    stop.Note(
+      class: entry.reason.class,
+      text: "SQL を出さなかった "
+        <> entry.service
+        <> "/"
+        <> entry.query
+        <> ": "
+        <> entry.reason.text,
+    )
   })
 }
 
-pub fn build(app: App) -> #(List(File), List(Skipped)) {
+pub fn build(app: App, hashes: hash.Hashes) -> #(List(File), List(Skipped)) {
   list.fold(app.services, #([], []), fn(acc, service) {
     list.fold(service.queries, acc, fn(inner, query) {
       let #(files, skipped) = inner
@@ -48,7 +68,9 @@ pub fn build(app: App) -> #(List(File), List(Skipped)) {
                 <> service.module
                 <> "."
                 <> query.name
-                <> " — 手で編集しない\n"
+                <> " [sha256:"
+                <> hash.service(hashes, service.module)
+                <> "] — 手で編集しない\n"
                 <> text,
             ),
             ..files
@@ -184,12 +206,13 @@ fn column(
   app: App,
   scope: Scope,
   field_name: String,
-) -> Result(Column, String) {
+) -> Result(Column, Reason) {
   case model.field_by_name(app.entities, field_name) {
-    None -> Error("列 " <> field_name <> " が Entity 宣言に無い")
+    None -> Error(clash("列 " <> field_name <> " が Entity 宣言に無い"))
     Some(field) ->
       case alias_of(scope, field.entity_name) {
-        None -> Error("列 " <> field_name <> " の Entity が from にも join にも無い")
+        None ->
+          Error(clash("列 " <> field_name <> " の Entity が from にも join にも無い"))
         Some(alias) ->
           Ok(Column(
             reference: alias <> "." <> quoted(field.column),
@@ -202,19 +225,19 @@ fn column(
 
 // ── 1文 ─────────────────────────────────────────────────────────────────────
 
-fn statement(app: App, select: Select) -> Result(String, String) {
+fn statement(app: App, select: Select) -> Result(String, Reason) {
   use from <- try(
     model.entity_by_name(app.entities, select.from)
-    |> option.to_result("from の Entity が無い: " <> select.from),
+    |> option.to_result(clash("from の Entity が無い: " <> select.from)),
   )
   use _ <- try(case select.with {
     [] -> Ok(Nil)
-    _ -> Error("with(関係先を添える)は未実装")
+    _ -> Error(undone("with(関係先を添える)は未実装"))
   })
   use _ <- try(case select.along {
     [] -> Ok(Nil)
     [model.LDistance] -> Ok(Nil)
-    _ -> Error("along(Rank / Running)は未実装")
+    _ -> Error(undone("along(Rank / Running)は未実装"))
   })
   let scope = assign(Scope(aliases: [], next_param: 1), from)
   use #(scope, joins) <- try(join_clauses(app, scope, select.join))
@@ -275,25 +298,25 @@ fn join_clauses(
   app: App,
   scope: Scope,
   arrows: List(String),
-) -> Result(#(Scope, List(String)), String) {
+) -> Result(#(Scope, List(String)), Reason) {
   list.try_fold(arrows, #(scope, []), fn(acc, arrow_name) {
     let #(current, clauses) = acc
     use arrow <- try(
       model.arrow_by_name(app.arrows, arrow_name)
-      |> option.to_result("矢印が無い: " <> arrow_name),
+      |> option.to_result(clash("矢印が無い: " <> arrow_name)),
     )
     use target <- try(
       model.entity_by_name(app.entities, arrow.target_entity)
-      |> option.to_result("矢印の先が無い: " <> arrow.target_entity),
+      |> option.to_result(clash("矢印の先が無い: " <> arrow.target_entity)),
     )
     use owner <- try(
       alias_of(current, arrow.from_entity)
-      |> option.to_result("矢印の元が from に無い: " <> arrow.from_entity),
+      |> option.to_result(clash("矢印の元が from に無い: " <> arrow.from_entity)),
     )
     let next = assign(current, target)
     use alias <- try(
       alias_of(next, target.name)
-      |> option.to_result("別名が付かない: " <> target.name),
+      |> option.to_result(undone("別名が付かない: " <> target.name)),
     )
     Ok(#(
       next,
@@ -322,7 +345,7 @@ fn select_list(
   scope: Scope,
   select: Select,
   from: Entity,
-) -> Result(String, String) {
+) -> Result(String, Reason) {
   let alias = option.unwrap(alias_of(scope, from.name), "t")
   case select.group, select.agg {
     [], [] -> {
@@ -385,9 +408,9 @@ fn select_list(
                   case alias_of(scope, arrow.from_entity) {
                     Some(owner) ->
                       Ok(owner <> "." <> quoted(arrow.prop <> "_id"))
-                    None -> Error("Via の元が from に無い")
+                    None -> Error(clash("Via の元が from に無い"))
                   }
-                None -> Error("Via の矢印が無い: " <> arrow_name)
+                None -> Error(clash("Via の矢印が無い: " <> arrow_name))
               }
           }
         }),
@@ -402,7 +425,7 @@ fn agg_expression(
   app: App,
   scope: Scope,
   value: model.Agg,
-) -> Result(String, String) {
+) -> Result(String, Reason) {
   case value {
     model.ACount -> Ok("count(*)::integer AS count")
     model.ASum(field) -> wrap(app, scope, "sum", field)
@@ -417,7 +440,7 @@ fn wrap(
   scope: Scope,
   name: String,
   field: String,
-) -> Result(String, String) {
+) -> Result(String, Reason) {
   case column(app, scope, field) {
     Ok(found) -> Ok(name <> "(" <> found.reference <> ") AS " <> name)
     Error(reason) -> Error(reason)
@@ -428,7 +451,7 @@ fn where_clauses(
   app: App,
   scope: Scope,
   conds: List(model.Cond),
-) -> Result(#(Scope, List(String)), String) {
+) -> Result(#(Scope, List(String)), Reason) {
   list.try_fold(conds, #(scope, []), fn(acc, cond) {
     let #(current, clauses) = acc
     use #(next, text) <- try(where_one(app, current, cond))
@@ -440,7 +463,7 @@ fn where_one(
   app: App,
   scope: Scope,
   cond: model.Cond,
-) -> Result(#(Scope, String), String) {
+) -> Result(#(Scope, String), Reason) {
   case cond {
     model.CEq(field, operand) -> compare(app, scope, field, "=", operand)
     model.CNe(field, operand) -> compare(app, scope, field, "<>", operand)
@@ -476,7 +499,7 @@ fn where_one(
             found.reference <> " IS NOT DISTINCT FROM " <> placeholder,
           ))
         }
-        Ok(_), _ -> Error("EqOrNull の相手は穴だけ")
+        Ok(_), _ -> Error(undone("EqOrNull の相手は穴だけ"))
         Error(reason), _ -> Error(reason)
       }
     model.CCurrentVersion(left, right) ->
@@ -486,7 +509,8 @@ fn where_one(
         Error(reason), _ -> Error(reason)
         _, Error(reason) -> Error(reason)
       }
-    model.CHas(..) | model.CHasNone(..) -> Error("Has / HasNone(関係の有無)は未実装")
+    model.CHas(..) | model.CHasNone(..) ->
+      Error(undone("Has / HasNone(関係の有無)は未実装"))
   }
 }
 
@@ -496,7 +520,7 @@ fn compare(
   field: String,
   operator: String,
   operand: model.Operand,
-) -> Result(#(Scope, String), String) {
+) -> Result(#(Scope, String), Reason) {
   use found <- try(column(app, scope, field))
   case operand {
     model.OpParam(_) -> {
@@ -522,8 +546,8 @@ fn compare(
           Ok(#(scope, found.reference <> operator <> target.reference))
         Error(reason) -> Error(reason)
       }
-    model.OpAt(_) -> Error("At(固定時刻)は未実装")
-    model.OpKey(_) -> Error("KeyOf(固定識別子)は未実装")
+    model.OpAt(_) -> Error(undone("At(固定時刻)は未実装"))
+    model.OpKey(_) -> Error(undone("KeyOf(固定識別子)は未実装"))
   }
 }
 
@@ -531,7 +555,7 @@ fn having_clauses(
   app: App,
   scope: Scope,
   entries: List(#(String, model.Agg, model.Operand)),
-) -> Result(#(Scope, List(String)), String) {
+) -> Result(#(Scope, List(String)), Reason) {
   list.try_fold(entries, #(scope, []), fn(acc, entry) {
     let #(current, clauses) = acc
     let #(name, value, operand) = entry
@@ -558,7 +582,7 @@ fn having_clauses(
             expression <> operator <> int.to_string(number),
           ]),
         ))
-      _ -> Error("having の相手は穴か数だけ")
+      _ -> Error(undone("having の相手は穴か数だけ"))
     }
   })
 }
@@ -567,7 +591,7 @@ fn agg_bare(
   app: App,
   scope: Scope,
   value: model.Agg,
-) -> Result(String, String) {
+) -> Result(String, Reason) {
   case value {
     model.ACount -> Ok("count(*)")
     model.ASum(field) -> bare(app, scope, "sum", field)
@@ -582,7 +606,7 @@ fn bare(
   scope: Scope,
   name: String,
   field: String,
-) -> Result(String, String) {
+) -> Result(String, Reason) {
   case column(app, scope, field) {
     Ok(found) -> Ok(name <> "(" <> found.reference <> ")")
     Error(reason) -> Error(reason)
@@ -593,7 +617,7 @@ fn group_clause(
   app: App,
   scope: Scope,
   groups: List(model.Group),
-) -> Result(String, String) {
+) -> Result(String, Reason) {
   case groups {
     [] -> Ok("")
     _ -> {
@@ -623,9 +647,9 @@ fn group_clause(
                   case alias_of(scope, arrow.from_entity) {
                     Some(owner) ->
                       Ok(owner <> "." <> quoted(arrow.prop <> "_id"))
-                    None -> Error("Via の元が from に無い")
+                    None -> Error(clash("Via の元が from に無い"))
                   }
-                None -> Error("Via の矢印が無い: " <> arrow_name)
+                None -> Error(clash("Via の矢印が無い: " <> arrow_name))
               }
           }
         }),
@@ -641,7 +665,7 @@ fn order_clause(
   scope: Scope,
   select: Select,
   from: Entity,
-) -> Result(String, String) {
+) -> Result(String, Reason) {
   use declared <- try(
     list.try_map(select.order, fn(order) {
       case order {
@@ -692,7 +716,7 @@ fn direction(
   scope: Scope,
   field: String,
   way: String,
-) -> Result(String, String) {
+) -> Result(String, Reason) {
   case column(app, scope, field) {
     Ok(found) ->
       Ok(
@@ -714,18 +738,18 @@ fn keyset_clause(
   scope: Scope,
   select: Select,
   from: Entity,
-) -> Result(#(Scope, List(String)), String) {
+) -> Result(#(Scope, List(String)), Reason) {
   case select.limit {
     model.LPaged(..) ->
       case select.order {
-        [] -> Error("order が空の Paged はカーソルが成立しない")
+        [] -> Error(clash("order が空の Paged はカーソルが成立しない"))
         orders -> {
           use directions <- try(
             list.try_map(orders, fn(order) {
               case order {
                 model.OAsc(field) -> Ok(#(field, "ASC"))
                 model.ODesc(field) -> Ok(#(field, "DESC"))
-                _ -> Error("keyset は列の Asc / Desc だけ")
+                _ -> Error(undone("keyset は列の Asc / Desc だけ"))
               }
             }),
           )
@@ -781,7 +805,7 @@ fn keyset_clause(
                 <> "))"
               Ok(#(Scope(..scope, next_param: first + count), [text]))
             }
-            _ -> Error("向きの混じった order の keyset は未実装(行比較が成立しない)")
+            _ -> Error(undone("向きの混じった order の keyset は未実装(行比較が成立しない)"))
           }
         }
       }

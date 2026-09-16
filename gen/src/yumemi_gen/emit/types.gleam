@@ -9,26 +9,30 @@ pub type File {
   File(path: String, text: String)
 }
 
-pub fn emit(types: List(ValueType)) -> List(File) {
-  list.map(types, one)
+pub fn emit(types: List(ValueType), input_hash: String) -> List(File) {
+  list.map(types, one(_, input_hash))
 }
 
-fn one(value: ValueType) -> File {
+fn one(value: ValueType, input_hash: String) -> File {
   let text = case value.backing {
-    model.IntValue -> int_module(value)
-    model.StringValue -> string_module(value)
+    model.IntValue -> int_module(value, input_hash)
+    model.StringValue -> string_module(value, input_hash)
   }
   File(path: "src/gen/types/" <> value.name <> ".gleam", text: text)
 }
 
-fn header(value: ValueType) -> String {
-  "//// GENERATED from types." <> value.name <> " — 手で編集しない\n"
+fn header(value: ValueType, input_hash: String) -> String {
+  "//// GENERATED from types."
+  <> value.name
+  <> " [sha256:"
+  <> input_hash
+  <> "] — 手で編集しない\n"
 }
 
-fn string_module(value: ValueType) -> String {
+fn string_module(value: ValueType, input_hash: String) -> String {
   let name = value.type_name
   string.concat([
-    header(value),
+    header(value, input_hash),
     "\n",
     "import framework/spec\n",
     "import gleam/result\n",
@@ -60,10 +64,10 @@ fn string_module(value: ValueType) -> String {
   ])
 }
 
-fn int_module(value: ValueType) -> String {
+fn int_module(value: ValueType, input_hash: String) -> String {
   let name = value.type_name
   string.concat([
-    header(value),
+    header(value, input_hash),
     "\n",
     "import framework/spec\n",
     "import gleam/int\n",

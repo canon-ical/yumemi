@@ -1,4 +1,9 @@
-//// 束2 ── `src/gen/query.gleam`。読みの語彙。
+//// 束2 ── 読みの語彙。3 module に割れる(2026-09-16 人見裁定)。
+////   `src/gen/query/from.gleam`  ── From だけ
+////   `src/gen/query/field.gleam` ── Field だけ
+////   `src/gen/query.gleam`       ── 残り(Arrow / Operand / Cond / … / Select)と From / Field の型別名
+//// From と Field を同じ module に置くと構成子の名前空間が衝突する(Entity `consent_version` の
+//// From と Entity Consent の `version` 列が `ConsentVersion` で衝突し `Duplicate definition`)。
 //// From / Field / Arrow / Operand は Entity 宣言から、残りは framework/query.gleam の
 //// 構成子をそのまま単型に写す(アプリは語彙を足せない、20:664)。
 
@@ -6,40 +11,101 @@ import gleam/list
 import gleam/string
 import yumemi_gen/emit/types.{type File, File}
 import yumemi_gen/model.{type App}
-import yumemi_gen/naming
 
-pub fn emit(app: App) -> List(File) {
-  [File(path: "src/gen/query.gleam", text: text(app))]
+/// From を持つ module の道(アプリの import に出る)。
+pub const from_module = "gen/query/from"
+
+/// Field を持つ module の道。
+pub const field_module = "gen/query/field"
+
+pub fn emit(app: App, input_hash: String) -> List(File) {
+  [
+    File(
+      path: "src/gen/query/from.gleam",
+      text: string.concat([
+        header(input_hash),
+        "\n",
+        block("From", from_variants(app)),
+      ]),
+    ),
+    File(
+      path: "src/gen/query/field.gleam",
+      text: string.concat([
+        header(input_hash),
+        "\n",
+        block("Field", field_variants(app)),
+      ]),
+    ),
+    File(path: "src/gen/query.gleam", text: text(app, input_hash)),
+  ]
 }
 
-/// 構成子は module ごとに1つの名前空間に並ぶので、From と Field が衝突しうる
-/// (Entity `consent_version` の From と、Entity Consent の `version` 列)。
-/// 20 は決めていないので、生成器は黙って直さず、衝突を数えて報告する。
-pub fn collisions(app: App) -> List(String) {
-  let names =
+fn header(input_hash: String) -> String {
+  "//// GENERATED from entity declarations / named Select values [sha256:"
+  <> input_hash
+  <> "] — 手で編集しない\n"
+}
+
+fn entities_in_order(app: App) -> List(model.Entity) {
+  list.sort(app.entities, fn(a, b) { string.compare(a.module, b.module) })
+}
+
+fn from_variants(app: App) -> List(String) {
+  list.map(entities_in_order(app), fn(entity) { entity.name })
+}
+
+fn field_variants(app: App) -> List(String) {
+  list.flat_map(entities_in_order(app), fn(entity) {
+    list.map(entity.fields, fn(field) { field.name })
+  })
+}
+
+/// 構成子は module ごとに1つの名前空間に並ぶ。割ったあとも同じ module の中で
+/// 名前が重なりうる(Arrow と KeyOf、Field どうし)ので、module ごとに数えて報告する。
+/// 20 は直し方を決めていないので、生成器は黙って直さない。
+pub fn collisions(app: App) -> List(#(String, String)) {
+  let lifecycles = list.filter(entities_in_order(app), model.has_lifecycle)
+  let query_names =
     list.flatten([
-      list.map(app.entities, fn(entity) { entity.name }),
-      list.flat_map(app.entities, fn(entity) {
-        list.map(entity.fields, fn(field) { field.name })
-      }),
       list.map(app.arrows, fn(arrow) { arrow.name }),
-      list.flat_map(app.entities, fn(entity) {
-        case model.has_lifecycle(entity) {
-          True -> ["PhaseOf" <> entity.name, "KeyOf" <> entity.name]
-          False -> ["KeyOf" <> entity.name]
-        }
-      }),
+      ["Param", "Num", "Str", "At", "Col"],
+      list.map(lifecycles, fn(entity) { "PhaseOf" <> entity.name }),
+      list.map(entities_in_order(app), fn(entity) { "KeyOf" <> entity.name }),
+      cond_variants(),
+      ["Count", "Sum", "Min", "Max", "Avg"],
+      ["AggGt", "AggGe", "AggLt", "AggLe", "AggEq"],
+      ["Day", "Week", "Month"],
+      ["ByField", "Bucket", "Via"],
+      ["Nearest", "Asc", "Desc", "AscAgg", "DescAgg"],
+      ["Distance", "Rank", "Running"],
+      ["NoLimit", "Paged", "First", "FirstPerGroup"],
+      ["Select"],
     ])
+  list.flatten([
+    duplicates(from_module, from_variants(app)),
+    duplicates(field_module, field_variants(app)),
+    duplicates("gen/query", query_names),
+  ])
+}
+
+fn duplicates(module: String, names: List(String)) -> List(#(String, String)) {
   names
   |> list.filter(fn(name) {
     list.length(list.filter(names, fn(other) { other == name })) > 1
   })
   |> list.unique
+  |> list.map(fn(name) { #(module, name) })
 }
 
-fn text(app: App) -> String {
-  let entities =
-    list.sort(app.entities, fn(a, b) { string.compare(a.module, b.module) })
+fn cond_variants() -> List(String) {
+  [
+    "CurrentVersion", "Eq", "Ne", "Lt", "Le", "Gt", "Ge", "In", "Contains",
+    "IsNull", "NotNull", "IsTrue", "EqOrNull", "Has", "HasNone",
+  ]
+}
+
+fn text(app: App, input_hash: String) -> String {
+  let entities = entities_in_order(app)
   let lifecycles = list.filter(entities, model.has_lifecycle)
   let imports =
     list.flatten([
@@ -47,22 +113,21 @@ fn text(app: App) -> String {
       [
         "import framework/er.{type Key}",
         "import framework/time.{type Datetime}",
+        "import " <> field_module,
+        "import " <> from_module,
         "import gleam/option.{type Option}",
       ],
     ])
   string.concat([
-    "//// GENERATED from entity declarations / named Select values — 手で編集しない\n",
+    header(input_hash),
     "\n",
     string.join(imports, "\n"),
     "\n\n",
-    block("From", list.map(entities, fn(entity) { entity.name })),
+    "/// From の実体は gen/query/from。名前空間を割るためだけに別 module にしてある。\n",
+    "pub type From =\n  from.From\n",
     "\n",
-    block(
-      "Field",
-      list.flat_map(entities, fn(entity) {
-        list.map(entity.fields, fn(field) { field.name })
-      }),
-    ),
+    "/// Field の実体は gen/query/field。\n",
+    "pub type Field =\n  field.Field\n",
     "\n",
     block("Arrow", list.map(app.arrows, fn(arrow) { arrow.name })),
     "\n",
@@ -157,7 +222,6 @@ fn text(app: App) -> String {
 }
 
 fn block(name: String, variants: List(String)) -> String {
-  let _ = naming.pascal
   string.concat([
     "pub type ",
     name,

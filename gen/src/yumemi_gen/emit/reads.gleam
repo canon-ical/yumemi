@@ -3,18 +3,21 @@
 
 import gleam/list
 import gleam/string
+import yumemi_gen/emit/hash
 import yumemi_gen/emit/render.{type Style, Style}
 import yumemi_gen/emit/types.{type File, File}
 import yumemi_gen/emit/typing.{type Ty}
 import yumemi_gen/model.{type App, type NamedQuery, type Service}
 
-pub fn emit(app: App) -> List(File) {
+pub fn emit(app: App, hashes: hash.Hashes) -> List(File) {
   app.services
   |> list.filter(fn(service) { service.queries != [] })
-  |> list.map(one(app, _))
+  |> list.map(fn(service) {
+    one(app, service, hash.service(hashes, service.module))
+  })
 }
 
-fn one(app: App, service: Service) -> File {
+fn one(app: App, service: Service, input_hash: String) -> File {
   let outs =
     list.map(service.queries, fn(query) { typing.out(app, query.select) })
   let params =
@@ -40,7 +43,7 @@ fn one(app: App, service: Service) -> File {
   File(
     path: "src/gen/reads/" <> service.module <> ".gleam",
     text: string.concat([
-      header(service),
+      header(service, input_hash),
       "\n",
       imports,
       "\n\n",
@@ -52,15 +55,16 @@ fn one(app: App, service: Service) -> File {
   )
 }
 
-fn header(service: Service) -> String {
+fn header(service: Service, input_hash: String) -> String {
+  let stamp = " [sha256:" <> input_hash <> "] — 手で編集しない\n"
   case service.queries {
     [single] ->
       "//// GENERATED from service."
       <> service.module
       <> "."
       <> single.name
-      <> " — 手で編集しない\n"
-    _ -> "//// GENERATED from service." <> service.module <> " — 手で編集しない\n"
+      <> stamp
+    _ -> "//// GENERATED from service." <> service.module <> stamp
   }
 }
 
