@@ -22,6 +22,10 @@ pub type Cond(field, arrow, operand) {
   Contains(field, operand)
   IsNull(field)
   NotNull(field)
+  /// 真偽の列。`Operand` に真偽の構成子が無いので、これが唯一の綴り。
+  IsTrue(field)
+  /// 穴が NULL のときは「NULL と一致」。`Eq` では NULL に当たらない。
+  EqOrNull(field, operand)
   Has(arrow, List(Cond(field, arrow, operand)))
   HasNone(arrow, List(Cond(field, arrow, operand)))
 }

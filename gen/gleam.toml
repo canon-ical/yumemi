@@ -1,0 +1,14 @@
+name = "yumemi_gen"
+version = "0.1.0"
+target = "javascript"
+description = "The yumemi generator. Reads the app's Gleam sources, writes the derived Gleam and SQL."
+licences = ["Apache-2.0"]
+
+[dependencies]
+gleam_stdlib = ">= 0.44.0 and < 2.0.0"
+glance = "7.0.0"
+simplifile = ">= 2.0.0 and < 4.0.0"
+argv = ">= 1.0.0 and < 2.0.0"
+
+[dev-dependencies]
+gleeunit = ">= 1.0.0 and < 2.0.0"

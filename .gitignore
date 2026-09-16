@@ -2,3 +2,5 @@ build/
 *.beam
 *.ez
 erl_crash.dump
+gen/_out/
+gen/build/

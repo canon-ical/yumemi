@@ -1,0 +1,266 @@
+//// 生成器の内部モデル。★ から読み取った事実だけを持ち、出力の判断は emit 側に置く。
+
+import gleam/list
+import gleam/option.{type Option, None, Some}
+
+/// 値型(types.gleam の `pub const <name>: Spec`)。
+pub type Backing {
+  StringValue
+  IntValue
+}
+
+pub type ValueType {
+  ValueType(
+    /// "article_id"
+    name: String,
+    /// "ArticleId"
+    type_name: String,
+    /// "Uuid" / "Pattern" / "Text" / "Markdown" / "MarkdownText" / "Range" / "Url"
+    spec: String,
+    backing: Backing,
+  )
+}
+
+pub fn backing_of(spec: String) -> Backing {
+  case spec {
+    "Range" -> IntValue
+    _ -> StringValue
+  }
+}
+
+/// 型の参照。module は import の道(`gen/types/title` など)。
+pub type TypeRef {
+  TypeRef(module: Option(String), name: String)
+}
+
+pub type RelKind {
+  Has
+  Held
+  Link
+  Multi
+}
+
+pub type PropKind {
+  /// has / held / link / multi
+  RelProp(kind: RelKind, target_module: String, target_type: String)
+  /// 値(gen/types の型、framework の型、Int / Bool / String / Float)
+  ValueProp(type_ref: TypeRef)
+  /// 構成子を持つ sum(列は <prop>_kind + 各 payload)
+  SumProp(type_ref: TypeRef, payloads: List(TypeRef))
+}
+
+pub type Prop {
+  Prop(
+    /// "muse"
+    name: String,
+    optional: Bool,
+    repeated: Bool,
+    kind: PropKind,
+  )
+}
+
+/// 列 1本。Field の variant 1つと SQL の 1列が同じものを指す。
+pub type FieldValue {
+  RelValue(target_module: String, target_type: String)
+  TypeValue(type_ref: TypeRef)
+  PhaseValue(module: String)
+  DatetimeValue
+}
+
+pub type FieldDef {
+  FieldDef(
+    /// "ArticleMuse"
+    name: String,
+    /// "Article"
+    entity_name: String,
+    /// "muse_id"
+    column: String,
+    optional: Bool,
+    repeated: Bool,
+    value: FieldValue,
+  )
+}
+
+pub type Entity {
+  Entity(
+    /// module 名。"article" / "consent_version"
+    module: String,
+    /// From / Field の接頭辞。module 名の PascalCase
+    name: String,
+    /// レコード型の名。"Article" / "ConsentVersionRow"
+    type_name: String,
+    /// 表の名。module 名
+    table: String,
+    props: List(Prop),
+    fields: List(FieldDef),
+    /// Lifecycle の相。無ければ空
+    phases: List(String),
+    /// key 関数が返す Property の名。組なら先頭
+    key_prop: String,
+    /// key の列名
+    key_column: String,
+    subject: Bool,
+  )
+}
+
+pub fn field_by_name(entities: List(Entity), name: String) -> Option(FieldDef) {
+  let all = list.flat_map(entities, fn(entity) { entity.fields })
+  case list.find(all, fn(field) { field.name == name }) {
+    Ok(field) -> Some(field)
+    Error(_) -> None
+  }
+}
+
+pub fn entity_by_name(entities: List(Entity), name: String) -> Option(Entity) {
+  case list.find(entities, fn(entity) { entity.name == name }) {
+    Ok(entity) -> Some(entity)
+    Error(_) -> None
+  }
+}
+
+pub fn entity_by_module(
+  entities: List(Entity),
+  module: String,
+) -> Option(Entity) {
+  case list.find(entities, fn(entity) { entity.module == module }) {
+    Ok(entity) -> Some(entity)
+    Error(_) -> None
+  }
+}
+
+pub fn prop_by_name(entity: Entity, name: String) -> Option(Prop) {
+  case list.find(entity.props, fn(prop) { prop.name == name }) {
+    Ok(prop) -> Some(prop)
+    Error(_) -> None
+  }
+}
+
+pub fn has_lifecycle(entity: Entity) -> Bool {
+  entity.phases != []
+}
+
+/// 読みの語彙。構成子は framework/query.gleam と1対1。
+pub type Operand {
+  OpParam(String)
+  OpNum(Int)
+  OpStr(String)
+  OpAt(String)
+  OpPhase(entity: String, variant: String)
+  OpKey(entity: String)
+  OpCol(String)
+}
+
+pub type Cond {
+  CEq(String, Operand)
+  CNe(String, Operand)
+  CLt(String, Operand)
+  CLe(String, Operand)
+  CGt(String, Operand)
+  CGe(String, Operand)
+  CIn(String, Operand)
+  CContains(String, Operand)
+  CIsNull(String)
+  CNotNull(String)
+  CIsTrue(String)
+  CEqOrNull(String, Operand)
+  CCurrentVersion(String, String)
+  CHas(String, List(Cond))
+  CHasNone(String, List(Cond))
+}
+
+pub type Agg {
+  ACount
+  ASum(String)
+  AMin(String)
+  AMax(String)
+  AAvg(String)
+}
+
+pub type Group {
+  GByField(String)
+  GBucket(String, String)
+  GVia(String)
+}
+
+pub type Order {
+  ONearest(String, Operand)
+  OAsc(String)
+  ODesc(String)
+  OAscAgg(Agg)
+  ODescAgg(Agg)
+}
+
+pub type Along {
+  LDistance
+  LRank
+  LRunning(Agg)
+}
+
+pub type Limit {
+  LNoLimit
+  LPaged(size: Operand, after: Operand)
+  LFirst(Int)
+  LFirstPerGroup(Int, Group)
+}
+
+pub type Select {
+  Select(
+    from: String,
+    join: List(String),
+    where: List(Cond),
+    group: List(Group),
+    having: List(#(String, Agg, Operand)),
+    agg: List(Agg),
+    along: List(Along),
+    with: List(String),
+    order: List(Order),
+    limit: Limit,
+  )
+}
+
+pub type NamedQuery {
+  NamedQuery(name: String, select: Select)
+}
+
+pub type Service {
+  Service(module: String, params: List(String), queries: List(NamedQuery))
+}
+
+/// 矢印。関係 Property 1つにつき1本。
+pub type Arrow {
+  Arrow(
+    /// "ArticleToMuse"
+    name: String,
+    from_entity: String,
+    prop: String,
+    target_entity: String,
+    kind: RelKind,
+    optional: Bool,
+  )
+}
+
+pub type App {
+  App(
+    value_types: List(ValueType),
+    entities: List(Entity),
+    services: List(Service),
+    arrows: List(Arrow),
+  )
+}
+
+pub fn arrow_by_name(arrows: List(Arrow), name: String) -> Option(Arrow) {
+  case list.find(arrows, fn(arrow) { arrow.name == name }) {
+    Ok(arrow) -> Some(arrow)
+    Error(_) -> None
+  }
+}
+
+pub fn value_type_by_name(
+  types: List(ValueType),
+  type_name: String,
+) -> Option(ValueType) {
+  case list.find(types, fn(value) { value.type_name == type_name }) {
+    Ok(value) -> Some(value)
+    Error(_) -> None
+  }
+}
