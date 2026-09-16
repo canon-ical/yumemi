@@ -1,6 +1,7 @@
 //// 束4 ── `gen/sql/queries/<service>/<name>.sql`。名前付きクエリ値 1つにつき SELECT 1文。
 //// 実行時は `$1..$n` を埋めるだけ。組み立ては全部ここで済ませる(20:837)。
 
+import framework/schema
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -231,7 +232,9 @@ fn statement(app: App, select: Select) -> Result(String, String) {
     string.concat([
       "SELECT ",
       selected,
-      "\nFROM app.",
+      "\nFROM ",
+      schema.app,
+      ".",
       from.table,
       " ",
       option.unwrap(alias_of(scope, from.name), "t"),
@@ -295,7 +298,9 @@ fn join_clauses(
     Ok(#(
       next,
       list.append(clauses, [
-        "JOIN app."
+        "JOIN "
+        <> schema.app
+        <> "."
         <> target.table
         <> " "
         <> alias

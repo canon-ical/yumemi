@@ -7,6 +7,8 @@ licences = ["Apache-2.0"]
 [dependencies]
 gleam_stdlib = ">= 0.44.0 and < 2.0.0"
 glance = "7.0.0"
+# スキーマ名など「1箇所に置く定数」を framework から読むための path 依存(P2-3)。
+yumemi = { path = ".." }
 simplifile = ">= 2.0.0 and < 4.0.0"
 argv = ">= 1.0.0 and < 2.0.0"
 
