@@ -85,7 +85,7 @@ src/gen/query.gleam         残りの語彙 + 型別名          184 行
 上書き用の module 別名も使えない ── `import gen/query/from as From` は
 `I'm expecting a lowercase name here` で syntax error(実測)。だから
 **★ の側の1度の書き換えが必ず要る**。本便はそれが機械で済むことを道具で示した
-(`gen/scripts/requalify.py`、`q.X` → `qfrom.X` / `qfield.X`)── musearch の 23 ファイルが
+(`gen/scripts/requalify.py`、`q.X` → `from.X` / `field.X`)── musearch の 23 ファイルが
 自動で通る。**綴りをどうするかは未決**(下記 未決 1)。musearch には書いていない
 (道具は `/tmp` の複製にだけ当てる)。
 
@@ -198,9 +198,9 @@ D4(`Eq(<key 列>, Param)` の穴を `Key(<Entity>)` で受けた 3 本)は**未�
 **1. 割ったあとの ★ の綴り。**Gleam は構成子を再輸出できず、module 別名も大文字にできない
 (`import gen/query/from as From` は syntax error ── 実測)。したがって
 `q.Article` / `q.ArticleSlug` は**どう割っても引けない**。要るのは綴りの決めだけで、
-本便の道具は `qfrom.Article` / `qfield.ArticleSlug` を使った(musearch 23 ファイルが機械で通る)。
+本便の道具は `from.Article` / `field.ArticleSlug` を使った(musearch 23 ファイルが機械で通る)。
 `import gen/query/from` の素の形(`from.Article`)は発注書が失敗例に挙げているので採らなかった。
-**水無瀬さん(鷹野さん)に確認が必要** ── 決まれば musearch の便で 1 コマンド。
+**決着(2026-09-16 人見):`from.Article` / `field.ArticleSlug`。**`requalify.py` を同日に鷹野がこの綴りへ差し替えた。musearch の便で 1 コマンド。
 
 **2. 未実装を exit 1 に入れた読み。**20 の表の 1 は「生成器の内部エラー / バグ、差し戻しではない」。
 G1・G5 の未実装は「生成器の作者が直す」側なので 1 に寄せた ── 5(語彙の不足)に入れると

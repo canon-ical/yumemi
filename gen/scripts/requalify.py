@@ -49,14 +49,14 @@ def main():
             text = text.replace(
                 "import gen/query as q",
                 "import gen/query as q\n"
-                "import gen/query/field as qfield\n"
-                "import gen/query/from as qfrom",
+                "import gen/query/field\n"
+                "import gen/query/from",
                 1,
             )
             for variant in froms:
-                text = re.sub(rf"\bq\.{variant}\b", f"qfrom.{variant}", text)
+                text = re.sub(rf"\bq\.{variant}\b", f"from.{variant}", text)
             for variant in fields:
-                text = re.sub(rf"\bq\.{variant}\b", f"qfield.{variant}", text)
+                text = re.sub(rf"\bq\.{variant}\b", f"field.{variant}", text)
             if text != before:
                 open(full, "w", encoding="utf-8").write(text)
                 touched += 1
