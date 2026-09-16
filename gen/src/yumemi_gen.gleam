@@ -43,12 +43,29 @@ pub fn generate(app_dir: String) -> Result(List(types.File), String) {
     source.load(app_dir) |> result.map_error(string.inspect),
   )
   use app <- result.try(reader.read(units) |> result.map_error(string.inspect))
+  let diagnostics =
+    list.append(
+      list.map(query.collisions(app), fn(name) {
+        "名前の衝突 gen/query.gleam: " <> name <> "(From / Field / Arrow / Operand は同じ名前空間)"
+      }),
+      sql.notes(app),
+    )
+  let notes = case diagnostics {
+    [] -> []
+    _ -> [
+      types.File(
+        path: "_diagnostics.txt",
+        text: string.join(diagnostics, "\n") <> "\n",
+      ),
+    ]
+  }
   Ok(
     list.flatten([
       types.emit(app.value_types),
       query.emit(app),
       reads.emit(app),
       sql.emit(app),
+      notes,
     ]),
   )
 }

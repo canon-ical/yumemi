@@ -165,6 +165,10 @@ fn entity_of(unit: Unit, table: Registry) -> Result(Entity, Error) {
   let entity_name = naming.pascal(name)
   let fields = fields_of(entity_name, name, props, phases)
   let key_column = column_of(props, key_prop)
+  let collection = case g.find_constant(module, "collection") {
+    Some(constant) -> option.unwrap(g.string_value(constant.value), name)
+    None -> name
+  }
   Ok(model.Entity(
     module: name,
     name: entity_name,
@@ -175,6 +179,7 @@ fn entity_of(unit: Unit, table: Registry) -> Result(Entity, Error) {
     phases: phases,
     key_prop: key_prop,
     key_column: key_column,
+    collection: collection,
     subject: g.find_constant(module, "subject") != None,
   ))
 }
@@ -307,6 +312,7 @@ fn fields_of(
     list.flat_map(props, fn(prop) {
       let base = entity_name <> naming.pascal(prop.name)
       case prop.kind {
+        model.RelProp(kind: model.Multi, ..) -> []
         model.RelProp(target_module: target_module, target_type: target_type, ..) -> [
           model.FieldDef(
             name: base,

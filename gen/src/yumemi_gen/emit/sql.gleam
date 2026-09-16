@@ -14,21 +14,15 @@ pub type Skipped {
 }
 
 pub fn emit(app: App) -> List(File) {
-  let #(files, skipped) = build(app)
-  case skipped {
-    [] -> files
-    _ -> [
-      File(
-        path: "_skipped.txt",
-        text: string.concat(
-          list.map(skipped, fn(entry) {
-            entry.service <> "/" <> entry.query <> ": " <> entry.reason <> "\n"
-          }),
-        ),
-      ),
-      ..files
-    ]
-  }
+  let #(files, _) = build(app)
+  files
+}
+
+pub fn notes(app: App) -> List(String) {
+  let #(_, skipped) = build(app)
+  list.map(skipped, fn(entry) {
+    "SQL を出さなかった " <> entry.service <> "/" <> entry.query <> ": " <> entry.reason
+  })
 }
 
 pub fn build(app: App) -> #(List(File), List(Skipped)) {
@@ -220,6 +214,8 @@ fn statement(app: App, select: Select) -> Result(String, String) {
   let scope = assign(Scope(aliases: [], next_param: 1), from)
   use #(scope, joins) <- try(join_clauses(app, scope, select.join))
   use #(scope, wheres) <- try(where_clauses(app, scope, select.where))
+  // 穴の並びは read 関数と同じ ── Paged の size が先、cursor(keyset)が後。
+  let #(scope, size_place) = size_param(scope, select.limit)
   use #(scope, keyset) <- try(keyset_clause(app, scope, select, from))
   use selected <- try(select_list(app, scope, select, from))
   use #(scope, havings) <- try(having_clauses(app, scope, select.having))
@@ -255,7 +251,7 @@ fn statement(app: App, select: Select) -> Result(String, String) {
         "" -> ""
         text -> "\nORDER BY " <> text
       },
-      limit_clause(select.limit),
+      limit_clause(select.limit, size_place),
       ";\n",
     ]),
   )
@@ -802,13 +798,26 @@ fn range(first: Int, count: Int) -> List(Int) {
   }
 }
 
-fn limit_clause(limit: model.Limit) -> String {
+/// Paged の size が穴なら番号を1つ取る。read 関数の並びに合わせて keyset より先。
+fn size_param(scope: Scope, limit: model.Limit) -> #(Scope, Option(Int)) {
   case limit {
-    model.LNoLimit -> ""
-    model.LFirst(count) -> "\nLIMIT " <> int.to_string(count)
-    model.LPaged(size: model.OpNum(size), ..) ->
+    model.LPaged(size: model.OpParam(_), ..) -> #(
+      Scope(..scope, next_param: scope.next_param + 1),
+      Some(scope.next_param),
+    )
+    _ -> #(scope, None)
+  }
+}
+
+fn limit_clause(limit: model.Limit, size_place: Option(Int)) -> String {
+  case limit, size_place {
+    model.LNoLimit, _ -> ""
+    model.LFirst(count), _ -> "\nLIMIT " <> int.to_string(count)
+    model.LPaged(size: model.OpNum(size), ..), _ ->
       "\nLIMIT " <> int.to_string(size + 1)
-    model.LPaged(..) -> "\nLIMIT $0"
-    model.LFirstPerGroup(..) -> ""
+    model.LPaged(..), Some(place) ->
+      "\nLIMIT $" <> int.to_string(place) <> " + 1"
+    model.LPaged(..), None -> "\nLIMIT 21"
+    model.LFirstPerGroup(..), _ -> ""
   }
 }

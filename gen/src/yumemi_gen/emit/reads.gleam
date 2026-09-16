@@ -36,7 +36,7 @@ fn one(app: App, service: Service) -> File {
   let body =
     service.queries
     |> list.map(function(app, style, _))
-    |> string.join("\n\n")
+    |> string.join("\n")
   File(
     path: "src/gen/reads/" <> service.module <> ".gleam",
     text: string.concat([
@@ -48,7 +48,6 @@ fn one(app: App, service: Service) -> File {
       "fn query(ctx: Context, name: String, input: a) -> Promise(b)\n",
       "\n",
       body,
-      "\n",
     ]),
   )
 }

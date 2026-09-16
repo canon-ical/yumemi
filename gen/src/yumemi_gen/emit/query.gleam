@@ -12,6 +12,31 @@ pub fn emit(app: App) -> List(File) {
   [File(path: "src/gen/query.gleam", text: text(app))]
 }
 
+/// 構成子は module ごとに1つの名前空間に並ぶので、From と Field が衝突しうる
+/// (Entity `consent_version` の From と、Entity Consent の `version` 列)。
+/// 20 は決めていないので、生成器は黙って直さず、衝突を数えて報告する。
+pub fn collisions(app: App) -> List(String) {
+  let names =
+    list.flatten([
+      list.map(app.entities, fn(entity) { entity.name }),
+      list.flat_map(app.entities, fn(entity) {
+        list.map(entity.fields, fn(field) { field.name })
+      }),
+      list.map(app.arrows, fn(arrow) { arrow.name }),
+      list.flat_map(app.entities, fn(entity) {
+        case model.has_lifecycle(entity) {
+          True -> ["PhaseOf" <> entity.name, "KeyOf" <> entity.name]
+          False -> ["KeyOf" <> entity.name]
+        }
+      }),
+    ])
+  names
+  |> list.filter(fn(name) {
+    list.length(list.filter(names, fn(other) { other == name })) > 1
+  })
+  |> list.unique
+}
+
 fn text(app: App) -> String {
   let entities = list.sort(app.entities, fn(a, b) { string.compare(a.module, b.module) })
   let lifecycles = list.filter(entities, model.has_lifecycle)

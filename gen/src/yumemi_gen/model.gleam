@@ -99,6 +99,8 @@ pub type Entity {
     key_prop: String,
     /// key の列名
     key_column: String,
+    /// 入口での集合名(★ の `collection`)
+    collection: String,
     subject: Bool,
   )
 }
