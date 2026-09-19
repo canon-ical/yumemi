@@ -2,6 +2,7 @@
 
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import yumemi_gen/naming
 
 /// 値型(types.gleam の `pub const <name>: Spec`)。
 pub type Backing {
@@ -59,6 +60,29 @@ pub type Prop {
   )
 }
 
+/// Entity の `framework/verbs` 宣言を、生成器が検証した形で保持する。
+pub type VerbRule {
+  UpdateRule(name: String, fields: List(String), at: VerbGate)
+  AdvanceRule(bump: VerbBump)
+  DeleteWhereRule(field: String)
+  CreateManyRule
+  AdvanceAllRule
+}
+
+pub type VerbGate {
+  AnyPhase
+  Only(List(String))
+}
+
+pub type VerbBump {
+  Always
+  BumpUnless(from: String, to: String)
+}
+
+pub type OrderedBy {
+  OrderedBy(field: String, within: String)
+}
+
 /// 列 1本。Field の variant 1つと SQL の 1列が同じものを指す。
 pub type FieldValue {
   RelValue(target_module: String, target_type: String)
@@ -99,9 +123,21 @@ pub type Entity {
     key_prop: String,
     /// key の列名
     key_column: String,
+    /// key 関数が返す Property の全て。複合 key を先頭列へ潰さない。
+    key_props: List(String),
+    /// key の列の全て。`key_props` と同じ順序。
+    key_columns: List(String),
     /// 入口での集合名(★ の `collection`)
     collection: String,
     subject: Bool,
+    /// `Phase` の遷移辺。無ければ空。
+    edges: List(#(String, String)),
+    /// Entity に宣言された追加の verb 規則。
+    verbs: List(VerbRule),
+    /// reorder の宣言。無ければ None。
+    ordered_by: Option(OrderedBy),
+    /// put の鍵。無ければ空。
+    upsert_key: List(String),
   )
 }
 
@@ -137,8 +173,34 @@ pub fn prop_by_name(entity: Entity, name: String) -> Option(Prop) {
   }
 }
 
+pub fn field_for_prop(entity: Entity, name: String) -> Option(FieldDef) {
+  let prefix = entity.name <> naming.pascal(name)
+  case list.find(entity.fields, fn(field) { field.name == prefix }) {
+    Ok(field) -> Some(field)
+    Error(_) -> None
+  }
+}
+
 pub fn has_lifecycle(entity: Entity) -> Bool {
   entity.phases != []
+}
+
+pub fn has_transitions(entity: Entity) -> Bool {
+  entity.edges != []
+}
+
+pub fn advance_bump(entity: Entity) -> VerbBump {
+  case
+    list.find(entity.verbs, fn(rule) {
+      case rule {
+        AdvanceRule(..) -> True
+        _ -> False
+      }
+    })
+  {
+    Ok(AdvanceRule(bump)) -> bump
+    _ -> Always
+  }
 }
 
 /// 読みの語彙。構成子は framework/query.gleam と1対1。

@@ -18,6 +18,8 @@ pub type Error {
   NoKeyFunction(module: String)
   NoEntityType(module: String)
   Unsupported(where: String, detail: String)
+  Vocabulary(where: String, detail: String)
+  Internal(where: String, detail: String)
 }
 
 /// import の解決表。
@@ -158,14 +160,42 @@ fn entity_of(unit: Unit, table: Registry) -> Result(Entity, Error) {
     Some(phase) -> list.map(phase.variants, fn(variant) { variant.name })
     None -> []
   }
-  let key_prop = key_property(key_fn)
+  use key_props <- result.try(key_properties(key_fn, unit.path))
   let entity_name = naming.pascal(name)
   let fields = fields_of(entity_name, name, props, phases)
-  let key_column = column_of(props, key_prop)
+  use key_columns <- result.try(
+    list.try_map(key_props, fn(key_prop) {
+      case list.find(props, fn(prop) { prop.name == key_prop }) {
+        Ok(_) -> Ok(column_of(props, key_prop))
+        Error(_) ->
+          Error(Unsupported(
+            unit.path,
+            "key が Entity の Property でない: " <> key_prop,
+          ))
+      }
+    }),
+  )
+  use _ <- result.try(validate_key_fields(
+    entity_name,
+    key_props,
+    fields,
+    unit.path,
+  ))
+  let key_prop = result.unwrap(list.first(key_props), "id")
+  let key_column = result.unwrap(list.first(key_columns), key_prop)
   let collection = case g.find_constant(module, "collection") {
     Some(constant) -> option.unwrap(g.string_value(constant.value), name)
     None -> name
   }
+  use #(verbs, ordered_by, upsert_key) <- result.try(declarations(
+    module,
+    phases,
+    props,
+    key_props,
+    entity_name,
+    unit.path,
+  ))
+  use edges <- result.try(edges_of(module, phases, unit.path))
   Ok(model.Entity(
     module: name,
     name: entity_name,
@@ -176,20 +206,483 @@ fn entity_of(unit: Unit, table: Registry) -> Result(Entity, Error) {
     phases: phases,
     key_prop: key_prop,
     key_column: key_column,
+    key_props: key_props,
+    key_columns: key_columns,
     collection: collection,
     subject: g.find_constant(module, "subject") != None,
+    edges: edges,
+    verbs: verbs,
+    ordered_by: ordered_by,
+    upsert_key: upsert_key,
   ))
 }
 
-fn key_property(key_fn: glance.Function) -> String {
+fn key_properties(
+  key_fn: glance.Function,
+  where: String,
+) -> Result(List(String), Error) {
   case key_fn.body {
-    [glance.Expression(glance.FieldAccess(label: label, ..))] -> label
-    [glance.Expression(glance.Tuple(elements: [first, ..], ..))] ->
-      case first {
-        glance.FieldAccess(label: label, ..) -> label
-        _ -> "id"
+    [glance.Expression(glance.FieldAccess(label: label, ..))] -> Ok([label])
+    [glance.Expression(glance.Tuple(elements: elements, ..))] ->
+      case elements {
+        [] -> Error(Internal(where, "key の組が空"))
+        _ ->
+          list.try_map(elements, fn(element) {
+            case element {
+              glance.FieldAccess(label: label, ..) -> Ok(label)
+              _ -> Error(Internal(where, "key の組に Property 以外がある"))
+            }
+          })
       }
-    _ -> "id"
+    _ -> Error(Internal(where, "key の本体を Property または組として読めない"))
+  }
+}
+
+fn validate_key_fields(
+  entity_name: String,
+  key_props: List(String),
+  fields: List(model.FieldDef),
+  where: String,
+) -> Result(Nil, Error) {
+  case
+    list.find(key_props, fn(prop) {
+      let expected = entity_name <> naming.pascal(prop)
+      !list.any(fields, fn(field) { field.name == expected })
+    })
+  {
+    Ok(prop) -> Error(Internal(where, "key Property の SQL 列を読めない: " <> prop))
+    Error(_) ->
+      case list.length(list.unique(key_props)) == list.length(key_props) {
+        True -> Ok(Nil)
+        False -> Error(Internal(where, "key に重複した Property がある"))
+      }
+  }
+}
+
+fn public_constant(
+  module: glance.Module,
+  name: String,
+) -> Option(glance.Constant) {
+  case g.find_constant(module, name) {
+    Some(constant) ->
+      case constant.publicity {
+        glance.Public -> Some(constant)
+        glance.Private -> None
+      }
+    None -> None
+  }
+}
+
+fn expression_list(
+  expression: glance.Expression,
+  where: String,
+  label: String,
+) -> Result(List(glance.Expression), Error) {
+  case expression {
+    glance.List(elements: elements, ..) -> Ok(elements)
+    _ -> Error(Unsupported(where, label <> " が List でない"))
+  }
+}
+
+fn string_expression(
+  expression: glance.Expression,
+  where: String,
+  label: String,
+) -> Result(String, Error) {
+  g.string_value(expression)
+  |> option.to_result(Unsupported(where, label <> " が文字列でない"))
+}
+
+fn constructor_expression(
+  expression: glance.Expression,
+  where: String,
+  label: String,
+) -> Result(String, Error) {
+  g.ctor_name(expression)
+  |> option.to_result(Unsupported(where, label <> " の構成子が読めない"))
+}
+
+fn declaration_list(
+  module: glance.Module,
+  name: String,
+  where: String,
+) -> Result(List(glance.Expression), Error) {
+  case public_constant(module, name) {
+    None -> Ok([])
+    Some(constant) -> expression_list(constant.value, where, name)
+  }
+}
+
+fn declarations(
+  module: glance.Module,
+  phases: List(String),
+  props: List(Prop),
+  key_props: List(String),
+  entity_name: String,
+  where: String,
+) -> Result(
+  #(List(model.VerbRule), Option(model.OrderedBy), List(String)),
+  Error,
+) {
+  use expressions <- result.try(declaration_list(module, "verbs", where))
+  use verbs <- result.try(
+    list.try_map(expressions, fn(expression) {
+      parse_rule(expression, phases, props, key_props, where)
+    }),
+  )
+  let ordered_by = case public_constant(module, "ordered_by") {
+    None -> Ok(None)
+    Some(constant) ->
+      parse_order(constant.value, phases, props, key_props, entity_name, where)
+  }
+  use ordered_by <- result.try(ordered_by)
+  let upsert_key = case public_constant(module, "upsert_key") {
+    None -> Ok([])
+    Some(constant) -> {
+      use expressions <- result.try(expression_list(
+        constant.value,
+        where,
+        "upsert_key",
+      ))
+      list.try_map(expressions, fn(expression) {
+        string_expression(expression, where, "upsert_key の列")
+      })
+    }
+  }
+  use upsert_key <- result.try(upsert_key)
+  use _ <- result.try(validate_upsert_key(upsert_key, props, where))
+  Ok(#(verbs, ordered_by, upsert_key))
+}
+
+fn parse_rule(
+  expression: glance.Expression,
+  phases: List(String),
+  props: List(Prop),
+  key_props: List(String),
+  where: String,
+) -> Result(model.VerbRule, Error) {
+  use name <- result.try(constructor_expression(expression, where, "verbs の規則"))
+  case name {
+    "Update" -> {
+      use update_name_expression <- result.try(
+        g.labelled(expression, "name")
+        |> option.to_result(Unsupported(where, "Update.name が無い")),
+      )
+      use update_name <- result.try(string_expression(
+        update_name_expression,
+        where,
+        "Update.name",
+      ))
+      use fields_expression <- result.try(
+        g.labelled(expression, "fields")
+        |> option.to_result(Unsupported(where, "Update.fields が無い")),
+      )
+      use fields <- result.try(expression_list(
+        fields_expression,
+        where,
+        "Update.fields",
+      ))
+      use fields <- result.try(
+        list.try_map(fields, fn(field) {
+          string_expression(field, where, "Update.fields の Property")
+        }),
+      )
+      use at <- result.try(parse_gate(expression, phases, where))
+      use _ <- result.try(validate_update(
+        update_name,
+        fields,
+        props,
+        key_props,
+        where,
+      ))
+      Ok(model.UpdateRule(name: update_name, fields: fields, at: at))
+    }
+    "Advance" -> {
+      use bump <- result.try(parse_bump(expression, phases, where))
+      case phases {
+        [] -> Error(Unsupported(where, "Advance は Lifecycle のある Entity だけ"))
+        _ -> Ok(model.AdvanceRule(bump: bump))
+      }
+    }
+    "DeleteWhere" -> {
+      use field_expression <- result.try(
+        g.labelled(expression, "field")
+        |> option.to_result(Unsupported(where, "DeleteWhere.field が無い")),
+      )
+      use field <- result.try(string_expression(
+        field_expression,
+        where,
+        "DeleteWhere.field",
+      ))
+      use _ <- result.try(validate_delete_where(field, props, where))
+      Ok(model.DeleteWhereRule(field))
+    }
+    "CreateMany" -> Ok(model.CreateManyRule)
+    "AdvanceAll" ->
+      Error(Vocabulary(
+        where,
+        "AdvanceAll は語彙の不足。集合レベルの advance は System Service で分割して掃く(10-model:258)",
+      ))
+    _ -> Error(Unsupported(where, "未知の verb 規則: " <> name))
+  }
+}
+
+fn parse_gate(
+  expression: glance.Expression,
+  phases: List(String),
+  where: String,
+) -> Result(model.VerbGate, Error) {
+  case g.labelled(expression, "at") {
+    None -> Ok(model.AnyPhase)
+    Some(value) ->
+      case constructor_expression(value, where, "Update.at") {
+        Ok("AnyPhase") -> Ok(model.AnyPhase)
+        Ok("Only") ->
+          case g.args(value) {
+            [phase_list] -> {
+              use names <- result.try(expression_list(phase_list, where, "Only"))
+              use names <- result.try(
+                list.try_map(names, fn(item) {
+                  constructor_expression(item, where, "Only の phase")
+                }),
+              )
+              use _ <- result.try(validate_phases(names, phases, where))
+              Ok(model.Only(names))
+            }
+            _ -> Error(Unsupported(where, "Only の引数が読めない"))
+          }
+        Ok(name) -> Error(Unsupported(where, "未知の Gate: " <> name))
+        Error(error) -> Error(error)
+      }
+  }
+}
+
+fn parse_bump(
+  expression: glance.Expression,
+  phases: List(String),
+  where: String,
+) -> Result(model.VerbBump, Error) {
+  case g.labelled(expression, "bump") {
+    None -> Ok(model.Always)
+    Some(value) ->
+      case constructor_expression(value, where, "Advance.bump") {
+        Ok("Always") -> Ok(model.Always)
+        Ok("BumpUnless") ->
+          case g.args(value) {
+            [from, to] -> {
+              use from <- result.try(constructor_expression(
+                from,
+                where,
+                "BumpUnless.from",
+              ))
+              use to <- result.try(constructor_expression(
+                to,
+                where,
+                "BumpUnless.to",
+              ))
+              use _ <- result.try(validate_phases([from, to], phases, where))
+              Ok(model.BumpUnless(from: from, to: to))
+            }
+            _ -> Error(Unsupported(where, "BumpUnless の引数が2つでない"))
+          }
+        Ok(name) -> Error(Unsupported(where, "未知の Bump: " <> name))
+        Error(error) -> Error(error)
+      }
+  }
+}
+
+fn parse_order(
+  expression: glance.Expression,
+  phases: List(String),
+  props: List(Prop),
+  key_props: List(String),
+  entity_name: String,
+  where: String,
+) -> Result(Option(model.OrderedBy), Error) {
+  use name <- result.try(constructor_expression(expression, where, "ordered_by"))
+  case name {
+    "Order" -> {
+      use field_expression <- result.try(
+        g.labelled(expression, "field")
+        |> option.to_result(Unsupported(where, "ordered_by.field が無い")),
+      )
+      use field <- result.try(string_expression(
+        field_expression,
+        where,
+        "ordered_by.field",
+      ))
+      use within_expression <- result.try(
+        g.labelled(expression, "within")
+        |> option.to_result(Unsupported(where, "ordered_by.within が無い")),
+      )
+      use within <- result.try(string_expression(
+        within_expression,
+        where,
+        "ordered_by.within",
+      ))
+      use _ <- result.try(validate_order(field, within, props, where))
+      use _ <- result.try(case list.length(key_props) > 1 {
+        True ->
+          Error(Internal(where, entity_name <> " の複合 key に対する reorder は未実装"))
+        False -> Ok(Nil)
+      })
+      let _ = phases
+      Ok(Some(model.OrderedBy(field: field, within: within)))
+    }
+    _ -> Error(Unsupported(where, "ordered_by が Order でない"))
+  }
+}
+
+fn validate_phases(
+  names: List(String),
+  phases: List(String),
+  where: String,
+) -> Result(Nil, Error) {
+  case list.find(names, fn(name) { !list.contains(phases, name) }) {
+    Ok(name) -> Error(Unsupported(where, "宣言の phase が無い: " <> name))
+    Error(_) -> Ok(Nil)
+  }
+}
+
+fn validate_update(
+  name: String,
+  fields: List(String),
+  props: List(Prop),
+  key_props: List(String),
+  where: String,
+) -> Result(Nil, Error) {
+  case name {
+    "" -> Error(Unsupported(where, "Update.name が空"))
+    _ ->
+      case
+        list.find(fields, fn(field) {
+          case list.find(props, fn(prop) { prop.name == field }) {
+            Error(_) -> True
+            Ok(prop) ->
+              list.contains(key_props, field)
+              || prop.name == "version"
+              || is_relation(prop)
+          }
+        })
+      {
+        Ok(field) ->
+          Error(Unsupported(
+            where,
+            "Update.fields の Property が書き換え可能でない: " <> field,
+          ))
+        Error(_) -> Ok(Nil)
+      }
+  }
+}
+
+fn validate_delete_where(
+  field: String,
+  props: List(Prop),
+  where: String,
+) -> Result(Nil, Error) {
+  case list.find(props, fn(prop) { prop.name == field }) {
+    Error(_) ->
+      Error(Unsupported(where, "DeleteWhere.field の Property が無い: " <> field))
+    Ok(prop) ->
+      case is_relation(prop) {
+        True -> Error(Unsupported(where, "DeleteWhere.field が親の列: " <> field))
+        False -> Ok(Nil)
+      }
+  }
+}
+
+fn validate_order(
+  field: String,
+  within: String,
+  props: List(Prop),
+  where: String,
+) -> Result(Nil, Error) {
+  use order_prop <- result.try(
+    list.find(props, fn(prop) { prop.name == field })
+    |> result.map_error(fn(_) {
+      Unsupported(where, "ordered_by.field の Property が無い: " <> field)
+    }),
+  )
+  use within_prop <- result.try(
+    list.find(props, fn(prop) { prop.name == within })
+    |> result.map_error(fn(_) {
+      Unsupported(where, "ordered_by.within の Property が無い: " <> within)
+    }),
+  )
+  case is_relation(order_prop), is_relation(within_prop) {
+    False, True -> Ok(Nil)
+    True, _ -> Error(Unsupported(where, "ordered_by.field が親の関係列: " <> field))
+    _, False ->
+      Error(Unsupported(where, "ordered_by.within が範囲の関係列でない: " <> within))
+  }
+}
+
+fn validate_upsert_key(
+  fields: List(String),
+  props: List(Prop),
+  where: String,
+) -> Result(Nil, Error) {
+  case
+    list.find(fields, fn(field) {
+      case list.find(props, fn(prop) { prop.name == field }) {
+        Ok(prop) -> prop.repeated && is_multi(prop)
+        Error(_) -> True
+      }
+    })
+  {
+    Ok(field) ->
+      Error(Unsupported(where, "upsert_key の Property が無いか複合列: " <> field))
+    Error(_) ->
+      case list.length(list.unique(fields)) == list.length(fields) {
+        True -> Ok(Nil)
+        False -> Error(Unsupported(where, "upsert_key に重複した Property がある"))
+      }
+  }
+}
+
+fn is_relation(prop: Prop) -> Bool {
+  case prop.kind {
+    model.RelProp(..) -> True
+    _ -> False
+  }
+}
+
+fn is_multi(prop: Prop) -> Bool {
+  case prop.kind {
+    model.RelProp(kind: model.Multi, ..) -> True
+    _ -> False
+  }
+}
+
+fn edges_of(
+  module: glance.Module,
+  phases: List(String),
+  where: String,
+) -> Result(List(#(String, String)), Error) {
+  case public_constant(module, "edges") {
+    None -> Ok([])
+    Some(constant) -> {
+      use expressions <- result.try(expression_list(
+        constant.value,
+        where,
+        "edges",
+      ))
+      list.try_map(expressions, fn(expression) {
+        case expression {
+          glance.Tuple(elements: [from, to], ..) -> {
+            use from <- result.try(constructor_expression(
+              from,
+              where,
+              "edges.from",
+            ))
+            use to <- result.try(constructor_expression(to, where, "edges.to"))
+            use _ <- result.try(validate_phases([from, to], phases, where))
+            Ok(#(from, to))
+          }
+          _ -> Error(Unsupported(where, "edges の要素が (from, to) の組でない"))
+        }
+      })
+    }
   }
 }
 

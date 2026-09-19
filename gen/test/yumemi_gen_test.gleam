@@ -22,6 +22,10 @@ const fixture = "fixtures/article"
 /// 本便(gen-2)で置いた fixture ── 20 の写しではない。
 const flag_fixture = "fixtures/flag"
 
+const advance_all_fixture = "fixtures/flag_advance_all"
+
+const parent_delete_fixture = "fixtures/flag_parent"
+
 pub fn main() {
   gleeunit.main()
 }
@@ -72,7 +76,8 @@ pub fn types_entities_services_counted_test() {
 
 pub fn lifecycle_read_from_edges_test() {
   let assert Some(article) = model.entity_by_name(app().entities, "Article")
-  article.phases |> should.equal(["Draft", "Published", "Retracted"])
+  article.phases
+  |> should.equal(["Draft", "Scheduled", "Published", "Retracted"])
   article.key_prop |> should.equal("slug")
   article.collection |> should.equal("articles")
 }
@@ -129,6 +134,7 @@ pub fn phase_and_arrival_columns_are_generated_test() {
   [
     "ArticlePhase",
     "ArticleEnteredDraft",
+    "ArticleEnteredScheduled",
     "ArticleEnteredPublished",
     "ArticleEnteredRetracted",
   ]
@@ -163,7 +169,10 @@ pub fn param_labels_come_from_p_variants_test() {
 
 pub fn one_statement_per_named_query_test() {
   let paths = list.map(files(), fn(entry) { entry.0 })
-  list.filter(paths, string.starts_with(_, "gen/sql/queries/"))
+  list.filter(paths, fn(path) {
+    string.starts_with(path, "gen/sql/queries/")
+    && !string.starts_with(path, "gen/sql/queries/verb/")
+  })
   |> list.sort(string.compare)
   |> should.equal([
     "gen/sql/queries/article_list/counts.sql",
@@ -242,6 +251,104 @@ pub fn no_collision_after_the_split_test() {
   let assert Ok(units) = source.load(fixture)
   let assert Ok(loaded) = reader.read(units)
   query.collisions(loaded) |> should.equal([])
+}
+
+// ── 束5 verb / phase ────────────────────────────────────────────────────────
+
+pub fn verb_bundle_covers_declared_actions_test() {
+  let paths = list.map(files(), fn(entry) { entry.0 })
+  [
+    "src/gen/verb.gleam",
+    "src/gen/phase.gleam",
+    "gen/sql/queries/verb/pin_article.sql",
+    "gen/sql/queries/verb/delete_article_by_title.sql",
+    "gen/sql/queries/verb/create_articles.sql",
+    "gen/sql/queries/verb/reorder_articles.sql",
+    "gen/sql/queries/verb/put_article.sql",
+  ]
+  |> list.each(fn(path) { list.contains(paths, path) |> should.be_true })
+  let found = text("src/gen/verb.gleam")
+  string.contains(found, "pub fn pin_article(") |> should.be_true
+  string.contains(found, "pub fn update_article_title(") |> should.be_false
+  string.contains(found, "pub fn advance_article(") |> should.be_true
+}
+
+pub fn advance_sql_has_no_service_argument_test() {
+  let found = text("gen/sql/queries/verb/advance_article.sql")
+  string.contains(found, "CASE WHEN $3='scheduled' AND $4='draft' THEN 0")
+  |> should.be_true
+  string.contains(found, "$5") |> should.be_true
+  string.contains(found, "$6") |> should.be_false
+  [
+    "article_create",
+    "article_publish",
+    "article_retract",
+    "article_list",
+  ]
+  |> list.each(fn(service) {
+    string.contains(found, service) |> should.be_false
+  })
+}
+
+pub fn verb_sql_uses_entity_only_headers_test() {
+  files()
+  |> list.filter(fn(entry) {
+    string.starts_with(entry.0, "gen/sql/queries/verb/")
+  })
+  |> list.each(fn(entry) {
+    string.starts_with(entry.1, "-- GENERATED from entity.")
+    |> should.be_true
+    string.contains(entry.1, "service.")
+    |> should.be_false
+  })
+}
+
+pub fn composite_key_is_present_in_signature_where_and_returning_test() {
+  let update =
+    text_of(flag_fixture, "gen/sql/queries/verb/update_chunk_text.sql")
+  let delete = text_of(flag_fixture, "gen/sql/queries/verb/delete_chunk.sql")
+  string.contains(update, "WHERE a=$1 AND b=$2 AND c=$3")
+  |> should.be_true
+  string.contains(update, "RETURNING a,b,c") |> should.be_true
+  string.contains(delete, "WHERE a=$1 AND b=$2 AND c=$3")
+  |> should.be_true
+  string.contains(delete, "RETURNING a,b,c") |> should.be_true
+  let verb = text_of(flag_fixture, "src/gen/verb.gleam")
+  string.contains(
+    verb,
+    "pub fn update_chunk_text(\n  a: Int,\n  b: Int,\n  c: Int,",
+  )
+  |> should.be_true
+}
+
+fn reader_error(app_dir: String) -> reader.Error {
+  let assert Ok(units) = source.load(app_dir)
+  let assert Error(error) = reader.read(units)
+  error
+}
+
+pub fn advance_all_is_exit_five_with_reason_test() {
+  let error = reader_error(advance_all_fixture)
+  case error {
+    reader.Vocabulary(where: where, detail: detail) -> {
+      where |> should.equal("entity/bulk")
+      stop.code(stop.Vocabulary) |> should.equal(5)
+      string.contains(detail, "System Service") |> should.be_true
+    }
+    _ -> should.fail()
+  }
+}
+
+pub fn delete_where_parent_is_exit_four_test() {
+  let error = reader_error(parent_delete_fixture)
+  case error {
+    reader.Unsupported(where: where, detail: detail) -> {
+      where |> should.equal("entity/child")
+      stop.code(stop.Conflict) |> should.equal(4)
+      string.contains(detail, "親の列") |> should.be_true
+    }
+    _ -> should.fail()
+  }
 }
 
 // ── header の入力ハッシュ(20 の規約①、柏木 P2-5) ────────────────────────────

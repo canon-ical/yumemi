@@ -16,10 +16,12 @@ import gleam/result
 import gleam/string
 import simplifile
 import yumemi_gen/emit/hash
+import yumemi_gen/emit/phase
 import yumemi_gen/emit/query
 import yumemi_gen/emit/reads
 import yumemi_gen/emit/sql
 import yumemi_gen/emit/types
+import yumemi_gen/emit/verb
 import yumemi_gen/reader
 import yumemi_gen/source
 import yumemi_gen/stop.{type Note, Note}
@@ -100,6 +102,9 @@ pub fn generate(
       query.emit(app, hashes.entities),
       reads.emit(app, hashes),
       sql.emit(app, hashes),
+      phase.emit(app, hashes.entities),
+      verb.emit(app, hashes),
+      verb.sql(app, hashes),
       diagnostics,
     ]),
     notes,
@@ -116,6 +121,10 @@ fn read_note(error: reader.Error) -> Note {
       Note(class: stop.Missing, text: module <> ": Entity のレコード型が読めない")
     reader.Unsupported(where: where, detail: detail) ->
       Note(class: stop.Conflict, text: where <> ": " <> detail)
+    reader.Vocabulary(where: where, detail: detail) ->
+      Note(class: stop.Vocabulary, text: where <> ": " <> detail)
+    reader.Internal(where: where, detail: detail) ->
+      Note(class: stop.NotImplemented, text: where <> ": " <> detail)
   }
 }
 
