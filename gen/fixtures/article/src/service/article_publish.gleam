@@ -39,7 +39,9 @@ pub fn logic(
 ) -> Step(article.Article, Error, Start) {
   case it.phase {
     article.Draft -> {
-      use _ <- step.apply(verb.advance_article(it.article.slug, phase.DraftToPublished))
+      use _ <- step.apply(
+        verb.advance_article(it.article.slug, phase.ArticleDraftToPublished),
+      )
       step.done(it.article)
     }
     article.Published -> step.fail(AlreadyPublished)

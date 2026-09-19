@@ -39,10 +39,7 @@ fn text(entities: List(Entity), input_hash: String) -> String {
 fn entity_text(entity: Entity) -> String {
   let variants =
     entity.edges
-    |> list.map(fn(edge) {
-      let #(from, to) = edge
-      naming.pascal(from) <> "To" <> naming.pascal(to)
-    })
+    |> list.map(fn(edge) { step_variant(entity, edge) })
   let from_cases =
     list.map2(entity.edges, variants, fn(edge, variant) {
       let #(from, _) = edge
@@ -82,4 +79,9 @@ fn entity_text(entity: Entity) -> String {
     to_cases,
     "\n  }\n}\n",
   ])
+}
+
+fn step_variant(entity: Entity, edge: #(String, String)) -> String {
+  let #(from, to) = edge
+  entity.name <> naming.pascal(from) <> "To" <> naming.pascal(to)
 }

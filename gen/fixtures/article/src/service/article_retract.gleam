@@ -31,6 +31,8 @@ pub fn logic(
   _args: Args,
 ) -> Step(article.Article, Error, Start) {
   use <- step.guard(it.phase == article.Published, NotPublished)
-  use _ <- step.apply(verb.advance_article(it.article.slug, phase.PublishedToRetracted))
+  use _ <- step.apply(
+    verb.advance_article(it.article.slug, phase.ArticlePublishedToRetracted),
+  )
   step.done(it.article)
 }

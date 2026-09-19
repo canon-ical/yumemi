@@ -20,7 +20,7 @@ scripts/probe-compile.sh ~/yumemism_repo/musearch/app build/gen3-musearch.p5Ywux
 
 | 検収 | 結果 |
 |---|---|
-| fixture `gleam test` | **46 passed, no failures** |
+| fixture `gleam test` | **47 passed, no failures** |
 | 生成 | **522 ファイル**(診断を除く生成物 521)、終了コード 3。`entity/ledger: key 関数が無い` 1 件を notes 集約 |
 | 生成物の内訳 | root 81 本、verb SQL 240 本、`src/gen/verb.gleam` 1 本、`src/gen/phase.gleam` 1 本 |
 | 警告 | **17 件**。すべて module 名の `_` 前と root Entity の不一致 |
@@ -50,22 +50,22 @@ scripts/probe-compile.sh ~/yumemism_repo/musearch/app build/gen3-musearch.p5Ywux
 基準(手書きの ▲ そのまま)                         0
 段1: 8束を生成物へ差し替え                      121
 段2: from./field. へ機械置換後                   35
-段3: gen/types の手書き関数を戻した後            34
+段3: gen/types の手書き関数を戻した後            31
 ```
 
-段 3 の 34 は実際に `gleam build` が出した error 行数。gen-2 報告の段 3 は 17 だったため、数字は **+17**。別集計の既知分として、生成した `src/gen/verb.gleam` は key を持つ Entity 33 本から `gen/draft/*` を 33 参照し、そのうち **16 Entity の draft module が musearch に無い**。この 16 は既知の参照先欠落として数え、今回の 34 error 行へ重複加算していない(ビルドが先に到達した型エラーのため、16 本が独立した error 行としては出ていない)。
+段 3 の **31** は旧 gen-3 検収基準での比較値で、修正前の 34 行から `src/gen/phase.gleam` 由来の **3 件**(Duplicate definition 1 + Type mismatch 2)を除いた。gen-2 報告の段 3 は 17 だったため、数字は **+14**。current musearch main は後発変更を含むため、live probe の全体値はこの基準へ混ぜていない。別集計の既知分として、生成した `src/gen/verb.gleam` は key を持つ Entity 33 本から `gen/draft/*` を 33 参照し、そのうち **16 Entity の draft module が musearch に無い**。この 16 は既知の参照先欠落として数え、今回の 31 error 行へ重複加算していない(ビルドが先に到達した型エラーのため、16 本が独立した error 行としては出ていない)。
 
 ## gen-2 からの増減
 
 | 指標 | gen-2 | gen-3 | 増減 |
 |---|---:|---:|---:|
-| fixture passed | 33 | **46** | **+13** |
+| fixture passed | 33 | **47** | **+14** |
 | 生成ファイル | 126 | **522** | **+396** |
 | types の両側対象 | 61 | **83** | +22 |
 | query 生成行 | 414 | **542** | +128 |
 | reads の両側対象 | 22 | **35** | +13 |
 | 読み SQL の両側対象 | 29 | **39** | +10 |
-| probe 段 1 → 段 2 → 段 3 | 162 → 22 → 17 | **121 → 35 → 34** | — → +13 → +17 |
+| probe 段 1 → 段 2 → 段 3 | 162 → 22 → 17 | **121 → 35 → 31** | — → +13 → +14 |
 
 gen-3 の増分 396 ファイルのうち、verb SQL 240、root 81、verb 1、phase 1 が新束である。残りは Entity / Service の増加と root 相対 read の追加である。
 
@@ -120,6 +120,7 @@ musearch の Entity には `verbs` 宣言が無い。したがって生成器が
 ## 残差(閉じないもの)
 
 - `pageview_record`: root が Entity でない `Browser`。現行の allow Entity + Args key 規則だけでは閉じない。
+- `phase.gleam`: 生成側の構成子は Entity 修飾(`ArticleDraftToPublished`)で、手書き musearch の構成子(`DraftToPublished`)とは命名が異なる。意味は対応するが、文字列差分は残る。
 - Root の余分な欄 3 種: `article_read` の `muse`、`article_pin` の `slot_count`、`pageview_record` の `browser`。
 - `gen/draft/*`: 生成器は draft module をまだ出さない。key を持つ 33 Entity のうち 16 Entity は musearch 側にも参照先が無い。
 - 入口全般: `registry` / `faces` / `prefix` / `entry.gleam` は gen-4。

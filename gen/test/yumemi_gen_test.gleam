@@ -30,6 +30,8 @@ const no_key_fixture = "fixtures/flag_no_key"
 
 const root_warning_fixture = "fixtures/root_warning"
 
+const phase_collision_fixture = "fixtures/flag_phase_collision"
+
 pub fn main() {
   gleeunit.main()
 }
@@ -309,6 +311,31 @@ pub fn verb_bundle_covers_declared_actions_test() {
   string.contains(found, "pub fn pin_article(") |> should.be_true
   string.contains(found, "pub fn update_article_title(") |> should.be_false
   string.contains(found, "pub fn advance_article(") |> should.be_true
+}
+
+pub fn lifecycle_steps_are_entity_qualified_test() {
+  let phase = text_of(phase_collision_fixture, "src/gen/phase.gleam")
+  string.contains(phase, "pub type FanStep {\n  FanOnboardedToRetiring\n}")
+  |> should.be_true
+  string.contains(phase, "pub type MuseStep {\n  MuseOnboardedToRetiring\n}")
+  |> should.be_true
+  string.contains(phase, "\n  OnboardedToRetiring\n") |> should.be_false
+  string.contains(phase, "FanOnboardedToRetiring -> fan.Onboarded")
+  |> should.be_true
+  string.contains(phase, "MuseOnboardedToRetiring -> muse.Onboarded")
+  |> should.be_true
+
+  let verb = text_of(phase_collision_fixture, "src/gen/verb.gleam")
+  string.contains(
+    verb,
+    "pub fn advance_fan(\n  id: String,\n  step: FanStep,\n)",
+  )
+  |> should.be_true
+  string.contains(
+    verb,
+    "pub fn advance_muse(\n  id: String,\n  step: MuseStep,\n)",
+  )
+  |> should.be_true
 }
 
 pub fn advance_sql_has_no_service_argument_test() {
