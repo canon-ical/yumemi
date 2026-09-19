@@ -4,9 +4,10 @@
 //// 1 Service で当てる。
 import framework/effect.{type Effect, Read}
 import framework/step.{type Start, type Step}
+import gen/allow/widget as allow
 import gen/query as q
 import gen/reads/widget_list as reads
-import gen/root/widget_list.{type Actor, type Root, type Service}
+import gen/root/widget_list.{type Actor, type Root, type Service, Service}
 import gleam/option.{type Option}
 
 pub const effect: Effect = Read
@@ -24,6 +25,13 @@ pub type Error
 pub type P {
   Place
 }
+
+pub const service: Service(Args, Out, Error) = Service(
+  allow: [
+    allow.Clause(who: allow.Anyone, at: allow.AnyPhase, owner: allow.NoOwner),
+  ],
+  logic: logic,
+)
 
 /// 真偽の列はそのまま条件、穴が NULL なら NULL の行に当たる(TOP と置き場を1本で引く)。
 pub const shown: q.Select(P) = q.Select(

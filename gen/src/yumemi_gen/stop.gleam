@@ -16,6 +16,8 @@ import gleam/list
 import gleam/string
 
 pub type Class {
+  /// 0 ── 止めない。生成物はそのまま書く。
+  Warning
   /// 1 ── 生成器がまだ書けない。★ からは導けるのに出せないものもここ。
   NotImplemented
   /// 2 ── glance が parse できない。
@@ -36,6 +38,7 @@ pub type Note {
 
 pub fn code(class: Class) -> Int {
   case class {
+    Warning -> 0
     NotImplemented -> 1
     Syntax -> 2
     Missing -> 3
@@ -47,6 +50,7 @@ pub fn code(class: Class) -> Int {
 
 pub fn label(class: Class) -> String {
   case class {
+    Warning -> "警告"
     NotImplemented -> "生成器の不足"
     Syntax -> "構文が読めない"
     Missing -> "宣言の不足"
@@ -87,7 +91,7 @@ pub fn worst(notes: List(Note)) -> Int {
                     False ->
                       case codes {
                         [] -> 0
-                        _ -> 1
+                        _ -> 0
                       }
                   }
               }

@@ -5,9 +5,10 @@
 import framework/effect.{type Effect, Read}
 import framework/page.{type Cursor, type Page, type PageSize}
 import framework/step.{type Start, type Step}
+import gen/allow/widget as allow
 import gen/query as q
 import gen/reads/widget_page as reads
-import gen/root/widget_page.{type Actor, type Root, type Service}
+import gen/root/widget_page.{type Actor, type Root, type Service, Service}
 import gleam/option.{type Option}
 
 pub const effect: Effect = Read
@@ -27,6 +28,13 @@ pub type P {
   Cursor
 }
 
+pub const service: Service(Args, Out, Error) = Service(
+  allow: [
+    allow.Clause(who: allow.Anyone, at: allow.AnyPhase, owner: allow.NoOwner),
+  ],
+  logic: logic,
+)
+
 pub const paged: q.Select(P) = q.Select(
   from: q.Widget,
   join: [],
@@ -36,7 +44,7 @@ pub const paged: q.Select(P) = q.Select(
   agg: [],
   along: [],
   with: [],
-  order: [q.Asc(q.WidgetOrder), q.Desc(q.WidgetName)],
+  order: [q.Asc(q.WidgetPlace), q.Desc(q.WidgetName)],
   limit: q.Paged(size: q.Param(Limit), after: q.Param(Cursor)),
 )
 

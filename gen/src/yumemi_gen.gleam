@@ -1,8 +1,8 @@
 //// yumemi の生成器。`gleam run -m yumemi_gen -- <app dir> <out dir>`
 ////
-//// 出すのは4束だけ ── `src/gen/types/*`、`src/gen/query.gleam` と `src/gen/query/{from,field}.gleam`、
-//// `src/gen/reads/*`、`gen/sql/queries/<service>/<name>.sql`(読み)。
-//// verb / root / entry / migration は出さない。
+//// 出すのは生成束 ── `src/gen/types/*`、`src/gen/query.gleam` と
+//// `src/gen/query/{from,field}.gleam`、`src/gen/reads/*`、`src/gen/root/*`、
+//// `gen/sql/queries/<service>/<name>.sql`(読み)、verb / phase。
 ////
 //// **出力が揃わなかったら 0 で終わらない。**理由は 20 の exit code 表で分類し(`stop`)、
 //// stderr と `_diagnostics.txt` の両方に同じ1行で出す。ファイル自体は書いてから止まる
@@ -19,6 +19,7 @@ import yumemi_gen/emit/hash
 import yumemi_gen/emit/phase
 import yumemi_gen/emit/query
 import yumemi_gen/emit/reads
+import yumemi_gen/emit/root
 import yumemi_gen/emit/sql
 import yumemi_gen/emit/types
 import yumemi_gen/emit/verb
@@ -56,7 +57,7 @@ pub fn main() {
 @external(javascript, "./yumemi_gen_ffi.mjs", "halt")
 fn halt(code: Int) -> Nil
 
-/// 4束と、止まる理由。理由が1つでもあれば呼び手は非 0 で終わる。
+/// 生成束と、止まる理由。理由が1つでもあれば呼び手は非 0 で終わる。
 pub fn generate(
   app_dir: String,
 ) -> Result(#(List(types.File), List(Note)), Note) {
@@ -77,17 +78,20 @@ pub fn generate(
     list.append(
       list.append(
         reader.missing_key_notes(units),
-        list.map(query.collisions(app), fn(entry) {
-          let #(module, name) = entry
-          Note(
-            class: stop.Conflict,
-            text: "名前の衝突 "
-              <> module
-              <> ": "
-              <> name
-              <> "(構成子は module ごとに1つの名前空間)",
-          )
-        }),
+        list.append(
+          list.map(query.collisions(app), fn(entry) {
+            let #(module, name) = entry
+            Note(
+              class: stop.Conflict,
+              text: "名前の衝突 "
+                <> module
+                <> ": "
+                <> name
+                <> "(構成子は module ごとに1つの名前空間)",
+            )
+          }),
+          root.notes(app),
+        ),
       ),
       sql.notes(app, hashes),
     )
@@ -112,6 +116,7 @@ pub fn generate(
       phase.emit(app, hashes.entities),
       verb.emit(app, hashes),
       verb.sql(app, hashes),
+      root.emit(app, hashes),
       diagnostics,
     ]),
     notes,

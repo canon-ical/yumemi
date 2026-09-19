@@ -28,6 +28,8 @@ const parent_delete_fixture = "fixtures/flag_parent"
 
 const no_key_fixture = "fixtures/flag_no_key"
 
+const root_warning_fixture = "fixtures/root_warning"
+
 pub fn main() {
   gleeunit.main()
 }
@@ -145,11 +147,17 @@ pub fn phase_and_arrival_columns_are_generated_test() {
 
 // ── 束3 読みの器 ────────────────────────────────────────────────────────────
 
-pub fn reads_are_emitted_per_service_with_named_queries_test() {
+pub fn reads_are_emitted_for_queries_and_root_arrows_test() {
   let paths = list.map(files(), fn(entry) { entry.0 })
-  // 名前付きクエリ値を持つのは article_list だけ。
+  // article_list は名前付きクエリ、他の4本は root Article の矢印。
   list.filter(paths, string.starts_with(_, "src/gen/reads/"))
-  |> should.equal(["src/gen/reads/article_list.gleam"])
+  |> should.equal([
+    "src/gen/reads/article_create.gleam",
+    "src/gen/reads/article_list.gleam",
+    "src/gen/reads/article_publish.gleam",
+    "src/gen/reads/article_read.gleam",
+    "src/gen/reads/article_retract.gleam",
+  ])
 }
 
 pub fn read_return_type_comes_from_the_query_value_test() {
@@ -165,6 +173,34 @@ pub fn param_labels_come_from_p_variants_test() {
   let found = text("src/gen/reads/article_list.gleam")
   string.contains(found, "limit limit: Int,") |> should.be_true
   string.contains(found, "cursor cursor: Option(Cursor),") |> should.be_true
+}
+
+pub fn root_bundle_uses_allow_and_args_key_test() {
+  let read = text("src/gen/root/article_read.gleam")
+  string.contains(read, "Root(") |> should.be_true
+  string.contains(read, "article: article.Article,") |> should.be_true
+  string.contains(read, "phase: article.Phase,") |> should.be_true
+  string.contains(read, "at: Datetime,") |> should.be_true
+  string.contains(read, "seed: String,") |> should.be_true
+  string.contains(read, "pub type Actor {") |> should.be_true
+  string.contains(read, "Anonymous") |> should.be_true
+  string.contains(read, "AsStaff(staff.Staff)") |> should.be_true
+
+  let publish = text("src/gen/root/article_publish.gleam")
+  string.contains(publish, "logic: fn(staff.Staff, Root, args)")
+  |> should.be_true
+
+  let list_root = text("src/gen/root/article_list.gleam")
+  string.contains(list_root, "Root(at: Datetime, seed: String)")
+  |> should.be_true
+}
+
+pub fn root_relative_arrows_are_emitted_test() {
+  let found = text("src/gen/reads/article_read.gleam")
+  string.contains(found, "pub fn to_category(") |> should.be_true
+  string.contains(found, "then: fn(category.Category)") |> should.be_true
+  string.contains(found, "pub fn to_tags(") |> should.be_true
+  string.contains(found, "then: fn(List(tag.Tag))") |> should.be_true
 }
 
 // ── 束4 読みの SQL ──────────────────────────────────────────────────────────
@@ -376,16 +412,21 @@ pub fn no_key_generation_writes_bundles_and_reports_entity_test() {
     "src/gen/phase.gleam",
     "src/gen/verb.gleam",
     "gen/sql/queries/verb/create_no_key.sql",
+    "src/gen/root/path_only_lookup.gleam",
     "_diagnostics.txt",
   ]
   |> list.each(fn(path) { list.contains(paths, path) |> should.be_true })
 
   let notes = notes_of(no_key_fixture)
-  list.length(notes) |> should.equal(1)
+  list.length(notes) |> should.equal(2)
   stop.worst(notes) |> should.equal(3)
-  let assert [note] = notes
-  string.contains(note.text, "entity/no_key") |> should.be_true
-  string.contains(note.text, "key") |> should.be_true
+  notes
+  |> list.any(fn(note) {
+    note.class == stop.Missing
+    && string.contains(note.text, "entity/no_key")
+    && string.contains(note.text, "key")
+  })
+  |> should.be_true
 }
 
 pub fn path_key_is_used_for_keyed_verbs_test() {
@@ -393,8 +434,32 @@ pub fn path_key_is_used_for_keyed_verbs_test() {
   string.contains(verb, "pub fn update_path_only_value(") |> should.be_true
   string.contains(verb, "pub fn delete_path_only(") |> should.be_true
   notes_of(no_key_fixture)
-  |> list.any(fn(note) { string.contains(note.text, "path_only") })
+  |> list.any(fn(note) {
+    string.contains(note.text, "path_only")
+    && string.contains(note.text, "key 関数が無い")
+  })
   |> should.be_false
+}
+
+pub fn path_key_is_used_for_root_lookup_test() {
+  let found = text_of(no_key_fixture, "src/gen/root/path_only_lookup.gleam")
+  string.contains(found, "path_only: path_only.PathOnly") |> should.be_true
+  string.contains(found, "logic: fn(path_only.PathOnly, Root, args)")
+  |> should.be_true
+}
+
+pub fn root_module_mismatch_is_a_nonblocking_warning_test() {
+  let paths = list.map(files_of(root_warning_fixture), fn(entry) { entry.0 })
+  list.contains(paths, "src/gen/root/store_check.gleam") |> should.be_true
+  let found = text_of(root_warning_fixture, "src/gen/root/store_check.gleam")
+  string.contains(found, "widget: widget.Widget") |> should.be_true
+  let notes = notes_of(root_warning_fixture)
+  list.length(notes) |> should.equal(1)
+  let assert [note] = notes
+  note.class |> should.equal(stop.Warning)
+  stop.worst(notes) |> should.equal(0)
+  string.contains(note.text, "store_check") |> should.be_true
+  string.contains(note.text, "widget") |> should.be_true
 }
 
 // ── header の入力ハッシュ(20 の規約①、柏木 P2-5) ────────────────────────────
@@ -471,24 +536,29 @@ pub fn first_one_returns_option_and_agg_returns_option_test() {
   string.contains(found, "fn(Option(Int))") |> should.be_true
 }
 
-// ── 出力が不整合なら 0 で終わらない(柏木 P2-2) ──────────────────────────────
+// ── 向きの混じった keyset は SQL を出して停止しない(G1) ────────────────
 
-pub fn mixed_direction_keyset_is_reported_not_silent_test() {
+pub fn mixed_direction_keyset_is_generated_test() {
   let paths = list.map(files_of(flag_fixture), fn(entry) { entry.0 })
-  // reads は出るが SQL は出ない ── この不整合を黙って 0 で終わらせない。
+  // mixed order でも SQL と reads が両方出る。
   list.contains(paths, "src/gen/reads/widget_page.gleam") |> should.be_true
   list.contains(paths, "gen/sql/queries/widget_page/paged.sql")
-  |> should.be_false
-  list.contains(paths, "_diagnostics.txt") |> should.be_true
+  |> should.be_true
+  list.contains(paths, "_diagnostics.txt") |> should.be_false
+  let found = text_of(flag_fixture, "gen/sql/queries/widget_page/paged.sql")
+  string.contains(
+    found,
+    "COALESCE(w.place,2147483647)>COALESCE($3::integer,2147483647)",
+  )
+  |> should.be_true
+  string.contains(found, "IS NOT DISTINCT FROM") |> should.be_true
+  string.contains(found, "w.name<$4::text") |> should.be_true
 }
 
-pub fn the_exit_code_comes_from_the_worst_note_test() {
+pub fn mixed_direction_keyset_has_no_generator_note_test() {
   let notes = notes_of(flag_fixture)
-  list.length(notes) |> should.equal(1)
-  stop.worst(notes) |> should.equal(1)
-  let assert [note] = notes
-  note.class |> should.equal(stop.NotImplemented)
-  string.contains(note.text, "widget_page/paged") |> should.be_true
+  notes |> should.equal([])
+  stop.worst(notes) |> should.equal(0)
 }
 
 pub fn a_clean_app_has_no_notes_test() {

@@ -34,6 +34,12 @@ pub type TypeRef {
   TypeRef(module: Option(String), name: String)
 }
 
+/// ★ の型を root の鍵照合に使う形。module は import 解決後の道。
+pub type TypeShape {
+  NamedShape(module: Option(String), name: String, parameters: List(TypeShape))
+  TupleShape(List(TypeShape))
+}
+
 pub type RelKind {
   Has
   Held
@@ -127,6 +133,10 @@ pub type Entity {
     key_props: List(String),
     /// key の列の全て。`key_props` と同じ順序。
     key_columns: List(String),
+    /// key / path_key の戻り型。Service Args の照合に使う。
+    key_type: Option(TypeShape),
+    /// key が別にある Entity の path_key 戻り型。root はどちらも受ける。
+    path_key_type: Option(TypeShape),
     /// 入口での集合名(★ の `collection`)
     collection: String,
     subject: Bool,
@@ -290,8 +300,27 @@ pub type NamedQuery {
   NamedQuery(name: String, select: Select)
 }
 
+pub type Arg {
+  Arg(name: String, type_: TypeShape)
+}
+
+/// allow の `who`。Entity は Service の第一引数へ写す主体。
+pub type Subject {
+  SubjectEntity(module: String, type_name: String)
+  SubjectAnonymous
+  SubjectParty
+  SubjectSystem
+}
+
 pub type Service {
-  Service(module: String, params: List(String), queries: List(NamedQuery))
+  Service(
+    module: String,
+    params: List(String),
+    queries: List(NamedQuery),
+    args: List(Arg),
+    allow_module: Option(String),
+    subjects: List(Subject),
+  )
 }
 
 /// 矢印。関係 Property 1つにつき1本。

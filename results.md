@@ -38,3 +38,21 @@
 - `cd gen && gleam check`: 成功 (`build/gen3-p0-check.txt`)
 - musearch 読み取り生成: **411 files**, types 83 / query submodules 2(+`query.gleam`) / reads 34 / read SQL 48 / verb SQL 240。終了 **3**。stderr と `build/gen3-p0-musearch.2j3SYU/_diagnostics.txt` に `entity/ledger: key 関数が無い`。
 - musearch の生成前後 `git status --short` は同一。既存の `?? docs/__pycache__/` 以外の状態変化なし。
+
+## r3 ── root / G1 / G2
+
+### 実装
+
+- Service の `allow` module、`Args` の型、`allow` の who を reader/model へ追加。root は allow Entity の `key` または `path_key` 戻り型と Args 欄の同型照合で決める。
+- `src/gen/root/<service>.gleam` を追加。root Entity + phase + Datetime + seed、rootless の Root、単一主体の直接型、混在主体の Service 専用 Actor sum、module prefix 不一致の Warning(exit 0)を生成する。
+- root Entity から出る Has / Held / Link / Multi の `reads.to_<prop>` を出す。Article fixture の `to_category` / `to_tags` を検証。
+- mixed ASC/DESC keyset を lexicographic OR 枝へ展開し、nullable 列は `COALESCE`、同値列は `IS NOT DISTINCT FROM` で比較する。G1 の SQL を生成し、診断で止めない。
+- flag に allow/service 宣言、path_key root fixture、prefix mismatch fixture を追加。入口・musearch は書いていない。
+
+### 検証
+
+- `cd gen && gleam test`: **46 passed, no failures** (`gen/build/gen3-final-test-2.txt`)
+- `cd gen && gleam check`: 成功 (`gen/build/gen3-final-check-2.txt`)
+- `fixtures/flag` mixed order: `gen/sql/queries/widget_page/paged.sql` が出力され、`COALESCE` / `IS NOT DISTINCT FROM` を確認。notes は空、exit 0。
+- `fixtures/root_warning`: root file を書き、Warning 1件、`stop.worst = 0`。
+- musearch 読み取り生成: tmp `/tmp/yumemi-gen3-musearch-final.p9bZTy` に **root 81本**。既存残差を notes 集約し exit 3。musearch tree は変更していない。

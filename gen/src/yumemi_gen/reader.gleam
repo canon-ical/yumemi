@@ -71,6 +71,24 @@ fn module_of_type(annotation: glance.Type, imports: Imports) -> Option(String) {
   }
 }
 
+fn type_shape(annotation: glance.Type, imports: Imports) -> model.TypeShape {
+  case annotation {
+    glance.NamedType(name: name, module: module, parameters: parameters, ..) ->
+      model.NamedShape(
+        module: case module {
+          Some(local) ->
+            dict.get(imports.qualified, local) |> option.from_result
+          None -> dict.get(imports.unqualified, name) |> option.from_result
+        },
+        name: name,
+        parameters: list.map(parameters, type_shape(_, imports)),
+      )
+    glance.TupleType(elements: elements, ..) ->
+      model.TupleShape(list.map(elements, type_shape(_, imports)))
+    _ -> model.NamedShape(module: None, name: "Unknown", parameters: [])
+  }
+}
+
 // ── types.gleam ──────────────────────────────────────────────────────────────
 
 pub fn value_types(units: List(Unit)) -> Result(List(ValueType), Error) {
@@ -210,6 +228,22 @@ fn entity_of(unit: Unit, table: Registry) -> Result(Option(Entity), Error) {
       ))
       let key_prop = result.unwrap(list.first(key_props), "")
       let key_column = result.unwrap(list.first(key_columns), "")
+      let key_type = case key_fn {
+        Some(function) ->
+          case function.return {
+            Some(annotation) -> Some(type_shape(annotation, imports))
+            None -> None
+          }
+        None -> None
+      }
+      let path_key_type = case g.find_function(module, "path_key") {
+        Some(function) ->
+          case function.return {
+            Some(annotation) -> Some(type_shape(annotation, imports))
+            None -> None
+          }
+        None -> None
+      }
       let collection = case g.find_constant(module, "collection") {
         Some(constant) -> option.unwrap(g.string_value(constant.value), name)
         None -> name
@@ -236,6 +270,8 @@ fn entity_of(unit: Unit, table: Registry) -> Result(Option(Entity), Error) {
           key_column: key_column,
           key_props: key_props,
           key_columns: key_columns,
+          key_type: key_type,
+          path_key_type: path_key_type,
           collection: collection,
           subject: g.find_constant(module, "subject") != None,
           edges: edges,
@@ -984,10 +1020,13 @@ pub fn services(units: List(Unit)) -> Result(List(model.Service), Error) {
 
 fn service_of(unit: Unit) -> Result(model.Service, Error) {
   let module = g.in_order(unit.module)
+  let imports = imports_of(module)
   let params = case g.find_custom_type(module, "P") {
     Some(custom) -> list.map(custom.variants, fn(variant) { variant.name })
     None -> []
   }
+  use args <- result.try(args_of(module, imports, unit.path))
+  use subjects <- result.try(subjects_of(module, unit.path))
   use queries <- result.try(
     module.constants
     |> list.filter(fn(definition) {
@@ -1008,7 +1047,131 @@ fn service_of(unit: Unit) -> Result(model.Service, Error) {
     module: last_segment(unit.path),
     params: params,
     queries: queries,
+    args: args,
+    allow_module: allow_module_of(module),
+    subjects: subjects,
   ))
+}
+
+fn allow_module_of(module: glance.Module) -> Option(String) {
+  case
+    list.find_map(module.imports, fn(definition) {
+      let import_ = definition.definition
+      let local = case import_.alias {
+        Some(glance.Named(name)) -> name
+        _ -> last_segment(import_.module)
+      }
+      case string.starts_with(import_.module, "gen/allow/"), local == "allow" {
+        True, True -> Ok(import_.module)
+        _, _ -> Error(Nil)
+      }
+    })
+  {
+    Ok(path) -> Some(path)
+    Error(_) -> None
+  }
+}
+
+fn args_of(
+  module: glance.Module,
+  imports: Imports,
+  where: String,
+) -> Result(List(model.Arg), Error) {
+  case g.find_custom_type(module, "Args") {
+    None -> Ok([])
+    Some(custom) ->
+      case custom.variants {
+        [variant] ->
+          list.try_map(variant.fields, fn(field) {
+            case g.variant_field_label(field) {
+              Some(name) ->
+                Ok(model.Arg(
+                  name: name,
+                  type_: type_shape(g.variant_field_type(field), imports),
+                ))
+              None -> Error(Unsupported(where, "Args の欄に名前が無い"))
+            }
+          })
+        _ -> Error(Unsupported(where, "Args が1構成子でない"))
+      }
+  }
+}
+
+fn subjects_of(
+  module: glance.Module,
+  where: String,
+) -> Result(List(model.Subject), Error) {
+  case g.find_constant(module, "service") {
+    None -> Ok([])
+    Some(service) ->
+      case g.labelled(service.value, "allow") {
+        None -> Error(Unsupported(where, "Service.allow が無い"))
+        Some(value) ->
+          case value {
+            glance.List(elements: elements, ..) ->
+              elements |> list.try_map(subject_of(_, where))
+            _ -> Error(Unsupported(where, "Service.allow が List でない"))
+          }
+      }
+  }
+}
+
+fn subject_of(
+  expression: glance.Expression,
+  where: String,
+) -> Result(model.Subject, Error) {
+  case g.ctor_name(expression) {
+    Some("Clause") ->
+      case g.labelled(expression, "who") {
+        Some(who) -> who_subject(who, where)
+        None -> Error(Unsupported(where, "allow.Clause.who が無い"))
+      }
+    Some(name) -> shorthand_subject(name, where)
+    None -> Error(Unsupported(where, "allow の句が読めない"))
+  }
+}
+
+fn who_subject(
+  expression: glance.Expression,
+  where: String,
+) -> Result(model.Subject, Error) {
+  case g.ctor_name(expression) {
+    Some("Anyone") -> Ok(model.SubjectAnonymous)
+    Some("Party") -> Ok(model.SubjectParty)
+    Some("System") -> Ok(model.SubjectSystem)
+    Some(name) ->
+      case string.starts_with(name, "As") {
+        True -> {
+          let rest = string.drop_start(name, 2)
+          Ok(model.SubjectEntity(
+            module: naming.snake(rest),
+            type_name: naming.pascal(rest),
+          ))
+        }
+        False ->
+          Ok(model.SubjectEntity(
+            module: naming.snake(name),
+            type_name: naming.pascal(name),
+          ))
+      }
+    None -> Error(Unsupported(where, "allow.Clause.who が読めない"))
+  }
+}
+
+fn shorthand_subject(
+  name: String,
+  _where: String,
+) -> Result(model.Subject, Error) {
+  case name {
+    "Anyone" -> Ok(model.SubjectAnonymous)
+    "Party" -> Ok(model.SubjectParty)
+    "System" -> Ok(model.SubjectSystem)
+    _ ->
+      Ok(model.SubjectEntity(
+        module: naming.snake(name),
+        type_name: naming.pascal(name),
+      ))
+  }
 }
 
 fn parse_select(
