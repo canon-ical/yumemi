@@ -200,3 +200,24 @@ pub const upsert_key: List(String) = ["category", "order"]
 ```
 
 この断片で、`Update` / `Advance` / `DeleteWhere` / `CreateMany` の追加手と、`Gate` / `Bump` の条件、`ordered_by` / `upsert_key` の出力先を 20 の Entity 宣言の節に畳める。NULL クリア、複数 scope、cross-Entity batch はこの断片からは導かれず、未決のまま残す。
+
+## 閉じ方 ── 巡 6 で止め、鷹野の検算で閉じた(役員 人見 2026-09-20)
+
+**柏木ゲート 2 は 3 回まで。3 回目にも P0 が出たので便を止め、残りは次便の P1 にする**(役員 人見 2026-09-20 の裁定 ── ゲートが呼んだ P0 は便の中で追い続けるものではない)。巡 7 には入れていない。
+
+鷹野[PDM]の独立検算(2026-09-20 07:20〜、HEAD `9fc36c3`):
+
+| 検算 | 結果 |
+|---|---|
+| `gleam test`(gen/) | 52 passed |
+| musearch への生成 | exit 3(`entity/ledger` の key 無し、既知の note)、572 ファイル、verb SQL 241 本、root 92 本 |
+| 生成 SQL に Service 名 | 0(リテラル集合と Service 名 92 本の共通が空)。advance の引数は最大 `$5` |
+| `verify-gate2-sql.mjs`(真壁の PG 16) | P0-1 / 2 / 3(値確定・Int 上限・rollback)/ 4 / 5(rootArrow の復号)/ 7 の 6 項目 PASS |
+| 柏木 3 回目の再現 `reorder-negative.mjs` | **再現した**(P0-3 未閉鎖) |
+| 柏木 3 回目の再現 `root-real.mjs` | **再現した**(P0-5 未閉鎖、G2 未閉鎖) |
+
+**次便(gen-4)へ P1 として渡すもの:**
+
+- P0-3 → P1: `reorder` の交換方式。負の一時値は順序列が制限なし Int のとき実値と衝突する(23505)、非負 CHECK でも落ちる(23514)。宣言の値域・制約と整合する方式に替えるか、対応不能な宣言は生成時に名指しで止める
+- P0-5 → P1: root 相対 read が `Held`(key だけ)を Entity として継続関数へ渡し、関係先の取得・復号をしない。真壁の `verify-root-ffi.mjs` は検証側で作った resolve() を呼んでいて経路を外していた。framework の Context 契約として実装し、実 `makeContext` / decode で検証する
+- 継続:probe 段 3 の Service 側 error 129(手書き未追従、musearch 追随便)、draft module 不在、musearch main `fe7c53f` への前進、上記「未決」3 点
