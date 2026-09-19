@@ -415,6 +415,31 @@ fn render_function(function: Fn, style: Style) -> String {
       "  " <> param.label <> ": " <> render.ty(style, param.ty) <> ",\n"
     })
     |> string.concat
+  let body = case string.starts_with(function.name, "reorder_") {
+    True ->
+      string.concat([
+        "  verb.compound(\n",
+        "    fn(ctx) { stage(ctx, \"",
+        function.name,
+        "_stage\", ",
+        function.input,
+        ") },\n",
+        "    fn(ctx, _) { stage(ctx, \"",
+        function.name,
+        "\", ",
+        function.input,
+        ") },\n",
+        "  )\n",
+      ])
+    False ->
+      string.concat([
+        "  verb.staged(fn(ctx) { stage(ctx, \"",
+        function.name,
+        "\", ",
+        function.input,
+        ") })\n",
+      ])
+  }
   string.concat([
     "pub fn ",
     function.name,
@@ -423,11 +448,7 @@ fn render_function(function: Fn, style: Style) -> String {
     ") -> ",
     render.ty(style, function.result),
     " {\n",
-    "  verb.staged(fn(ctx) { stage(ctx, \"",
-    function.name,
-    "\", ",
-    function.input,
-    ") })\n",
+    body,
     "}\n",
   ])
 }
@@ -515,6 +536,12 @@ fn sql_files(
       sql_file(
         entity,
         hashes,
+        "reorder_" <> entity.collection <> "_stage",
+        reorder_stage_sql(entity, app, ordered),
+      ),
+      sql_file(
+        entity,
+        hashes,
         "reorder_" <> entity.collection,
         reorder_sql(entity, app, ordered),
       ),
@@ -559,7 +586,7 @@ fn sql_file(
 }
 
 fn create_sql(entity: model.Entity) -> String {
-  let fields = persisted_fields(entity)
+  let fields = create_fields(entity)
   case fields {
     [] ->
       "INSERT INTO "
@@ -581,7 +608,7 @@ fn create_sql(entity: model.Entity) -> String {
 }
 
 fn create_many_sql(entity: model.Entity, app: model.App) -> String {
-  let fields = persisted_fields(entity)
+  let fields = create_fields(entity)
   case fields {
     [] -> create_sql(entity)
     _ -> {
@@ -741,25 +768,12 @@ fn reorder_sql(
   app: model.App,
   ordered: model.OrderedBy,
 ) -> String {
-  let key_kind = case
-    list.find(entity.fields, fn(field) {
-      field.column == first_key_column(entity)
-    })
-  {
-    Ok(field) -> sql_type(app, field.value)
-    Error(_) -> "text"
-  }
   let within_column = prop_column(entity, ordered.within)
   let order_column = prop_column(entity, ordered.field)
   let key_column = first_key_column(entity)
-  let id_cast = case key_kind {
-    "uuid" -> "::uuid"
-    "integer" -> "::integer"
-    _ -> ""
-  }
   "WITH positions AS (\n"
   <> " SELECT value"
-  <> id_cast
+  <> key_cast(app, entity)
   <> " AS id,(ord-1)::integer AS new_order,ord"
   <> "\n"
   <> " FROM jsonb_array_elements_text($2::jsonb) WITH ORDINALITY AS items(value,ord)\n"
@@ -773,29 +787,13 @@ fn reorder_sql(
   <> "=p.id WHERE e."
   <> quoted(within_column)
   <> "=$1\n"
-  <> "), bounds AS (\n"
-  <> " SELECT COALESCE(MAX("
-  <> quoted(order_column)
-  <> "),-1)::bigint AS max_order,EXISTS(SELECT 1 FROM "
-  <> table(entity)
-  <> " e JOIN target t ON e."
-  <> quoted(within_column)
-  <> "=$1 AND e."
-  <> quoted(order_column)
-  <> "=t.new_order WHERE e."
-  <> quoted(key_column)
-  <> "<>t.id) AS collision FROM "
-  <> table(entity)
-  <> " WHERE "
-  <> quoted(within_column)
-  <> "=$1\n"
   <> "), changed AS (\n"
   <> " UPDATE "
   <> table(entity)
   <> " e SET "
   <> quoted(order_column)
-  <> "=CASE WHEN b.collision THEN (b.max_order+t.ord)::integer ELSE t.new_order END\n"
-  <> " FROM target t CROSS JOIN bounds b WHERE e."
+  <> "=t.new_order\n"
+  <> " FROM target t WHERE e."
   <> quoted(key_column)
   <> "=t.id AND e."
   <> quoted(within_column)
@@ -810,6 +808,65 @@ fn reorder_sql(
   <> ",changed."
   <> quoted(key_column)
   <> ";\n"
+}
+
+fn reorder_stage_sql(
+  entity: model.Entity,
+  app: model.App,
+  ordered: model.OrderedBy,
+) -> String {
+  let within_column = prop_column(entity, ordered.within)
+  let order_column = prop_column(entity, ordered.field)
+  let key_column = first_key_column(entity)
+  "WITH positions AS (\n"
+  <> " SELECT value"
+  <> key_cast(app, entity)
+  <> " AS id,ord\n"
+  <> " FROM jsonb_array_elements_text($2::jsonb) WITH ORDINALITY AS items(value,ord)\n"
+  <> "), target AS MATERIALIZED (\n"
+  <> " SELECT e."
+  <> quoted(key_column)
+  <> " AS id,p.ord FROM "
+  <> table(entity)
+  <> " e JOIN positions p ON e."
+  <> quoted(key_column)
+  <> "=p.id WHERE e."
+  <> quoted(within_column)
+  <> "=$1\n"
+  <> "), changed AS (\n"
+  <> " UPDATE "
+  <> table(entity)
+  <> " e SET "
+  <> quoted(order_column)
+  <> "=(-t.ord)::integer\n"
+  <> " FROM target t WHERE e."
+  <> quoted(key_column)
+  <> "=t.id AND e."
+  <> quoted(within_column)
+  <> "=$1 RETURNING e."
+  <> quoted(key_column)
+  <> "\n), counts AS (\n"
+  <> " SELECT (SELECT count(*) FROM positions) AS expected,"
+  <> "(SELECT count(*) FROM changed) AS actual\n"
+  <> ") SELECT framework.require_rows("
+  <> "CASE WHEN expected=0 OR expected=actual THEN GREATEST(actual,1) ELSE 0 END,"
+  <> "'conflict') FROM counts;\n"
+}
+
+fn key_cast(app: model.App, entity: model.Entity) -> String {
+  let key_kind = case
+    list.find(entity.fields, fn(field) {
+      field.column == first_key_column(entity)
+    })
+  {
+    Ok(field) -> sql_type(app, field.value)
+    Error(_) -> "text"
+  }
+  case key_kind {
+    "uuid" -> "::uuid"
+    "integer" -> "::integer"
+    _ -> ""
+  }
 }
 
 fn put_sql(entity: model.Entity) -> String {
@@ -830,25 +887,84 @@ fn put_sql(entity: model.Entity) -> String {
       <> "=EXCLUDED."
       <> quoted(prop_column(entity, prop.name))
     })
+  let ordered_version = version_place(ordered)
+  let updates = case has_version(entity), ordered_version {
+    True, Some(_) ->
+      list.append(updates, [
+        "version=target.version+1",
+      ])
+    _, _ -> updates
+  }
   let conflict = case updates {
     [] -> ") DO NOTHING\n"
-    _ -> ") DO UPDATE SET " <> string.join(updates, ",") <> "\n"
+    _ ->
+      ") DO UPDATE SET "
+      <> string.join(updates, ",")
+      <> case ordered_version {
+        Some(place) -> "\nWHERE " <> "target.version=$" <> int.to_string(place)
+        None -> ""
+      }
+      <> "\n"
   }
-  "INSERT INTO "
-  <> table(entity)
-  <> "("
-  <> string.join(columns, ",")
-  <> ")\nVALUES("
-  <> string.join(placeholders(1, list.length(columns)), ",")
-  <> ")\nON CONFLICT ("
-  <> string.join(
-    list.map(entity.upsert_key, fn(prop) { quoted(prop_column(entity, prop)) }),
-    ",",
-  )
-  <> conflict
-  <> "RETURNING "
-  <> returning(entity)
-  <> ";\n"
+  let body =
+    "INSERT INTO "
+    <> table(entity)
+    <> " AS target("
+    <> string.join(columns, ",")
+    <> ")\nVALUES("
+    <> string.join(placeholders(1, list.length(columns)), ",")
+    <> ")\nON CONFLICT ("
+    <> string.join(
+      list.map(entity.upsert_key, fn(prop) { quoted(prop_column(entity, prop)) }),
+      ",",
+    )
+    <> conflict
+    <> "RETURNING "
+    <> returning(entity)
+    <> "\n"
+  case ordered_version {
+    Some(_) ->
+      "WITH changed AS (\n"
+      <> body
+      <> ")\nSELECT framework.require_rows(count(*),'conflict') FROM changed;\n"
+    None -> body <> ";"
+  }
+}
+
+fn create_fields(entity: model.Entity) -> List(model.FieldDef) {
+  persisted_fields(entity)
+  |> list.filter(fn(field) {
+    !list.contains(entity.auto_key, prop_for_field(entity, field.name))
+  })
+}
+
+fn prop_for_field(entity: model.Entity, field_name: String) -> String {
+  case
+    list.find(entity.props, fn(prop) {
+      case model.field_for_prop(entity, prop.name) {
+        Some(field) -> field.name == field_name
+        None -> False
+      }
+    })
+  {
+    Ok(prop) -> prop.name
+    Error(_) -> field_name
+  }
+}
+
+fn version_place(names: List(String)) -> Option(Int) {
+  place_of(names, "version", 1)
+}
+
+fn place_of(names: List(String), wanted: String, place: Int) -> Option(Int) {
+  case names {
+    [] -> None
+    [head, ..tail] ->
+      case head == wanted {
+        True -> Some(place)
+        False -> place_of(tail, wanted, place + 1)
+      }
+  }
 }
 
 fn version_condition(entity: model.Entity, place: Int) -> List(String) {

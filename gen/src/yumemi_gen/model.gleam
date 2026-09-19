@@ -153,6 +153,8 @@ pub type Entity {
     ordered_by: Option(OrderedBy),
     /// put の鍵。無ければ空。
     upsert_key: List(String),
+    /// create 時に実行側/DB が自動採番する key Property。明示が無ければ空。
+    auto_key: List(String),
   )
 }
 

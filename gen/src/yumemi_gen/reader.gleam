@@ -256,6 +256,12 @@ fn entity_of(unit: Unit, table: Registry) -> Result(Option(Entity), Error) {
         entity_name,
         unit.path,
       ))
+      use auto_key <- result.try(auto_key_of(
+        module,
+        key_props,
+        props,
+        unit.path,
+      ))
       use edges <- result.try(edges_of(module, phases, unit.path))
       Ok(
         Some(model.Entity(
@@ -278,6 +284,7 @@ fn entity_of(unit: Unit, table: Registry) -> Result(Option(Entity), Error) {
           verbs: verbs,
           ordered_by: ordered_by,
           upsert_key: upsert_key,
+          auto_key: auto_key,
         )),
       )
     }
@@ -413,6 +420,43 @@ fn declaration_list(
   case public_constant(module, name) {
     None -> Ok([])
     Some(constant) -> expression_list(constant.value, where, name)
+  }
+}
+
+fn auto_key_of(
+  module: glance.Module,
+  key_props: List(String),
+  props: List(Prop),
+  where: String,
+) -> Result(List(String), Error) {
+  case public_constant(module, "auto_key") {
+    None -> Ok([])
+    Some(constant) -> {
+      use expressions <- result.try(expression_list(
+        constant.value,
+        where,
+        "auto_key",
+      ))
+      use names <- result.try(
+        list.try_map(expressions, fn(expression) {
+          string_expression(expression, where, "auto_key の Property")
+        }),
+      )
+      case
+        list.find(names, fn(name) {
+          !list.contains(key_props, name)
+          || !list.any(props, fn(prop) { prop.name == name })
+        })
+      {
+        Ok(name) ->
+          Error(Unsupported(where, "auto_key の Property が key に無い: " <> name))
+        Error(_) ->
+          case list.length(list.unique(names)) == list.length(names) {
+            True -> Ok(names)
+            False -> Error(Unsupported(where, "auto_key に重複した Property がある"))
+          }
+      }
+    }
   }
 }
 

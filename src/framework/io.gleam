@@ -22,8 +22,8 @@ pub fn reject(
   stage: fn(Context) -> Promise(value),
 ) -> Promise(Nil)
 
-/// Read a relation from a Service root. The runtime supplies this capability
-/// on Context so generated reads do not depend on an app-owned FFI module.
+/// Read a relation from a Service root. The framework installs this capability
+/// on Context and resolves the decoded relation on the root value.
 @external(javascript, "./io_ffi.mjs", "rootArrow")
 pub fn root_arrow(
   context: Context,

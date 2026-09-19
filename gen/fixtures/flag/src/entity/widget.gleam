@@ -20,3 +20,6 @@ pub fn key(it: Widget) -> WidgetId {
 }
 
 pub const collection: String = "widgets"
+
+// id は実行側が UUID を採番する。明示した key だけ Draft から除く。
+pub const auto_key: List(String) = ["id"]

@@ -325,6 +325,10 @@ pub fn verb_bundle_covers_declared_actions_test() {
 pub fn put_does_not_update_keys_versions_or_phase_gated_fields_test() {
   let found = text("gen/sql/queries/verb/put_article.sql")
   string.contains(found, "body=EXCLUDED.body") |> should.be_true
+  string.contains(found, "WHERE target.version=$6") |> should.be_true
+  string.contains(found, "version=target.version+1") |> should.be_true
+  string.contains(found, "framework.require_rows(count(*),'conflict')")
+  |> should.be_true
   string.contains(found, "slug=EXCLUDED.slug") |> should.be_false
   string.contains(found, "title=EXCLUDED.title") |> should.be_false
   string.contains(found, "version=EXCLUDED.version") |> should.be_false
@@ -337,6 +341,12 @@ pub fn reorder_uses_declared_order_column_and_returning_alias_test() {
   |> should.be_true
   string.contains(found, "FROM changed ORDER BY changed.\"order\",changed.slug")
   |> should.be_true
+  let stage = text("gen/sql/queries/verb/reorder_articles_stage.sql")
+  string.contains(stage, "\"order\"=(-t.ord)::integer") |> should.be_true
+  string.contains(stage, "expected=actual") |> should.be_true
+  let verb = text("src/gen/verb.gleam")
+  string.contains(verb, "verb.compound(") |> should.be_true
+  string.contains(verb, "reorder_articles_stage") |> should.be_true
 }
 
 pub fn lifecycle_steps_are_entity_qualified_test() {
@@ -408,6 +418,40 @@ pub fn composite_key_is_present_in_signature_where_and_returning_test() {
   string.contains(
     verb,
     "pub fn update_chunk_text(\n  a: Int,\n  b: Int,\n  c: Int,",
+  )
+  |> should.be_true
+}
+
+pub fn draft_keeps_input_keys_and_create_sql_arguments_test() {
+  let chunk = text_of(flag_fixture, "src/gen/draft/chunk.gleam")
+  string.contains(chunk, "ChunkDraft(\n    a: Int,\n    b: Int,\n    c: Int,")
+  |> should.be_true
+  let create = text_of(flag_fixture, "gen/sql/queries/verb/create_chunk.sql")
+  string.contains(
+    create,
+    "INSERT INTO app.chunk(a,b,c,text)\nVALUES($1,$2,$3,$4)",
+  )
+  |> should.be_true
+
+  let article = text("src/gen/draft/article.gleam")
+  string.contains(article, "ArticleDraft(\n    slug: Slug,") |> should.be_true
+  let article_create = text("gen/sql/queries/verb/create_article.sql")
+  string.contains(
+    article_create,
+    "INSERT INTO app.article(slug,title,body,version,\"order\",category_id)",
+  )
+  |> should.be_true
+}
+
+pub fn auto_key_is_excluded_only_by_explicit_declaration_test() {
+  let draft = text_of(flag_fixture, "src/gen/draft/widget.gleam")
+  string.contains(draft, "WidgetDraft(\n    name: WidgetName,")
+  |> should.be_true
+  string.contains(draft, "WidgetDraft(\n    id: WidgetId") |> should.be_false
+  let created = text_of(flag_fixture, "gen/sql/queries/verb/create_widget.sql")
+  string.contains(
+    created,
+    "INSERT INTO app.widget(name,place,visible,\"order\")",
   )
   |> should.be_true
 }

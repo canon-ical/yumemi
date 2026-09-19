@@ -1,6 +1,6 @@
 # gen-3 の検収と報告
 
-発注は `tech/_drafts/gleam-framework/43-gen-holes.v0.md` 穴 1・2 と、gen-3 の実装指示。検収日は 2026-09-20、branch は `gen-3`。musearch は読み取りだけで、生成先は `gen/build/gen3-r6-final-musearch.DL3qn7` に置いた。
+発注は `tech/_drafts/gleam-framework/43-gen-holes.v0.md` 穴 1・2 と、gen-3 の実装指示。検収日は 2026-09-20、branch は `gen-3`。musearch は読み取りだけで、生成先は `gen/build/r7-final-musearch-SmGAmt` に置いた。
 
 gen-3 は verb / root / phase を生成束へ足した。入口(`registry` / `faces` / `prefix` / `entry.gleam`)は gen-4 の射程であり、本便では触っていない。
 
@@ -10,28 +10,28 @@ gen-3 は verb / root / phase を生成束へ足した。入口(`registry` / `fa
 
 ```
 cd gen && gleam test
-gleam run -m yumemi_gen -- ~/yumemism_repo/musearch/app build/gen3-r6-final-musearch.DL3qn7
-scripts/probe-compile.sh ~/yumemism_repo/musearch/app build/gen3-r6-final-musearch.DL3qn7 build/gen3-r6-final-probe
-node scripts/verify-root-ffi.mjs build/gen3-r6-final-musearch.DL3qn7
-PGHOST=127.0.0.1 PGPORT=55432 PGUSER=yumemism PGDATABASE=postgres node scripts/verify-gate2-sql.mjs build/gen3-r6-final-musearch.DL3qn7 build/gen3-r6-final-article.Ernjzx build/gen3-r6-final-flag.FRG4en
+gleam run -m yumemi_gen -- ~/yumemism_repo/musearch/app build/r7-final-musearch-SmGAmt
+scripts/probe-compile.sh ~/yumemism_repo/musearch/app build/r7-final-musearch-SmGAmt build/r7-final-probe3-ED75Rj
+node scripts/verify-root-ffi.mjs build/r7-final-musearch-SmGAmt
+PGHOST=127.0.0.1 PGPORT=55432 PGUSER=yumemism PGDATABASE=postgres node scripts/verify-gate2-sql.mjs build/r7-final-musearch-SmGAmt build/r7-final-article-5pU9D8 build/r7-final-flag-NbY0FD
 ```
 
-ログは `gen/build/gen3-r6-final-test.txt`、`gen/build/gen3-r6-final-musearch-run.txt`、`gen/build/gen3-r6-final-probe-compile.txt`、`gen/build/gen3-r6-final-root-ffi.txt`、`gen/build/gen3-r6-final-sql-verify.txt`、診断は `gen/build/gen3-r6-final-musearch.DL3qn7/_diagnostics.txt` にある。
+ログは `build/gleam-test-r7-final.txt`、`build/musearch-run-r7.txt`、`build/probe-r7-final.txt`、`build/root-ffi-r7.txt`、`build/gate2-sql-r7.txt`、`build/sql-service-name-r7.txt`、診断は `gen/build/r7-final-musearch-SmGAmt/_diagnostics.txt` にある。
 
 | 検収 | 結果 |
 |---|---|
-| fixture `gleam test` | **50 passed, no failures** |
+| fixture `gleam test` | **52 passed, no failures** |
 | 生成 | **572 ファイル**(診断を除く生成物 571)、終了コード 3。`entity/ledger: key 関数が無い` 1 件を notes 集約 |
 | 生成物の内訳 | draft 33 本、root 81 本、verb SQL 240 本、`src/gen/verb.gleam` 1 本、`src/gen/phase.gleam` 1 本 |
 | 警告 | **21 件**。すべて module 名の `_` 前と root Entity の不一致 |
 | exit 1 notes | **4 件**。`Has` / `HasNone` 2 件、`with(...)` 2 件 |
 | musearch の後状態 | **未変更**。生成先と隔離 probe だけへ書き込み |
 
-上記の生成本数と `r6` ログを今回の基準とする。50 tests は draft 束・型 alias・SQL/FFI 修正を含む値である。
+上記の生成本数と `r7` ログを今回の基準とする。52 tests は draft key 契約・auto key 宣言・SQL/Context の実行検査を含む値である。
 
-今回の実測は probe 基準0・段1/2/3が **338/134/129**。段3の `src/gen/verb.gleam` / `src/gen/phase.gleam` 由来 error は **0件**で、残る129件は Service 側の未追従である。生成 verb の draft参照は33 moduleを生成し、Entity alias・同名 Kind・Property 型引数も probe の対象から消えた。root read の FFI は framework/io の `rootArrow` exportを Node import で確認した。
+今回の実測は probe 基準0・段1/2/3が **338/134/129**。段3の `src/gen/verb.gleam` / `src/gen/phase.gleam` / `src/gen/draft/*` / `src/gen/reads/*` 由来 error は **0件**で、残る129件は Service 側の未追従である。生成 verb の draft参照は33 moduleを生成し、Entity alias・同名 Kind・Property 型引数も probe の対象から消えた。root read は実 `makeContext` で relation resolver を通して decoded 値を返した。
 
-検証ログは `gen/build/gen3-r6-final-test.txt`、`gen/build/gen3-r6-final-musearch-run.txt`、`gen/build/gen3-r6-final-probe-compile.txt`、`gen/build/gen3-r6-final-sql-verify.txt`、`gen/build/gen3-r6-final-root-ffi.txt`。初回ゲート2の所見は `/home/yumemism/.codex-agents/runs/niekawa-20260920-015538-60185-849/evidence/gate2/gate2.md` に残し、今回の実行証拠は `gen/build` に置いた。
+検証ログは `build/gleam-test-r7-final.txt`、`build/musearch-run-r7.txt`、`build/probe-r7-final.txt`、`build/gate2-sql-r7.txt`、`build/root-ffi-r7.txt`、`build/sql-service-name-r7.txt`。初回ゲート2の所見は `/home/yumemism/.codex-agents/runs/niekawa-20260920-015538-60185-849/evidence/gate2/gate2.md` に残し、今回の実行証拠は `build` と `gen/build` に置いた。
 
 ### 束ごとの diff
 
@@ -66,18 +66,28 @@ PGHOST=127.0.0.1 PGPORT=55432 PGUSER=yumemism PGDATABASE=postgres node scripts/v
 | 対象 | 実測 |
 |---|---|
 | P0-1 複合 key の `version` | SQL 実行で対象行だけ更新、`version` と sibling/version 違いの行は不変 |
-| P0-2 `put` | SQL 実行で key・version・phase・`Only` 制約対象を不変、許可された body だけ更新 |
-| P0-3 `reorder` | `UNIQUE(scope, order)` の交換を実 DB で実行、順序 `b,a`・一意件数2 |
+| P0-2 `put` | stale version は conflict、put は版を 7→8 に進め、旧版 update は conflict、key/title/phase は不変 |
+| P0-3 `reorder` | staging → apply の同一 transaction で `UNIQUE(scope, order)` を交換、`0/2147483647` も `b=0,a=1`、競合 rollback |
 | P0-4 混在 keyset | `2147483647`、NULL、同値列のページ継続で欠落なし |
-| P0-5 root FFI | framework/io の `rootArrow` import 解決、生成 root read 36本 |
+| P0-5 root FFI | 実 `makeContext` に framework adapter を装着し、root relation resolver が decoded 値を返す、生成 root read 36本 |
+| P0-7 Draft key | flag の複合 key と Article.slug を Draft → create SQL → 実 DB で確認。auto key は宣言時だけ除外 |
 
-証拠は `gen/build/gen3-r6-final-sql-verify.txt` と `gen/build/gen3-r6-final-root-ffi.txt`、実装は `gen/scripts/verify-gate2-sql.mjs` / `verify-root-ffi.mjs` にある。
+証拠は `build/gate2-sql-r7.txt` と `build/root-ffi-r7.txt`、実装は `gen/scripts/verify-gate2-sql.mjs` / `verify-root-ffi.mjs` にある。
+
+### 巡6 P0 修正の実装境界
+
+- **P0-7**: `Entity.auto_key` の明示宣言を reader が読み、Draft は宣言された key だけ除外する。宣言が無い Article.slug / flag の複合 key は Draft に残し、create SQL の引数順と実 DB の列へ通した。
+- **P0-5**: framework `io_ffi.mjs` が Context に rootArrow adapter を装着し、root Entity の relation resolver を呼んで decoded 値を返す。musearch は変更していない。
+- **P0-2**: version-bearing put は `target.version = 入力版` を conflict 条件にし、成功時だけ `version+1`。changed が 0 行なら framework conflict として transaction を abort する。
+- **P0-3**: reorder は `reorder_*_stage` で負の一時値へ退避し、続く `reorder_*` で要求値を確定する compound verb。同一 transaction の UNIQUE 衝突は rollback され、上限値への加算はしない。
+
+`build/probe-r7-final.txt` の probe 段3 **129** は、既存の Created 型付き Draft を保持した検収条件である。Draft を全量置換した複製検収では **140** になるが、生成ファイルを指す error は 0 件だった。したがって 129 と 140 は同じ条件の再測定値ではなく、既存 Draft の保持有無が違う。
 
 ## gen-2 からの増減
 
 | 指標 | gen-2 | gen-3 | 増減 |
 |---|---:|---:|---:|
-| fixture passed | 33 | **50** | **+17** |
+| fixture passed | 33 | **52** | **+19** |
 | 生成ファイル | 126 | **572** | **+446** |
 | types の両側対象 | 61 | **83** | +22 |
 | query 生成行 | 414 | **542** | +128 |

@@ -1,5 +1,5 @@
 //// 束0 ── Entity の Property から `src/gen/draft/*.gleam` を出す。
-//// key を除いた入力と、key を戻した作成結果を同じ Property 定義から組み立てる。
+//// 入力必須の key を含む Draft と、key を戻した作成結果を同じ Property 定義から組み立てる。
 
 import gleam/list
 import gleam/option.{None, Some}
@@ -57,11 +57,11 @@ fn one(entity: model.Entity, app: model.App, hashes: hash.Hashes) -> File {
 fn fields(
   entity: model.Entity,
   app: model.App,
-  include_key: Bool,
+  include_created_key: Bool,
 ) -> List(#(typing.Ty, String)) {
   entity.props
   |> list.filter_map(fn(prop) {
-    case include_key || !list.contains(entity.key_props, prop.name) {
+    case include_created_key || !list.contains(entity.auto_key, prop.name) {
       False -> Error(Nil)
       True ->
         case model.field_for_prop(entity, prop.name) {
