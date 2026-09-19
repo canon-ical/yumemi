@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# 生成した4束を、実物のアプリへ差し替えて gleam build にかける検算。
+# 生成した8束を、実物のアプリへ差し替えて gleam build にかける検算。
 # アプリは読むだけ ── 複製へ差し替えるので元のワークツリーは触らない。
 #
 #   gen/scripts/probe-compile.sh <app dir> <out dir> <work dir>
 #
 # 4段で数える。
 #   基準 ── 手書きの ▲ そのまま(0)
-#   段1 ── 4束を生成物へ差し替え。From / Field が別 module へ割れた分の error がここに出る
+#   段1 ── 8束を生成物へ差し替え。From / Field が別 module へ割れた分と新束の error がここに出る
 #   段2 ── ★ の綴りを機械で付け替える(requalify.py)。割れた分だけが消える
 #   段3 ── 既知の1件(★ が呼ぶ gen/types の手書き関数)を外した残り
 set -euo pipefail
@@ -39,8 +39,13 @@ cp "$out"/src/gen/query.gleam "$work/app/src/gen/query.gleam"
 mkdir -p "$work/app/src/gen/query"
 cp "$out"/src/gen/query/*.gleam "$work/app/src/gen/query/"
 cp "$out"/src/gen/reads/*.gleam "$work/app/src/gen/reads/"
+cp "$out"/src/gen/verb.gleam "$work/app/src/gen/verb.gleam"
+cp "$out"/src/gen/phase.gleam "$work/app/src/gen/phase.gleam"
+mkdir -p "$work/app/src/gen/root" "$work/app/gen/sql/queries/verb"
+cp "$out"/src/gen/root/*.gleam "$work/app/src/gen/root/"
+cp "$out"/gen/sql/queries/verb/*.sql "$work/app/gen/sql/queries/verb/"
 
-echo "== 段1:差し替え後(4束を生成物に置き換え)"
+echo "== 段1:差し替え後(8束を生成物に置き換え)"
 errors
 echo "== 段1 の error の在処(先頭 20)"
 sites | head -20

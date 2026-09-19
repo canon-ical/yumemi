@@ -30,18 +30,19 @@ def squeeze(text):
     return re.sub(r"\s+", " ", text).strip()
 
 
-# 本便の射程外 ── root の読み(穴 2)、allow / framework / verb の SQL。
-OUT_OF_SCOPE = ("gen/sql/queries/allow/", "gen/sql/queries/framework/",
-                "gen/sql/queries/verb/")
+# 読み SQL の束に混ぜない補助束。verb SQL は下で専用束として数える。
+OUT_OF_SCOPE = ("gen/sql/queries/allow/", "gen/sql/queries/framework/")
 
 
-def in_scope(rel):
+def in_scope(rel, include_verb=True):
     if rel.startswith(OUT_OF_SCOPE):
+        return False
+    if not include_verb and rel.startswith("gen/sql/queries/verb/"):
         return False
     return os.path.basename(rel) != "root.sql"
 
 
-def files_under(root, rel, suffix):
+def files_under(root, rel, suffix, include_verb=True):
     base = os.path.join(root, rel)
     if not os.path.isdir(base):
         return []
@@ -51,14 +52,14 @@ def files_under(root, rel, suffix):
             if name.endswith(suffix):
                 full = os.path.join(dirpath, name)
                 relative = os.path.relpath(full, root)
-                if in_scope(relative):
+                if in_scope(relative, include_verb):
                     found.append(relative)
     return sorted(found)
 
 
-def compare_bundle(title, out_dir, app_dir, rel, suffix):
-    ours = files_under(out_dir, rel, suffix)
-    theirs = files_under(app_dir, rel, suffix)
+def compare_bundle(title, out_dir, app_dir, rel, suffix, include_verb=True):
+    ours = files_under(out_dir, rel, suffix, include_verb)
+    theirs = files_under(app_dir, rel, suffix, include_verb)
     both = [p for p in ours if p in theirs]
     only_ours = [p for p in ours if p not in theirs]
     only_theirs = [p for p in theirs if p not in ours]
@@ -100,6 +101,43 @@ def compare_bundle(title, out_dir, app_dir, rel, suffix):
         "differ": len(differ),
         "only_ours": len(only_ours),
         "only_theirs": len(only_theirs),
+    }
+
+
+def compare_file(title, out_dir, app_dir, path):
+    """単一ファイルの束(src/gen/verb.gleam / phase.gleam)を数える。"""
+    ours = [path] if os.path.isfile(os.path.join(out_dir, path)) else []
+    theirs = [path] if os.path.isfile(os.path.join(app_dir, path)) else []
+    both = bool(ours and theirs)
+    exact = body_same = differ = False
+    if both:
+        mine, yours = read(os.path.join(out_dir, path)), read(
+            os.path.join(app_dir, path)
+        )
+        exact = mine == yours
+        body_same = not exact and squeeze(body(mine)) == squeeze(body(yours))
+        differ = not exact and not body_same
+    print(f"## {title}")
+    print(f"  対象(両側にある): {int(both)}")
+    print(f"  完全一致: {int(exact)}")
+    print(f"  本文一致(GENERATED 行だけ違う / 空白の詰め方だけ違う): {int(body_same)}")
+    print(f"  不一致: {int(differ)}")
+    print(f"  生成器だけが出した: {int(bool(ours and not theirs))}")
+    print(f"  手書きにだけある: {int(bool(theirs and not ours))}")
+    if differ:
+        mine = read(os.path.join(out_dir, path)).split("\n")
+        yours = read(os.path.join(app_dir, path)).split("\n")
+        added = len([line for line in yours if line not in mine])
+        dropped = len([line for line in mine if line not in yours])
+        print(f"    [不一致] {path}  手書きだけの行 {added} / 生成だけの行 {dropped}")
+    print()
+    return {
+        "both": int(both),
+        "exact": int(exact),
+        "body": int(body_same),
+        "differ": int(differ),
+        "only_ours": int(bool(ours and not theirs)),
+        "only_theirs": int(bool(theirs and not ours)),
     }
 
 
@@ -187,7 +225,15 @@ def main():
     compare_bundle("束3 src/gen/reads/*.gleam", out_dir, app_dir,
                    "src/gen/reads", ".gleam")
     compare_bundle("束4 gen/sql/queries/<service>/<name>.sql", out_dir, app_dir,
-                   "gen/sql/queries", ".sql")
+                   "gen/sql/queries", ".sql", include_verb=False)
+    compare_file("束5 src/gen/verb.gleam", out_dir, app_dir,
+                 "src/gen/verb.gleam")
+    compare_bundle("束6 gen/sql/queries/verb/*.sql", out_dir, app_dir,
+                   "gen/sql/queries/verb", ".sql")
+    compare_bundle("束7 src/gen/root/*.gleam", out_dir, app_dir,
+                   "src/gen/root", ".gleam")
+    compare_file("束8 src/gen/phase.gleam", out_dir, app_dir,
+                 "src/gen/phase.gleam")
 
 
 if __name__ == "__main__":
