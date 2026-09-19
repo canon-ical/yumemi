@@ -1,6 +1,6 @@
 # gen-3 の検収と報告
 
-発注は `tech/_drafts/gleam-framework/43-gen-holes.v0.md` 穴 1・2 と、gen-3 の実装指示。検収日は 2026-09-20、branch は `gen-3`。musearch は読み取りだけで、生成先は `gen/build/gen3-musearch.p5Ywux` に置いた。
+発注は `tech/_drafts/gleam-framework/43-gen-holes.v0.md` 穴 1・2 と、gen-3 の実装指示。検収日は 2026-09-20、branch は `gen-3`。musearch は読み取りだけで、生成先は `gen/build/gen3-r6-final-musearch.DL3qn7` に置いた。
 
 gen-3 は verb / root / phase を生成束へ足した。入口(`registry` / `faces` / `prefix` / `entry.gleam`)は gen-4 の射程であり、本便では触っていない。
 
@@ -10,32 +10,28 @@ gen-3 は verb / root / phase を生成束へ足した。入口(`registry` / `fa
 
 ```
 cd gen && gleam test
-gleam run -m yumemi_gen -- ~/yumemism_repo/musearch/app build/gen3-musearch.p5Ywux
-gleam format build/gen3-musearch.p5Ywux/src/gen
-python3 scripts/compare.py build/gen3-musearch.p5Ywux ~/yumemism_repo/musearch/app
-scripts/probe-compile.sh ~/yumemism_repo/musearch/app build/gen3-musearch.p5Ywux /tmp/yumemi-gen3-probe-3
+gleam run -m yumemi_gen -- ~/yumemism_repo/musearch/app build/gen3-r6-final-musearch.DL3qn7
+scripts/probe-compile.sh ~/yumemism_repo/musearch/app build/gen3-r6-final-musearch.DL3qn7 build/gen3-r6-final-probe
+node scripts/verify-root-ffi.mjs build/gen3-r6-final-musearch.DL3qn7
+PGHOST=127.0.0.1 PGPORT=55432 PGUSER=yumemism PGDATABASE=postgres node scripts/verify-gate2-sql.mjs build/gen3-r6-final-musearch.DL3qn7 build/gen3-r6-final-article.Ernjzx build/gen3-r6-final-flag.FRG4en
 ```
 
-ログは `gen/build/gen3-final-test-3.txt`、`gen/build/gen3-musearch-run-3.txt`、`gen/build/gen3-compare-3.txt`、`gen/build/gen3-probe-compile-3.txt`、診断は `gen/build/gen3-musearch.p5Ywux/_diagnostics.txt` にある。
+ログは `gen/build/gen3-r6-final-test.txt`、`gen/build/gen3-r6-final-musearch-run.txt`、`gen/build/gen3-r6-final-probe-compile.txt`、`gen/build/gen3-r6-final-root-ffi.txt`、`gen/build/gen3-r6-final-sql-verify.txt`、診断は `gen/build/gen3-r6-final-musearch.DL3qn7/_diagnostics.txt` にある。
 
 | 検収 | 結果 |
 |---|---|
-| fixture `gleam test` | **47 passed, no failures** |
-| 生成 | **522 ファイル**(診断を除く生成物 521)、終了コード 3。`entity/ledger: key 関数が無い` 1 件を notes 集約 |
-| 生成物の内訳 | root 81 本、verb SQL 240 本、`src/gen/verb.gleam` 1 本、`src/gen/phase.gleam` 1 本 |
-| 警告 | **17 件**。すべて module 名の `_` 前と root Entity の不一致 |
+| fixture `gleam test` | **50 passed, no failures** |
+| 生成 | **572 ファイル**(診断を除く生成物 571)、終了コード 3。`entity/ledger: key 関数が無い` 1 件を notes 集約 |
+| 生成物の内訳 | draft 33 本、root 81 本、verb SQL 240 本、`src/gen/verb.gleam` 1 本、`src/gen/phase.gleam` 1 本 |
+| 警告 | **21 件**。すべて module 名の `_` 前と root Entity の不一致 |
 | exit 1 notes | **4 件**。`Has` / `HasNone` 2 件、`with(...)` 2 件 |
-| musearch の後状態 | `?? docs/__pycache__/` だけ。その他の差分 0 |
+| musearch の後状態 | **未変更**。生成先と隔離 probe だけへ書き込み |
 
-上記の生成本数・束の比較・`*-3.txt` は初回検収の基準である。47 tests は phase 構成子修正後の値であり、初回ログの値ではない。
+上記の生成本数と `r6` ログを今回の基準とする。50 tests は draft 束・型 alias・SQL/FFI 修正を含む値である。
 
-ゲート2で `eb76bef` と musearch `fe7c53f6660b6ae6f9ace5a9c4772579207f70a3` を再検証した実測は、生成539ファイル(診断込み)、probe基準0・段1/2/3が192/103/102、phase由来のerrorは0件だった。fan/museの生成phase moduleも隔離projectでコンパイルを確認した。以下の旧基準の31は34からphaseの3件を引いた比較値で、最新基準の再実測値ではない。
+今回の実測は probe 基準0・段1/2/3が **338/134/129**。段3の `src/gen/verb.gleam` / `src/gen/phase.gleam` 由来 error は **0件**で、残る129件は Service 側の未追従である。生成 verb の draft参照は33 moduleを生成し、Entity alias・同名 Kind・Property 型引数も probe の対象から消えた。root read の FFI は framework/io の `rootArrow` exportを Node import で確認した。
 
-この最新基準の内訳はroot 92本、reads 67本、verb SQL 241本(create 33 / update 165 / advance 10 / delete 33)、警告21件、draft参照33本中のmodule不在13本。以下のroot 81・verb SQL 240・警告17・draft不在16という旧基準の集計と分けて扱う。
-
-最新probe段3の102件をすべてService側の未追従とは扱えない。ログで場所を特定できる行は `src/gen/verb.gleam` 71箇所と `src/service/*` 30箇所で、生成verbにはdraft不在に加えて引数重複、import・型名衝突、型引数欠落がある。phaseの3件が消えたことだけでは生成束の成立を示さない。これらとSQL実行・FFI接続の欠陥はゲート2のP0として返す。
-
-検証ログは `/home/yumemism/.codex-agents/runs/niekawa-20260920-015538-60185-849/evidence/gate2/` の `gleam-test.txt`、`musearch-run.txt`、`compare.txt`、`probe.txt`、`phase-build.txt`。SQL実行とFFI接続に関するゲート2の所見は同runの `gate2.md` に記録する。
+検証ログは `gen/build/gen3-r6-final-test.txt`、`gen/build/gen3-r6-final-musearch-run.txt`、`gen/build/gen3-r6-final-probe-compile.txt`、`gen/build/gen3-r6-final-sql-verify.txt`、`gen/build/gen3-r6-final-root-ffi.txt`。初回ゲート2の所見は `/home/yumemism/.codex-agents/runs/niekawa-20260920-015538-60185-849/evidence/gate2/gate2.md` に残し、今回の実行証拠は `gen/build` に置いた。
 
 ### 束ごとの diff
 
@@ -58,26 +54,38 @@ scripts/probe-compile.sh ~/yumemism_repo/musearch/app build/gen3-musearch.p5Ywux
 
 ```
 基準(手書きの ▲ そのまま)                         0
-段1: 8束を生成物へ差し替え                      121
-段2: from./field. へ機械置換後                   35
-段3: gen/types の手書き関数を戻した後            31
+段1: 8束を生成物へ差し替え                      338
+段2: from./field. へ機械置換後                  134
+段3: gen/types の手書き関数を戻した後           129
 ```
 
-段 3 の **31** は旧 gen-3 検収基準での比較値で、修正前の 34 行から `src/gen/phase.gleam` 由来の **3 件**(Duplicate definition 1 + Type mismatch 2)を除いた。gen-2 報告の段 3 は 17 だったため、数字は **+14**。current musearch main は後発変更を含むため、live probe の全体値はこの基準へ混ぜていない。別集計の既知分として、生成した `src/gen/verb.gleam` は key を持つ Entity 33 本から `gen/draft/*` を 33 参照し、そのうち **16 Entity の draft module が musearch に無い**。この 16 は既知の参照先欠落として数え、今回の 31 error 行へ重複加算していない(ビルドが先に到達した型エラーのため、16 本が独立した error 行としては出ていない)。
+段3 の **129** は、生成束を実物へ差し替えた後に残る Service 側の未追従である。生成器は `src/gen/draft/*.gleam` を33本出し、probe は既存 draft の固有 constructor を保ったまま不足 module と Created 型を補う。`src/gen/verb.gleam` と `src/gen/phase.gleam` の error 行は 0 件で、P0-6 の対象を残差へ重複加算していない。
+
+### ゲート2 P0 の再検証
+
+| 対象 | 実測 |
+|---|---|
+| P0-1 複合 key の `version` | SQL 実行で対象行だけ更新、`version` と sibling/version 違いの行は不変 |
+| P0-2 `put` | SQL 実行で key・version・phase・`Only` 制約対象を不変、許可された body だけ更新 |
+| P0-3 `reorder` | `UNIQUE(scope, order)` の交換を実 DB で実行、順序 `b,a`・一意件数2 |
+| P0-4 混在 keyset | `2147483647`、NULL、同値列のページ継続で欠落なし |
+| P0-5 root FFI | framework/io の `rootArrow` import 解決、生成 root read 36本 |
+
+証拠は `gen/build/gen3-r6-final-sql-verify.txt` と `gen/build/gen3-r6-final-root-ffi.txt`、実装は `gen/scripts/verify-gate2-sql.mjs` / `verify-root-ffi.mjs` にある。
 
 ## gen-2 からの増減
 
 | 指標 | gen-2 | gen-3 | 増減 |
 |---|---:|---:|---:|
-| fixture passed | 33 | **47** | **+14** |
-| 生成ファイル | 126 | **522** | **+396** |
+| fixture passed | 33 | **50** | **+17** |
+| 生成ファイル | 126 | **572** | **+446** |
 | types の両側対象 | 61 | **83** | +22 |
 | query 生成行 | 414 | **542** | +128 |
 | reads の両側対象 | 22 | **35** | +13 |
 | 読み SQL の両側対象 | 29 | **39** | +10 |
-| probe 段 1 → 段 2 → 段 3 | 162 → 22 → 17 | **121 → 35 → 31** | — → +13 → +14 |
+| probe 段 1 → 段 2 → 段 3 | 162 → 22 → 17 | **338 → 134 → 129** | — → +112 → +112 |
 
-gen-3 の増分 396 ファイルのうち、verb SQL 240、root 81、verb 1、phase 1 が新束である。残りは Entity / Service の増加と root 相対 read の追加である。
+gen-3 の増分 446 ファイルのうち、draft 33、verb SQL 240、root 81、verb 1、phase 1 が新束である。残りは Entity / Service の増加と root 相対 read の追加である。
 
 ## verb SQL の本数と穴 1 の 25 本
 
@@ -117,13 +125,13 @@ musearch の Entity には `verbs` 宣言が無い。したがって生成器が
 
 ここには現物との不一致がある。穴 1 の 25 名のうち `mark_notification_read` は `src/gen/verb.gleam` にはあるが `gen/sql/queries/verb/` の SQL ファイルには無い。一方、実際の SQL 61 本には `lock_store_schedule`、`pageview_browser`、`pageview_duplicate`、`pageview_visit_insert`、`pageview_visit_update`、`update_muse_profile`、`update_roster_by_external`、`update_roster_profile`、`update_widget_values` があり、穴 1 の一覧に無い。25 名と 61 SQL の対応は未決で、数字を黙って一致させていない。
 
-## 警告 17 件と root 不一致 15 本
+## 警告 21 件と root 不一致 15 本
 
-手書き root の不一致 15 本と生成器 warning 17 件の共通部分は 13 本。
+手書き root の不一致 15 本と生成器 warning 21 件の共通部分は 13 本。
 
 - 生成器だけの 4 本: `space_edit`, `space_hide`, `space_remove`, `space_show`
 - 手書き側だけの 2 本: `metrics_muse`, `link_import_apply`
-- 差は `+4 - 2 = +2`。したがって手書き 15 本に対して生成器の warning は 17 件になる
+- 差は `+8 - 2 = +6`。したがって手書き 15 本に対して生成器の warning は 21 件になる
 
 共通 13 本は `article_list`, `heaven_embed_code`, `heaven_unlink`, `link_list`, `notification_fanout`, `pageview_record`, `roster_list`, `space_list`, `store_schedule_delete`, `store_schedule_put`, `subscription_add`, `subscription_read`, `widget_list`。
 
@@ -132,7 +140,7 @@ musearch の Entity には `verbs` 宣言が無い。したがって生成器が
 - `pageview_record`: root が Entity でない `Browser`。現行の allow Entity + Args key 規則だけでは閉じない。
 - `phase.gleam`: 生成側の構成子は Entity 修飾(`ArticleDraftToPublished`)で、手書き musearch の構成子(`DraftToPublished`)とは命名が異なる。意味は対応するが、文字列差分は残る。
 - Root の余分な欄 3 種: `article_read` の `muse`、`article_pin` の `slot_count`、`pageview_record` の `browser`。
-- `gen/draft/*`: 生成器は draft module をまだ出さない。key を持つ 33 Entity のうち 16 Entity は musearch 側にも参照先が無い。
+- `gen/draft/*`: 33 Entity 分を生成する。musearch の既存 draft に固有 constructor がある場合は、probe では既存束を保持しつつ不足 module / Created 型だけを補っている。
 - 入口全般: `registry` / `faces` / `prefix` / `entry.gleam` は gen-4。
 - 今回の exit 1 notes 4 件: `store_schedule_list/all_slots` の `Has` / `HasNone`、`store_schedule_list/public_slots` の `Has` / `HasNone`、`store_roster_list/mine` の `with(...)`、`roster_list/listed` の `with(...)`。
 - gen-2 系の残差では、複合 key の query/SQL (`G3`) と、`with` / `Has` / `HasNone` など語彙・SQL不足 (`G5`) が残る。gen-2 の From/Field module 分割 (`G4`) 自体は `from.` / `field.` の機械置換で閉じた。
@@ -142,7 +150,6 @@ musearch の Entity には `verbs` 宣言が無い。したがって生成器が
 1. 穴 1 の 25 verb 名と実 SQL 61 本の対応を、関数単位で数えるのか SQL ファイル単位で数えるのか決める。
 2. `Update` の NULL クリア、複数 scope の `Order`、upsert の parent/phase guard、発行結果型を追加語彙にするか、Service の Logic に残すか決める。
 3. `pageview_record` と Root 余分欄 3 種を gen-3 の例外として固定するか、root 宣言を gen-4 で拡張するか決める。
-4. 16 Entity の draft module を別便で補うか、verb の型参照を生成器の外へ移すか決める。
 
 ## 20-programming-model.md への記述案
 
