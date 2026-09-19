@@ -893,36 +893,21 @@ fn cursor_compare(found: Column, way: String, place: String) -> String {
     "DESC" -> "<"
     _ -> ">"
   }
-  let left = sortable(found, way, found.reference)
-  let right = sortable(found, way, place <> keyset_cast(found.kind))
-  left <> operator <> right
-}
-
-fn sortable(found: Column, way: String, expression: String) -> String {
+  let right = place <> keyset_cast(found.kind)
   case found.optional {
     True ->
-      "COALESCE(" <> expression <> "," <> null_sentinel(found.kind, way) <> ")"
-    False -> expression
-  }
-}
-
-fn null_sentinel(kind: String, way: String) -> String {
-  case kind, way {
-    "integer", "ASC" -> "2147483647"
-    "integer", "DESC" -> "-2147483648"
-    "date", "ASC" -> "'infinity'::date"
-    "date", "DESC" -> "'-infinity'::date"
-    "timestamptz", "ASC" -> "'infinity'::timestamptz"
-    "timestamptz", "DESC" -> "'-infinity'::timestamptz"
-    "time", "ASC" -> "'23:59:59.999999'::time"
-    "time", "DESC" -> "'00:00:00'::time"
-    "uuid", "ASC" -> "'ffffffff-ffff-ffff-ffff-ffffffffffff'::uuid"
-    "uuid", "DESC" -> "'00000000-0000-0000-0000-000000000000'::uuid"
-    "boolean", "ASC" -> "true"
-    "boolean", "DESC" -> "false"
-    _, "ASC" -> "'zzzzzzzz'"
-    _, "DESC" -> "''"
-    _, _ -> "''"
+      "("
+      <> place
+      <> " IS NOT NULL AND ("
+      <> found.reference
+      <> " IS NULL OR ("
+      <> found.reference
+      <> " IS NOT NULL AND "
+      <> found.reference
+      <> operator
+      <> right
+      <> ")))"
+    False -> found.reference <> operator <> right
   }
 }
 

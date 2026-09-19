@@ -360,6 +360,32 @@ fn put_props(entity: model.Entity) -> List(model.Prop) {
   })
 }
 
+fn put_update_props(entity: model.Entity) -> List(model.Prop) {
+  let constrained =
+    entity.verbs
+    |> list.flat_map(fn(rule) {
+      case rule {
+        model.UpdateRule(_, fields, model.Only(_)) -> fields
+        _ -> []
+      }
+    })
+  entity.props
+  |> list.filter(fn(prop) {
+    case model.field_for_prop(entity, prop.name) {
+      None -> False
+      Some(field) ->
+        !list.contains(entity.key_props, prop.name)
+        && !list.contains(entity.upsert_key, prop.name)
+        && prop.name != "version"
+        && !list.contains(constrained, prop.name)
+        && case field.value {
+          model.PhaseValue(_) -> False
+          _ -> True
+        }
+    }
+  })
+}
+
 fn prop_type(entity: model.Entity, app: model.App, name: String) -> typing.Ty {
   case model.field_for_prop(entity, name) {
     Some(field) -> typing.field_base(app, field.name)
@@ -734,34 +760,61 @@ fn reorder_sql(
   "WITH positions AS (\n"
   <> " SELECT value"
   <> id_cast
-  <> " AS id,(ord-1)::integer AS "
-  <> quoted("order")
+  <> " AS id,(ord-1)::integer AS new_order,ord"
   <> "\n"
   <> " FROM jsonb_array_elements_text($2::jsonb) WITH ORDINALITY AS items(value,ord)\n"
+  <> "), target AS MATERIALIZED (\n"
+  <> " SELECT e."
+  <> quoted(key_column)
+  <> " AS id,p.new_order,p.ord FROM "
+  <> table(entity)
+  <> " e JOIN positions p ON e."
+  <> quoted(key_column)
+  <> "=p.id WHERE e."
+  <> quoted(within_column)
+  <> "=$1\n"
+  <> "), bounds AS (\n"
+  <> " SELECT COALESCE(MAX("
+  <> quoted(order_column)
+  <> "),-1)::bigint AS max_order,EXISTS(SELECT 1 FROM "
+  <> table(entity)
+  <> " e JOIN target t ON e."
+  <> quoted(within_column)
+  <> "=$1 AND e."
+  <> quoted(order_column)
+  <> "=t.new_order WHERE e."
+  <> quoted(key_column)
+  <> "<>t.id) AS collision FROM "
+  <> table(entity)
+  <> " WHERE "
+  <> quoted(within_column)
+  <> "=$1\n"
   <> "), changed AS (\n"
   <> " UPDATE "
   <> table(entity)
   <> " e SET "
   <> quoted(order_column)
-  <> "=p."
-  <> quoted("order")
-  <> "\n FROM positions p WHERE e."
+  <> "=CASE WHEN b.collision THEN (b.max_order+t.ord)::integer ELSE t.new_order END\n"
+  <> " FROM target t CROSS JOIN bounds b WHERE e."
   <> quoted(key_column)
-  <> "=p.id AND e."
+  <> "=t.id AND e."
   <> quoted(within_column)
   <> "=$1\n RETURNING "
   <> returning_with_alias(entity, "e")
+  <> ",e."
+  <> quoted(order_column)
   <> "\n)\nSELECT "
-  <> returning(entity)
-  <> "\nFROM changed ORDER BY "
-  <> quoted("order")
-  <> ","
-  <> returning(entity)
+  <> returning_with_alias(entity, "changed")
+  <> "\nFROM changed ORDER BY changed."
+  <> quoted(order_column)
+  <> ",changed."
+  <> quoted(key_column)
   <> ";\n"
 }
 
 fn put_sql(entity: model.Entity) -> String {
   let props = put_props(entity)
+  let update_props = put_update_props(entity)
   let ordered =
     list.append(
       entity.upsert_key,
@@ -771,25 +824,15 @@ fn put_sql(entity: model.Entity) -> String {
     )
   let columns =
     list.map(ordered, fn(prop) { quoted(prop_column(entity, prop)) })
-  let rest =
-    ordered
-    |> list.drop(list.length(entity.upsert_key))
-  let first_key = case entity.upsert_key {
-    [first, ..] -> first
-    [] -> ""
-  }
-  let updates = case rest {
-    [] -> [
-      quoted(prop_column(entity, first_key))
+  let updates =
+    list.map(update_props, fn(prop) {
+      quoted(prop_column(entity, prop.name))
       <> "=EXCLUDED."
-      <> quoted(prop_column(entity, first_key)),
-    ]
-    _ ->
-      list.map(rest, fn(prop) {
-        quoted(prop_column(entity, prop))
-        <> "=EXCLUDED."
-        <> quoted(prop_column(entity, prop))
-      })
+      <> quoted(prop_column(entity, prop.name))
+    })
+  let conflict = case updates {
+    [] -> ") DO NOTHING\n"
+    _ -> ") DO UPDATE SET " <> string.join(updates, ",") <> "\n"
   }
   "INSERT INTO "
   <> table(entity)
@@ -802,9 +845,8 @@ fn put_sql(entity: model.Entity) -> String {
     list.map(entity.upsert_key, fn(prop) { quoted(prop_column(entity, prop)) }),
     ",",
   )
-  <> ") DO UPDATE SET "
-  <> string.join(updates, ",")
-  <> "\nRETURNING "
+  <> conflict
+  <> "RETURNING "
   <> returning(entity)
   <> ";\n"
 }

@@ -322,6 +322,23 @@ pub fn verb_bundle_covers_declared_actions_test() {
   string.contains(found, "pub fn advance_article(") |> should.be_true
 }
 
+pub fn put_does_not_update_keys_versions_or_phase_gated_fields_test() {
+  let found = text("gen/sql/queries/verb/put_article.sql")
+  string.contains(found, "body=EXCLUDED.body") |> should.be_true
+  string.contains(found, "slug=EXCLUDED.slug") |> should.be_false
+  string.contains(found, "title=EXCLUDED.title") |> should.be_false
+  string.contains(found, "version=EXCLUDED.version") |> should.be_false
+}
+
+pub fn reorder_uses_declared_order_column_and_returning_alias_test() {
+  let found = text("gen/sql/queries/verb/reorder_articles.sql")
+  string.contains(found, "AS new_order,ord") |> should.be_true
+  string.contains(found, "RETURNING e.slug,e.\"order\"")
+  |> should.be_true
+  string.contains(found, "FROM changed ORDER BY changed.\"order\",changed.slug")
+  |> should.be_true
+}
+
 pub fn lifecycle_steps_are_entity_qualified_test() {
   let phase = text_of(phase_collision_fixture, "src/gen/phase.gleam")
   string.contains(phase, "pub type FanStep {\n  FanOnboardedToRetiring\n}")
@@ -584,9 +601,10 @@ pub fn mixed_direction_keyset_is_generated_test() {
   let found = text_of(flag_fixture, "gen/sql/queries/widget_page/paged.sql")
   string.contains(
     found,
-    "COALESCE(w.place,2147483647)>COALESCE($3::integer,2147483647)",
+    "($3 IS NOT NULL AND (w.place IS NULL OR (w.place IS NOT NULL AND w.place>$3::integer)))",
   )
   |> should.be_true
+  string.contains(found, "COALESCE(w.place,2147483647)") |> should.be_false
   string.contains(found, "IS NOT DISTINCT FROM") |> should.be_true
   string.contains(found, "w.name<$4::text") |> should.be_true
 }
