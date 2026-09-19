@@ -27,7 +27,20 @@ pub fn emit(app: model.App, hashes: hash.Hashes) -> List(File) {
   let draft_paths =
     entities
     |> list.map(fn(entity) { "gen/draft/" <> entity.module })
-  let style = Style(qualified: draft_paths)
+  let entity_paths =
+    entities
+    |> list.map(fn(entity) { "entity/" <> entity.module })
+  let aliases =
+    list.append(
+      list.map(entities, fn(entity) {
+        #("gen/draft/" <> entity.module, "draft_" <> entity.module)
+      }),
+      list.map(entities, fn(entity) {
+        #("entity/" <> entity.module, "entity_" <> entity.module)
+      }),
+    )
+  let style =
+    Style(qualified: list.append(draft_paths, entity_paths), aliases: aliases)
   let all_types =
     list.flat_map(functions, fn(function) {
       list.append(list.map(function.params, fn(param) { param.ty }), [
@@ -296,11 +309,16 @@ fn version_param(entity: model.Entity) -> List(Param) {
 }
 
 fn has_version(entity: model.Entity) -> Bool {
-  case model.prop_by_name(entity, "version") {
+  !list.contains(entity.key_props, "version")
+  && case model.prop_by_name(entity, "version") {
     Some(model.Prop(
       optional: False,
       repeated: False,
-      kind: model.ValueProp(model.TypeRef(module: None, name: "Int")),
+      kind: model.ValueProp(model.TypeRef(
+        module: None,
+        name: "Int",
+        parameters: [],
+      )),
       ..,
     )) -> True
     _ -> False
@@ -348,9 +366,9 @@ fn prop_type(entity: model.Entity, app: model.App, name: String) -> typing.Ty {
     None ->
       case model.prop_by_name(entity, name) {
         Some(model.Prop(kind: model.ValueProp(reference), ..)) ->
-          typing.TyRef(reference.module, reference.name)
+          typing.type_ref(reference)
         Some(model.Prop(kind: model.SumProp(reference, ..), ..)) ->
-          typing.TyRef(reference.module, reference.name)
+          typing.type_ref(reference)
         _ -> typing.TyRef(None, "String")
       }
   }

@@ -836,7 +836,11 @@ fn prop_kind(
     )
     glance.NamedType(name: name, ..) -> {
       let module = module_of_type(annotation, imports)
-      let reference = model.TypeRef(module: module, name: name)
+      let parameters =
+        g.type_params(annotation)
+        |> list.map(type_shape(_, imports))
+      let reference =
+        model.TypeRef(module: module, name: name, parameters: parameters)
       let owner = case module {
         Some(path) -> path
         None -> unit.path
@@ -845,7 +849,12 @@ fn prop_kind(
         Some(_) -> reference
         None ->
           case dict.get(table, unit.path <> "." <> name) {
-            Ok(_) -> model.TypeRef(module: Some(unit.path), name: name)
+            Ok(_) ->
+              model.TypeRef(
+                module: Some(unit.path),
+                name: name,
+                parameters: parameters,
+              )
             Error(_) -> reference
           }
       }
@@ -858,6 +867,10 @@ fn prop_kind(
                 model.TypeRef(
                   module: module_of_type(item, imports),
                   name: option.unwrap(g.type_name(item), "String"),
+                  parameters: list.map(g.type_params(item), type_shape(
+                    _,
+                    imports,
+                  )),
                 )
               })
             })
@@ -874,7 +887,9 @@ fn prop_kind(
     _ -> #(
       optional,
       repeated,
-      model.ValueProp(model.TypeRef(module: None, name: "String")),
+      model.ValueProp(
+        model.TypeRef(module: None, name: "String", parameters: []),
+      ),
     )
   }
 }

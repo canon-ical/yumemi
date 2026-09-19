@@ -36,7 +36,7 @@ fn one(app: model.App, service: model.Service, input_hash: String) -> File {
     list.append(outs, arrow_outs)
     |> list.flat_map(typing.entity_modules)
     |> list.unique
-  let style = Style(qualified: qualified)
+  let style = Style(qualified: qualified, aliases: [])
   let all_types =
     list.flatten([
       outs,

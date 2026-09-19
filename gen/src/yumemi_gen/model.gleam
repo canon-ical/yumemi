@@ -31,7 +31,12 @@ pub fn backing_of(spec: String) -> Backing {
 
 /// 型の参照。module は import の道(`gen/types/title` など)。
 pub type TypeRef {
-  TypeRef(module: Option(String), name: String)
+  TypeRef(
+    module: Option(String),
+    name: String,
+    /// `Sealed(String, StaffKey)` のような型引数。Property でも落とさない。
+    parameters: List(TypeShape),
+  )
 }
 
 /// ★ の型を root の鍵照合に使う形。module は import 解決後の道。
