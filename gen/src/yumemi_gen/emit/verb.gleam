@@ -75,46 +75,51 @@ fn entities_in_order(app: model.App) -> List(model.Entity) {
 fn functions_for(entity: model.Entity, app: model.App) -> List(Fn) {
   let key = key_params(entity, app)
   let version = version_param(entity)
-  let generic_updates =
-    writable_props(entity)
-    |> list.map(fn(prop) {
-      let params =
-        list.append(list.append(key, version), [
-          Param(label: prop.name, ty: prop_type(entity, app, prop.name)),
-        ])
-      Fn(
-        name: "update_" <> entity.module <> "_" <> prop.name,
-        params: params,
-        result: verb(typing.TyRef(None, "Nil")),
-        input: input_of(params),
-      )
-    })
-  let named_updates =
-    entity.verbs
-    |> list.filter_map(fn(rule) {
-      case rule {
-        model.UpdateRule(name, fields, ignored) -> {
-          let _ = ignored
-          let params =
-            list.append(
-              list.append(key, version),
-              list.map(fields, fn(field) {
-                Param(label: field, ty: prop_type(entity, app, field))
-              }),
-            )
-          Ok(Fn(
-            name: name <> "_" <> entity.module,
-            params: params,
-            result: verb(typing.TyRef(None, "Nil")),
-            input: input_of(params),
-          ))
-        }
-        _ -> Error(Nil)
-      }
-    })
-  let advance = case model.has_transitions(entity) {
+  let generic_updates = case model.has_key(entity) {
     False -> []
-    True -> [
+    True ->
+      writable_props(entity)
+      |> list.map(fn(prop) {
+        let params =
+          list.append(list.append(key, version), [
+            Param(label: prop.name, ty: prop_type(entity, app, prop.name)),
+          ])
+        Fn(
+          name: "update_" <> entity.module <> "_" <> prop.name,
+          params: params,
+          result: verb(typing.TyRef(None, "Nil")),
+          input: input_of(params),
+        )
+      })
+  }
+  let named_updates = case model.has_key(entity) {
+    False -> []
+    True ->
+      entity.verbs
+      |> list.filter_map(fn(rule) {
+        case rule {
+          model.UpdateRule(name, fields, ignored) -> {
+            let _ = ignored
+            let params =
+              list.append(
+                list.append(key, version),
+                list.map(fields, fn(field) {
+                  Param(label: field, ty: prop_type(entity, app, field))
+                }),
+              )
+            Ok(Fn(
+              name: name <> "_" <> entity.module,
+              params: params,
+              result: verb(typing.TyRef(None, "Nil")),
+              input: input_of(params),
+            ))
+          }
+          _ -> Error(Nil)
+        }
+      })
+  }
+  let advance = case model.has_key(entity), model.has_transitions(entity) {
+    True, True -> [
       Fn(
         name: "advance_" <> entity.module,
         params: list.append(list.append(key, version), [
@@ -131,32 +136,40 @@ fn functions_for(entity: model.Entity, app: model.App) -> List(Fn) {
         ),
       ),
     ]
+    _, _ -> []
   }
-  let delete = [
-    Fn(
-      name: "delete_" <> entity.module,
-      params: key,
-      result: verb(typing.TyRef(None, "Nil")),
-      input: input_of(key),
-    ),
-  ]
+  let delete = case model.has_key(entity) {
+    False -> []
+    True -> [
+      Fn(
+        name: "delete_" <> entity.module,
+        params: key,
+        result: verb(typing.TyRef(None, "Nil")),
+        input: input_of(key),
+      ),
+    ]
+  }
   let extra = [
     create(entity),
     ..list.filter_map(entity.verbs, fn(rule) {
       case rule {
-        model.DeleteWhereRule(field) -> Ok(delete_where(entity, app, field))
+        model.DeleteWhereRule(field) ->
+          case model.has_key(entity) {
+            True -> Ok(delete_where(entity, app, field))
+            False -> Error(Nil)
+          }
         model.CreateManyRule -> Ok(create_many(entity))
         _ -> Error(Nil)
       }
     })
   ]
-  let reorder = case entity.ordered_by {
-    Some(ordered) -> [reorder(entity, app, ordered)]
-    None -> []
+  let reorder = case model.has_key(entity), entity.ordered_by {
+    True, Some(ordered) -> [reorder(entity, app, ordered)]
+    _, _ -> []
   }
-  let put = case entity.upsert_key {
-    [] -> []
-    _ -> [put(entity, app)]
+  let put = case model.has_key(entity), entity.upsert_key {
+    True, [_first, ..] -> [put(entity, app)]
+    _, _ -> []
   }
   list.append(
     list.append(list.append(extra, generic_updates), named_updates),
@@ -382,32 +395,38 @@ fn sql_files(
   app: model.App,
   hashes: hash.Hashes,
 ) -> List(File) {
-  let generic_updates =
-    writable_props(entity)
-    |> list.map(fn(prop) {
-      sql_file(
-        entity,
-        hashes,
-        "update_" <> entity.module <> "_" <> prop.name,
-        update_sql(entity, app, [prop.name], model.AnyPhase),
-      )
-    })
-  let named_updates =
-    entity.verbs
-    |> list.filter_map(fn(rule) {
-      case rule {
-        model.UpdateRule(name, fields, at) ->
-          Ok(sql_file(
-            entity,
-            hashes,
-            name <> "_" <> entity.module,
-            update_sql(entity, app, fields, at),
-          ))
-        _ -> Error(Nil)
-      }
-    })
-  let advance = case model.has_transitions(entity) {
-    True -> [
+  let generic_updates = case model.has_key(entity) {
+    False -> []
+    True ->
+      writable_props(entity)
+      |> list.map(fn(prop) {
+        sql_file(
+          entity,
+          hashes,
+          "update_" <> entity.module <> "_" <> prop.name,
+          update_sql(entity, app, [prop.name], model.AnyPhase),
+        )
+      })
+  }
+  let named_updates = case model.has_key(entity) {
+    False -> []
+    True ->
+      entity.verbs
+      |> list.filter_map(fn(rule) {
+        case rule {
+          model.UpdateRule(name, fields, at) ->
+            Ok(sql_file(
+              entity,
+              hashes,
+              name <> "_" <> entity.module,
+              update_sql(entity, app, fields, at),
+            ))
+          _ -> Error(Nil)
+        }
+      })
+  }
+  let advance = case model.has_key(entity), model.has_transitions(entity) {
+    True, True -> [
       sql_file(
         entity,
         hashes,
@@ -415,21 +434,28 @@ fn sql_files(
         advance_sql(entity, model.advance_bump(entity)),
       ),
     ]
-    False -> []
+    _, _ -> []
   }
-  let delete = [
-    sql_file(entity, hashes, "delete_" <> entity.module, delete_sql(entity)),
-  ]
+  let delete = case model.has_key(entity) {
+    False -> []
+    True -> [
+      sql_file(entity, hashes, "delete_" <> entity.module, delete_sql(entity)),
+    ]
+  }
   let extras =
     list.filter_map(entity.verbs, fn(rule) {
       case rule {
         model.DeleteWhereRule(field) ->
-          Ok(sql_file(
-            entity,
-            hashes,
-            "delete_" <> entity.module <> "_by_" <> field,
-            delete_where_sql(entity, field),
-          ))
+          case model.has_key(entity) {
+            True ->
+              Ok(sql_file(
+                entity,
+                hashes,
+                "delete_" <> entity.module <> "_by_" <> field,
+                delete_where_sql(entity, field),
+              ))
+            False -> Error(Nil)
+          }
         model.CreateManyRule ->
           Ok(sql_file(
             entity,
@@ -440,8 +466,8 @@ fn sql_files(
         _ -> Error(Nil)
       }
     })
-  let reorder = case entity.ordered_by {
-    Some(ordered) -> [
+  let reorder = case model.has_key(entity), entity.ordered_by {
+    True, Some(ordered) -> [
       sql_file(
         entity,
         hashes,
@@ -449,13 +475,13 @@ fn sql_files(
         reorder_sql(entity, app, ordered),
       ),
     ]
-    None -> []
+    _, _ -> []
   }
-  let put = case entity.upsert_key {
-    [] -> []
-    _ -> [
+  let put = case model.has_key(entity), entity.upsert_key {
+    True, [_first, ..] -> [
       sql_file(entity, hashes, "put_" <> entity.module, put_sql(entity)),
     ]
+    _, _ -> []
   }
   list.append(
     [
@@ -828,13 +854,27 @@ fn table(entity: model.Entity) -> String {
 }
 
 fn returning(entity: model.Entity) -> String {
-  string.join(list.map(entity.key_columns, quoted), ",")
+  case returned_columns(entity) {
+    [] -> "*"
+    columns -> string.join(list.map(columns, quoted), ",")
+  }
 }
 
 fn returning_with_alias(entity: model.Entity, alias: String) -> String {
-  entity.key_columns
-  |> list.map(fn(column) { alias <> "." <> quoted(column) })
-  |> string.join(",")
+  case returned_columns(entity) {
+    [] -> alias <> ".*"
+    columns ->
+      columns
+      |> list.map(fn(column) { alias <> "." <> quoted(column) })
+      |> string.join(",")
+  }
+}
+
+fn returned_columns(entity: model.Entity) -> List(String) {
+  case entity.key_columns {
+    [] -> list.map(persisted_fields(entity), fn(field) { field.column })
+    columns -> columns
+  }
 }
 
 fn placeholders(first: Int, count: Int) -> List(String) {

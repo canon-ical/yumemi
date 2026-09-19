@@ -75,13 +75,20 @@ pub fn generate(
   let hashes = hash.of(units)
   let notes =
     list.append(
-      list.map(query.collisions(app), fn(entry) {
-        let #(module, name) = entry
-        Note(
-          class: stop.Conflict,
-          text: "名前の衝突 " <> module <> ": " <> name <> "(構成子は module ごとに1つの名前空間)",
-        )
-      }),
+      list.append(
+        reader.missing_key_notes(units),
+        list.map(query.collisions(app), fn(entry) {
+          let #(module, name) = entry
+          Note(
+            class: stop.Conflict,
+            text: "名前の衝突 "
+              <> module
+              <> ": "
+              <> name
+              <> "(構成子は module ごとに1つの名前空間)",
+          )
+        }),
+      ),
       sql.notes(app, hashes),
     )
   let diagnostics = case notes {

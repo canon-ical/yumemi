@@ -26,6 +26,8 @@ const advance_all_fixture = "fixtures/flag_advance_all"
 
 const parent_delete_fixture = "fixtures/flag_parent"
 
+const no_key_fixture = "fixtures/flag_no_key"
+
 pub fn main() {
   gleeunit.main()
 }
@@ -349,6 +351,50 @@ pub fn delete_where_parent_is_exit_four_test() {
     }
     _ -> should.fail()
   }
+}
+
+pub fn no_key_entity_keeps_create_only_test() {
+  let verb = text_of(no_key_fixture, "src/gen/verb.gleam")
+  string.contains(verb, "pub fn create_no_key(") |> should.be_true
+  string.contains(verb, "pub fn update_no_key_") |> should.be_false
+  string.contains(verb, "pub fn delete_no_key") |> should.be_false
+  string.contains(verb, "pub fn advance_no_key") |> should.be_false
+
+  let create = text_of(no_key_fixture, "gen/sql/queries/verb/create_no_key.sql")
+  string.contains(create, "INSERT INTO app.no_key") |> should.be_true
+  string.contains(create, "RETURNING name,value")
+  |> should.be_true
+}
+
+pub fn no_key_generation_writes_bundles_and_reports_entity_test() {
+  let paths = list.map(files_of(no_key_fixture), fn(entry) { entry.0 })
+  [
+    "src/gen/types/no_key_name.gleam",
+    "src/gen/query.gleam",
+    "src/gen/query/from.gleam",
+    "src/gen/query/field.gleam",
+    "src/gen/phase.gleam",
+    "src/gen/verb.gleam",
+    "gen/sql/queries/verb/create_no_key.sql",
+    "_diagnostics.txt",
+  ]
+  |> list.each(fn(path) { list.contains(paths, path) |> should.be_true })
+
+  let notes = notes_of(no_key_fixture)
+  list.length(notes) |> should.equal(1)
+  stop.worst(notes) |> should.equal(3)
+  let assert [note] = notes
+  string.contains(note.text, "entity/no_key") |> should.be_true
+  string.contains(note.text, "key") |> should.be_true
+}
+
+pub fn path_key_is_used_for_keyed_verbs_test() {
+  let verb = text_of(no_key_fixture, "src/gen/verb.gleam")
+  string.contains(verb, "pub fn update_path_only_value(") |> should.be_true
+  string.contains(verb, "pub fn delete_path_only(") |> should.be_true
+  notes_of(no_key_fixture)
+  |> list.any(fn(note) { string.contains(note.text, "path_only") })
+  |> should.be_false
 }
 
 // ── header の入力ハッシュ(20 の規約①、柏木 P2-5) ────────────────────────────

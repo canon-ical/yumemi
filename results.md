@@ -23,3 +23,18 @@
 
 - AdvanceAll は生成器が途中で止まるため、複合 key の正常系と同じ fixture には置かず、flag_advance_all と flag_parent を検証用 fixture として分離した。
 - 既存 flag の mixed-direction keyset は従来どおり exit 1 の診断を出す。
+
+## r2 ── key 無し Entity の verb 縮退(P0)
+
+### 実装
+
+- `reader` は `key` が無いレコード Entity を読み続け、`path_key` だけの Entity は key として採用する。レコード型の無い `entity/ledger` は Entity 束から除外し、`entity/ledger: key 関数が無い` を Missing note に集約する。
+- key 無し Entity は create / create-many だけを出し、update / named Update / delete / advance / DeleteWhere / reorder / put は Gleam と SQL の両方を出さない。create SQL の `RETURNING` は key が無い場合に Entity の persisted Property 列へ縮退する。
+- `gen/fixtures/flag_no_key` と test を追加。no-key Lifecycle の create-only、全束書き切り、exit 3 note、`path_key` fallback を検証する。
+
+### 検証
+
+- `cd gen && gleam test`: **42 passed, no failures** (`build/gen3-p0-test.txt`)
+- `cd gen && gleam check`: 成功 (`build/gen3-p0-check.txt`)
+- musearch 読み取り生成: **411 files**, types 83 / query submodules 2(+`query.gleam`) / reads 34 / read SQL 48 / verb SQL 240。終了 **3**。stderr と `build/gen3-p0-musearch.2j3SYU/_diagnostics.txt` に `entity/ledger: key 関数が無い`。
+- musearch の生成前後 `git status --short` は同一。既存の `?? docs/__pycache__/` 以外の状態変化なし。

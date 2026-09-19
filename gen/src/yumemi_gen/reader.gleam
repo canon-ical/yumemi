@@ -12,6 +12,7 @@ import yumemi_gen/glance_util as g
 import yumemi_gen/model.{type App, type Entity, type Prop, type ValueType}
 import yumemi_gen/naming
 import yumemi_gen/source.{type Unit}
+import yumemi_gen/stop
 
 pub type Error {
   NoTypesModule
@@ -122,99 +123,165 @@ fn registry(units: List(Unit)) -> Registry {
 
 pub fn entities(units: List(Unit)) -> Result(List(Entity), Error) {
   let table = registry(units)
-  units
-  |> list.filter(fn(unit) { string.starts_with(unit.path, "entity/") })
-  |> list.try_map(entity_of(_, table))
-}
-
-fn entity_of(unit: Unit, table: Registry) -> Result(Entity, Error) {
-  let module = g.in_order(unit.module)
-  let imports = imports_of(module)
-  let name = last_segment(unit.path)
-  use key_fn <- result.try(
-    g.find_function(module, "key")
-    |> option.to_result(NoKeyFunction(unit.path)),
+  use candidates <- result.try(
+    units
+    |> list.filter(fn(unit) { string.starts_with(unit.path, "entity/") })
+    |> list.try_map(entity_of(_, table)),
   )
-  use record_name <- result.try(case key_fn.parameters {
-    [glance.FunctionParameter(type_: Some(annotation), ..), ..] ->
-      g.type_name(annotation) |> option.to_result(NoEntityType(unit.path))
-    _ -> Error(NoEntityType(unit.path))
-  })
-  use record <- result.try(
-    g.find_custom_type(module, record_name)
-    |> option.to_result(NoEntityType(unit.path)),
-  )
-  use variant <- result.try(case record.variants {
-    [variant] -> Ok(variant)
-    _ -> Error(NoEntityType(unit.path))
-  })
-  let props =
-    list.filter_map(variant.fields, fn(field) {
-      case g.variant_field_label(field) {
-        Some(label) ->
-          Ok(prop_of(label, g.variant_field_type(field), imports, table, unit))
+  Ok(
+    list.filter_map(candidates, fn(candidate) {
+      case candidate {
+        Some(entity) -> Ok(entity)
         None -> Error(Nil)
-      }
-    })
-  let phases = case g.find_custom_type(module, "Phase") {
-    Some(phase) -> list.map(phase.variants, fn(variant) { variant.name })
-    None -> []
-  }
-  use key_props <- result.try(key_properties(key_fn, unit.path))
-  let entity_name = naming.pascal(name)
-  let fields = fields_of(entity_name, name, props, phases)
-  use key_columns <- result.try(
-    list.try_map(key_props, fn(key_prop) {
-      case list.find(props, fn(prop) { prop.name == key_prop }) {
-        Ok(_) -> Ok(column_of(props, key_prop))
-        Error(_) ->
-          Error(Unsupported(
-            unit.path,
-            "key が Entity の Property でない: " <> key_prop,
-          ))
       }
     }),
   )
-  use _ <- result.try(validate_key_fields(
-    entity_name,
-    key_props,
-    fields,
-    unit.path,
-  ))
-  let key_prop = result.unwrap(list.first(key_props), "id")
-  let key_column = result.unwrap(list.first(key_columns), key_prop)
-  let collection = case g.find_constant(module, "collection") {
-    Some(constant) -> option.unwrap(g.string_value(constant.value), name)
-    None -> name
+}
+
+/// key が無くても通常のレコード型なら Entity として読み続ける。
+/// レコード型の無い型置き場(例: entity/ledger)は Entity にはしない。
+fn entity_of(unit: Unit, table: Registry) -> Result(Option(Entity), Error) {
+  let module = g.in_order(unit.module)
+  let imports = imports_of(module)
+  let name = last_segment(unit.path)
+  let key_fn = case g.find_function(module, "key") {
+    Some(function) -> Some(function)
+    None -> g.find_function(module, "path_key")
   }
-  use #(verbs, ordered_by, upsert_key) <- result.try(declarations(
+  use record_name <- result.try(record_name_of(
     module,
-    phases,
-    props,
-    key_props,
-    entity_name,
+    key_fn,
+    naming.pascal(name),
     unit.path,
   ))
-  use edges <- result.try(edges_of(module, phases, unit.path))
-  Ok(model.Entity(
-    module: name,
-    name: entity_name,
-    type_name: record_name,
-    table: name,
-    props: props,
-    fields: fields,
-    phases: phases,
-    key_prop: key_prop,
-    key_column: key_column,
-    key_props: key_props,
-    key_columns: key_columns,
-    collection: collection,
-    subject: g.find_constant(module, "subject") != None,
-    edges: edges,
-    verbs: verbs,
-    ordered_by: ordered_by,
-    upsert_key: upsert_key,
-  ))
+  case record_name {
+    None -> Ok(None)
+    Some(record_name) -> {
+      use record <- result.try(
+        g.find_custom_type(module, record_name)
+        |> option.to_result(NoEntityType(unit.path)),
+      )
+      use variant <- result.try(case record.variants {
+        [variant] -> Ok(variant)
+        _ -> Error(NoEntityType(unit.path))
+      })
+      let props =
+        list.filter_map(variant.fields, fn(field) {
+          case g.variant_field_label(field) {
+            Some(label) ->
+              Ok(prop_of(
+                label,
+                g.variant_field_type(field),
+                imports,
+                table,
+                unit,
+              ))
+            None -> Error(Nil)
+          }
+        })
+      let phases = case g.find_custom_type(module, "Phase") {
+        Some(phase) -> list.map(phase.variants, fn(variant) { variant.name })
+        None -> []
+      }
+      let raw_key_props = case key_fn {
+        Some(function) -> key_properties(function, unit.path)
+        None -> Ok([])
+      }
+      use key_props <- result.try(raw_key_props)
+      let entity_name = naming.pascal(name)
+      let fields = fields_of(entity_name, name, props, phases)
+      use key_columns <- result.try(
+        list.try_map(key_props, fn(key_prop) {
+          case list.find(props, fn(prop) { prop.name == key_prop }) {
+            Ok(_) -> Ok(column_of(props, key_prop))
+            Error(_) ->
+              Error(Unsupported(
+                unit.path,
+                "key が Entity の Property でない: " <> key_prop,
+              ))
+          }
+        }),
+      )
+      use _ <- result.try(validate_key_fields(
+        entity_name,
+        key_props,
+        fields,
+        unit.path,
+      ))
+      let key_prop = result.unwrap(list.first(key_props), "")
+      let key_column = result.unwrap(list.first(key_columns), "")
+      let collection = case g.find_constant(module, "collection") {
+        Some(constant) -> option.unwrap(g.string_value(constant.value), name)
+        None -> name
+      }
+      use #(verbs, ordered_by, upsert_key) <- result.try(declarations(
+        module,
+        phases,
+        props,
+        key_props,
+        entity_name,
+        unit.path,
+      ))
+      use edges <- result.try(edges_of(module, phases, unit.path))
+      Ok(
+        Some(model.Entity(
+          module: name,
+          name: entity_name,
+          type_name: record_name,
+          table: name,
+          props: props,
+          fields: fields,
+          phases: phases,
+          key_prop: key_prop,
+          key_column: key_column,
+          key_props: key_props,
+          key_columns: key_columns,
+          collection: collection,
+          subject: g.find_constant(module, "subject") != None,
+          edges: edges,
+          verbs: verbs,
+          ordered_by: ordered_by,
+          upsert_key: upsert_key,
+        )),
+      )
+    }
+  }
+}
+
+fn record_name_of(
+  module: glance.Module,
+  key_fn: Option(glance.Function),
+  fallback: String,
+  where: String,
+) -> Result(Option(String), Error) {
+  case key_fn {
+    Some(function) ->
+      case function.parameters {
+        [glance.FunctionParameter(type_: Some(annotation), ..), ..] ->
+          g.type_name(annotation)
+          |> option.to_result(NoEntityType(where))
+          |> result.map(Some)
+        _ -> Error(NoEntityType(where))
+      }
+    None ->
+      case g.find_custom_type(module, fallback) {
+        Some(_) -> Ok(Some(fallback))
+        None -> Ok(None)
+      }
+  }
+}
+
+pub fn missing_key_notes(units: List(Unit)) -> List(stop.Note) {
+  units
+  |> list.filter(fn(unit) { string.starts_with(unit.path, "entity/") })
+  |> list.filter_map(fn(unit) {
+    let module = g.in_order(unit.module)
+    case g.find_function(module, "key"), g.find_function(module, "path_key") {
+      None, None ->
+        Ok(stop.Note(class: stop.Missing, text: unit.path <> ": key 関数が無い"))
+      _, _ -> Error(Nil)
+    }
+  })
 }
 
 fn key_properties(

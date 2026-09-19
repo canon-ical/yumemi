@@ -185,6 +185,10 @@ pub fn has_lifecycle(entity: Entity) -> Bool {
   entity.phases != []
 }
 
+pub fn has_key(entity: Entity) -> Bool {
+  entity.key_props != []
+}
+
 pub fn has_transitions(entity: Entity) -> Bool {
   entity.edges != []
 }
