@@ -27,9 +27,9 @@ PGHOST=127.0.0.1 PGPORT=55432 PGUSER=yumemism PGDATABASE=postgres node scripts/v
 | exit 1 notes | **4 件**。`Has` / `HasNone` 2 件、`with(...)` 2 件 |
 | musearch の後状態 | **未変更**。生成先と隔離 probe だけへ書き込み |
 
-上記の生成本数と `r7` ログを今回の基準とする。52 tests は draft key 契約・auto key 宣言・SQL/Context の実行検査を含む値である。
+上記の生成本数と `r7` ログを今回の基準とする。52 tests は生成結果などを検査する Gleam test の件数である。PostgreSQL / Context の実行検査は別の Node スクリプトであり、この52件には含まれない。
 
-今回の実測は probe 基準0・段1/2/3が **338/134/129**。段3の `src/gen/verb.gleam` / `src/gen/phase.gleam` / `src/gen/draft/*` / `src/gen/reads/*` 由来 error は **0件**で、残る129件は Service 側の未追従である。生成 verb の draft参照は33 moduleを生成し、Entity alias・同名 Kind・Property 型引数も probe の対象から消えた。root read は実 `makeContext` で relation resolver を通して decoded 値を返した。
+今回の実測は probe 基準0・段1/2/3が **338/134/129**。段3の `src/gen/verb.gleam` / `src/gen/phase.gleam` / `src/gen/draft/*` / `src/gen/reads/*` 由来 error は **0件**で、残る129件は Service 側の未追従である。生成 verb の draft参照は33 moduleを生成し、Entity alias・同名 Kind・Property 型引数も probe の対象から消えた。root read の既存検証は実 `makeContext` に検証側で作った resolver を渡したもの。生成 read と実 Entity の検証では `Muse` の代わりに `Held(Muse)` が返り、P0-5 / G2 は未閉鎖である。
 
 検証ログは `build/gleam-test-r7-final.txt`、`build/musearch-run-r7.txt`、`build/probe-r7-final.txt`、`build/gate2-sql-r7.txt`、`build/root-ffi-r7.txt`、`build/sql-service-name-r7.txt`。初回ゲート2の所見は `/home/yumemism/.codex-agents/runs/niekawa-20260920-015538-60185-849/evidence/gate2/gate2.md` に残し、今回の実行証拠は `build` と `gen/build` に置いた。
 
@@ -67,21 +67,23 @@ PGHOST=127.0.0.1 PGPORT=55432 PGUSER=yumemism PGDATABASE=postgres node scripts/v
 |---|---|
 | P0-1 複合 key の `version` | SQL 実行で対象行だけ更新、`version` と sibling/version 違いの行は不変 |
 | P0-2 `put` | stale version は conflict、put は版を 7→8 に進め、旧版 update は conflict、key/title/phase は不変 |
-| P0-3 `reorder` | staging → apply の同一 transaction で `UNIQUE(scope, order)` を交換、`0/2147483647` も `b=0,a=1`、競合 rollback |
+| P0-3 `reorder` | 非負値の交換・Int上限・競合 rollback は通る。有効な負の Int 値では staging が一意制約違反となり未閉鎖 |
 | P0-4 混在 keyset | `2147483647`、NULL、同値列のページ継続で欠落なし |
-| P0-5 root FFI | 実 `makeContext` に framework adapter を装着し、root relation resolver が decoded 値を返す、生成 root read 36本 |
-| P0-7 Draft key | flag の複合 key と Article.slug を Draft → create SQL → 実 DB で確認。auto key は宣言時だけ除外 |
+| P0-5 root FFI | 36本生成。検証側の resolver は通るが、実 Entity と生成 read は `Held` を `Muse` として返すため未閉鎖 |
+| P0-7 Draft key | Draft に複合 key / slug が残る。提供 SQL 検査は手書き引数配列。追加監査ではコンパイルした ChunkDraft → 生成 verb → 検証用 PG adapter → SQL → 実 DB を確認 |
 
 証拠は `build/gate2-sql-r7.txt` と `build/root-ffi-r7.txt`、実装は `gen/scripts/verify-gate2-sql.mjs` / `verify-root-ffi.mjs` にある。
 
+追加監査の証拠は `build/gate2c/evidence/`。`root-real.mjs` は生成 read をコンパイルして実 `decodeArticle` / `makeContext` で再現する。`reorder-negative.mjs` は負値衝突と CHECK 違反、`reorder-concurrent.mjs` は同一 scope の2接続でロック待ちと確定値を確認する。
+
 ### 巡6 P0 修正の実装境界
 
-- **P0-7**: `Entity.auto_key` の明示宣言を reader が読み、Draft は宣言された key だけ除外する。宣言が無い Article.slug / flag の複合 key は Draft に残し、create SQL の引数順と実 DB の列へ通した。
-- **P0-5**: framework `io_ffi.mjs` が Context に rootArrow adapter を装着し、root Entity の relation resolver を呼んで decoded 値を返す。musearch は変更していない。
+- **P0-7**: `Entity.auto_key` の明示宣言を reader が読み、Draft は宣言された key だけ除外する。宣言が無い Article.slug / flag の複合 key は Draft に残る。提供スクリプトは手書き引数配列で create SQL を実行する。型付き複合 key の経路は追加監査の `build/gate2c/evidence/draft-typed.txt` で確認した。musearch runtime の追従を検証したものではない。
+- **P0-5 未閉鎖**: framework `io_ffi.mjs` は relation resolver が無い場合に関係値をそのまま返す。実 Entity の Held は key だけを持つため、関係先の取得・復号が未実装。musearch は変更していない。
 - **P0-2**: version-bearing put は `target.version = 入力版` を conflict 条件にし、成功時だけ `version+1`。changed が 0 行なら framework conflict として transaction を abort する。
-- **P0-3**: reorder は `reorder_*_stage` で負の一時値へ退避し、続く `reorder_*` で要求値を確定する compound verb。同一 transaction の UNIQUE 衝突は rollback され、上限値への加算はしない。
+- **P0-3**: reorder は `reorder_*_stage` で負の一時値へ退避し、続く `reorder_*` で要求値を確定する compound verb。同一 transaction の UNIQUE 衝突は rollback され、上限値への加算はしない。ただし負の一時値は有効な Int 値と衝突し、非負 CHECK がある場合も失敗するため P0-3 は未閉鎖。
 
-`build/probe-r7-final.txt` の probe 段3 **129** は、既存の Created 型付き Draft を保持した検収条件である。Draft を全量置換した複製検収では **140** になるが、生成ファイルを指す error は 0 件だった。したがって 129 と 140 は同じ条件の再測定値ではなく、既存 Draft の保持有無が違う。
+今回の再測定(`7812b47`、musearch `fe7c53f`)では、既存の Created 型付き Draft を保持した probe 段3は **129**、Draft 全量置換は **162**。いずれもエラーの主位置は Service のみで、生成ファイルの主位置は0件。旧稿の全量置換140は今回の値ではない。証拠は `build/gate2c/evidence/probe.txt` と `full-draft-build.txt`。
 
 ## gen-2 からの増減
 
