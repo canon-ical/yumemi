@@ -1,7 +1,7 @@
 // ★ src/service/widget_page.gleam
-//// Service widget_page ── 向きの混じった `order` で `Paged`。生成器は SQL を組めないので
-//// `_diagnostics.txt` へ落ちる(残差 G1)。**このとき 0 で終わってはならない** ── reads の
-//// 関数だけ在って SQL が無い状態は実行時に必ず落ちる不整合(柏木 P2-2)。
+//// Service widget_page ── 向きの混じった `order` で `Paged`。
+//// gen-3 は列ごとの比較を組み合わせた keyset SQL を生成する。
+//// NULL 境界とページ間の欠落は、生成文字列の検査とは別に SQL 実行で検証する。
 import framework/effect.{type Effect, Read}
 import framework/page.{type Cursor, type Page, type PageSize}
 import framework/step.{type Start, type Step}

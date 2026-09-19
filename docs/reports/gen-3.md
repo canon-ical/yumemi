@@ -27,6 +27,16 @@ scripts/probe-compile.sh ~/yumemism_repo/musearch/app build/gen3-musearch.p5Ywux
 | exit 1 notes | **4 件**。`Has` / `HasNone` 2 件、`with(...)` 2 件 |
 | musearch の後状態 | `?? docs/__pycache__/` だけ。その他の差分 0 |
 
+上記の生成本数・束の比較・`*-3.txt` は初回検収の基準である。47 tests は phase 構成子修正後の値であり、初回ログの値ではない。
+
+ゲート2で `eb76bef` と musearch `fe7c53f6660b6ae6f9ace5a9c4772579207f70a3` を再検証した実測は、生成539ファイル(診断込み)、probe基準0・段1/2/3が192/103/102、phase由来のerrorは0件だった。fan/museの生成phase moduleも隔離projectでコンパイルを確認した。以下の旧基準の31は34からphaseの3件を引いた比較値で、最新基準の再実測値ではない。
+
+この最新基準の内訳はroot 92本、reads 67本、verb SQL 241本(create 33 / update 165 / advance 10 / delete 33)、警告21件、draft参照33本中のmodule不在13本。以下のroot 81・verb SQL 240・警告17・draft不在16という旧基準の集計と分けて扱う。
+
+最新probe段3の102件をすべてService側の未追従とは扱えない。ログで場所を特定できる行は `src/gen/verb.gleam` 71箇所と `src/service/*` 30箇所で、生成verbにはdraft不在に加えて引数重複、import・型名衝突、型引数欠落がある。phaseの3件が消えたことだけでは生成束の成立を示さない。これらとSQL実行・FFI接続の欠陥はゲート2のP0として返す。
+
+検証ログは `/home/yumemism/.codex-agents/runs/niekawa-20260920-015538-60185-849/evidence/gate2/` の `gleam-test.txt`、`musearch-run.txt`、`compare.txt`、`probe.txt`、`phase-build.txt`。SQL実行とFFI接続に関するゲート2の所見は同runの `gate2.md` に記録する。
+
 ### 束ごとの diff
 
 完全一致はバイト一致、本文一致は先頭の `GENERATED` 行を外して空白を詰めた一致。束 2 は生成側が 3 module、手書き側が 1 module なので行数と variant で数えた。
