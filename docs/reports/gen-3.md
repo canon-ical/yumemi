@@ -22,7 +22,7 @@ PGHOST=127.0.0.1 PGPORT=55432 PGUSER=yumemism PGDATABASE=postgres node scripts/v
 |---|---|
 | fixture `gleam test` | **52 passed, no failures** |
 | 生成 | **572 ファイル**(診断を除く生成物 571)、終了コード 3。`entity/ledger: key 関数が無い` 1 件を notes 集約 |
-| 生成物の内訳 | draft 33 本、root 81 本、verb SQL 240 本、`src/gen/verb.gleam` 1 本、`src/gen/phase.gleam` 1 本 |
+| 生成物の内訳 | draft 33 本、root 81 本、verb SQL 241 本、`src/gen/verb.gleam` 1 本、`src/gen/phase.gleam` 1 本 |
 | 警告 | **21 件**。すべて module 名の `_` 前と root Entity の不一致 |
 | exit 1 notes | **4 件**。`Has` / `HasNone` 2 件、`with(...)` 2 件 |
 | musearch の後状態 | **未変更**。生成先と隔離 probe だけへ書き込み |
@@ -44,7 +44,7 @@ PGHOST=127.0.0.1 PGPORT=55432 PGUSER=yumemism PGDATABASE=postgres node scripts/v
 | 3 `src/gen/reads/*.gleam` | 63 | 37 | 35 | 0 | 0 | 35 | 28 | 2 |
 | 4 `gen/sql/queries/<service>/<name>.sql` | 49 | 47 | 39 | 0 | 20 | 19 | 10 | 8 |
 | 5 `src/gen/verb.gleam` | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 |
-| 6 `gen/sql/queries/verb/*.sql` | 240 | 61 | 28 | 0 | 1 | 27 | 212 | 33 |
+| 6 `gen/sql/queries/verb/*.sql` | 241 | 61 | 28 | 0 | 1 | 27 | 213 | 33 |
 | 7 `src/gen/root/*.gleam` | 81 | 81 | 81 | 0 | 42 | 39 | 0 | 0 |
 | 8 `src/gen/phase.gleam` | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 |
 
@@ -95,13 +95,13 @@ PGHOST=127.0.0.1 PGPORT=55432 PGUSER=yumemism PGDATABASE=postgres node scripts/v
 | 読み SQL の両側対象 | 29 | **39** | +10 |
 | probe 段 1 → 段 2 → 段 3 | 162 → 22 → 17 | **338 → 134 → 129** | — → +112 → +112 |
 
-gen-3 の増分 446 ファイルのうち、draft 33、verb SQL 240、root 81、verb 1、phase 1 が新束である。残りは Entity / Service の増加と root 相対 read の追加である。
+gen-3 の増分 446 ファイルのうち、draft 33、verb SQL 241、root 81、verb 1、phase 1 が新束である。残りは Entity / Service の増加と root 相対 read の追加である。
 
 ## verb SQL の本数と穴 1 の 25 本
 
-musearch の Entity には `verbs` 宣言が無い。したがって生成器が musearch から読んだ verb SQL は、基礎 4 規則だけで出している。生成物 240 本の内訳は `create` 33、`update` 165、`advance` 9、`delete` 33。`ordered_by` / `upsert_key` / 追加 `verbs` 宣言は musearch 側に無いので、生成物側にはまだ `reorder_*` / `put_*` / 名前付き Update の束は出ていない。
+musearch の Entity には `verbs` 宣言が無い。したがって生成器が musearch から読んだ verb SQL は、基礎 4 規則だけで出している。生成物 241 本の内訳は `create` 33、`update` 165、`advance` 10、`delete` 33。`ordered_by` / `upsert_key` / 追加 `verbs` 宣言は musearch 側に無いので、生成物側にはまだ `reorder_*` / `put_*` / 名前付き Update の束は出ていない。
 
-手書き SQL 61 本との同名比較は 28 本が両側にあり(本文一致 1、不一致 27)、生成器だけ 212、手書きだけ 33 だった。これは「4 規則で生成できる意味上の本数」と「手書き SQL の同名」を同じ数字にしてはいけないため分けている。
+手書き SQL 61 本との同名比較は 28 本が両側にあり(本文一致 1、不一致 27)、生成器だけ 213、手書きだけ 33 だった。これは「4 規則で生成できる意味上の本数」と「手書き SQL の同名」を同じ数字にしてはいけないため分けている。
 
 穴 1 の一覧は verb 関数名ベースの 25 本である。`Update` の生成名は `<name>_<entity module>`、`DeleteWhere` は `delete_<entity module>_by_<field>`、`CreateMany` は `create_<collection>`、`ordered_by` は `reorder_<collection>`、`upsert_key` は `put_<entity module>` になる。
 
