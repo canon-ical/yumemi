@@ -205,6 +205,15 @@ pub fn root_relative_arrows_are_emitted_test() {
   string.contains(found, "then: fn(List(tag.Tag))") |> should.be_true
 }
 
+pub fn root_relative_arrows_use_framework_io_ffi_test() {
+  let found = text("src/gen/reads/article_read.gleam")
+  string.contains(found, "import framework/io.{type Context, type Promise}")
+  |> should.be_true
+  string.contains(found, "io.root_arrow(ctx,") |> should.be_true
+  string.contains(found, "operations_ffi.mjs\", \"rootArrow\"")
+  |> should.be_false
+}
+
 // ── 束4 読みの SQL ──────────────────────────────────────────────────────────
 
 pub fn one_statement_per_named_query_test() {

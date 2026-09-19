@@ -74,12 +74,7 @@ fn one(app: model.App, service: model.Service, input_hash: String) -> File {
           "@external(javascript, \"../operations_ffi.mjs\", \"read\")\n"
           <> "fn query(ctx: Context, name: String, input: a) -> Promise(b)\n"
       },
-      case arrows {
-        [] -> ""
-        _ ->
-          "\n@external(javascript, \"../operations_ffi.mjs\", \"rootArrow\")\n"
-          <> "fn root_arrow(ctx: Context, service: String, arrow: String, root: Root) -> Promise(value)\n"
-      },
+      "\n",
       "\n",
       body,
     ]),
@@ -143,7 +138,7 @@ fn arrow_function(
     render.ty(style, out),
     ") -> Step(out, err, state),\n",
     ") -> Step(out, err, state) {\n",
-    "  step.read(fn(ctx) { root_arrow(ctx, \"",
+    "  step.read(fn(ctx) { io.root_arrow(ctx, \"",
     service,
     "\", \"",
     arrow.name,

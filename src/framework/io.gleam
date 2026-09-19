@@ -21,3 +21,13 @@ pub fn reject(
   context: Context,
   stage: fn(Context) -> Promise(value),
 ) -> Promise(Nil)
+
+/// Read a relation from a Service root. The runtime supplies this capability
+/// on Context so generated reads do not depend on an app-owned FFI module.
+@external(javascript, "./io_ffi.mjs", "rootArrow")
+pub fn root_arrow(
+  context: Context,
+  service: String,
+  arrow: String,
+  root: root,
+) -> Promise(value)
