@@ -15,11 +15,16 @@ app=${1:?app dir}
 out=${2:?out dir}
 work=${3:?work dir}
 here=$(cd "$(dirname "$0")" && pwd)
+framework_source=$(cd "$here/../.." && pwd)
 
 rm -rf "$work"
 mkdir -p "$work"
 cp -r "$app/../framework" "$work/framework"
 cp -r "$app" "$work/app"
+# The generated root reads use the framework-owned rootArrow contract. Keep
+# the app copy isolated, but make the probe package use this worktree's FFI.
+cp "$framework_source/src/framework/io.gleam" "$work/framework/src/framework/io.gleam"
+cp "$framework_source/src/framework/io_ffi.mjs" "$work/framework/src/framework/io_ffi.mjs"
 rm -rf "$work/app/build"
 
 errors() {
