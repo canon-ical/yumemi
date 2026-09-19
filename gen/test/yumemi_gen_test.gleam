@@ -22,6 +22,16 @@ const fixture = "fixtures/article"
 /// 本便(gen-2)で置いた fixture ── 20 の写しではない。
 const flag_fixture = "fixtures/flag"
 
+const advance_all_fixture = "fixtures/flag_advance_all"
+
+const parent_delete_fixture = "fixtures/flag_parent"
+
+const no_key_fixture = "fixtures/flag_no_key"
+
+const root_warning_fixture = "fixtures/root_warning"
+
+const phase_collision_fixture = "fixtures/flag_phase_collision"
+
 pub fn main() {
   gleeunit.main()
 }
@@ -72,7 +82,8 @@ pub fn types_entities_services_counted_test() {
 
 pub fn lifecycle_read_from_edges_test() {
   let assert Some(article) = model.entity_by_name(app().entities, "Article")
-  article.phases |> should.equal(["Draft", "Published", "Retracted"])
+  article.phases
+  |> should.equal(["Draft", "Scheduled", "Published", "Retracted"])
   article.key_prop |> should.equal("slug")
   article.collection |> should.equal("articles")
 }
@@ -129,6 +140,7 @@ pub fn phase_and_arrival_columns_are_generated_test() {
   [
     "ArticlePhase",
     "ArticleEnteredDraft",
+    "ArticleEnteredScheduled",
     "ArticleEnteredPublished",
     "ArticleEnteredRetracted",
   ]
@@ -137,11 +149,17 @@ pub fn phase_and_arrival_columns_are_generated_test() {
 
 // ── 束3 読みの器 ────────────────────────────────────────────────────────────
 
-pub fn reads_are_emitted_per_service_with_named_queries_test() {
+pub fn reads_are_emitted_for_queries_and_root_arrows_test() {
   let paths = list.map(files(), fn(entry) { entry.0 })
-  // 名前付きクエリ値を持つのは article_list だけ。
+  // article_list は名前付きクエリ、他の4本は root Article の矢印。
   list.filter(paths, string.starts_with(_, "src/gen/reads/"))
-  |> should.equal(["src/gen/reads/article_list.gleam"])
+  |> should.equal([
+    "src/gen/reads/article_create.gleam",
+    "src/gen/reads/article_list.gleam",
+    "src/gen/reads/article_publish.gleam",
+    "src/gen/reads/article_read.gleam",
+    "src/gen/reads/article_retract.gleam",
+  ])
 }
 
 pub fn read_return_type_comes_from_the_query_value_test() {
@@ -159,11 +177,51 @@ pub fn param_labels_come_from_p_variants_test() {
   string.contains(found, "cursor cursor: Option(Cursor),") |> should.be_true
 }
 
+pub fn root_bundle_uses_allow_and_args_key_test() {
+  let read = text("src/gen/root/article_read.gleam")
+  string.contains(read, "Root(") |> should.be_true
+  string.contains(read, "article: article.Article,") |> should.be_true
+  string.contains(read, "phase: article.Phase,") |> should.be_true
+  string.contains(read, "at: Datetime,") |> should.be_true
+  string.contains(read, "seed: String,") |> should.be_true
+  string.contains(read, "pub type Actor {") |> should.be_true
+  string.contains(read, "Anonymous") |> should.be_true
+  string.contains(read, "AsStaff(staff.Staff)") |> should.be_true
+
+  let publish = text("src/gen/root/article_publish.gleam")
+  string.contains(publish, "logic: fn(staff.Staff, Root, args)")
+  |> should.be_true
+
+  let list_root = text("src/gen/root/article_list.gleam")
+  string.contains(list_root, "Root(at: Datetime, seed: String)")
+  |> should.be_true
+}
+
+pub fn root_relative_arrows_are_emitted_test() {
+  let found = text("src/gen/reads/article_read.gleam")
+  string.contains(found, "pub fn to_category(") |> should.be_true
+  string.contains(found, "then: fn(category.Category)") |> should.be_true
+  string.contains(found, "pub fn to_tags(") |> should.be_true
+  string.contains(found, "then: fn(List(tag.Tag))") |> should.be_true
+}
+
+pub fn root_relative_arrows_use_framework_io_ffi_test() {
+  let found = text("src/gen/reads/article_read.gleam")
+  string.contains(found, "import framework/io.{type Context, type Promise}")
+  |> should.be_true
+  string.contains(found, "io.root_arrow(ctx,") |> should.be_true
+  string.contains(found, "operations_ffi.mjs\", \"rootArrow\"")
+  |> should.be_false
+}
+
 // ── 束4 読みの SQL ──────────────────────────────────────────────────────────
 
 pub fn one_statement_per_named_query_test() {
   let paths = list.map(files(), fn(entry) { entry.0 })
-  list.filter(paths, string.starts_with(_, "gen/sql/queries/"))
+  list.filter(paths, fn(path) {
+    string.starts_with(path, "gen/sql/queries/")
+    && !string.starts_with(path, "gen/sql/queries/verb/")
+  })
   |> list.sort(string.compare)
   |> should.equal([
     "gen/sql/queries/article_list/counts.sql",
@@ -244,6 +302,263 @@ pub fn no_collision_after_the_split_test() {
   query.collisions(loaded) |> should.equal([])
 }
 
+// ── 束5 verb / phase ────────────────────────────────────────────────────────
+
+pub fn verb_bundle_covers_declared_actions_test() {
+  let paths = list.map(files(), fn(entry) { entry.0 })
+  [
+    "src/gen/verb.gleam",
+    "src/gen/phase.gleam",
+    "gen/sql/queries/verb/pin_article.sql",
+    "gen/sql/queries/verb/delete_article_by_title.sql",
+    "gen/sql/queries/verb/create_articles.sql",
+    "gen/sql/queries/verb/reorder_articles.sql",
+    "gen/sql/queries/verb/put_article.sql",
+  ]
+  |> list.each(fn(path) { list.contains(paths, path) |> should.be_true })
+  let found = text("src/gen/verb.gleam")
+  string.contains(found, "pub fn pin_article(") |> should.be_true
+  string.contains(found, "pub fn update_article_title(") |> should.be_false
+  string.contains(found, "pub fn advance_article(") |> should.be_true
+}
+
+pub fn put_does_not_update_keys_versions_or_phase_gated_fields_test() {
+  let found = text("gen/sql/queries/verb/put_article.sql")
+  string.contains(found, "body=EXCLUDED.body") |> should.be_true
+  string.contains(found, "WHERE target.version=$6") |> should.be_true
+  string.contains(found, "version=target.version+1") |> should.be_true
+  string.contains(found, "framework.require_rows(count(*),'conflict')")
+  |> should.be_true
+  string.contains(found, "slug=EXCLUDED.slug") |> should.be_false
+  string.contains(found, "title=EXCLUDED.title") |> should.be_false
+  string.contains(found, "version=EXCLUDED.version") |> should.be_false
+}
+
+pub fn reorder_uses_declared_order_column_and_returning_alias_test() {
+  let found = text("gen/sql/queries/verb/reorder_articles.sql")
+  string.contains(found, "AS new_order,ord") |> should.be_true
+  string.contains(found, "RETURNING e.slug,e.\"order\"")
+  |> should.be_true
+  string.contains(found, "FROM changed ORDER BY changed.\"order\",changed.slug")
+  |> should.be_true
+  let stage = text("gen/sql/queries/verb/reorder_articles_stage.sql")
+  string.contains(stage, "\"order\"=(-t.ord)::integer") |> should.be_true
+  string.contains(stage, "expected=actual") |> should.be_true
+  let verb = text("src/gen/verb.gleam")
+  string.contains(verb, "verb.compound(") |> should.be_true
+  string.contains(verb, "reorder_articles_stage") |> should.be_true
+}
+
+pub fn lifecycle_steps_are_entity_qualified_test() {
+  let phase = text_of(phase_collision_fixture, "src/gen/phase.gleam")
+  string.contains(phase, "pub type FanStep {\n  FanOnboardedToRetiring\n}")
+  |> should.be_true
+  string.contains(phase, "pub type MuseStep {\n  MuseOnboardedToRetiring\n}")
+  |> should.be_true
+  string.contains(phase, "\n  OnboardedToRetiring\n") |> should.be_false
+  string.contains(phase, "FanOnboardedToRetiring -> fan.Onboarded")
+  |> should.be_true
+  string.contains(phase, "MuseOnboardedToRetiring -> muse.Onboarded")
+  |> should.be_true
+
+  let verb = text_of(phase_collision_fixture, "src/gen/verb.gleam")
+  string.contains(
+    verb,
+    "pub fn advance_fan(\n  id: String,\n  step: FanStep,\n)",
+  )
+  |> should.be_true
+  string.contains(
+    verb,
+    "pub fn advance_muse(\n  id: String,\n  step: MuseStep,\n)",
+  )
+  |> should.be_true
+}
+
+pub fn advance_sql_has_no_service_argument_test() {
+  let found = text("gen/sql/queries/verb/advance_article.sql")
+  string.contains(found, "CASE WHEN $3='scheduled' AND $4='draft' THEN 0")
+  |> should.be_true
+  string.contains(found, "$5") |> should.be_true
+  string.contains(found, "$6") |> should.be_false
+  [
+    "article_create",
+    "article_publish",
+    "article_retract",
+    "article_list",
+  ]
+  |> list.each(fn(service) {
+    string.contains(found, service) |> should.be_false
+  })
+}
+
+pub fn verb_sql_uses_entity_only_headers_test() {
+  files()
+  |> list.filter(fn(entry) {
+    string.starts_with(entry.0, "gen/sql/queries/verb/")
+  })
+  |> list.each(fn(entry) {
+    string.starts_with(entry.1, "-- GENERATED from entity.")
+    |> should.be_true
+    string.contains(entry.1, "service.")
+    |> should.be_false
+  })
+}
+
+pub fn composite_key_is_present_in_signature_where_and_returning_test() {
+  let update =
+    text_of(flag_fixture, "gen/sql/queries/verb/update_chunk_text.sql")
+  let delete = text_of(flag_fixture, "gen/sql/queries/verb/delete_chunk.sql")
+  string.contains(update, "WHERE a=$1 AND b=$2 AND c=$3")
+  |> should.be_true
+  string.contains(update, "RETURNING a,b,c") |> should.be_true
+  string.contains(delete, "WHERE a=$1 AND b=$2 AND c=$3")
+  |> should.be_true
+  string.contains(delete, "RETURNING a,b,c") |> should.be_true
+  let verb = text_of(flag_fixture, "src/gen/verb.gleam")
+  string.contains(
+    verb,
+    "pub fn update_chunk_text(\n  a: Int,\n  b: Int,\n  c: Int,",
+  )
+  |> should.be_true
+}
+
+pub fn draft_keeps_input_keys_and_create_sql_arguments_test() {
+  let chunk = text_of(flag_fixture, "src/gen/draft/chunk.gleam")
+  string.contains(chunk, "ChunkDraft(\n    a: Int,\n    b: Int,\n    c: Int,")
+  |> should.be_true
+  let create = text_of(flag_fixture, "gen/sql/queries/verb/create_chunk.sql")
+  string.contains(
+    create,
+    "INSERT INTO app.chunk(a,b,c,text)\nVALUES($1,$2,$3,$4)",
+  )
+  |> should.be_true
+
+  let article = text("src/gen/draft/article.gleam")
+  string.contains(article, "ArticleDraft(\n    slug: Slug,") |> should.be_true
+  let article_create = text("gen/sql/queries/verb/create_article.sql")
+  string.contains(
+    article_create,
+    "INSERT INTO app.article(slug,title,body,version,\"order\",category_id)",
+  )
+  |> should.be_true
+}
+
+pub fn auto_key_is_excluded_only_by_explicit_declaration_test() {
+  let draft = text_of(flag_fixture, "src/gen/draft/widget.gleam")
+  string.contains(draft, "WidgetDraft(\n    name: WidgetName,")
+  |> should.be_true
+  string.contains(draft, "WidgetDraft(\n    id: WidgetId") |> should.be_false
+  let created = text_of(flag_fixture, "gen/sql/queries/verb/create_widget.sql")
+  string.contains(
+    created,
+    "INSERT INTO app.widget(name,place,visible,\"order\")",
+  )
+  |> should.be_true
+}
+
+fn reader_error(app_dir: String) -> reader.Error {
+  let assert Ok(units) = source.load(app_dir)
+  let assert Error(error) = reader.read(units)
+  error
+}
+
+pub fn advance_all_is_exit_five_with_reason_test() {
+  let error = reader_error(advance_all_fixture)
+  case error {
+    reader.Vocabulary(where: where, detail: detail) -> {
+      where |> should.equal("entity/bulk")
+      stop.code(stop.Vocabulary) |> should.equal(5)
+      string.contains(detail, "System Service") |> should.be_true
+    }
+    _ -> should.fail()
+  }
+}
+
+pub fn delete_where_parent_is_exit_four_test() {
+  let error = reader_error(parent_delete_fixture)
+  case error {
+    reader.Unsupported(where: where, detail: detail) -> {
+      where |> should.equal("entity/child")
+      stop.code(stop.Conflict) |> should.equal(4)
+      string.contains(detail, "親の列") |> should.be_true
+    }
+    _ -> should.fail()
+  }
+}
+
+pub fn no_key_entity_keeps_create_only_test() {
+  let verb = text_of(no_key_fixture, "src/gen/verb.gleam")
+  string.contains(verb, "pub fn create_no_key(") |> should.be_true
+  string.contains(verb, "pub fn update_no_key_") |> should.be_false
+  string.contains(verb, "pub fn delete_no_key") |> should.be_false
+  string.contains(verb, "pub fn advance_no_key") |> should.be_false
+
+  let create = text_of(no_key_fixture, "gen/sql/queries/verb/create_no_key.sql")
+  string.contains(create, "INSERT INTO app.no_key") |> should.be_true
+  string.contains(create, "RETURNING name,value")
+  |> should.be_true
+}
+
+pub fn no_key_generation_writes_bundles_and_reports_entity_test() {
+  let paths = list.map(files_of(no_key_fixture), fn(entry) { entry.0 })
+  [
+    "src/gen/types/no_key_name.gleam",
+    "src/gen/query.gleam",
+    "src/gen/query/from.gleam",
+    "src/gen/query/field.gleam",
+    "src/gen/phase.gleam",
+    "src/gen/verb.gleam",
+    "gen/sql/queries/verb/create_no_key.sql",
+    "src/gen/root/path_only_lookup.gleam",
+    "_diagnostics.txt",
+  ]
+  |> list.each(fn(path) { list.contains(paths, path) |> should.be_true })
+
+  let notes = notes_of(no_key_fixture)
+  list.length(notes) |> should.equal(2)
+  stop.worst(notes) |> should.equal(3)
+  notes
+  |> list.any(fn(note) {
+    note.class == stop.Missing
+    && string.contains(note.text, "entity/no_key")
+    && string.contains(note.text, "key")
+  })
+  |> should.be_true
+}
+
+pub fn path_key_is_used_for_keyed_verbs_test() {
+  let verb = text_of(no_key_fixture, "src/gen/verb.gleam")
+  string.contains(verb, "pub fn update_path_only_value(") |> should.be_true
+  string.contains(verb, "pub fn delete_path_only(") |> should.be_true
+  notes_of(no_key_fixture)
+  |> list.any(fn(note) {
+    string.contains(note.text, "path_only")
+    && string.contains(note.text, "key 関数が無い")
+  })
+  |> should.be_false
+}
+
+pub fn path_key_is_used_for_root_lookup_test() {
+  let found = text_of(no_key_fixture, "src/gen/root/path_only_lookup.gleam")
+  string.contains(found, "path_only: path_only.PathOnly") |> should.be_true
+  string.contains(found, "logic: fn(path_only.PathOnly, Root, args)")
+  |> should.be_true
+}
+
+pub fn root_module_mismatch_is_a_nonblocking_warning_test() {
+  let paths = list.map(files_of(root_warning_fixture), fn(entry) { entry.0 })
+  list.contains(paths, "src/gen/root/store_check.gleam") |> should.be_true
+  let found = text_of(root_warning_fixture, "src/gen/root/store_check.gleam")
+  string.contains(found, "widget: widget.Widget") |> should.be_true
+  let notes = notes_of(root_warning_fixture)
+  list.length(notes) |> should.equal(1)
+  let assert [note] = notes
+  note.class |> should.equal(stop.Warning)
+  stop.worst(notes) |> should.equal(0)
+  string.contains(note.text, "store_check") |> should.be_true
+  string.contains(note.text, "widget") |> should.be_true
+}
+
 // ── header の入力ハッシュ(20 の規約①、柏木 P2-5) ────────────────────────────
 
 pub fn every_header_carries_the_input_hash_test() {
@@ -318,24 +633,30 @@ pub fn first_one_returns_option_and_agg_returns_option_test() {
   string.contains(found, "fn(Option(Int))") |> should.be_true
 }
 
-// ── 出力が不整合なら 0 で終わらない(柏木 P2-2) ──────────────────────────────
+// ── 向きの混じった keyset は SQL を出して停止しない(G1) ────────────────
 
-pub fn mixed_direction_keyset_is_reported_not_silent_test() {
+pub fn mixed_direction_keyset_is_generated_test() {
   let paths = list.map(files_of(flag_fixture), fn(entry) { entry.0 })
-  // reads は出るが SQL は出ない ── この不整合を黙って 0 で終わらせない。
+  // mixed order でも SQL と reads が両方出る。
   list.contains(paths, "src/gen/reads/widget_page.gleam") |> should.be_true
   list.contains(paths, "gen/sql/queries/widget_page/paged.sql")
-  |> should.be_false
-  list.contains(paths, "_diagnostics.txt") |> should.be_true
+  |> should.be_true
+  list.contains(paths, "_diagnostics.txt") |> should.be_false
+  let found = text_of(flag_fixture, "gen/sql/queries/widget_page/paged.sql")
+  string.contains(
+    found,
+    "($3 IS NOT NULL AND (w.place IS NULL OR (w.place IS NOT NULL AND w.place>$3::integer)))",
+  )
+  |> should.be_true
+  string.contains(found, "COALESCE(w.place,2147483647)") |> should.be_false
+  string.contains(found, "IS NOT DISTINCT FROM") |> should.be_true
+  string.contains(found, "w.name<$4::text") |> should.be_true
 }
 
-pub fn the_exit_code_comes_from_the_worst_note_test() {
+pub fn mixed_direction_keyset_has_no_generator_note_test() {
   let notes = notes_of(flag_fixture)
-  list.length(notes) |> should.equal(1)
-  stop.worst(notes) |> should.equal(1)
-  let assert [note] = notes
-  note.class |> should.equal(stop.NotImplemented)
-  string.contains(note.text, "widget_page/paged") |> should.be_true
+  notes |> should.equal([])
+  stop.worst(notes) |> should.equal(0)
 }
 
 pub fn a_clean_app_has_no_notes_test() {

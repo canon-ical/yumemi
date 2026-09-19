@@ -2,6 +2,7 @@
 
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import yumemi_gen/naming
 
 /// 値型(types.gleam の `pub const <name>: Spec`)。
 pub type Backing {
@@ -30,7 +31,18 @@ pub fn backing_of(spec: String) -> Backing {
 
 /// 型の参照。module は import の道(`gen/types/title` など)。
 pub type TypeRef {
-  TypeRef(module: Option(String), name: String)
+  TypeRef(
+    module: Option(String),
+    name: String,
+    /// `Sealed(String, StaffKey)` のような型引数。Property でも落とさない。
+    parameters: List(TypeShape),
+  )
+}
+
+/// ★ の型を root の鍵照合に使う形。module は import 解決後の道。
+pub type TypeShape {
+  NamedShape(module: Option(String), name: String, parameters: List(TypeShape))
+  TupleShape(List(TypeShape))
 }
 
 pub type RelKind {
@@ -57,6 +69,29 @@ pub type Prop {
     repeated: Bool,
     kind: PropKind,
   )
+}
+
+/// Entity の `framework/verbs` 宣言を、生成器が検証した形で保持する。
+pub type VerbRule {
+  UpdateRule(name: String, fields: List(String), at: VerbGate)
+  AdvanceRule(bump: VerbBump)
+  DeleteWhereRule(field: String)
+  CreateManyRule
+  AdvanceAllRule
+}
+
+pub type VerbGate {
+  AnyPhase
+  Only(List(String))
+}
+
+pub type VerbBump {
+  Always
+  BumpUnless(from: String, to: String)
+}
+
+pub type OrderedBy {
+  OrderedBy(field: String, within: String)
 }
 
 /// 列 1本。Field の variant 1つと SQL の 1列が同じものを指す。
@@ -99,9 +134,27 @@ pub type Entity {
     key_prop: String,
     /// key の列名
     key_column: String,
+    /// key 関数が返す Property の全て。複合 key を先頭列へ潰さない。
+    key_props: List(String),
+    /// key の列の全て。`key_props` と同じ順序。
+    key_columns: List(String),
+    /// key / path_key の戻り型。Service Args の照合に使う。
+    key_type: Option(TypeShape),
+    /// key が別にある Entity の path_key 戻り型。root はどちらも受ける。
+    path_key_type: Option(TypeShape),
     /// 入口での集合名(★ の `collection`)
     collection: String,
     subject: Bool,
+    /// `Phase` の遷移辺。無ければ空。
+    edges: List(#(String, String)),
+    /// Entity に宣言された追加の verb 規則。
+    verbs: List(VerbRule),
+    /// reorder の宣言。無ければ None。
+    ordered_by: Option(OrderedBy),
+    /// put の鍵。無ければ空。
+    upsert_key: List(String),
+    /// create 時に実行側/DB が自動採番する key Property。明示が無ければ空。
+    auto_key: List(String),
   )
 }
 
@@ -137,8 +190,38 @@ pub fn prop_by_name(entity: Entity, name: String) -> Option(Prop) {
   }
 }
 
+pub fn field_for_prop(entity: Entity, name: String) -> Option(FieldDef) {
+  let prefix = entity.name <> naming.pascal(name)
+  case list.find(entity.fields, fn(field) { field.name == prefix }) {
+    Ok(field) -> Some(field)
+    Error(_) -> None
+  }
+}
+
 pub fn has_lifecycle(entity: Entity) -> Bool {
   entity.phases != []
+}
+
+pub fn has_key(entity: Entity) -> Bool {
+  entity.key_props != []
+}
+
+pub fn has_transitions(entity: Entity) -> Bool {
+  entity.edges != []
+}
+
+pub fn advance_bump(entity: Entity) -> VerbBump {
+  case
+    list.find(entity.verbs, fn(rule) {
+      case rule {
+        AdvanceRule(..) -> True
+        _ -> False
+      }
+    })
+  {
+    Ok(AdvanceRule(bump)) -> bump
+    _ -> Always
+  }
 }
 
 /// 読みの語彙。構成子は framework/query.gleam と1対1。
@@ -224,8 +307,27 @@ pub type NamedQuery {
   NamedQuery(name: String, select: Select)
 }
 
+pub type Arg {
+  Arg(name: String, type_: TypeShape)
+}
+
+/// allow の `who`。Entity は Service の第一引数へ写す主体。
+pub type Subject {
+  SubjectEntity(module: String, type_name: String)
+  SubjectAnonymous
+  SubjectParty
+  SubjectSystem
+}
+
 pub type Service {
-  Service(module: String, params: List(String), queries: List(NamedQuery))
+  Service(
+    module: String,
+    params: List(String),
+    queries: List(NamedQuery),
+    args: List(Arg),
+    allow_module: Option(String),
+    subjects: List(Subject),
+  )
 }
 
 /// 矢印。関係 Property 1つにつき1本。

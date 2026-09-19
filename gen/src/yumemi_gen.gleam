@@ -1,8 +1,8 @@
 //// yumemi の生成器。`gleam run -m yumemi_gen -- <app dir> <out dir>`
 ////
-//// 出すのは4束だけ ── `src/gen/types/*`、`src/gen/query.gleam` と `src/gen/query/{from,field}.gleam`、
-//// `src/gen/reads/*`、`gen/sql/queries/<service>/<name>.sql`(読み)。
-//// verb / root / entry / migration は出さない。
+//// 出すのは生成束 ── `src/gen/types/*`、`src/gen/query.gleam` と
+//// `src/gen/query/{from,field}.gleam`、`src/gen/reads/*`、`src/gen/root/*`、
+//// `gen/sql/queries/<service>/<name>.sql`(読み)、verb / phase。
 ////
 //// **出力が揃わなかったら 0 で終わらない。**理由は 20 の exit code 表で分類し(`stop`)、
 //// stderr と `_diagnostics.txt` の両方に同じ1行で出す。ファイル自体は書いてから止まる
@@ -15,11 +15,15 @@ import gleam/list
 import gleam/result
 import gleam/string
 import simplifile
+import yumemi_gen/emit/draft
 import yumemi_gen/emit/hash
+import yumemi_gen/emit/phase
 import yumemi_gen/emit/query
 import yumemi_gen/emit/reads
+import yumemi_gen/emit/root
 import yumemi_gen/emit/sql
 import yumemi_gen/emit/types
+import yumemi_gen/emit/verb
 import yumemi_gen/reader
 import yumemi_gen/source
 import yumemi_gen/stop.{type Note, Note}
@@ -54,7 +58,7 @@ pub fn main() {
 @external(javascript, "./yumemi_gen_ffi.mjs", "halt")
 fn halt(code: Int) -> Nil
 
-/// 4束と、止まる理由。理由が1つでもあれば呼び手は非 0 で終わる。
+/// 生成束と、止まる理由。理由が1つでもあれば呼び手は非 0 で終わる。
 pub fn generate(
   app_dir: String,
 ) -> Result(#(List(types.File), List(Note)), Note) {
@@ -73,13 +77,23 @@ pub fn generate(
   let hashes = hash.of(units)
   let notes =
     list.append(
-      list.map(query.collisions(app), fn(entry) {
-        let #(module, name) = entry
-        Note(
-          class: stop.Conflict,
-          text: "名前の衝突 " <> module <> ": " <> name <> "(構成子は module ごとに1つの名前空間)",
-        )
-      }),
+      list.append(
+        reader.missing_key_notes(units),
+        list.append(
+          list.map(query.collisions(app), fn(entry) {
+            let #(module, name) = entry
+            Note(
+              class: stop.Conflict,
+              text: "名前の衝突 "
+                <> module
+                <> ": "
+                <> name
+                <> "(構成子は module ごとに1つの名前空間)",
+            )
+          }),
+          root.notes(app),
+        ),
+      ),
       sql.notes(app, hashes),
     )
   let diagnostics = case notes {
@@ -97,9 +111,14 @@ pub fn generate(
   Ok(#(
     list.flatten([
       types.emit(app.value_types, hashes.types),
+      draft.emit(app, hashes),
       query.emit(app, hashes.entities),
       reads.emit(app, hashes),
       sql.emit(app, hashes),
+      phase.emit(app, hashes.entities),
+      verb.emit(app, hashes),
+      verb.sql(app, hashes),
+      root.emit(app, hashes),
       diagnostics,
     ]),
     notes,
@@ -116,6 +135,10 @@ fn read_note(error: reader.Error) -> Note {
       Note(class: stop.Missing, text: module <> ": Entity のレコード型が読めない")
     reader.Unsupported(where: where, detail: detail) ->
       Note(class: stop.Conflict, text: where <> ": " <> detail)
+    reader.Vocabulary(where: where, detail: detail) ->
+      Note(class: stop.Vocabulary, text: where <> ": " <> detail)
+    reader.Internal(where: where, detail: detail) ->
+      Note(class: stop.NotImplemented, text: where <> ": " <> detail)
   }
 }
 

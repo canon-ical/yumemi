@@ -9,7 +9,8 @@ import yumemi_gen/emit/typing.{type Ty, TyApp, TyRef, TyTuple}
 
 pub type Style {
   /// 修飾して綴る module の道(`entity/muse` など)。
-  Style(qualified: List(String))
+  /// alias は module path ごとの衝突しない綴り。
+  Style(qualified: List(String), aliases: List(#(String, String)))
 }
 
 fn last_segment(path: String) -> String {
@@ -19,12 +20,19 @@ fn last_segment(path: String) -> String {
   }
 }
 
+fn alias(style: Style, path: String) -> String {
+  case list.key_find(style.aliases, path) {
+    Ok(name) -> name
+    Error(_) -> last_segment(path)
+  }
+}
+
 pub fn ty(style: Style, value: Ty) -> String {
   case value {
     TyRef(module: None, name: name) -> name
     TyRef(module: Some(path), name: name) ->
       case list.contains(style.qualified, path) {
-        True -> last_segment(path) <> "." <> name
+        True -> alias(style, path) <> "." <> name
         False -> name
       }
     TyApp(head: head, args: args) ->
@@ -55,14 +63,18 @@ pub fn imports(
   |> list.sort(fn(left, right) { string.compare(left.0, right.0) })
   |> list.map(fn(entry) {
     let #(path, names) = entry
-    case list.sort(list.unique(names), string.compare) {
-      [] -> "import " <> path
-      sorted ->
-        "import "
-        <> path
-        <> ".{"
-        <> string.join(list.map(sorted, fn(name) { "type " <> name }), ", ")
-        <> "}"
+    case list.contains(style.qualified, path) {
+      True -> "import " <> path <> " as " <> alias(style, path)
+      False ->
+        case list.sort(list.unique(names), string.compare) {
+          [] -> "import " <> path
+          sorted ->
+            "import "
+            <> path
+            <> ".{"
+            <> string.join(list.map(sorted, fn(name) { "type " <> name }), ", ")
+            <> "}"
+        }
     }
   })
   |> string.join("\n")

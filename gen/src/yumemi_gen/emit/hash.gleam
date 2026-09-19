@@ -18,6 +18,8 @@ pub type Hashes {
   Hashes(
     types: String,
     entities: String,
+    /// Entity module 名 -> その Entity ファイルだけのハッシュ
+    entity_files: List(#(String, String)),
     /// Service module 名 -> ハッシュ
     services: List(#(String, String)),
   )
@@ -31,6 +33,8 @@ pub fn of(units: List(Unit)) -> Hashes {
   Hashes(
     types: over(type_units),
     entities: over(entity_units),
+    entity_files: entity_units
+      |> list.map(fn(unit) { #(last_segment(unit.path), over([unit])) }),
     services: units
       |> list.filter(fn(unit) { string.starts_with(unit.path, "service/") })
       |> list.map(fn(unit) { #(last_segment(unit.path), over([unit, ..base])) }),
@@ -40,6 +44,13 @@ pub fn of(units: List(Unit)) -> Hashes {
 /// Service 1つを決める入力のハッシュ。無い Service は Entity の分で代用する。
 pub fn service(hashes: Hashes, module: String) -> String {
   case list.key_find(hashes.services, module) {
+    Ok(value) -> value
+    Error(_) -> hashes.entities
+  }
+}
+
+pub fn entity(hashes: Hashes, module: String) -> String {
+  case list.key_find(hashes.entity_files, module) {
     Ok(value) -> value
     Error(_) -> hashes.entities
   }

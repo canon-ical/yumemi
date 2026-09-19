@@ -21,3 +21,13 @@ pub fn reject(
   context: Context,
   stage: fn(Context) -> Promise(value),
 ) -> Promise(Nil)
+
+/// Read a relation from a Service root. The framework installs this capability
+/// on Context and resolves the decoded relation on the root value.
+@external(javascript, "./io_ffi.mjs", "rootArrow")
+pub fn root_arrow(
+  context: Context,
+  service: String,
+  arrow: String,
+  root: root,
+) -> Promise(value)

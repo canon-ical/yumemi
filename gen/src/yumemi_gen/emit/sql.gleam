@@ -732,7 +732,8 @@ fn direction(
   }
 }
 
-/// keyset。`order` が空の Paged は止める(20:787)。向きが混じるものも止める。
+/// keyset。`order` が空の Paged は止める(20:787)。
+/// 向きが混じる場合は、列ごとの比較を OR でつなぐ lexicographic keyset にする。
 fn keyset_clause(
   app: App,
   scope: Scope,
@@ -755,61 +756,172 @@ fn keyset_clause(
           )
           let ways = list.unique(list.map(directions, fn(pair) { pair.1 }))
           case ways {
-            [single] -> {
+            [single] -> uniform_keyset(app, scope, directions, from, single)
+            _ -> {
               use columns <- try(
                 list.try_map(directions, fn(pair) { column(app, scope, pair.0) }),
               )
-              let alias = option.unwrap(alias_of(scope, from.name), "t")
-              let key_reference = alias <> "." <> quoted(from.key_column)
-              let key_kind = case
-                list.find(from.fields, fn(field) {
-                  field.column == from.key_column
-                })
-              {
-                Ok(field) -> sql_type(app, field.value)
-                Error(_) -> "text"
-              }
+              let key_field = from.name <> naming.pascal(from.key_prop)
+              use key <- try(column(app, scope, key_field))
+              let terms =
+                list.append(
+                  list.map2(columns, directions, fn(found, pair) {
+                    #(found, pair.1)
+                  }),
+                  [#(key, last_direction(directions))],
+                )
               let first = scope.next_param
-              let count = list.length(columns) + 1
               let places =
-                range(first, count)
+                range(first + 1, list.length(terms))
                 |> list.map(fn(index) { "$" <> int.to_string(index) })
-              let places = case list.reverse(places) {
-                [last, ..rest] ->
-                  list.reverse([last <> cast_of(key_kind), ..rest])
-                [] -> []
-              }
-              let head_cast = case columns {
-                [head, ..] -> cast_of(head.kind)
-                [] -> ""
-              }
-              let operator = case single {
-                "DESC" -> "<"
-                _ -> ">"
-              }
+              let comparisons =
+                list.map2(terms, places, fn(term, place) {
+                  let #(found, way) = term
+                  cursor_compare(found, way, place)
+                })
+              let branches = keyset_branches(terms, places, comparisons, [])
               let text =
                 "($"
                 <> int.to_string(first)
-                <> head_cast
-                <> " IS NULL OR ("
-                <> string.join(
-                  list.append(list.map(columns, fn(found) { found.reference }), [
-                    key_reference,
-                  ]),
-                  ",",
-                )
+                <> "::boolean=false OR "
+                <> string.join(branches, " OR ")
                 <> ")"
-                <> operator
-                <> "("
-                <> string.join(places, ",")
-                <> "))"
-              Ok(#(Scope(..scope, next_param: first + count), [text]))
+              Ok(
+                #(Scope(..scope, next_param: first + list.length(terms) + 1), [
+                  text,
+                ]),
+              )
             }
-            _ -> Error(undone("向きの混じった order の keyset は未実装(行比較が成立しない)"))
           }
         }
       }
     _ -> Ok(#(scope, []))
+  }
+}
+
+fn uniform_keyset(
+  app: App,
+  scope: Scope,
+  directions: List(#(String, String)),
+  from: Entity,
+  way: String,
+) -> Result(#(Scope, List(String)), Reason) {
+  use columns <- try(
+    list.try_map(directions, fn(pair) { column(app, scope, pair.0) }),
+  )
+  let alias = option.unwrap(alias_of(scope, from.name), "t")
+  let key_reference = alias <> "." <> quoted(from.key_column)
+  let key_kind = case
+    list.find(from.fields, fn(field) { field.column == from.key_column })
+  {
+    Ok(field) -> sql_type(app, field.value)
+    Error(_) -> "text"
+  }
+  let first = scope.next_param
+  let count = list.length(columns) + 1
+  let places =
+    range(first, count)
+    |> list.map(fn(index) { "$" <> int.to_string(index) })
+  let places = case list.reverse(places) {
+    [last, ..rest] -> list.reverse([last <> cast_of(key_kind), ..rest])
+    [] -> []
+  }
+  let head_cast = case columns {
+    [head, ..] -> cast_of(head.kind)
+    [] -> ""
+  }
+  let operator = case way {
+    "DESC" -> "<"
+    _ -> ">"
+  }
+  let text =
+    "($"
+    <> int.to_string(first)
+    <> head_cast
+    <> " IS NULL OR ("
+    <> string.join(
+      list.append(list.map(columns, fn(found) { found.reference }), [
+        key_reference,
+      ]),
+      ",",
+    )
+    <> ")"
+    <> operator
+    <> "("
+    <> string.join(places, ",")
+    <> "))"
+  Ok(#(Scope(..scope, next_param: first + count), [text]))
+}
+
+fn keyset_branches(
+  terms: List(#(Column, String)),
+  places: List(String),
+  comparisons: List(String),
+  prefix: List(String),
+) -> List(String) {
+  case terms, places, comparisons {
+    [term, ..rest_terms], [place, ..rest_places], [comparison, ..rest] -> {
+      let branch = case prefix {
+        [] -> comparison
+        _ -> "(" <> string.join(prefix, " AND ") <> " AND " <> comparison <> ")"
+      }
+      let #(found, _) = term
+      let equal = found.reference <> " IS NOT DISTINCT FROM " <> place
+      [
+        branch,
+        ..keyset_branches(
+          rest_terms,
+          rest_places,
+          rest,
+          list.append(prefix, [equal]),
+        )
+      ]
+    }
+    _, _, _ -> []
+  }
+}
+
+fn last_direction(directions: List(#(String, String))) -> String {
+  case list.last(directions) {
+    Ok(pair) -> pair.1
+    Error(_) -> "ASC"
+  }
+}
+
+fn cursor_compare(found: Column, way: String, place: String) -> String {
+  let operator = case way {
+    "DESC" -> "<"
+    _ -> ">"
+  }
+  let right = place <> keyset_cast(found.kind)
+  case found.optional {
+    True ->
+      "("
+      <> place
+      <> " IS NOT NULL AND ("
+      <> found.reference
+      <> " IS NULL OR ("
+      <> found.reference
+      <> " IS NOT NULL AND "
+      <> found.reference
+      <> operator
+      <> right
+      <> ")))"
+    False -> found.reference <> operator <> right
+  }
+}
+
+fn keyset_cast(kind: String) -> String {
+  case kind {
+    "uuid" -> "::uuid"
+    "timestamptz" -> "::timestamptz"
+    "date" -> "::date"
+    "time" -> "::time"
+    "public.vector" -> "::public.vector"
+    "integer" -> "::integer"
+    "boolean" -> "::boolean"
+    "double precision" -> "::double precision"
+    _ -> "::text"
   }
 }
 

@@ -33,6 +33,27 @@ pub const int_ty = TyRef(None, "Int")
 
 pub const float_ty = TyRef(None, "Float")
 
+/// model の型参照を出力用の型木へ戻す。Property の型引数もここで保持する。
+pub fn type_ref(reference: model.TypeRef) -> Ty {
+  let head = TyRef(reference.module, reference.name)
+  apply(head, list.map(reference.parameters, type_shape))
+}
+
+fn type_shape(shape: model.TypeShape) -> Ty {
+  case shape {
+    model.NamedShape(module: module, name: name, parameters: parameters) ->
+      apply(TyRef(module, name), list.map(parameters, type_shape))
+    model.TupleShape(items) -> TyTuple(list.map(items, type_shape))
+  }
+}
+
+fn apply(head: Ty, args: List(Ty)) -> Ty {
+  case args {
+    [] -> head
+    _ -> TyApp(head, args)
+  }
+}
+
 pub fn datetime() -> Ty {
   TyRef(Some("framework/time"), "Datetime")
 }
@@ -71,8 +92,7 @@ pub fn field_base(app: App, field_name: String) -> Ty {
       case field.value {
         model.RelValue(target_module: target_module, target_type: target_type) ->
           key_of(TyRef(Some("entity/" <> target_module), target_type))
-        model.TypeValue(reference) ->
-          TyRef(module: reference.module, name: reference.name)
+        model.TypeValue(reference) -> type_ref(reference)
         model.PhaseValue(module) -> TyRef(Some("entity/" <> module), "Phase")
         model.DatetimeValue -> datetime()
       }
