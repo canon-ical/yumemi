@@ -15,6 +15,7 @@ import gleam/list
 import gleam/result
 import gleam/string
 import simplifile
+import yumemi_gen/emit/draft
 import yumemi_gen/emit/hash
 import yumemi_gen/emit/phase
 import yumemi_gen/emit/query
@@ -110,6 +111,7 @@ pub fn generate(
   Ok(#(
     list.flatten([
       types.emit(app.value_types, hashes.types),
+      draft.emit(app, hashes),
       query.emit(app, hashes.entities),
       reads.emit(app, hashes),
       sql.emit(app, hashes),

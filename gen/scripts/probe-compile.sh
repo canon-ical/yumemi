@@ -41,6 +41,13 @@ cp "$out"/src/gen/query/*.gleam "$work/app/src/gen/query/"
 cp "$out"/src/gen/reads/*.gleam "$work/app/src/gen/reads/"
 cp "$out"/src/gen/verb.gleam "$work/app/src/gen/verb.gleam"
 cp "$out"/src/gen/phase.gleam "$work/app/src/gen/phase.gleam"
+mkdir -p "$work/app/src/gen/draft"
+for draft in "$out"/src/gen/draft/*.gleam; do
+  name=$(basename "$draft")
+  if [ ! -e "$work/app/src/gen/draft/$name" ] || ! grep -q '^pub type .*Created' "$work/app/src/gen/draft/$name"; then
+    cp "$draft" "$work/app/src/gen/draft/$name"
+  fi
+done
 mkdir -p "$work/app/src/gen/root" "$work/app/gen/sql/queries/verb"
 cp "$out"/src/gen/root/*.gleam "$work/app/src/gen/root/"
 cp "$out"/gen/sql/queries/verb/*.sql "$work/app/gen/sql/queries/verb/"
