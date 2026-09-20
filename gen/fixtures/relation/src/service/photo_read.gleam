@@ -6,12 +6,15 @@ import entity/shelf
 import framework/effect.{type Effect, Read}
 import framework/step.{type Start, type Step}
 import gen/allow/photo as allow
+import gen/face.{type Face, Test}
 import gen/reads/photo_read as reads
 import gen/root/photo_read.{type Actor, type Root, type Service, Service}
 import gen/types/photo_id.{type PhotoId}
 import gleam/option.{type Option}
 
 pub const effect: Effect = Read
+
+pub const faces: List(Face) = [Test]
 
 pub type Args {
   Args(id: PhotoId)

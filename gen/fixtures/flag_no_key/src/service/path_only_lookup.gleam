@@ -2,9 +2,12 @@ import entity/path_only
 import framework/effect.{type Effect, Read}
 import framework/step.{type Start, type Step}
 import gen/allow/path_only as allow
+import gen/face.{type Face, Test}
 import gen/root/path_only_lookup.{type Root, type Service, Service}
 
 pub const effect: Effect = Read
+
+pub const faces: List(Face) = [Test]
 
 pub type Args {
   Args(path: String)

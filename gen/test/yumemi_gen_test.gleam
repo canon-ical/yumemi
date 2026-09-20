@@ -39,6 +39,18 @@ const relation_text_order_fixture = "fixtures/relation_text_order"
 
 const relation_option_order_fixture = "fixtures/relation_option_order"
 
+const entry_prefix_fixture = "fixtures/entry_prefix_validation"
+
+const faces_missing_entry_fixture = "fixtures/faces_missing_entry"
+
+const faces_empty_entries_fixture = "fixtures/faces_empty_entries"
+
+const faces_unknown_fixture = "fixtures/faces_unknown"
+
+const composite_root_route_fixture = "fixtures/composite_root_route"
+
+const sql_unsupported_fixture = "fixtures/sql_unsupported"
+
 pub fn main() {
   gleeunit.main()
 }
@@ -93,6 +105,116 @@ pub fn lifecycle_read_from_edges_test() {
   |> should.equal(["Draft", "Scheduled", "Published", "Retracted"])
   article.key_prop |> should.equal("slug")
   article.collection |> should.equal("articles")
+}
+
+pub fn article_http_route_table_has_seven_rows_test() {
+  let face = text("src/gen/face.gleam")
+  string.contains(face, "pub type Face {\n  Public\n  Admin\n}")
+  |> should.be_true
+  let http = text("src/gen/entry/http.gleam")
+  [
+    "Route(face: \"admin\", method: \"POST\", path: \"/api/admin/articles\", service: \"article_create\", path_keys: [], credential: Session),",
+    "Route(face: \"public\", method: \"GET\", path: \"/api/articles\", service: \"article_list\", path_keys: [], credential: Session),",
+    "Route(face: \"admin\", method: \"GET\", path: \"/api/admin/articles\", service: \"article_list\", path_keys: [], credential: Session),",
+    "Route(face: \"public\", method: \"GET\", path: \"/api/articles/{slug}\", service: \"article_read\", path_keys: [\"slug\"], credential: Session),",
+    "Route(face: \"admin\", method: \"GET\", path: \"/api/admin/articles/{slug}\", service: \"article_read\", path_keys: [\"slug\"], credential: Session),",
+    "Route(face: \"admin\", method: \"POST\", path: \"/api/admin/articles/{slug}/publish\", service: \"article_publish\", path_keys: [\"slug\"], credential: Session),",
+    "Route(face: \"admin\", method: \"POST\", path: \"/api/admin/articles/{slug}/retract\", service: \"article_retract\", path_keys: [\"slug\"], credential: Session),",
+  ]
+  |> list.each(fn(row) { string.contains(http, row) |> should.be_true })
+  http
+  |> string.split("\n")
+  |> list.filter(fn(line) {
+    string.starts_with(line, "  Route(face:")
+    && string.contains(line, "path: \"")
+  })
+  |> list.length
+  |> should.equal(7)
+}
+
+pub fn entry_prefix_is_required_named_and_one_word_test() {
+  let notes = notes_of(entry_prefix_fixture)
+  stop.worst(notes) |> should.equal(4)
+  list.length(notes) |> should.equal(3)
+  notes
+  |> list.any(fn(note) {
+    note.class == stop.Conflict
+    && string.contains(note.text, "entry.missing")
+    && string.contains(note.text, "prefix が無い")
+  })
+  |> should.be_true
+  notes
+  |> list.any(fn(note) {
+    string.contains(note.text, "entry.invalid")
+    && string.contains(note.text, "prefix が不正")
+  })
+  |> should.be_true
+  notes
+  |> list.any(fn(note) {
+    string.contains(note.text, "entry.spaced")
+    && string.contains(note.text, "prefix が不正")
+  })
+  |> should.be_true
+  notes
+  |> list.any(fn(note) { string.contains(note.text, "entry.valid") })
+  |> should.be_false
+}
+
+pub fn faces_is_required_without_entry_module_test() {
+  let notes = notes_of(faces_missing_entry_fixture)
+  stop.worst(notes) |> should.equal(4)
+  notes
+  |> list.any(fn(note) {
+    note.class == stop.Conflict
+    && string.contains(note.text, "service.example_read")
+    && string.contains(note.text, "faces const が無い")
+  })
+  |> should.be_true
+}
+
+pub fn faces_is_required_when_entries_is_empty_test() {
+  let notes = notes_of(faces_empty_entries_fixture)
+  stop.worst(notes) |> should.equal(4)
+  notes
+  |> list.any(fn(note) {
+    string.contains(note.text, "service.example_read")
+    && string.contains(note.text, "faces const が無い")
+  })
+  |> should.be_true
+}
+
+pub fn unknown_face_is_rejected_by_name_test() {
+  let notes = notes_of(faces_unknown_fixture)
+  stop.worst(notes) |> should.equal(4)
+  notes
+  |> list.any(fn(note) {
+    string.contains(note.text, "service.example_read")
+    && string.contains(note.text, "未知の面名: Missing")
+  })
+  |> should.be_true
+}
+
+pub fn composite_root_counts_each_key_component_in_route_test() {
+  let root =
+    text_of(composite_root_route_fixture, "src/gen/root/child_read.gleam")
+  string.contains(root, "parent: parent.Parent") |> should.be_true
+
+  let http = text_of(composite_root_route_fixture, "src/gen/entry/http.gleam")
+  string.contains(
+    http,
+    "Route(face: \"test\", method: \"GET\", path: \"/test/parents/{a}/{b}/children\", service: \"child_list\", path_keys: [\"a\", \"b\"], credential: Session),",
+  )
+  |> should.be_true
+  string.contains(http, "service: \"child_read\"") |> should.be_false
+
+  let notes = notes_of(composite_root_route_fixture)
+  stop.worst(notes) |> should.equal(4)
+  notes
+  |> list.any(fn(note) {
+    string.contains(note.text, "service.child_read face Test")
+    && string.contains(note.text, "パス変数が3個以上")
+  })
+  |> should.be_true
 }
 
 // ── 束1 Type の値 ───────────────────────────────────────────────────────────
@@ -303,6 +425,73 @@ pub fn one_statement_per_named_query_test() {
     "gen/sql/queries/article_list/counts.sql",
     "gen/sql/queries/article_list/items.sql",
   ])
+}
+
+pub fn relation_presence_and_with_become_sql_test() {
+  let related =
+    text_of(relation_fixture, "gen/sql/queries/photo_filter/related.sql")
+  string.contains(
+    related,
+    "WHERE EXISTS(\n"
+      <> "  SELECT 1 FROM app.album a\n"
+      <> "  WHERE a.id=p.album_id\n"
+      <> "    AND a.id=$1::uuid",
+  )
+  |> should.be_true
+  string.contains(
+    related,
+    "NOT EXISTS(\n"
+      <> "  SELECT 1 FROM app.shelf s\n"
+      <> "  WHERE s.id=p.shelf_id\n"
+      <> "    AND s.id=$2::uuid",
+  )
+  |> should.be_true
+
+  let with_photos =
+    text_of(relation_fixture, "gen/sql/queries/photo_filter/album_photos.sql")
+  string.contains(
+    with_photos,
+    "COALESCE((SELECT jsonb_agg(to_jsonb(p) ORDER BY p.\"order\",p.id)",
+  )
+  |> should.be_true
+  string.contains(with_photos, "FROM app.photo p\nWHERE p.album_id=a.id")
+  |> should.be_true
+  string.contains(with_photos, "),'[]'::jsonb) AS photos")
+  |> should.be_true
+}
+
+pub fn forward_with_stops_as_unimplemented_test() {
+  let notes = notes_of(sql_unsupported_fixture)
+  let assert Ok(note) =
+    list.find(notes, fn(note) {
+      string.contains(note.text, "article_list/items")
+    })
+  note.class |> should.equal(stop.NotImplemented)
+  stop.worst(notes) |> should.equal(1)
+  string.contains(note.text, "with の順方向は未対応: ArticleToCategory")
+  |> should.be_true
+  files_of(sql_unsupported_fixture)
+  |> list.any(fn(file) {
+    file.0 == "gen/sql/queries/article_list/items.sql"
+  })
+  |> should.be_false
+}
+
+pub fn multi_has_stops_as_unimplemented_test() {
+  let notes = notes_of(sql_unsupported_fixture)
+  let assert Ok(note) =
+    list.find(notes, fn(note) {
+      string.contains(note.text, "photo_filter/related")
+    })
+  note.class |> should.equal(stop.NotImplemented)
+  stop.worst(notes) |> should.equal(1)
+  string.contains(note.text, "Has / HasNone は Multi の矢印に未対応")
+  |> should.be_true
+  files_of(sql_unsupported_fixture)
+  |> list.any(fn(file) {
+    file.0 == "gen/sql/queries/photo_filter/related.sql"
+  })
+  |> should.be_false
 }
 
 /// gen-3b ── 矢印 1 本につき SQL 1 文(`gen/sql/queries/<service>/to_<prop>.sql`)。
@@ -887,4 +1076,6 @@ pub fn escalating_notes_win_over_generator_notes_test() {
   |> should.equal(4)
   stop.worst([stop.Note(class: stop.Irreversible, text: "x")])
   |> should.equal(6)
+  stop.worst([stop.Note(class: stop.NotImplemented, text: "x")])
+  |> should.equal(1)
 }

@@ -314,6 +314,44 @@ pub type Arg {
   Arg(name: String, type_: TypeShape)
 }
 
+/// `src/entry.gleam` の入口に宣言された認証媒体。
+pub type Credential {
+  SessionCredential
+  ApiKeyCredential
+}
+
+pub type Admit {
+  AnonymousAdmit
+  AuthenticatedAdmit
+}
+
+pub type EntryServices {
+  ReadOnlyServices
+  AllServices
+}
+
+/// 入口が受ける subject の集合。型名は entry.gleam の構成子名をそのまま保持する。
+pub type EntrySubjects {
+  AnyEntrySubject
+  NamedEntrySubjects(List(String))
+}
+
+pub type Entry {
+  Entry(
+    name: String,
+    prefix: String,
+    admit: Admit,
+    subject: EntrySubjects,
+    services: EntryServices,
+    credential: Credential,
+  )
+}
+
+pub type Effect {
+  ReadEffect
+  WriteEffect
+}
+
 /// allow の `who`。Entity は Service の第一引数へ写す主体。
 pub type Subject {
   SubjectEntity(module: String, type_name: String)
@@ -330,6 +368,9 @@ pub type Service {
     args: List(Arg),
     allow_module: Option(String),
     subjects: List(Subject),
+    effect: Effect,
+    faces: List(String),
+    faces_declared: Bool,
   )
 }
 
@@ -352,6 +393,7 @@ pub type App {
     entities: List(Entity),
     services: List(Service),
     arrows: List(Arrow),
+    entries: List(Entry),
   )
 }
 

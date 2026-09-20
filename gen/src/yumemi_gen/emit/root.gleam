@@ -56,15 +56,28 @@ pub fn root_for(app: App, service: Service) -> Option(Entity) {
 }
 
 fn key_matches(entity: Entity, service: Service) -> Bool {
+  let shapes =
+    list.append(
+      option_shapes(entity.key_type),
+      option_shapes(entity.path_key_type),
+    )
   list.any(service.args, fn(arg) {
-    case entity.key_type, entity.path_key_type {
-      Some(key_type), Some(path_key_type) ->
-        arg.type_ == key_type || arg.type_ == path_key_type
-      Some(key_type), None -> arg.type_ == key_type
-      None, Some(path_key_type) -> arg.type_ == path_key_type
-      None, None -> False
-    }
+    list.any(shapes, fn(shape) { arg.type_ == shape })
   })
+}
+
+fn option_shapes(shape: Option(model.TypeShape)) -> List(model.TypeShape) {
+  case shape {
+    None -> []
+    Some(value) -> flatten_shape(value)
+  }
+}
+
+fn flatten_shape(shape: model.TypeShape) -> List(model.TypeShape) {
+  case shape {
+    model.TupleShape(items) -> list.flat_map(items, flatten_shape)
+    _ -> [shape]
+  }
 }
 
 fn model_entity_by_module(

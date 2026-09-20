@@ -22,6 +22,8 @@ pub type Hashes {
     entity_files: List(#(String, String)),
     /// Service module 名 -> ハッシュ
     services: List(#(String, String)),
+    /// entry.gleam と全 Service 宣言。入口の route 表を決める入力。
+    entry: String,
   )
 }
 
@@ -38,6 +40,11 @@ pub fn of(units: List(Unit)) -> Hashes {
     services: units
       |> list.filter(fn(unit) { string.starts_with(unit.path, "service/") })
       |> list.map(fn(unit) { #(last_segment(unit.path), over([unit, ..base])) }),
+    entry: units
+      |> list.filter(fn(unit) {
+        unit.path == "entry" || string.starts_with(unit.path, "service/")
+      })
+      |> over,
   )
 }
 
@@ -54,6 +61,10 @@ pub fn entity(hashes: Hashes, module: String) -> String {
     Ok(value) -> value
     Error(_) -> hashes.entities
   }
+}
+
+pub fn entry(hashes: Hashes) -> String {
+  hashes.entry
 }
 
 fn over(units: List(Unit)) -> String {

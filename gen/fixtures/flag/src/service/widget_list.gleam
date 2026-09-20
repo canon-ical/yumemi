@@ -5,12 +5,15 @@
 import framework/effect.{type Effect, Read}
 import framework/step.{type Start, type Step}
 import gen/allow/widget as allow
+import gen/face.{type Face, Test}
 import gen/query as q
 import gen/reads/widget_list as reads
 import gen/root/widget_list.{type Actor, type Root, type Service, Service}
 import gleam/option.{type Option}
 
 pub const effect: Effect = Read
+
+pub const faces: List(Face) = [Test]
 
 pub type Args {
   Args(place: Option(Int))

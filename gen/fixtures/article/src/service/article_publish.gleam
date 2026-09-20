@@ -1,17 +1,21 @@
-// ★ src/service/article_publish.gleam
 //// Service publish ── 下書きを公開する。1 module 1 Service。
 //// オーナーが読むのはこのファイル。ここに書かれていない判断は実装に存在しない。
+
+// ★ src/service/article_publish.gleam
 import entity/article
 import entity/staff
 import framework/effect.{type Effect, Write}
 import framework/step.{type Start, type Step}
 import gen/allow/article as allow
+import gen/face.{type Face, Admin}
 import gen/phase
 import gen/root/article_publish.{type Root, type Service, Service}
 import gen/types/slug.{type Slug}
 import gen/verb
 
 pub const effect: Effect = Write
+
+pub const faces: List(Face) = [Admin]
 
 /// 引数。root Entity の識別子と同じ Type のフィールドが URL に乗る。
 pub type Args {
@@ -39,9 +43,10 @@ pub fn logic(
 ) -> Step(article.Article, Error, Start) {
   case it.phase {
     article.Draft -> {
-      use _ <- step.apply(
-        verb.advance_article(it.article.slug, phase.ArticleDraftToPublished),
-      )
+      use _ <- step.apply(verb.advance_article(
+        it.article.slug,
+        phase.ArticleDraftToPublished,
+      ))
       step.done(it.article)
     }
     article.Published -> step.fail(AlreadyPublished)

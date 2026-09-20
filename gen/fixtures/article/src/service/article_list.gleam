@@ -1,20 +1,24 @@
-// ★ src/service/article_list.gleam
 //// Service list ── 公開済みの記事を新しい順に返す。カテゴリ別の件数も一緒に返す。
 //// 集合レベル(パス変数0個)。読みは矢印を辿るだけでなくクエリ値でも書ける ──
 //// 集計は都度クエリで、導出 Entity もマテビューも作らない(2026-09-04 人見裁定)。
 //// クエリ値は名前付きの `pub const` として置き、生成器が名前ごとに型付きの read 関数を吐く。
+
+// ★ src/service/article_list.gleam
 import entity/article
 import entity/category
 import framework/effect.{type Effect, Read}
 import framework/page.{type Cursor, type Page, type PageSize}
 import framework/step.{type Start, type Step}
 import gen/allow/article as allow
+import gen/face.{type Face, Admin, Public}
 import gen/query as q
 import gen/reads/article_list as reads
 import gen/root/article_list.{type Actor, type Root, type Service, Service}
 import gleam/option.{type Option}
 
 pub const effect: Effect = Read
+
+pub const faces: List(Face) = [Public, Admin]
 
 pub type Args {
   Args(limit: PageSize, cursor: Option(Cursor))

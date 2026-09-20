@@ -16,6 +16,7 @@ import gleam/result
 import gleam/string
 import simplifile
 import yumemi_gen/emit/draft
+import yumemi_gen/emit/entry
 import yumemi_gen/emit/hash
 import yumemi_gen/emit/phase
 import yumemi_gen/emit/query
@@ -75,10 +76,12 @@ pub fn generate(
   )
   use app <- result.try(reader.read(units) |> result.map_error(read_note))
   let hashes = hash.of(units)
+  let entry_output = entry.emit(app, hashes)
   let notes =
     list.append(
+      reader.missing_key_notes(units),
       list.append(
-        reader.missing_key_notes(units),
+        reader.entry_notes(app),
         list.append(
           list.map(query.collisions(app), fn(entry) {
             let #(module, name) = entry
@@ -91,10 +94,12 @@ pub fn generate(
                 <> "(構成子は module ごとに1つの名前空間)",
             )
           }),
-          root.notes(app),
+          list.append(
+            list.append(root.notes(app), sql.notes(app, hashes)),
+            entry_output.notes,
+          ),
         ),
       ),
-      sql.notes(app, hashes),
     )
   let diagnostics = case notes {
     [] -> []
@@ -113,6 +118,7 @@ pub fn generate(
       types.emit(app.value_types, hashes.types),
       draft.emit(app, hashes),
       query.emit(app, hashes.entities),
+      entry_output.files,
       reads.emit(app, hashes),
       sql.emit(app, hashes),
       phase.emit(app, hashes.entities),
@@ -130,7 +136,11 @@ fn read_note(error: reader.Error) -> Note {
     reader.NoTypesModule ->
       Note(class: stop.Missing, text: "src/types.gleam が無い")
     reader.NoKeyFunction(module: module) ->
-      Note(class: stop.Missing, text: module <> ": key 関数が無い")
+      Note(
+        class: stop.Missing,
+        text: module
+          <> ": key 関数が無い ── ER の外の型だけの宣言は src/types.gleam へ(src/entity/** は Entity だけ)",
+      )
     reader.NoEntityType(module: module) ->
       Note(class: stop.Missing, text: module <> ": Entity のレコード型が読めない")
     reader.Unsupported(where: where, detail: detail) ->

@@ -311,10 +311,6 @@ fn statement(app: App, select: Select) -> Result(String, Reason) {
     model.entity_by_name(app.entities, select.from)
     |> option.to_result(clash("from の Entity が無い: " <> select.from)),
   )
-  use _ <- try(case select.with {
-    [] -> Ok(Nil)
-    _ -> Error(undone("with(関係先を添える)は未実装"))
-  })
   use _ <- try(case select.along {
     [] -> Ok(Nil)
     [model.LDistance] -> Ok(Nil)
@@ -460,7 +456,11 @@ fn select_list(
           })
         _ -> []
       }
-      Ok(string.join(list.flatten([[alias <> ".*"], joined, distance]), ","))
+      use attached <- try(with_clauses(app, scope, from, select.with))
+      Ok(string.join(
+        list.flatten([[alias <> ".*"], joined, attached, distance]),
+        ",",
+      ))
     }
     groups, aggs -> {
       use group_cols <- try(
@@ -590,8 +590,232 @@ fn where_one(
         Error(reason), _ -> Error(reason)
         _, Error(reason) -> Error(reason)
       }
-    model.CHas(..) | model.CHasNone(..) ->
-      Error(undone("Has / HasNone(関係の有無)は未実装"))
+    model.CHas(arrow, inner) -> has_clause(app, scope, arrow, inner, False)
+    model.CHasNone(arrow, inner) -> has_clause(app, scope, arrow, inner, True)
+  }
+}
+
+fn has_clause(
+  app: App,
+  scope: Scope,
+  arrow_name: String,
+  inner: List(model.Cond),
+  negate: Bool,
+) -> Result(#(Scope, String), Reason) {
+  use arrow <- try(
+    model.arrow_by_name(app.arrows, arrow_name)
+    |> option.to_result(clash("Has の矢印が無い: " <> arrow_name)),
+  )
+  use _ <- try(case arrow.kind {
+    model.Multi ->
+      Error(undone("Has / HasNone は Multi の矢印に未対応: " <> arrow_name))
+    model.Has | model.Held | model.Link -> Ok(Nil)
+  })
+  use target <- try(
+    model.entity_by_name(app.entities, arrow.target_entity)
+    |> option.to_result(clash("Has の関係先が無い: " <> arrow.target_entity)),
+  )
+  use owner <- try(
+    alias_of(scope, arrow.from_entity)
+    |> option.to_result(clash("Has の元が from / join に無い: " <> arrow.from_entity)),
+  )
+  let nested = assign(scope, target)
+  use target_alias <- try(
+    alias_of(nested, target.name)
+    |> option.to_result(undone("Has の関係先に別名が付かない: " <> target.name)),
+  )
+  use #(after, clauses) <- try(where_clauses(app, nested, inner))
+  let relation =
+    target_alias
+    <> "."
+    <> quoted(target.key_column)
+    <> "="
+    <> owner
+    <> "."
+    <> quoted(arrow.prop <> "_id")
+  let keyword = case negate {
+    True -> "NOT EXISTS"
+    False -> "EXISTS"
+  }
+  let predicates = list.append([relation], clauses)
+  Ok(#(
+    Scope(..scope, next_param: after.next_param),
+    keyword
+      <> "(\n  SELECT 1 FROM "
+      <> schema.app
+      <> "."
+      <> target.table
+      <> " "
+      <> target_alias
+      <> "\n  WHERE "
+      <> string.join(predicates, "\n    AND ")
+      <> "\n)",
+  ))
+}
+
+fn with_clauses(
+  app: App,
+  scope: Scope,
+  from: Entity,
+  names: List(String),
+) -> Result(List(String), Reason) {
+  use #(texts, _) <- try(
+    list.try_fold(names, #([], scope), fn(acc, name) {
+      let #(texts, current) = acc
+      use #(next, text) <- try(with_clause(app, current, from, name))
+      Ok(#(list.append(texts, [text]), next))
+    }),
+  )
+  Ok(texts)
+}
+
+fn with_clause(
+  app: App,
+  scope: Scope,
+  from: Entity,
+  name: String,
+) -> Result(#(Scope, String), Reason) {
+  use #(child, arrow) <- try(with_relation(app, from, name))
+  use owner <- try(
+    alias_of(scope, from.name)
+    |> option.to_result(clash("with の元が from / join に無い: " <> from.name)),
+  )
+  let nested = assign(scope, child)
+  use child_alias <- try(
+    alias_of(nested, child.name)
+    |> option.to_result(undone("with の関係先に別名が付かない: " <> child.name)),
+  )
+  let order = with_order(child, child_alias)
+  let output = with_output(from, name)
+  let relation =
+    child_alias
+    <> "."
+    <> quoted(arrow.prop <> "_id")
+    <> "="
+    <> owner
+    <> "."
+    <> quoted(from.key_column)
+  let aggregate = "jsonb_agg(to_jsonb(" <> child_alias <> ")" <> order <> ")"
+  Ok(#(
+    nested,
+    "COALESCE((SELECT "
+      <> aggregate
+      <> "\nFROM "
+      <> schema.app
+      <> "."
+      <> child.table
+      <> " "
+      <> child_alias
+      <> "\nWHERE "
+      <> relation
+      <> "),'[]'::jsonb) AS "
+      <> output,
+  ))
+}
+
+fn with_relation(
+  app: App,
+  from: Entity,
+  name: String,
+) -> Result(#(Entity, model.Arrow), Reason) {
+  case model.arrow_by_name(app.arrows, name) {
+    Some(arrow) ->
+      case arrow.from_entity == from.name {
+        True -> Error(undone("with の順方向は未対応: " <> name))
+        False -> reverse_with_relation(app, from, name)
+      }
+    None -> reverse_with_relation(app, from, name)
+  }
+}
+
+fn reverse_with_relation(
+  app: App,
+  from: Entity,
+  name: String,
+) -> Result(#(Entity, model.Arrow), Reason) {
+  let candidates =
+    list.filter(app.arrows, fn(arrow) { arrow.target_entity == from.name })
+  let named =
+    list.filter_map(candidates, fn(arrow) {
+      case model.entity_by_name(app.entities, arrow.from_entity) {
+        Some(child) ->
+          case with_name_matches(name, from, child) {
+            True -> Ok(#(child, arrow))
+            False -> Error(Nil)
+          }
+        None -> Error(Nil)
+      }
+    })
+  case named {
+    [one] -> supported_reverse_with(one, name)
+    [] ->
+      case candidates {
+        [one] ->
+          case model.entity_by_name(app.entities, one.from_entity) {
+            Some(child) -> supported_reverse_with(#(child, one), name)
+            None -> Error(clash("with の関係先が無い: " <> one.from_entity))
+          }
+        _ -> Error(clash("with の逆向きが無い: " <> name))
+      }
+    _ -> Error(clash("with の逆向きが複数: " <> name))
+  }
+}
+
+fn supported_reverse_with(
+  relation: #(Entity, model.Arrow),
+  name: String,
+) -> Result(#(Entity, model.Arrow), Reason) {
+  case relation.1.kind {
+    model.Held -> Ok(relation)
+    model.Has | model.Link | model.Multi ->
+      Error(undone("with の逆向きは Held の関係だけ対応: " <> name))
+  }
+}
+
+fn with_name_matches(name: String, from: Entity, child: Entity) -> Bool {
+  let prefix = from.name <> "To"
+  case string.starts_with(name, prefix) {
+    False -> False
+    True -> {
+      let requested = string.drop_start(name, string.length(prefix))
+      let short = case string.starts_with(child.name, from.name) {
+        True -> string.drop_start(child.name, string.length(from.name))
+        False -> child.name
+      }
+      requested == plural(short)
+    }
+  }
+}
+
+fn plural(word: String) -> String {
+  case string.ends_with(word, "y") {
+    True -> string.drop_end(word, 1) <> "ies"
+    False ->
+      case
+        string.ends_with(word, "s")
+        || string.ends_with(word, "x")
+        || string.ends_with(word, "ch")
+        || string.ends_with(word, "sh")
+      {
+        True -> word <> "es"
+        False -> word <> "s"
+      }
+  }
+}
+
+fn with_output(from: Entity, name: String) -> String {
+  let prefix = from.name <> "To"
+  case string.starts_with(name, prefix) {
+    True -> naming.snake(string.drop_start(name, string.length(prefix)))
+    False -> naming.snake(name)
+  }
+}
+
+fn with_order(child: Entity, alias: String) -> String {
+  let key = alias <> "." <> quoted(child.key_column)
+  case list.find(child.fields, fn(field) { field.column == "order" }) {
+    Ok(_) -> " ORDER BY " <> alias <> ".\"order\"," <> key
+    Error(_) -> " ORDER BY " <> key
   }
 }
 
