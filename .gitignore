@@ -4,3 +4,6 @@ build/
 erl_crash.dump
 gen/_out/
 gen/build/
+
+# hex publish の鍵(人見が置く、commit しない)
+.hex-token
