@@ -54,11 +54,40 @@ fn one(app: model.App, service: model.Service, input_hash: String) -> File {
         False, False -> []
       },
     )
+  // 矢印の read は関係値から鍵を取り出す(`er.of` / `er.of_held` / `er.of_multi`)。
+  // Option の関係は `option.map`、Multi は `list.map` で鍵の列にする。
+  let extra = case arrows {
+    [] -> extra
+    _ ->
+      list.append(extra, [
+        #("framework/er", []),
+        ..list.append(
+          case list.any(arrows, fn(arrow) { arrow_shape(arrow) == Optional }) {
+            True -> [#("gleam/option", [])]
+            False -> []
+          },
+          case list.any(arrows, fn(arrow) { arrow_shape(arrow) == Many }) {
+            True -> [#("gleam/list", [])]
+            False -> []
+          },
+        )
+      ])
+  }
   let imports = render.imports(style, all_types, extra)
+  let root_module = case root.root_for(app, service) {
+    Some(entity) -> entity.module
+    None -> ""
+  }
   let body =
     list.append(
       list.map(service.queries, function(app, style, _)),
-      list.map(arrows, arrow_function(app, style, service.module, _)),
+      list.map(arrows, arrow_function(
+        app,
+        style,
+        service.module,
+        root_module,
+        _,
+      )),
     )
     |> string.join("\n")
   File(
@@ -94,7 +123,10 @@ fn header(service: model.Service, input_hash: String) -> String {
   }
 }
 
-fn root_arrows(app: model.App, service: model.Service) -> List(model.Arrow) {
+pub fn root_arrows(
+  app: model.App,
+  service: model.Service,
+) -> List(model.Arrow) {
   case root.root_for(app, service) {
     None -> []
     Some(entity) ->
@@ -122,27 +154,131 @@ fn arrow_out(app: model.App, arrow: model.Arrow) -> typing.Ty {
   }
 }
 
+/// 矢印の出力の形。`arrow_out` と同じ規則で決める(Multi -> List、Link / Option -> Option)。
+pub type Shape {
+  One
+  Optional
+  Many
+}
+
+pub fn arrow_shape(arrow: model.Arrow) -> Shape {
+  case arrow.kind {
+    model.Multi -> Many
+    model.Link -> Optional
+    _ ->
+      case arrow.optional {
+        True -> Optional
+        False -> One
+      }
+  }
+}
+
+/// 生成 SQL の名。`gen/sql/queries/<service>/<query>.sql`、実行側の SQL 表の鍵は `<service>/<query>`。
+pub fn arrow_query(arrow: model.Arrow) -> String {
+  "to_" <> naming.snake(arrow.prop)
+}
+
+/// 関係値から鍵の文字列(の列)を取り出す式。root の欄は型付きで参照する ── 名前を実行時に推測しない。
+fn key_expression(root_module: String, arrow: model.Arrow) -> String {
+  let value = "it." <> root_module <> "." <> arrow.prop
+  let of = case arrow.kind {
+    model.Has -> "er.of"
+    model.Held -> "er.of_held"
+    _ -> "er.of"
+  }
+  case arrow_shape(arrow) {
+    One -> "er.to_string(" <> of <> "(" <> value <> "))"
+    Optional ->
+      case arrow.kind {
+        // Link(e) は Option(Key(e)) そのもの。
+        model.Link -> "option.map(" <> value <> ", er.to_string)"
+        _ ->
+          "option.map("
+          <> value
+          <> ", fn(held) { er.to_string("
+          <> of
+          <> "(held)) })"
+      }
+    Many -> "list.map(er.of_multi(" <> value <> "), er.to_string)"
+  }
+}
+
 fn arrow_function(
   app: model.App,
   style: Style,
   service: String,
+  root_module: String,
   arrow: model.Arrow,
 ) -> String {
   let out = arrow_out(app, arrow)
+  let target_module = case
+    model.entity_by_name(app.entities, arrow.target_entity)
+  {
+    Some(entity) -> entity.module
+    None -> naming.snake(arrow.target_entity)
+  }
+  let read = case arrow_shape(arrow) {
+    One -> "io.relation_one"
+    Optional -> "io.relation_option"
+    Many -> "io.relation_many"
+  }
+  let name = "to_" <> naming.snake(arrow.prop)
   string.concat([
-    "pub fn to_",
-    naming.snake(arrow.prop),
+    "/// 矢印 ",
+    arrow.name,
+    "(",
+    root_module,
+    ".",
+    arrow.prop,
+    " -> ",
+    target_module,
+    ")。関係先の取得と復号は Context の契約 `relation`。\n",
+    "const ",
+    name,
+    "_relation = io.Relation(\n",
+    "  service: \"",
+    service,
+    "\",\n",
+    "  query: \"",
+    arrow_query(arrow),
+    "\",\n",
+    "  arrow: \"",
+    arrow.name,
+    "\",\n",
+    "  from: \"",
+    root_module,
+    "\",\n",
+    "  prop: \"",
+    arrow.prop,
+    "\",\n",
+    "  target: \"",
+    target_module,
+    "\",\n",
+    ")\n\n",
+    "pub fn ",
+    name,
     "(\n",
     "  it: Root,\n",
     "  then: fn(",
     render.ty(style, out),
     ") -> Step(out, err, state),\n",
     ") -> Step(out, err, state) {\n",
-    "  step.read(fn(ctx) { io.root_arrow(ctx, \"",
-    service,
-    "\", \"",
-    arrow.name,
-    "\", it) }, then)\n",
+    "  step.read(\n",
+    "    fn(ctx) {\n",
+    "      ",
+    read,
+    "(\n",
+    "        ctx,\n",
+    "        ",
+    name,
+    "_relation,\n",
+    "        ",
+    key_expression(root_module, arrow),
+    ",\n",
+    "      )\n",
+    "    },\n",
+    "    then,\n",
+    "  )\n",
     "}\n",
   ])
 }
