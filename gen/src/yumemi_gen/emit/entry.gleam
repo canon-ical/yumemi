@@ -1,6 +1,7 @@
 //// 入口束 ── `src/gen/face.gleam` と `src/gen/entry/http.gleam`。
 //// Service × Face の route は entry の prefix と Entity / Args の型から導く。
 
+import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/order
@@ -9,8 +10,8 @@ import yumemi_gen/emit/hash
 import yumemi_gen/emit/root
 import yumemi_gen/emit/types.{type File, File}
 import yumemi_gen/model.{
-  type App, type Arg, type Effect, type Entity, type Entry, type Service,
-  type TypeShape,
+  type App, type Arg, type Collection, type Effect, type Entity, type Entry,
+  type Service, type TypeShape,
 }
 import yumemi_gen/stop
 
@@ -32,6 +33,17 @@ type Route {
 type RouteError {
   RouteError(text: String)
 }
+
+type Target {
+  EntityTarget(Entity)
+  CollectionTarget(Collection)
+}
+
+type Match {
+  Match(target: Target, suffix: String, word_count: Int)
+}
+
+const individual_verbs = ["read", "delete", "put"]
 
 pub fn emit(app: App, hashes: hash.Hashes) -> Output {
   case app.entries {
@@ -181,122 +193,245 @@ fn route_for(
   entry: Entry,
 ) -> Result(Route, RouteError) {
   let root_entity = root.root_for(app, service)
-  let #(target_entity, matched) = target_for(app, service)
-  case target_entity {
-    None -> Error(RouteError("対象 Entity が無い"))
-    Some(target) -> {
-      let verb = verb_for(service.module, target, matched)
+  case target_for(app, service) {
+    Error(error) -> Error(error)
+    Ok(#(target, suffix)) -> {
+      let verb = verb_for(service.module, suffix)
       case verb {
-        "" -> Error(RouteError("動詞が空なので route 無し"))
-        _ -> {
-          let root_args = case root_entity, target_entity {
-            Some(root), Some(target) if root.module != target.module ->
-              matching_args(root, service.args)
-            _, _ -> []
-          }
-          let available_args =
-            list.filter(service.args, fn(arg) {
-              !list.any(root_args, fn(root_arg) { root_arg.name == arg.name })
-            })
-          let target_args = matching_args(target, available_args)
-          let individual =
-            target_args != [] && verb != "create" && verb != "list"
-          case individual, list.length(target_args) {
-            True, count if count > 1 ->
+        "" -> Error(RouteError("動詞が空: " <> service.module))
+        _ ->
+          case nested_reserved_entity(app, target, verb) {
+            Some(entity) ->
               Error(RouteError(
-                "対象のパス変数が2個以上: "
-                <> string.join(
-                  list.map(target_args, fn(arg) { arg.name }),
-                  ", ",
-                ),
+                "動詞が Entity と予約動詞の入れ子: "
+                <> service.module
+                <> " -> "
+                <> verb
+                <> " ("
+                <> entity
+                <> ")",
               ))
-            _, _ -> {
-              let root_path = case root_entity, target_entity {
-                Some(root), Some(target) if root.module != target.module ->
-                  path_with_args(entry.prefix, root.collection, root_args)
-                _, _ -> entry.prefix
-              }
-              let target_path = append_segment(root_path, target.collection)
-              let path_count =
-                list.length(root_args)
-                + case individual {
-                  True -> 1
-                  False -> 0
-                }
-              case path_count >= 3 {
-                True -> Error(RouteError("パス変数が3個以上"))
-                False -> {
-                  let #(path, path_keys) = case individual {
-                    True -> {
-                      let assert [arg] = target_args
-                      #(
-                        append_variable(target_path, arg.name),
-                        names(root_args, [arg]),
+            None ->
+              case target {
+                CollectionTarget(_) ->
+                  case list.contains(individual_verbs, verb) {
+                    True ->
+                      Error(RouteError(
+                        "ER 外 collection に個体レベルの動詞: "
+                        <> service.module
+                        <> " ("
+                        <> verb
+                        <> ")",
+                      ))
+                    False ->
+                      route_for_target(
+                        service,
+                        entry,
+                        root_entity,
+                        target,
+                        verb,
                       )
-                    }
-                    False -> #(target_path, names(root_args, []))
                   }
-                  let method = method_for(service.effect, verb, individual)
-                  let final_path =
-                    suffix_for(path, service.effect, verb, individual)
-                  Ok(Route(
-                    face: entry.name,
-                    method: method,
-                    path: final_path,
-                    service: service.module,
-                    path_keys: path_keys,
-                    credential: credential_text(entry.credential),
-                  ))
-                }
+                _ -> route_for_target(service, entry, root_entity, target, verb)
               }
-            }
           }
+      }
+    }
+  }
+}
+
+fn route_for_target(
+  service: Service,
+  entry: Entry,
+  root_entity: Option(Entity),
+  target: Target,
+  verb: String,
+) -> Result(Route, RouteError) {
+  let root_args = case root_entity, target {
+    Some(root), EntityTarget(target) if root.module != target.module ->
+      matching_args(root, service.args)
+    Some(root), CollectionTarget(_) -> matching_args(root, service.args)
+    _, _ -> []
+  }
+  let available_args =
+    list.filter(service.args, fn(arg) {
+      !list.any(root_args, fn(root_arg) { root_arg.name == arg.name })
+    })
+  let target_args = case target {
+    EntityTarget(entity) -> matching_args(entity, available_args)
+    CollectionTarget(_) -> []
+  }
+  let individual = target_args != [] && verb != "create" && verb != "list"
+  case individual, list.length(target_args) {
+    True, count if count > 1 ->
+      Error(RouteError(
+        "対象のパス変数が2個以上: "
+        <> string.join(list.map(target_args, fn(arg) { arg.name }), ", "),
+      ))
+    _, _ -> {
+      let root_path = case root_entity, target {
+        Some(root), EntityTarget(target) if root.module != target.module ->
+          path_with_args(entry.prefix, root.collection, root_args)
+        Some(root), CollectionTarget(_) ->
+          path_with_args(entry.prefix, root.collection, root_args)
+        _, _ -> entry.prefix
+      }
+      let target_path = append_segment(root_path, target_collection(target))
+      let path_count =
+        list.length(root_args)
+        + case individual {
+          True -> 1
+          False -> 0
+        }
+      case path_count >= 3 {
+        True -> Error(RouteError("パス変数が3個以上"))
+        False -> {
+          let #(path, path_keys) = case individual {
+            True -> {
+              let assert [arg] = target_args
+              #(append_variable(target_path, arg.name), names(root_args, [arg]))
+            }
+            False -> #(target_path, names(root_args, []))
+          }
+          let method = method_for(service.effect, verb, individual)
+          let final_path = suffix_for(path, service.effect, verb, individual)
+          Ok(Route(
+            face: entry.name,
+            method: method,
+            path: final_path,
+            service: service.module,
+            path_keys: path_keys,
+            credential: credential_text(entry.credential),
+          ))
         }
       }
     }
   }
 }
 
-fn target_for(app: App, service: Service) -> #(Option(Entity), Bool) {
+fn target_for(
+  app: App,
+  service: Service,
+) -> Result(#(Target, String), RouteError) {
   let matches =
-    list.filter(app.entities, fn(entity) {
-      entity.module == service.module
-      || string.starts_with(service.module, entity.module <> "_")
+    all_targets(app)
+    |> list.flat_map(fn(target) { matches_for(service.module, target) })
+  case best_matches(matches) {
+    [] -> Error(RouteError("対象が無い: " <> service.module))
+    [Match(target: target, suffix: suffix, ..)] -> Ok(#(target, suffix))
+    ambiguous ->
+      Error(RouteError(
+        "対象が曖昧: "
+        <> service.module
+        <> " -> 候補 "
+        <> string.join(
+          list.map(ambiguous, fn(found) { target_module(found.target) }),
+          " / ",
+        ),
+      ))
+  }
+}
+
+fn all_targets(app: App) -> List(Target) {
+  list.append(
+    list.map(app.entities, fn(entity) { EntityTarget(entity) }),
+    list.map(app.collections, fn(collection) { CollectionTarget(collection) }),
+  )
+}
+
+fn matches_for(service_module: String, target: Target) -> List(Match) {
+  case target {
+    EntityTarget(entity) ->
+      entity_suffixes(entity.module)
+      |> list.filter_map(fn(suffix) {
+        case string.starts_with(service_module, suffix <> "_") {
+          True ->
+            Ok(Match(
+              target: target,
+              suffix: suffix,
+              word_count: list.length(string.split(suffix, "_")),
+            ))
+          False -> Error(Nil)
+        }
+      })
+    CollectionTarget(collection) ->
+      case string.starts_with(service_module, collection.module <> "_") {
+        True -> [
+          Match(
+            target: target,
+            suffix: collection.module,
+            word_count: list.length(string.split(collection.module, "_")),
+          ),
+        ]
+        False -> []
+      }
+  }
+}
+
+fn best_matches(matches: List(Match)) -> List(Match) {
+  let longest =
+    list.fold(matches, 0, fn(current, found) {
+      int.max(current, found.word_count)
     })
-  case longest(matches) {
-    Some(entity) -> #(Some(entity), True)
-    None -> #(root.root_for(app, service), False)
+  list.filter(matches, fn(found) { found.word_count == longest })
+}
+
+fn entity_suffixes(module: String) -> List(String) {
+  let words = string.split(module, "_")
+  entity_suffixes_from(words)
+}
+
+fn entity_suffixes_from(words: List(String)) -> List(String) {
+  case words {
+    [] -> []
+    [_first, ..rest] -> [string.join(words, "_"), ..entity_suffixes_from(rest)]
   }
 }
 
-fn longest(entities: List(Entity)) -> Option(Entity) {
-  case entities {
-    [] -> None
-    [first, ..rest] -> Some(longest_from(first, rest))
+fn verb_for(service_module: String, suffix: String) -> String {
+  let prefix = suffix <> "_"
+  case string.starts_with(service_module, prefix) {
+    True -> string.drop_start(service_module, string.length(prefix))
+    False -> ""
   }
 }
 
-fn longest_from(current: Entity, entities: List(Entity)) -> Entity {
-  case entities {
-    [] -> current
-    [candidate, ..rest] ->
-      case string.length(candidate.module) > string.length(current.module) {
-        True -> longest_from(candidate, rest)
-        False -> longest_from(current, rest)
-      }
+fn nested_reserved_entity(
+  app: App,
+  target: Target,
+  verb: String,
+) -> Option(String) {
+  let target_module = target_module(target)
+  case
+    list.find(app.entities, fn(entity) {
+      entity.module != target_module
+      && list.any(entity_suffixes(entity.module), fn(suffix) {
+        list.any(individual_verbs_with_create_list(), fn(reserved) {
+          verb == suffix <> "_" <> reserved
+        })
+      })
+    })
+  {
+    Ok(entity) -> Some(entity.module)
+    Error(_) -> None
   }
 }
 
-fn verb_for(service_module: String, target: Entity, matched: Bool) -> String {
-  case matched {
-    False -> service_module
-    True -> {
-      let prefix = target.module <> "_"
-      case string.starts_with(service_module, prefix) {
-        True -> string.drop_start(service_module, string.length(prefix))
-        False -> ""
-      }
-    }
+fn individual_verbs_with_create_list() -> List(String) {
+  ["create", "read", "list", "delete", "put"]
+}
+
+fn target_module(target: Target) -> String {
+  case target {
+    EntityTarget(entity) -> entity.module
+    CollectionTarget(collection) -> collection.module
+  }
+}
+
+fn target_collection(target: Target) -> String {
+  case target {
+    EntityTarget(entity) -> entity.collection
+    CollectionTarget(collection) -> collection.collection
   }
 }
 

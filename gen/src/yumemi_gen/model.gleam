@@ -161,6 +161,16 @@ pub type Entity {
   )
 }
 
+/// ER の外にある module が HTTP の集合名を名乗る宣言。
+pub type Collection {
+  Collection(
+    /// トップレベル module 名。`ledger` / `metrics`。
+    module: String,
+    /// 入口での集合名。`ledger_stores` / `metrics`。
+    collection: String,
+  )
+}
+
 pub fn field_by_name(entities: List(Entity), name: String) -> Option(FieldDef) {
   let all = list.flat_map(entities, fn(entity) { entity.fields })
   case list.find(all, fn(field) { field.name == name }) {
@@ -391,6 +401,7 @@ pub type App {
   App(
     value_types: List(ValueType),
     entities: List(Entity),
+    collections: List(Collection),
     services: List(Service),
     arrows: List(Arrow),
     entries: List(Entry),

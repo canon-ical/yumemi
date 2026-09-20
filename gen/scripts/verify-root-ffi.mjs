@@ -4,10 +4,9 @@
 ////   生成 `gen/reads/<service>.gleam` をコンパイル → musearch の実 `decodeArticle` / `decodeWidget` で root を作る
 ////   → musearch の実 `makeContext` に渡す → `step.interpret` → 継続関数が受け取った値を見る
 ////
-//// 関係先の取得と復号は framework の Context 契約 `relation(relation, keys)`。musearch の runtime(fe7c53f)は
-//// まだこの契約を実装していない(追随便)ので、
-////   (a) 契約が無いままの実 makeContext では framework が名指しで落とし、Held(key だけ)を Entity として渡さないこと
-////   (b) 契約の runtime 側 1 関数(生成 SQL を db.query に流し、実 codec で復号する)を足した実 makeContext では、
+//// 関係先の取得と復号は framework の Context 契約 `relation(relation, keys)`。
+////   (a) 実 makeContext から契約を一時的に外すと framework が名指しで落とし、Held(key だけ)を Entity として渡さないこと
+////   (b) 実 makeContext の契約を生成 SQL + 実 codec の検証関数へ差し替えると、
 ////       Held / Option(Held) / Link / Multi の 3 形が出力型どおりの Entity 値で継続関数に届くこと
 //// の両方を、実 PG 上の生成 SQL(`gen/sql/queries/<service>/to_<prop>.sql`)で検査する。
 //// 検証側が resolve() を自作して経路を外すことはしない ── 検証側が足すのは契約の相手側(SQL 実行 + 復号)だけ。
@@ -112,7 +111,9 @@ function buildMusearchHarness(dir) {
       path.join(dir, "src/gen/types", file),
     );
   }
-  copyInto(path.join(musearchApp, "src/gen/text_ffi.mjs"), path.join(dir, "src/gen/text_ffi.mjs"));
+  // yumemi-1 keeps the FFI beside `src/text.gleam`; the old gen/ location
+  // belonged to the pre-Hex app layout.
+  copyInto(path.join(musearchApp, "src/text_ffi.mjs"), path.join(dir, "src/text_ffi.mjs"));
   for (const allow of ["article", "widget"]) {
     copyInto(
       path.join(musearchApp, `src/gen/allow/${allow}.gleam`),
@@ -131,7 +132,9 @@ function buildMusearchHarness(dir) {
   }
   gleamBuild(dir);
   const built = path.join(dir, "build/dev/javascript");
-  for (const pkg of ["musearch_framework", "musearch_app"]) {
+  // yumemi-1 resolves the framework from Hex as `yumemi`; the old local
+  // package name was `musearch_framework`.
+  for (const pkg of ["yumemi", "musearch_app"]) {
     fs.cpSync(path.join(musearchApp, "build/dev/javascript", pkg), path.join(built, pkg), {
       recursive: true,
     });
@@ -286,12 +289,16 @@ try {
       db: { query() { log.push("query"); throw new Error("unexpected query"); } },
       root: aRoot, at: "2026-09-20T00:00:00Z", seed: "gate3b",
     });
+    // The current yumemi-1 runtime provides its storage capability by
+    // default. Remove only that capability here to exercise the framework's
+    // missing-contract rejection against the real makeContext object.
+    delete context.relation;
     const box = capture();
     const error = await expectRejected(
       step.interpret(articleRead.to_muse(aRoot, box.then), context),
       "article_read.to_muse without relation()",
     );
-    equal(error.code, "relation_contract", "error code");
+    equal(error.code, "relation_contract", `error code: ${error.message}`);
     assert(error.message.includes("Context does not implement relation(relation, keys)"), error.message);
     assert(error.message.includes("article_read/ArticleToMuse (article.muse -> muse)"), error.message);
     equal(box.called, 0, "continuation calls");
