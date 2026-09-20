@@ -173,7 +173,7 @@ pub fn arrow_shape(arrow: model.Arrow) -> Shape {
   }
 }
 
-/// 生成 SQL の名。`gen/sql/queries/<service>/<query>.sql`、実行側の SQL 表の鍵は `<service>/<query>`。
+/// 生成 SQL の名。`db/queries/<service>/<query>.sql`、実行側の SQL 表の鍵は `<service>/<query>`。
 pub fn arrow_query(arrow: model.Arrow) -> String {
   "to_" <> naming.snake(arrow.prop)
 }

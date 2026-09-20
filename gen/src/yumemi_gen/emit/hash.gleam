@@ -7,7 +7,7 @@
 //// | 1 `src/gen/types/*` | `src/types.gleam` |
 //// | 2 `src/gen/query*` | `src/entity/*.gleam` 全部 |
 //// | 3 `src/gen/reads/<svc>` | その Service + `src/types.gleam` + `src/entity/*.gleam` 全部 |
-//// | 4 `gen/sql/queries/<svc>/*` | 束3 と同じ |
+//// | 4 `db/queries/<svc>/*` | 束3 と同じ |
 
 import gleam/list
 import gleam/string

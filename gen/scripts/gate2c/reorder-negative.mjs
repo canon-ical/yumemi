@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import pg from '/home/yumemism/yumemism_repo/musearch/app/node_modules/pg/lib/index.js';
 const client = new pg.Client({host:process.env.PGHOST??'127.0.0.1',port:Number(process.env.PGPORT??55432),user:process.env.PGUSER??'yumemism',database:process.env.PGDATABASE??'gate2c_kashiwagi_3947'});
 await client.connect();
-const read = name => fs.readFileSync(`${process.env.ARTICLE_OUT}/gen/sql/queries/verb/${name}.sql`,'utf8').replaceAll('app.', 'gate2c_reorder.').replaceAll('framework.require_rows','gate2c_reorder.require_rows');
+const read = name => fs.readFileSync(`${process.env.ARTICLE_OUT}/db/queries/verb/${name}.sql`,'utf8').replaceAll('app.', 'gate2c_reorder.').replaceAll('framework.require_rows','gate2c_reorder.require_rows');
 try {
   await client.query(`CREATE SCHEMA gate2c_reorder;
     CREATE FUNCTION gate2c_reorder.require_rows(bigint,text) RETURNS bigint LANGUAGE sql AS 'SELECT $1';

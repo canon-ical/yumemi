@@ -524,20 +524,20 @@ pub fn root_relative_arrows_cover_one_option_many_test() {
 pub fn one_statement_per_named_query_test() {
   let paths = list.map(files(), fn(entry) { entry.0 })
   list.filter(paths, fn(path) {
-    string.starts_with(path, "gen/sql/queries/")
-    && !string.starts_with(path, "gen/sql/queries/verb/")
+    string.starts_with(path, "db/queries/")
+    && !string.starts_with(path, "db/queries/verb/")
     && !string.contains(path, "/to_")
   })
   |> list.sort(string.compare)
   |> should.equal([
-    "gen/sql/queries/article_list/counts.sql",
-    "gen/sql/queries/article_list/items.sql",
+    "db/queries/article_list/counts.sql",
+    "db/queries/article_list/items.sql",
   ])
 }
 
 pub fn relation_presence_and_with_become_sql_test() {
   let related =
-    text_of(relation_fixture, "gen/sql/queries/photo_filter/related.sql")
+    text_of(relation_fixture, "db/queries/photo_filter/related.sql")
   string.contains(
     related,
     "WHERE EXISTS(\n"
@@ -556,7 +556,7 @@ pub fn relation_presence_and_with_become_sql_test() {
   |> should.be_true
 
   let with_photos =
-    text_of(relation_fixture, "gen/sql/queries/photo_filter/album_photos.sql")
+    text_of(relation_fixture, "db/queries/photo_filter/album_photos.sql")
   string.contains(
     with_photos,
     "COALESCE((SELECT jsonb_agg(to_jsonb(p) ORDER BY p.\"order\",p.id)",
@@ -579,7 +579,7 @@ pub fn forward_with_stops_as_unimplemented_test() {
   string.contains(note.text, "with の順方向は未対応: ArticleToCategory")
   |> should.be_true
   files_of(sql_unsupported_fixture)
-  |> list.any(fn(file) { file.0 == "gen/sql/queries/article_list/items.sql" })
+  |> list.any(fn(file) { file.0 == "db/queries/article_list/items.sql" })
   |> should.be_false
 }
 
@@ -594,30 +594,30 @@ pub fn multi_has_stops_as_unimplemented_test() {
   string.contains(note.text, "Has / HasNone は Multi の矢印に未対応")
   |> should.be_true
   files_of(sql_unsupported_fixture)
-  |> list.any(fn(file) { file.0 == "gen/sql/queries/photo_filter/related.sql" })
+  |> list.any(fn(file) { file.0 == "db/queries/photo_filter/related.sql" })
   |> should.be_false
 }
 
-/// gen-3b ── 矢印 1 本につき SQL 1 文(`gen/sql/queries/<service>/to_<prop>.sql`)。
+/// gen-3b ── 矢印 1 本につき SQL 1 文(`db/queries/<service>/to_<prop>.sql`)。
 /// root Article を持つ 4 Service × 矢印 2 本 = 8 本。
 pub fn one_statement_per_root_arrow_test() {
   let paths = list.map(files(), fn(entry) { entry.0 })
   list.filter(paths, fn(path) {
-    string.starts_with(path, "gen/sql/queries/")
+    string.starts_with(path, "db/queries/")
     && string.contains(path, "/to_")
   })
   |> list.sort(string.compare)
   |> should.equal([
-    "gen/sql/queries/article_create/to_category.sql",
-    "gen/sql/queries/article_create/to_tags.sql",
-    "gen/sql/queries/article_publish/to_category.sql",
-    "gen/sql/queries/article_publish/to_tags.sql",
-    "gen/sql/queries/article_read/to_category.sql",
-    "gen/sql/queries/article_read/to_tags.sql",
-    "gen/sql/queries/article_retract/to_category.sql",
-    "gen/sql/queries/article_retract/to_tags.sql",
+    "db/queries/article_create/to_category.sql",
+    "db/queries/article_create/to_tags.sql",
+    "db/queries/article_publish/to_category.sql",
+    "db/queries/article_publish/to_tags.sql",
+    "db/queries/article_read/to_category.sql",
+    "db/queries/article_read/to_tags.sql",
+    "db/queries/article_retract/to_category.sql",
+    "db/queries/article_retract/to_tags.sql",
   ])
-  let found = text("gen/sql/queries/article_read/to_category.sql")
+  let found = text("db/queries/article_read/to_category.sql")
   string.starts_with(
     found,
     "-- GENERATED from service.article_read / ArticleToCategory",
@@ -633,13 +633,13 @@ pub fn one_statement_per_root_arrow_test() {
   string.contains(found, "ORDER BY keys.ord;") |> should.be_true
   // uuid の鍵は uuid に寄せる
   let album =
-    text_of(relation_fixture, "gen/sql/queries/photo_read/to_album.sql")
+    text_of(relation_fixture, "db/queries/photo_read/to_album.sql")
   string.contains(album, "JOIN app.album t ON t.id=keys.value::uuid")
   |> should.be_true
 }
 
 pub fn keyset_uses_the_order_columns_and_the_key_test() {
-  let found = text("gen/sql/queries/article_list/items.sql")
+  let found = text("db/queries/article_list/items.sql")
   string.contains(found, "(a.entered_published,a.slug)<") |> should.be_true
   string.contains(found, "ORDER BY a.entered_published DESC,a.slug DESC")
   |> should.be_true
@@ -648,7 +648,7 @@ pub fn keyset_uses_the_order_columns_and_the_key_test() {
 }
 
 pub fn group_becomes_group_by_test() {
-  let found = text("gen/sql/queries/article_list/counts.sql")
+  let found = text("db/queries/article_list/counts.sql")
   string.contains(found, "GROUP BY a.category_id") |> should.be_true
   string.contains(found, "count(*)::integer AS count") |> should.be_true
 }
@@ -718,11 +718,11 @@ pub fn verb_bundle_covers_declared_actions_test() {
   [
     "src/gen/verb.gleam",
     "src/gen/phase.gleam",
-    "gen/sql/queries/verb/pin_article.sql",
-    "gen/sql/queries/verb/delete_article_by_title.sql",
-    "gen/sql/queries/verb/create_articles.sql",
-    "gen/sql/queries/verb/reorder_articles.sql",
-    "gen/sql/queries/verb/put_article.sql",
+    "db/queries/verb/pin_article.sql",
+    "db/queries/verb/delete_article_by_title.sql",
+    "db/queries/verb/create_articles.sql",
+    "db/queries/verb/reorder_articles.sql",
+    "db/queries/verb/put_article.sql",
   ]
   |> list.each(fn(path) { list.contains(paths, path) |> should.be_true })
   let found = text("src/gen/verb.gleam")
@@ -732,7 +732,7 @@ pub fn verb_bundle_covers_declared_actions_test() {
 }
 
 pub fn put_does_not_update_keys_versions_or_phase_gated_fields_test() {
-  let found = text("gen/sql/queries/verb/put_article.sql")
+  let found = text("db/queries/verb/put_article.sql")
   string.contains(found, "body=EXCLUDED.body") |> should.be_true
   string.contains(found, "WHERE target.version=$6") |> should.be_true
   string.contains(found, "version=target.version+1") |> should.be_true
@@ -744,13 +744,13 @@ pub fn put_does_not_update_keys_versions_or_phase_gated_fields_test() {
 }
 
 pub fn reorder_uses_declared_order_column_and_returning_alias_test() {
-  let found = text("gen/sql/queries/verb/reorder_articles.sql")
+  let found = text("db/queries/verb/reorder_articles.sql")
   string.contains(found, "AS new_order,ord") |> should.be_true
   string.contains(found, "RETURNING e.slug,e.\"order\"")
   |> should.be_true
   string.contains(found, "FROM changed ORDER BY changed.\"order\",changed.slug")
   |> should.be_true
-  let stage = text("gen/sql/queries/verb/reorder_articles_stage.sql")
+  let stage = text("db/queries/verb/reorder_articles_stage.sql")
   string.contains(stage, "\"order\"=(-t.ord)::integer") |> should.be_false
   string.contains(stage, "\"order\"=f.candidate") |> should.be_true
   string.contains(stage, "c.expected=c.matched") |> should.be_true
@@ -762,7 +762,7 @@ pub fn reorder_uses_declared_order_column_and_returning_alias_test() {
 /// gen-3b(P0-3)── 退避の一時値は負値でなく、**宣言の値域の上端から下へ、範囲に無い値**を選ぶ。
 /// `Int` は int4 の全域、確定値は 0 から。範囲は FOR UPDATE で押さえる。
 pub fn reorder_stage_picks_free_values_inside_declared_int_bounds_test() {
-  let stage = text("gen/sql/queries/verb/reorder_articles_stage.sql")
+  let stage = text("db/queries/verb/reorder_articles_stage.sql")
   string.contains(stage, "FROM app.article e WHERE e.category_id=$1 FOR UPDATE")
   |> should.be_true
   string.contains(
@@ -787,14 +787,14 @@ pub fn reorder_stage_picks_free_values_inside_declared_int_bounds_test() {
   )
   |> should.be_true
   string.contains(stage, "'conflict'") |> should.be_true
-  let apply = text("gen/sql/queries/verb/reorder_articles.sql")
+  let apply = text("db/queries/verb/reorder_articles.sql")
   string.contains(apply, "(0+ord-1)::integer AS new_order") |> should.be_true
 }
 
 /// gen-3b(P0-3)── `Range(min: 1, max: 10)` の順序列は、一時値が 10 から下へ、確定値が 1 から。
 pub fn reorder_uses_range_bounds_of_the_order_type_test() {
   let stage =
-    text_of(relation_fixture, "gen/sql/queries/verb/reorder_photos_stage.sql")
+    text_of(relation_fixture, "db/queries/verb/reorder_photos_stage.sql")
   string.contains(
     stage,
     "generate_series(10::bigint,GREATEST(1::bigint,10::bigint-(c.held+2*c.expected)),-1)",
@@ -808,7 +808,7 @@ pub fn reorder_uses_range_bounds_of_the_order_type_test() {
   string.contains(stage, "FROM app.photo e WHERE e.album_id=$1 FOR UPDATE")
   |> should.be_true
   let apply =
-    text_of(relation_fixture, "gen/sql/queries/verb/reorder_photos.sql")
+    text_of(relation_fixture, "db/queries/verb/reorder_photos.sql")
   string.contains(apply, "(1+ord-1)::integer AS new_order") |> should.be_true
   string.contains(apply, "SELECT value::uuid AS id") |> should.be_true
 }
@@ -877,7 +877,7 @@ pub fn lifecycle_steps_are_entity_qualified_test() {
 }
 
 pub fn advance_sql_has_no_service_argument_test() {
-  let found = text("gen/sql/queries/verb/advance_article.sql")
+  let found = text("db/queries/verb/advance_article.sql")
   string.contains(found, "CASE WHEN $3='scheduled' AND $4='draft' THEN 0")
   |> should.be_true
   string.contains(found, "$5") |> should.be_true
@@ -896,7 +896,7 @@ pub fn advance_sql_has_no_service_argument_test() {
 pub fn verb_sql_uses_entity_only_headers_test() {
   files()
   |> list.filter(fn(entry) {
-    string.starts_with(entry.0, "gen/sql/queries/verb/")
+    string.starts_with(entry.0, "db/queries/verb/")
   })
   |> list.each(fn(entry) {
     string.starts_with(entry.1, "-- GENERATED from entity.")
@@ -908,8 +908,8 @@ pub fn verb_sql_uses_entity_only_headers_test() {
 
 pub fn composite_key_is_present_in_signature_where_and_returning_test() {
   let update =
-    text_of(flag_fixture, "gen/sql/queries/verb/update_chunk_text.sql")
-  let delete = text_of(flag_fixture, "gen/sql/queries/verb/delete_chunk.sql")
+    text_of(flag_fixture, "db/queries/verb/update_chunk_text.sql")
+  let delete = text_of(flag_fixture, "db/queries/verb/delete_chunk.sql")
   string.contains(update, "WHERE a=$1 AND b=$2 AND c=$3")
   |> should.be_true
   string.contains(update, "RETURNING a,b,c") |> should.be_true
@@ -928,7 +928,7 @@ pub fn draft_keeps_input_keys_and_create_sql_arguments_test() {
   let chunk = text_of(flag_fixture, "src/gen/draft/chunk.gleam")
   string.contains(chunk, "ChunkDraft(\n    a: Int,\n    b: Int,\n    c: Int,")
   |> should.be_true
-  let create = text_of(flag_fixture, "gen/sql/queries/verb/create_chunk.sql")
+  let create = text_of(flag_fixture, "db/queries/verb/create_chunk.sql")
   string.contains(
     create,
     "INSERT INTO app.chunk(a,b,c,text)\nVALUES($1,$2,$3,$4)",
@@ -937,7 +937,7 @@ pub fn draft_keeps_input_keys_and_create_sql_arguments_test() {
 
   let article = text("src/gen/draft/article.gleam")
   string.contains(article, "ArticleDraft(\n    slug: Slug,") |> should.be_true
-  let article_create = text("gen/sql/queries/verb/create_article.sql")
+  let article_create = text("db/queries/verb/create_article.sql")
   string.contains(
     article_create,
     "INSERT INTO app.article(slug,title,body,version,\"order\",category_id)",
@@ -950,7 +950,7 @@ pub fn auto_key_is_excluded_only_by_explicit_declaration_test() {
   string.contains(draft, "WidgetDraft(\n    name: WidgetName,")
   |> should.be_true
   string.contains(draft, "WidgetDraft(\n    id: WidgetId") |> should.be_false
-  let created = text_of(flag_fixture, "gen/sql/queries/verb/create_widget.sql")
+  let created = text_of(flag_fixture, "db/queries/verb/create_widget.sql")
   string.contains(
     created,
     "INSERT INTO app.widget(name,place,visible,\"order\")",
@@ -995,7 +995,7 @@ pub fn no_key_entity_keeps_create_only_test() {
   string.contains(verb, "pub fn delete_no_key") |> should.be_false
   string.contains(verb, "pub fn advance_no_key") |> should.be_false
 
-  let create = text_of(no_key_fixture, "gen/sql/queries/verb/create_no_key.sql")
+  let create = text_of(no_key_fixture, "db/queries/verb/create_no_key.sql")
   string.contains(create, "INSERT INTO app.no_key") |> should.be_true
   string.contains(create, "RETURNING name,value")
   |> should.be_true
@@ -1010,7 +1010,7 @@ pub fn no_key_generation_writes_bundles_and_reports_entity_test() {
     "src/gen/query/field.gleam",
     "src/gen/phase.gleam",
     "src/gen/verb.gleam",
-    "gen/sql/queries/verb/create_no_key.sql",
+    "db/queries/verb/create_no_key.sql",
     "src/gen/root/path_only_lookup.gleam",
     "_diagnostics.txt",
   ]
@@ -1107,7 +1107,7 @@ pub fn types_and_entities_hash_differ_test() {
 // ── 旗の列と「穴が NULL」── fixtures/flag(20:710 の IsTrue / EqOrNull) ───────
 
 pub fn is_true_and_eq_or_null_become_sql_test() {
-  let found = text_of(flag_fixture, "gen/sql/queries/widget_list/shown.sql")
+  let found = text_of(flag_fixture, "db/queries/widget_list/shown.sql")
   string.contains(found, "w.visible IS TRUE") |> should.be_true
   string.contains(found, "w.place IS NOT DISTINCT FROM $1") |> should.be_true
   // 2つは AND で交わる。穴は1つだけ(IsTrue は穴を取らない)。
@@ -1126,13 +1126,13 @@ pub fn eq_or_null_param_is_optional_test() {
 }
 
 pub fn empty_order_falls_back_to_the_key_test() {
-  let found = text_of(flag_fixture, "gen/sql/queries/widget_list/all.sql")
+  let found = text_of(flag_fixture, "db/queries/widget_list/all.sql")
   string.contains(found, "ORDER BY w.id ASC") |> should.be_true
 }
 
 pub fn optional_column_asc_gets_nulls_last_test() {
   let found =
-    text_of(flag_fixture, "gen/sql/queries/widget_list/first_place.sql")
+    text_of(flag_fixture, "db/queries/widget_list/first_place.sql")
   string.contains(found, "ORDER BY w.place ASC NULLS LAST,w.id ASC")
   |> should.be_true
   string.contains(found, "LIMIT 1") |> should.be_true
@@ -1151,10 +1151,10 @@ pub fn mixed_direction_keyset_is_generated_test() {
   let paths = list.map(files_of(flag_fixture), fn(entry) { entry.0 })
   // mixed order でも SQL と reads が両方出る。
   list.contains(paths, "src/gen/reads/widget_page.gleam") |> should.be_true
-  list.contains(paths, "gen/sql/queries/widget_page/paged.sql")
+  list.contains(paths, "db/queries/widget_page/paged.sql")
   |> should.be_true
   list.contains(paths, "_diagnostics.txt") |> should.be_false
-  let found = text_of(flag_fixture, "gen/sql/queries/widget_page/paged.sql")
+  let found = text_of(flag_fixture, "db/queries/widget_page/paged.sql")
   string.contains(
     found,
     "($3 IS NOT NULL AND (w.place IS NULL OR (w.place IS NOT NULL AND w.place>$3::integer)))",

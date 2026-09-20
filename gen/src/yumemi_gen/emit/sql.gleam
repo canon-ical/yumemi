@@ -1,4 +1,4 @@
-//// 束4 ── `gen/sql/queries/<service>/<name>.sql`。名前付きクエリ値 1つにつき SELECT 1文。
+//// 束4 ── `db/queries/<service>/<name>.sql`。名前付きクエリ値 1つにつき SELECT 1文。
 //// 実行時は `$1..$n` を埋めるだけ。組み立ては全部ここで済ませる(20:837)。
 
 import framework/schema
@@ -58,7 +58,7 @@ pub fn build(app: App, hashes: hash.Hashes) -> #(List(File), List(Skipped)) {
   #(list.append(files, arrow_files), list.append(skipped, arrow_skipped))
 }
 
-/// 矢印の read の SQL ── `gen/sql/queries/<service>/to_<prop>.sql`。鍵の列(jsonb 配列)を
+/// 矢印の read の SQL ── `db/queries/<service>/to_<prop>.sql`。鍵の列(jsonb 配列)を
 /// 受けて関係先の行を鍵の順で返す。実行側は Context の `relation` でこれを流し、復号して返す。
 fn build_arrows(app: App, hashes: hash.Hashes) -> #(List(File), List(Skipped)) {
   list.fold(app.services, #([], []), fn(acc, service) {
@@ -69,7 +69,7 @@ fn build_arrows(app: App, hashes: hash.Hashes) -> #(List(File), List(Skipped)) {
         Ok(text) -> #(
           [
             File(
-              path: "gen/sql/queries/"
+              path: "db/queries/"
                 <> service.module
                 <> "/"
                 <> query
@@ -140,7 +140,7 @@ fn build_queries(
         Ok(text) -> #(
           [
             File(
-              path: "gen/sql/queries/"
+              path: "db/queries/"
                 <> service.module
                 <> "/"
                 <> query.name

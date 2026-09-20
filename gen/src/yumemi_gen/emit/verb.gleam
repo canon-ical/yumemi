@@ -575,7 +575,7 @@ fn sql_file(
   body: String,
 ) -> File {
   File(
-    path: "gen/sql/queries/verb/" <> name <> ".sql",
+    path: "db/queries/verb/" <> name <> ".sql",
     text: "-- GENERATED from entity."
       <> entity.module
       <> " [sha256:"

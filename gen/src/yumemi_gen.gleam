@@ -2,7 +2,7 @@
 ////
 //// 出すのは生成束 ── `src/gen/types/*`、`src/gen/query.gleam` と
 //// `src/gen/query/{from,field}.gleam`、`src/gen/reads/*`、`src/gen/root/*`、
-//// `gen/sql/queries/<service>/<name>.sql`(読み)、verb / phase。
+//// `db/queries/<service>/<name>.sql`(読み)、verb / phase。
 ////
 //// **出力が揃わなかったら 0 で終わらない。**理由は 20 の exit code 表で分類し(`stop`)、
 //// stderr と `_diagnostics.txt` の両方に同じ1行で出す。ファイル自体は書いてから止まる

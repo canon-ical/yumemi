@@ -8,7 +8,7 @@
 ////   (a) 実 makeContext から契約を一時的に外すと framework が名指しで落とし、Held(key だけ)を Entity として渡さないこと
 ////   (b) 実 makeContext の契約を生成 SQL + 実 codec の検証関数へ差し替えると、
 ////       Held / Option(Held) / Link / Multi の 3 形が出力型どおりの Entity 値で継続関数に届くこと
-//// の両方を、実 PG 上の生成 SQL(`gen/sql/queries/<service>/to_<prop>.sql`)で検査する。
+//// の両方を、実 PG 上の生成 SQL(`db/queries/<service>/to_<prop>.sql`)で検査する。
 //// 検証側が resolve() を自作して経路を外すことはしない ── 検証側が足すのは契約の相手側(SQL 実行 + 復号)だけ。
 ////
 ////   PGHOST=127.0.0.1 PGPORT=55432 PGUSER=yumemism PGDATABASE=postgres \
@@ -52,7 +52,7 @@ function equal(actual, expected, label) {
 
 function readSqlMap(out) {
   const map = {};
-  const base = path.join(out, "gen/sql/queries");
+  const base = path.join(out, "db/queries");
   for (const service of fs.readdirSync(base)) {
     const dir = path.join(base, service);
     if (!fs.statSync(dir).isDirectory()) continue;

@@ -47,9 +47,9 @@ for draft in "$out"/src/gen/draft/*.gleam; do
     cp "$draft" "$work/app/src/gen/draft/$name"
   fi
 done
-mkdir -p "$work/app/src/gen/root" "$work/app/gen/sql/queries/verb"
+mkdir -p "$work/app/src/gen/root" "$work/app/db/queries/verb"
 cp "$out"/src/gen/root/*.gleam "$work/app/src/gen/root/"
-cp "$out"/gen/sql/queries/verb/*.sql "$work/app/gen/sql/queries/verb/"
+cp "$out"/db/queries/verb/*.sql "$work/app/db/queries/verb/"
 mkdir -p "$work/app/src/gen/entry"
 cp "$out/src/gen/entry/http.gleam" "$work/app/src/gen/entry/http.gleam"
 cp "$out/src/gen/face.gleam" "$work/app/src/gen/face.gleam"

@@ -12,7 +12,7 @@ await client.connect();
 try {
   await client.query('BEGIN');
   await client.query('CREATE SCHEMA gate2c_draft; CREATE TABLE gate2c_draft.chunk(a int,b int,c int,text text,PRIMARY KEY(a,b,c))');
-  const sql=fs.readFileSync(`${process.env.FLAG_OUT}/gen/sql/queries/verb/create_chunk.sql`,'utf8').replaceAll('app.','gate2c_draft.');
+  const sql=fs.readFileSync(`${process.env.FLAG_OUT}/db/queries/verb/create_chunk.sql`,'utf8').replaceAll('app.','gate2c_draft.');
   const value=await stage(operation(), {async stage(name,input){
     assert.equal(name,'create_chunk');
     assert.equal(input.constructor.name,'ChunkDraft');

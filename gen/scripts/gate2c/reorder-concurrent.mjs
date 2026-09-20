@@ -6,7 +6,7 @@ import pg from '/home/yumemism/yumemism_repo/musearch/app/node_modules/pg/lib/in
 const config={host:process.env.PGHOST??'127.0.0.1',port:Number(process.env.PGPORT??55432),user:process.env.PGUSER??'yumemism',database:process.env.PGDATABASE??'gate2c_kashiwagi_3947'};
 const [a,b,monitor]=[new pg.Client(config),new pg.Client(config),new pg.Client(config)];
 await Promise.all([a.connect(),b.connect(),monitor.connect()]);
-const read=name=>fs.readFileSync(`${process.env.ARTICLE_OUT}/gen/sql/queries/verb/${name}.sql`,'utf8').replaceAll('app.','gate2c_concurrent.').replaceAll('framework.require_rows','gate2c_concurrent.require_rows');
+const read=name=>fs.readFileSync(`${process.env.ARTICLE_OUT}/db/queries/verb/${name}.sql`,'utf8').replaceAll('app.','gate2c_concurrent.').replaceAll('framework.require_rows','gate2c_concurrent.require_rows');
 try {
  await monitor.query(`CREATE SCHEMA gate2c_concurrent;
  CREATE FUNCTION gate2c_concurrent.require_rows(bigint,text) RETURNS bigint LANGUAGE sql AS 'SELECT $1';

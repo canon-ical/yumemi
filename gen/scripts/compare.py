@@ -31,13 +31,13 @@ def squeeze(text):
 
 
 # 読み SQL の束に混ぜない補助束。verb SQL は下で専用束として数える。
-OUT_OF_SCOPE = ("gen/sql/queries/allow/", "gen/sql/queries/framework/")
+OUT_OF_SCOPE = ("db/queries/allow/", "db/queries/framework/")
 
 
 def in_scope(rel, include_verb=True):
     if rel.startswith(OUT_OF_SCOPE):
         return False
-    if not include_verb and rel.startswith("gen/sql/queries/verb/"):
+    if not include_verb and rel.startswith("db/queries/verb/"):
         return False
     return os.path.basename(rel) != "root.sql"
 
@@ -224,12 +224,12 @@ def main():
     compare_query(out_dir, app_dir)
     compare_bundle("束3 src/gen/reads/*.gleam", out_dir, app_dir,
                    "src/gen/reads", ".gleam")
-    compare_bundle("束4 gen/sql/queries/<service>/<name>.sql", out_dir, app_dir,
-                   "gen/sql/queries", ".sql", include_verb=False)
+    compare_bundle("束4 db/queries/<service>/<name>.sql", out_dir, app_dir,
+                   "db/queries", ".sql", include_verb=False)
     compare_file("束5 src/gen/verb.gleam", out_dir, app_dir,
                  "src/gen/verb.gleam")
-    compare_bundle("束6 gen/sql/queries/verb/*.sql", out_dir, app_dir,
-                   "gen/sql/queries/verb", ".sql")
+    compare_bundle("束6 db/queries/verb/*.sql", out_dir, app_dir,
+                   "db/queries/verb", ".sql")
     compare_bundle("束7 src/gen/root/*.gleam", out_dir, app_dir,
                    "src/gen/root", ".gleam")
     compare_file("束8 src/gen/phase.gleam", out_dir, app_dir,

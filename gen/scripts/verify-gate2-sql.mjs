@@ -7,7 +7,7 @@
 ////
 //// gen-3b:P0-3 は負値・両端値(int4 の上限 / 下限)・実 CHECK / UNIQUE・同一 scope の同時実行・失敗時 rollback、
 //// それに `Range(min: 1, max: 10)` の順序列(fixtures/relation)を足した。P0-5 はここでは矢印の生成 SQL
-//// (`gen/sql/queries/<service>/to_<prop>.sql`)を PG で流す ── Context 契約を通した復号は verify-root-ffi.mjs。
+//// (`db/queries/<service>/to_<prop>.sql`)を PG で流す ── Context 契約を通した復号は verify-root-ffi.mjs。
 
 import fs from "node:fs";
 import { spawnSync } from "node:child_process";
@@ -86,7 +86,7 @@ async function dropSchema(client, name) {
 
 const chunkSql = readSql(
   musearchOut,
-  "gen/sql/queries/verb/update_chunk_text.sql",
+  "db/queries/verb/update_chunk_text.sql",
 );
 const chunk = psql(`
 DROP SCHEMA IF EXISTS app CASCADE;
@@ -121,11 +121,11 @@ console.log("P0-1 chunk composite version key: PASS");
 
 const createChunkSql = readSql(
   flagOut,
-  "gen/sql/queries/verb/create_chunk.sql",
+  "db/queries/verb/create_chunk.sql",
 );
 const createArticleSql = readSql(
   articleOut,
-  "gen/sql/queries/verb/create_article.sql",
+  "db/queries/verb/create_article.sql",
 );
 const draftClient = gateDb();
 await draftClient.connect();
@@ -184,11 +184,11 @@ try {
 
 const putSql = readSql(
   articleOut,
-  "gen/sql/queries/verb/put_article.sql",
+  "db/queries/verb/put_article.sql",
 );
 const updateSql = readSql(
   articleOut,
-  "gen/sql/queries/verb/update_article_body.sql",
+  "db/queries/verb/update_article_body.sql",
 );
 const putClient = gateDb();
 await putClient.connect();
@@ -277,11 +277,11 @@ try {
 
 const reorderStageSql = readSql(
   articleOut,
-  "gen/sql/queries/verb/reorder_articles_stage.sql",
+  "db/queries/verb/reorder_articles_stage.sql",
 );
 const reorderSql = readSql(
   articleOut,
-  "gen/sql/queries/verb/reorder_articles.sql",
+  "db/queries/verb/reorder_articles.sql",
 );
 const reorderClient = gateDb();
 await reorderClient.connect();
@@ -424,8 +424,8 @@ try {
 
 // 値域つき順序列(`Range(min: 1, max: 10)`)── 確定値は 1 から、一時値は 10 から下へ。
 // 値域が狭くて一時値が足りないときは退避せず確定へ進む:UNIQUE が無ければ通り、あれば 23505 で rollback。
-const photoStageSql = readSql(relationOut, "gen/sql/queries/verb/reorder_photos_stage.sql");
-const photoSql = readSql(relationOut, "gen/sql/queries/verb/reorder_photos.sql");
+const photoStageSql = readSql(relationOut, "db/queries/verb/reorder_photos_stage.sql");
+const photoSql = readSql(relationOut, "db/queries/verb/reorder_photos.sql");
 const photoClient = gateDb();
 await photoClient.connect();
 try {
@@ -499,9 +499,9 @@ try {
 }
 
 // P0-5 ── 矢印の生成 SQL(鍵の列 → 関係先の行、鍵の順)。Context 契約を通した復号は verify-root-ffi.mjs。
-const arrowSql = readSql(musearchOut, "gen/sql/queries/article_read/to_muse.sql");
-const spaceSql = readSql(musearchOut, "gen/sql/queries/widget_edit/to_space.sql");
-const tagsSql = readSql(articleOut, "gen/sql/queries/article_read/to_tags.sql");
+const arrowSql = readSql(musearchOut, "db/queries/article_read/to_muse.sql");
+const spaceSql = readSql(musearchOut, "db/queries/widget_edit/to_space.sql");
+const tagsSql = readSql(articleOut, "db/queries/article_read/to_tags.sql");
 const arrowClient = gateDb();
 await arrowClient.connect();
 try {
@@ -541,7 +541,7 @@ try {
   await arrowClient.end();
 }
 
-const pageSql = readSql(flagOut, "gen/sql/queries/widget_page/paged.sql");
+const pageSql = readSql(flagOut, "db/queries/widget_page/paged.sql");
 const page = psql(`
 DROP SCHEMA IF EXISTS app CASCADE;
 CREATE SCHEMA app;
