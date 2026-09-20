@@ -330,6 +330,39 @@ pub fn one_statement_per_named_query_test() {
   ])
 }
 
+pub fn relation_presence_and_with_become_sql_test() {
+  let related =
+    text_of(relation_fixture, "gen/sql/queries/photo_filter/related.sql")
+  string.contains(
+    related,
+    "WHERE EXISTS(\n"
+      <> "  SELECT 1 FROM app.album a\n"
+      <> "  WHERE a.id=p.album_id\n"
+      <> "    AND a.id=$1::uuid",
+  )
+  |> should.be_true
+  string.contains(
+    related,
+    "NOT EXISTS(\n"
+      <> "  SELECT 1 FROM app.shelf s\n"
+      <> "  WHERE s.id=p.shelf_id\n"
+      <> "    AND s.id=$2::uuid",
+  )
+  |> should.be_true
+
+  let with_photos =
+    text_of(relation_fixture, "gen/sql/queries/photo_filter/album_photos.sql")
+  string.contains(
+    with_photos,
+    "COALESCE((SELECT jsonb_agg(to_jsonb(p) ORDER BY p.\"order\",p.id)",
+  )
+  |> should.be_true
+  string.contains(with_photos, "FROM app.photo p\nWHERE p.album_id=a.id")
+  |> should.be_true
+  string.contains(with_photos, "),'[]'::jsonb) AS photos")
+  |> should.be_true
+}
+
 /// gen-3b ── 矢印 1 本につき SQL 1 文(`gen/sql/queries/<service>/to_<prop>.sql`)。
 /// root Article を持つ 4 Service × 矢印 2 本 = 8 本。
 pub fn one_statement_per_root_arrow_test() {
