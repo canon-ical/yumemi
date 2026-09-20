@@ -100,7 +100,32 @@ missing-cast(by-placeholder, 参考): 2本/3 (advance_muse_heaven[$5::timestampt
 
 語彙に無い上限は推測で埋めていない。名指しする上限は `free_space` 5件、`widget` 30件、`widget` の image 10件、`link` の url 重複。`create_links` の jsonb 一括 guarded 挿入も語彙に無い残差である。
 
+## 生成物に出てはいけない 11 本(手書きの札の効き)
+
+贄川が巡 4 の出力に対して 1 本ずつ実測した。仮宣言コピー `out-decl-n4` で **11 本すべてが生成 SQL から消えた**。
+固定の写し(札の宣言が無い)では `advance_article` / `delete_roster_photo` / `delete_store_schedule` の
+3 本が残る ── これが札の効きの対照になる。
+
+| verb | 仮宣言コピー(札あり) | 固定の写し(札なし) |
+|---|---|---|
+| `rollup_day` | 消えた | もともと出ない |
+| `rollup_month` | 消えた | もともと出ない |
+| `purge_page_views` | 消えた | もともと出ない |
+| `replace_chunks` | 消えた | もともと出ない |
+| `create_ledger_store` | 消えた | もともと出ない |
+| `record_page_view` | 消えた | もともと出ない |
+| `issue_roster_code` | 消えた | もともと出ない |
+| `issue_store_api_key` | 消えた | もともと出ない |
+| `advance_article` | **消えた** | 出る |
+| `delete_roster_photo` | **消えた** | 出る |
+| `delete_store_schedule` | **消えた** | 出る |
+
+札の名が生成候補と一致しないときは 1 名 1 行の警告で `exit 0`。仮宣言コピーでは 8 本が警告になった
+(この 8 本はもともと生成候補に無い名)。
+
 ## 語彙・札・Draft
+
+`Order(within: String)` は `Order(within: List(String))` になった。本便で足した語彙はこの 1 語だけである。破壊的変更なので、既存の `within: "muse"` は `within: ["muse"]` へ直す必要がある。影響範囲は framework の `Order` constructor、reader の `parse_order` / 検証、reorder と ordered create の SQL emitter、宣言側の `ordered_by`。`IS NOT DISTINCT FROM` は within 全列に適用する。
 
 手書き札は Entity / ER 外 module の `handwritten_verbs` を読み、名前が生成候補と一致した verb を `src/gen/verb.gleam` と `db/queries/verb/` から抑止する。一致しない札は1名1行の warning、exit 0。header には札を残し、手書き実体は `gen/` 外に置く。
 
@@ -113,6 +138,11 @@ Draft は呼び手が作成時に与える Property だけを持つ。`auto_key`
 - `advance_muse_heaven` / `advance_roster` は ★ に version の入力が無く、楽観ロック競合を導けない。`update_muse_theme` も Muse に version Property が無い。
 - `create_article` / `create_consent` / `create_muse` / `create_muse_heaven` / `create_screen_reject` は手書き `*Created` と不一致だが、錨は生成型である。
 - `update_article_posted_on`、`update_roster_by_external`、`update_store_verified`、`reorder_widgets` は上表の契約差を残す。
+
+musearch `src/gen/sql.mjs` は verb 69 entry、`gen/sql/queries/verb/` は 61 本。**実体無しの 8 本**は
+`create_muse_schedule`、`advance_muse_schedule`、`create_shift_target`、`delete_shift_target`、
+`create_store_request`、`resolve_store_request`、`advance_store_request`、`create_ledger_store`。
+これは F3 の宿題であり、本便では musearch 本体を変更していない(贄川が巡 4 に entry と .sql の差で再実測)。
 
 ## DDL
 
