@@ -64,7 +64,7 @@ missing-cast(by-placeholder, 参考): 2本/3 (advance_muse_heaven[$5::timestampt
 |---|---:|---|---|
 | `advance_muse_heaven` | — | advance | ★ に version の入力が無い。番号のずれは参考値、型の多重集合では欠落0。 |
 | `advance_roster` | — | advance | ★ に version の入力が無く、`$2::integer` が型の多重集合でも残る唯一の欠落。 |
-| `create_article` | — | RETURNING の手書き残差 | 手書き `*Created` と不一致。錨は生成型で、生成側が正しい。 |
+| `create_article` | — | RETURNING の手書き残差 | RETURNING は手書き `*Created` と不一致だが、錨は生成型で生成側が正しい。ただし Draft に `posted_on` / `publish_at` が残るのは I 類と同根の F3 残差。 |
 | `create_consent` | — | RETURNING の手書き残差 | 手書き `*Created` と不一致。錨は生成型で、生成側が正しい。 |
 | `create_fan` | ○ | — | 段2一致。 |
 | `create_free_space` | — | H 類 guarded | 手書きは `framework.insert_free_space_guarded(...)`。親 `FOR UPDATE` と inline 採番は意味一致、文字一致は原理的に不可。 |
@@ -134,6 +134,7 @@ Draft は呼び手が作成時に与える Property だけを持つ。`auto_key`
 ## F3へ移した残差
 
 - 裁定3が裁定7の I を上書きした。`create_roster` は本便で塞がず F3へ移し、`auto_key` 相当の新語彙を追加しない。仮宣言コピーにも新しい宣言を足していない。
+- `create_article` の `posted_on` / `publish_at` も、作成時に呼び手が与えない欄を Draft から外す語彙が無いという I 類と同じ穴。RETURNING の生成型への整合は正しいが、Draft 入力の残差は F3 で閉じる。
 - 指示書上の対象本数は `27 → 26` に直した。`create_roster` を本便の対象から外したためである。突合器の全両側一覧29本では、I類として類別を残し、未分類0を維持する。
 - `advance_muse_heaven` / `advance_roster` は ★ に version の入力が無く、楽観ロック競合を導けない。`update_muse_theme` も Muse に version Property が無い。
 - `create_article` / `create_consent` / `create_muse` / `create_muse_heaven` / `create_screen_reject` は手書き `*Created` と不一致だが、錨は生成型である。
