@@ -94,4 +94,12 @@
 
 裁定 8 の「段 1 一致が合格線」はこの裁定で上書き。RETURNING(P0-2)は贄川の読みのまま(`*Created` が `id` 以外の欄を持つ Entity だけ複数列)。
 
+## 鷹野の裁定 3(2026-09-21 07:45、巡 3 のエスカレーション 3 点)
+
+1. **欠落キャストは型の多重集合で数える(a)。**placeholder 番号の寄りは手書きの version シム(取るだけで使わない引数)由来で意味ではない。`advance_muse_heaven` は欠落 0、`advance_roster` の `::integer` 1 本は名指しの残差として報告に残す。突合器は多重集合と番号の両方を出す(番号は参考)
+2. **合格線は「段 2 一致 11 本 + H 類 4 本は意味の突合(親の `FOR UPDATE` + `ordered_by` の採番が出ている)で合格 + 残り 12 本は全部類別して名指し、未分類 0」。**(a) に (b) を畳む。手書きは正典でない(裁定 2)ので、生成が正しい 9 本(RETURNING 5 / 生成の方が堅い 2 / `update_article_posted_on` の bump / `update_muse_theme` は ★ に version が無い)を手書きに寄せない。失敗名(`update_roster_by_external` の `not_active`)・`advance_*` 2 本・I 1 本は F3 の ★ 正典化で閉じる残差。H 類の上限(free_space 5 / widget 30 / image 10 / link の url 重複)は語彙に無いので名指しの残差
+3. **I(`create_roster`)は本便から外し F3 へ(a)。**語彙は 1 語(裁定 3)を守る。「作るときに書けない欄」の語は `roster` の `claim_code / claim_until / claimed_at` と `article` の `posted_on / publish_at` の実例を揃えて F3 で 1 語にする。仮宣言だけの実演は捨て仕事なのでしない。**裁定 7 の I を上書き、H は本便のまま。**対象は 27 → 26 本
+
+便を延ばさない(2-c は採らない)。
+
 まとめ:語彙の追加は 1 語(`Order.within`)、手書きに残すのは 11 本(rollup 2 / purge / replace_chunks / create_ledger_store / record_page_view / issue 2 / advance_article / delete 2)、生成器の穴は A〜D + E + H + I + キャスト。20 への記述案(語彙 1 語、手書きの札、Draft の欄の規則)は報告に置く、正典は鷹野が直す。musearch `sql.mjs` の実体無し 8 本は F3 の宿題として報告に写す。
