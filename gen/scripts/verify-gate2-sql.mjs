@@ -137,7 +137,7 @@ try {
       PRIMARY KEY(a,b,c));
     CREATE TABLE gate2_r7_draft.article(
       slug text PRIMARY KEY,title text,body text,version integer,
-      "order" integer,category_id text);
+      "order" integer,category_id text,phase text,entered_draft timestamptz);
   `);
   await draftClient.query(scopedSql(createChunkSql, "gate2_r7_draft"), [
     11,
@@ -152,6 +152,7 @@ try {
     1,
     0,
     "cat",
+    "2026-01-01T00:00:00Z",
   ]);
   const chunkRow = (
     await draftClient.query(

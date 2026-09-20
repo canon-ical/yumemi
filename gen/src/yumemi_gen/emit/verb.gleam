@@ -152,7 +152,7 @@ fn candidate_names(entity: model.Entity) -> List(String) {
   }
   let named_updates = entity.verbs |> list.filter_map(fn(rule) {
     case rule {
-      model.UpdateRule(name, ..) -> Ok(name <> "_" <> entity.module)
+      model.UpdateRule(name, ..) -> Ok(update_name(entity, name))
       _ -> Error(Nil)
     }
   })
@@ -235,10 +235,13 @@ fn functions_for(entity: model.Entity, app: model.App) -> List(Fn) {
         case rule {
           model.UpdateRule(name, fields, ignored) -> {
             let _ = ignored
-            let name = name <> "_" <> entity.module
+            let name = update_name(entity, name)
+            let lookup = update_lookup_props(entity, name)
+            let lookup_params = key_params_for_props(entity, app, lookup)
+            let version = update_version_params(entity, name)
             let params =
               list.append(
-                list.append(key, version),
+                list.append(lookup_params, version),
                 list.map(fields, fn(field) {
                   Param(label: field, ty: prop_type(entity, app, field))
                 }),
@@ -454,7 +457,15 @@ fn verb(inner: typing.Ty) -> typing.Ty {
 }
 
 fn key_params(entity: model.Entity, app: model.App) -> List(Param) {
-  entity.key_props
+  key_params_for_props(entity, app, entity.key_props)
+}
+
+fn key_params_for_props(
+  entity: model.Entity,
+  app: model.App,
+  props: List(String),
+) -> List(Param) {
+  props
   |> list.filter_map(fn(prop) {
     case model.field_for_prop(entity, prop) {
       Some(field) ->
@@ -644,7 +655,13 @@ fn sql_files(
             entity,
             hashes,
             name,
-            update_sql(entity, app, [prop.name], model.AnyPhase),
+            update_sql(
+              entity,
+              app,
+              name,
+              [prop.name],
+              model.AnyPhase,
+            ),
           ))
           False -> Error(Nil)
         }
@@ -657,13 +674,13 @@ fn sql_files(
       |> list.filter_map(fn(rule) {
         case rule {
           model.UpdateRule(name, fields, at) -> {
-            let name = name <> "_" <> entity.module
+            let name = update_name(entity, name)
             case emits(app, entity, name) {
               True -> Ok(sql_file(
                 entity,
                 hashes,
                 name,
-                update_sql(entity, app, fields, at),
+                update_sql(entity, app, name, fields, at),
               ))
               False -> Error(Nil)
             }
@@ -924,14 +941,16 @@ fn initial_phase(entity: model.Entity) -> Option(String) {
 fn update_sql(
   entity: model.Entity,
   app: model.App,
+  name: String,
   props: List(String),
   gate: model.VerbGate,
 ) -> String {
-  let version_offset = case has_version(entity) {
+  let lookup_props = update_lookup_props(entity, name)
+  let version_offset = case update_bumps_version(entity, name) {
     True -> 1
     False -> 0
   }
-  let first_value = list.length(entity.key_columns) + version_offset + 1
+  let first_value = list.length(lookup_props) + version_offset + 1
   let assignments =
     props
     |> list.index_map(fn(prop, index) {
@@ -944,17 +963,20 @@ fn update_sql(
         first_value + index,
       )
     })
-  let assignments = case has_version(entity) {
+  let assignments = case update_bumps_version(entity, name) {
     True -> list.append(assignments, ["version=version+1"])
     False -> assignments
   }
   let where =
     list.append(
-      key_conditions(app, entity, 1, None),
-      version_condition(entity, list.length(entity.key_columns) + 1),
+      update_key_conditions(app, entity, lookup_props, 1),
+      update_version_condition(
+        entity,
+        name,
+        list.length(lookup_props) + 1,
+      ),
     )
   let where = list.append(where, gate_condition(gate))
-  let _ = app
   "WITH changed AS (UPDATE "
   <> table(entity)
   <> " SET "
@@ -1044,8 +1066,6 @@ fn delete_sql(entity: model.Entity, app: model.App) -> String {
   <> table(entity)
   <> " WHERE "
   <> string.join(key_conditions(app, entity, 1, None), " AND ")
-  <> " RETURNING "
-  <> returning(entity)
   <> ";\n"
 }
 
@@ -1413,6 +1433,9 @@ fn version_condition(entity: model.Entity, place: Int) -> List(String) {
 fn gate_condition(gate: model.VerbGate) -> List(String) {
   case gate {
     model.AnyPhase -> []
+    model.Only([phase]) -> [
+      "phase='" <> naming.snake(phase) <> "'",
+    ]
     model.Only(phases) -> [
       "phase IN ("
       <> string.join(
@@ -1443,6 +1466,20 @@ fn key_conditions(
   })
 }
 
+fn update_key_conditions(
+  app: model.App,
+  entity: model.Entity,
+  props: List(String),
+  first_place: Int,
+) -> List(String) {
+  props
+  |> list.index_map(fn(prop, index) {
+    quoted(verb_prop_column(app, entity, prop))
+      <> "="
+      <> parameter_for_prop(app, entity, prop, first_place + index)
+  })
+}
+
 fn parameter_for_column(
   app: model.App,
   entity: model.Entity,
@@ -1465,6 +1502,48 @@ fn parameter_for_prop(
   case model.field_for_prop(entity, prop) {
     Some(field) -> parameter_value(app, field, place)
     None -> "$" <> int.to_string(place)
+  }
+}
+
+fn update_name(entity: model.Entity, name: String) -> String {
+  let prefix = "update_" <> entity.module <> "_"
+  case string.starts_with(name, prefix) {
+    True -> name
+    False -> name <> "_" <> entity.module
+  }
+}
+
+fn update_uses_upsert_key(entity: model.Entity, name: String) -> Bool {
+  string.starts_with(name, "update_" <> entity.module <> "_by_")
+  && entity.upsert_key != []
+}
+
+fn update_lookup_props(entity: model.Entity, name: String) -> List(String) {
+  case update_uses_upsert_key(entity, name) {
+    True -> entity.upsert_key
+    False -> entity.key_props
+  }
+}
+
+fn update_version_params(entity: model.Entity, name: String) -> List(Param) {
+  case update_bumps_version(entity, name) {
+    True -> version_param(entity)
+    False -> []
+  }
+}
+
+fn update_bumps_version(entity: model.Entity, name: String) -> Bool {
+  has_version(entity) && !update_uses_upsert_key(entity, name)
+}
+
+fn update_version_condition(
+  entity: model.Entity,
+  name: String,
+  place: Int,
+) -> List(String) {
+  case update_bumps_version(entity, name) {
+    True -> version_condition(entity, place)
+    False -> []
   }
 }
 
@@ -1527,17 +1606,26 @@ fn returning(entity: model.Entity) -> String {
 
 fn returning_created(app: model.App, entity: model.Entity) -> String {
   let columns =
-    entity.props
-    |> list.filter_map(fn(prop) {
-      case model.field_for_prop(entity, prop.name) {
-        Some(field) -> Ok(verb_field_column(app, field))
-        None -> Error(Nil)
-      }
+    created_fields(entity)
+    |> list.map(fn(field) {
+      verb_field_column(app, field)
     })
   case columns {
     [] -> "*"
     _ -> string.join(list.map(columns, quoted), ",")
   }
+}
+
+/// Draft/Created の同じ Property から戻り列を導く。verb_fields の補助列や phase は
+/// draft の型に無いので RETURNING に混ぜない。
+fn created_fields(entity: model.Entity) -> List(model.FieldDef) {
+  entity.props
+  |> list.filter_map(fn(prop) {
+    case model.field_for_prop(entity, prop.name) {
+      Some(field) -> Ok(field)
+      None -> Error(Nil)
+    }
+  })
 }
 
 fn returning_with_alias(entity: model.Entity, alias: String) -> String {
@@ -1644,7 +1732,7 @@ fn enum_field(field: model.FieldDef) -> Bool {
 
 fn cast_of(kind: String) -> String {
   case kind {
-    "jsonb" | "uuid" | "date" | "timestamptz" -> "::" <> kind
+    "jsonb" | "uuid" | "date" | "timestamptz" | "boolean" -> "::" <> kind
     _ -> ""
   }
 }

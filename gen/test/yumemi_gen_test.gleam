@@ -773,7 +773,7 @@ pub fn verb_fixture_emits_phase_gate_casts_sealed_and_multi_scope_test() {
 
   let update = text_of(verb_fixture, "db/queries/verb/rename_feature.sql")
   string.contains(update, "SET title=$2") |> should.be_true
-  string.contains(update, "phase IN ('draft')") |> should.be_true
+  string.contains(update, "phase='draft'") |> should.be_true
 
   let reorder = text_of(verb_fixture, "db/queries/verb/reorder_features.sql")
   string.contains(reorder, "$3::jsonb") |> should.be_true
@@ -970,7 +970,7 @@ pub fn composite_key_is_present_in_signature_where_and_returning_test() {
   string.contains(update, "RETURNING a,b,c") |> should.be_true
   string.contains(delete, "WHERE a=$1 AND b=$2 AND c=$3")
   |> should.be_true
-  string.contains(delete, "RETURNING a,b,c") |> should.be_true
+  string.contains(delete, "RETURNING") |> should.be_false
   let verb = text_of(flag_fixture, "src/gen/verb.gleam")
   string.contains(
     verb,
