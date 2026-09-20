@@ -6,12 +6,15 @@ import framework/effect.{type Effect, Read}
 import framework/page.{type Cursor, type Page, type PageSize}
 import framework/step.{type Start, type Step}
 import gen/allow/widget as allow
+import gen/face.{type Face, Test}
 import gen/query as q
 import gen/reads/widget_page as reads
 import gen/root/widget_page.{type Actor, type Root, type Service, Service}
 import gleam/option.{type Option}
 
 pub const effect: Effect = Read
+
+pub const faces: List(Face) = [Test]
 
 pub type Args {
   Args(limit: PageSize, cursor: Option(Cursor))

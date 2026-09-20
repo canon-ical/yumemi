@@ -21,23 +21,26 @@ fixture article は `public`(Anonymous / AnySubject / ReadOnly / `/api`) と `ad
 | `src/gen/entry/http.gleam` | 0 | 1 | +1 |
 | 生成ファイル合計 | 629 | 635 | +6 |
 
-fixture article は 53 → 55 files。`gleam test` は 59 → 61 passed(gen-4-sql merge 後。`gen/sql` の +4 は exit 1 の 4 本の SQL)。
+fixture article は 53 → 55 files。`gleam test` は 59 → 61 passed(gen-4-sql merge 後)、巡2の負例7件を足して **68 passed**。`gen/sql` の +4 は exit 1 だった4本の SQL。
 
 ## 検証
 
 | 検査 | 実測 | 証拠 |
 |---|---|---|
-| fixture `gleam test` | 61 passed, no failures | `gen/_out/kashiwagi-gate2-test.txt` |
-| route table scratch build | PASS、7 rows | `gen/_out/kashiwagi-gate2/evidence/route.txt` |
-| gate 2 SQL | 7 checks PASS | `gen/_out/kashiwagi-gate2/evidence/gate2-sql.txt` |
-| root FFI | 8 checks PASS | `gen/_out/kashiwagi-gate2/evidence/root-ffi.txt` |
+| fixture `gleam test` | **68 passed, no failures** | `build/gleam-test-final.txt` |
+| 入口/複合root/SQL負例 CLI | prefix / entry無し / entries空 / 未知面 / 3変数は exit 4、SQL 2形は exit 1 | `build/regression-cli-final.txt` |
+| route table scratch build | **PASS、7 rows** | `build/verify-route-table-final.txt` |
+| gate 2 SQL | **7 checks PASS** | `build/verify-gate2-sql-final.txt` |
+| root FFI | **8 checks PASS** | `build/verify-root-ffi-final.txt` |
+| 本便4 SQL + article route表 | 修正前生成物と byte 一致 | `build/artifact-comparison-final.txt` |
+| current musearch生成 | 635 files、faces不足92、prefix不足5、exit 1=0、`.mjs`=0、停止4 | `build/generate-musearch-final.txt` / `build/r2-out/musearch/_diagnostics.txt` |
 | probe original musearch | 0 / 338 / 134 / 129 | `gen/_out/kashiwagi-gate2/evidence/probe.txt` |
 
-上表は merge 後の木を柏木が再検証した実測。PG は `127.0.0.1:55432`、DB `postgres` の検証用スキーマを使用した。上表の既存検証だけでは、下記ゲート2の反例は検出しない。
+巡2の実測。PG は `127.0.0.1:55432`、DB `postgres` の検証用スキーマを使用した。負例は `gen/test/yumemi_gen_test.gleam` に固定した。
 
 ## musearch 7a: current ★
 
-`gleam run -m yumemi_gen -- ~/yumemism_repo/musearch/app gen/_out/final-musearch` は 631 files を書いた(gen-4-sql merge 前)。`_diagnostics.txt` の内訳は faces const 不足 **92本の exit 4**、exit 3 **1**、warning **21**、exit 1 **4**(merge 後は 635 files、exit 1 **0** ── 下の「exit 1 の4本(SQL)」節)。exit 3 の文言は `entity/ledger: key 関数が無い ── ER の外の型だけの宣言は src/types.gleam へ(src/entity/** は Entity だけ)` に更新した。
+`gleam run -m yumemi_gen -- ~/yumemism_repo/musearch/app build/r2-out/musearch` は **635 files** を書いて停止4。`_diagnostics.txt` は warning **21**、exit 3 **1**、exit 4 **97**(prefix不足5 + faces const不足92)、exit 1 **0**。生成器由来の `.mjs` は0。exit 3 の文言は `entity/ledger: key 関数が無い ── ER の外の型だけの宣言は src/types.gleam へ(src/entity/** は Entity だけ)`。
 
 ## musearch 7b: scratch の仮割当
 
@@ -161,35 +164,36 @@ fixture article は 53 → 55 files。`gleam test` は 59 → 61 passed(gen-4-sq
 
 ## 20 / 26 への記述案
 
-- **prefix欄**: `Http` / `HttpApi` の `prefix: String` は URLの頭そのもの。`/api` の暗黙既定値は置かず、Service側に path 欄を置かない。
+- **prefix欄**: `Http` / `HttpApi` の `prefix: String` は必須で、`/` から始まる空白の無い1語。欠落・不正は entry 名付きの exit 4。`/api` の暗黙既定値は置かず、Service側に path 欄を置かない。
 - **gen/face.gleam**: entry の name を PascalCase にした `pub type Face` を生成する。Face は framework の型ではない。
-- **facesの規則**: 全 Service に `pub const faces: List(Face)` を必須化。未知の面名、`who: As<X>` と面の subject 集合の不一致、非Systemの `faces=[]`、System-only の面名指定は exit 4。`faces=[]` は System-only のみ許す。
-- **4段の実装形**: 段1 prefix、段2 root と Args の key/path_key 型、段3 target Entity の最長 module prefix と collection、段4 verb の予約語から method / 個体変数 / suffix を決める。path_keys は実際にURLへ置いた Args欄名。3変数以上と target候補2個以上は exit 4。
+- **facesの規則**: 全 Service に `pub const faces: List(Face)` を必須化。entry不在・entries空でも必須検査を行う。未知の面名、`who: As<X>` と面の subject 集合の不一致、非Systemの `faces=[]`、System-only の面名指定は exit 4。`faces=[]` は System-only のみ許す。
+- **4段の実装形**: 段1 prefix、段2 root と Args の key/path_key 型、段3 target Entity の最長 module prefix と collection、段4 verb の予約語から method / 個体変数 / suffix を決める。複合key/path_keyは構成要素ごとに照合する。path_keys は実際にURLへ置いた Args欄名。root入れ子を含む2変数は許し、合計3変数以上と target候補2個以上は exit 4。
 - **ReadOnlyの絞り**: Entry の `All | ReadOnly` は Service の faces を上から絞り、ReadOnly面には Write route を出さない。Write Service がReadOnly面だけを名指す場合は warning(exit 0)。
 - **faces=[] と System**: `allow: [system]` の Service は HTTP route 表へ入れず、System-only のため `faces=[]` を許す。
 - **26 dispatch 検査2**: method + path は生成 `src/gen/entry/http.gleam` の pure route tableを引き、face名は entry name の原文、credential は Session / ApiKey の分類を持つ。
 
 ## exit 1 の4本(SQL)
 
-`gen-4-sql` branch(真壁 `d723622`)を `gen-4` へ merge 済み。`emit/sql.gleam` に `Has` / `HasNone`(EXISTS / NOT EXISTS)と `with`(相関 `jsonb_agg` で関係先を添える)の SQL 生成を実装し、merge 後の木で **exit 1 は 4 → 0**、生成は **635 files**(≥ 629)。4 本(`store_schedule_list/{all_slots,public_slots}.sql`、`store_roster_list/mine.sql`、`roster_list/listed.sql`)が生成束に出る。手書き SQL とは意味一致で、`listed` は JOIN / GROUP BY ではなく相関サブクエリの形。fixture `relation` に `photo_filter`(Has / HasNone / with)を足して `gleam test` で SQL を固定した。`along` / `FirstPerGroup` / `At` / `KeyOf` は残差のまま触っていない。
+`gen-4-sql` branch(真壁 `d723622`)を `gen-4` へ merge 済み。`emit/sql.gleam` に `Has` / `HasNone`(EXISTS / NOT EXISTS)と `with`(相関 `jsonb_agg` で関係先を添える)の SQL 生成を実装し、merge 後の木で **exit 1 は 4 → 0**、生成は **635 files**(≥ 629)。4 本(`store_schedule_list/{all_slots,public_slots}.sql`、`store_roster_list/mine.sql`、`roster_list/listed.sql`)が生成束に出る。巡2では `Has` / `HasNone` は単一FKを持つ Has / Held / Link だけ、`with` は逆向き Held だけに限定した。順方向 `with` と Multiへの `Has` / `HasNone` はSQLを出さず exit 1。本便4本は修正前とbyte一致。`along` / `FirstPerGroup` / `At` / `KeyOf` は残差のまま触っていない。
 
 ## 未決 / 残差
 
-- current musearch ★はprefix未追随なので7aでは空文字を読み、`/api`は補っていない。5語を足した7b scratchが明示形。
+- current musearch ★はprefix未追随の5入口を entry 名付き exit 4 にする。`/api`は補わない。5語を足した7b scratchが明示形。
+- current musearch ★は92 Serviceがfaces未追随で、entryの有無に依存せず exit 4 にする。
 - registryの既存URLと4段規則の割れは直していない。単複、末尾形、root / 鍵の違いはmusearch側の別便で裁定する。
 - scratchで `対象 Entity が無い` となるサービスは、Entity外の型置き場と route の扱いを別途決める。
 - 26 検査1「同じ host に2入口で停止」と付属入口の生成は本便の射程外で未実装。
 
-## 柏木ゲート2の反例
+## 柏木ゲート2のP0修正(巡2)
 
-判定は **P0 あり(4件)**。実装は未修正。再現入力・出力・実PGのエラーは `gen/_out/kashiwagi-gate2/`、再実行は `python3 gen/_out/kashiwagi-gate2/evidence/recheck.py`。
+P0 4件を修正し、再現入力は `gen/fixtures/*` と `gen/test/yumemi_gen_test.gleam` に固定した。
 
-1. entry の `prefix` を削除すると生成は exit 0 で、`article_create` の path が `/articles` になる。必須欄の不足を空文字として受け入れている。
-2. entry と全 Service の faces を削除すると生成は exit 0 で、faces 不足を一件も診断せず route 表も出ない。
-3. root の key が `#(Slug, Title)`、Args が `slug: Slug, title: Title, name: CategoryName` の `category_read` は root を認識せず、exit 0 で `/api/admin/categories/{name}` を出す。plan D5 の複合key照合と3変数停止を満たさない。
-4. 順方向 `with: [ArticleToCategory]` は `c.category_id=a.slug`、Multi の `Has(PhotoToLabels, ...)` は `l.id=p.labels_id` を生成して exit 0。どちらも実PGで列不存在となる。本便の4クエリ以外の未対応形も成功扱いせず、正しく生成するか未実装として停止する必要がある。
+1. prefix欠落・不正は `entry.<name>` を名指しする exit 4。正例 `/api/admin` も同じfixtureで固定した。
+2. faces必須検査をentry一覧の有無から分離し、entry不在・entries空・未知面をすべて exit 4 にした。
+3. root判定も key / path_key のTupleを構成要素へ平坦化する。root 2変数の子一覧は生成し、root 2 + target 1 は `パス変数が3個以上` の exit 4。
+4. 順方向 `with` と Multiへの `Has` / `HasNone` はSQLを生成せず exit 1。併せて `stop.worst` が NotImplemented 単独を0に潰していた分岐を直した。
 
-P1: route の入力ハッシュは Entity を含まず、collection の変更でURLが変わっても同じ値になる。入口負例とSQL関係種別の回帰検査も必要。対象Entity無し・動詞空の警告予定に対する exit 4 は残差として記録する。
+P1: route の入力ハッシュは Entity を含まず、collection の変更でURLが変わっても同じ値になる。対象Entity無し・動詞空の警告予定に対する exit 4 は残差として記録する。
 
 ## 実行記録
 

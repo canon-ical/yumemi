@@ -606,6 +606,11 @@ fn has_clause(
     model.arrow_by_name(app.arrows, arrow_name)
     |> option.to_result(clash("Has の矢印が無い: " <> arrow_name)),
   )
+  use _ <- try(case arrow.kind {
+    model.Multi ->
+      Error(undone("Has / HasNone は Multi の矢印に未対応: " <> arrow_name))
+    model.Has | model.Held | model.Link -> Ok(Nil)
+  })
   use target <- try(
     model.entity_by_name(app.entities, arrow.target_entity)
     |> option.to_result(clash("Has の関係先が無い: " <> arrow.target_entity)),
@@ -716,13 +721,7 @@ fn with_relation(
   case model.arrow_by_name(app.arrows, name) {
     Some(arrow) ->
       case arrow.from_entity == from.name {
-        True -> {
-          use child <- try(
-            model.entity_by_name(app.entities, arrow.target_entity)
-            |> option.to_result(clash("with の関係先が無い: " <> arrow.target_entity)),
-          )
-          Ok(#(child, arrow))
-        }
+        True -> Error(undone("with の順方向は未対応: " <> name))
         False -> reverse_with_relation(app, from, name)
       }
     None -> reverse_with_relation(app, from, name)
@@ -748,17 +747,28 @@ fn reverse_with_relation(
       }
     })
   case named {
-    [one] -> Ok(one)
+    [one] -> supported_reverse_with(one, name)
     [] ->
       case candidates {
         [one] ->
           case model.entity_by_name(app.entities, one.from_entity) {
-            Some(child) -> Ok(#(child, one))
+            Some(child) -> supported_reverse_with(#(child, one), name)
             None -> Error(clash("with の関係先が無い: " <> one.from_entity))
           }
         _ -> Error(clash("with の逆向きが無い: " <> name))
       }
     _ -> Error(clash("with の逆向きが複数: " <> name))
+  }
+}
+
+fn supported_reverse_with(
+  relation: #(Entity, model.Arrow),
+  name: String,
+) -> Result(#(Entity, model.Arrow), Reason) {
+  case relation.1.kind {
+    model.Held -> Ok(relation)
+    model.Has | model.Link | model.Multi ->
+      Error(undone("with の逆向きは Held の関係だけ対応: " <> name))
   }
 }
 

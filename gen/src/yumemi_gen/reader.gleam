@@ -1154,8 +1154,8 @@ fn entry_http(
   credential: model.Credential,
 ) -> Result(model.Entry, Error) {
   use name <- result.try(required_string(expression, "name", where))
-  // 旧 ★ は gen-4 前の entry API なので欄が無い。空文字は「prefix なし」であり、
-  // `/api` を暗黙に補わない。新しい宣言では prefix を読み、その値だけを使う。
+  // 欠落時も全 Service の faces 診断まで集めるため、ここでは空文字として保持する。
+  // `entry_notes` が entry 名付きの宣言矛盾にし、exit 0 では通さない。
   use prefix <- result.try(prefix_of(expression, where))
   use admit_expression <- result.try(required_expression(
     expression,
@@ -1494,21 +1494,50 @@ fn shorthand_subject(
 /// 入口と Service の結びを検査する。faces の不足は Service ごとに名指しするため、
 /// reader の単一 Result ではなく全件の Note として返す。
 pub fn entry_notes(app: model.App) -> List(stop.Note) {
-  case app.entries {
-    [] -> []
-    _ ->
-      list.flat_map(app.services, fn(service) {
-        case service.faces_declared {
-          False -> [
-            stop.Note(
-              class: stop.Conflict,
-              text: "service." <> service.module <> ": faces const が無い",
-            ),
-          ]
-          True -> face_notes(app.entries, service)
-        }
-      })
+  list.append(
+    list.filter_map(app.entries, prefix_note),
+    list.flat_map(app.services, fn(service) {
+      case service.faces_declared {
+        False -> [
+          stop.Note(
+            class: stop.Conflict,
+            text: "service." <> service.module <> ": faces const が無い",
+          ),
+        ]
+        True -> face_notes(app.entries, service)
+      }
+    }),
+  )
+}
+
+fn prefix_note(entry: model.Entry) -> Result(stop.Note, Nil) {
+  case entry.prefix {
+    "" ->
+      Ok(stop.Note(
+        class: stop.Conflict,
+        text: "entry." <> entry.name <> ": prefix が無い",
+      ))
+    prefix ->
+      case valid_prefix(prefix) {
+        True -> Error(Nil)
+        False ->
+          Ok(stop.Note(
+            class: stop.Conflict,
+            text: "entry."
+              <> entry.name
+              <> ": prefix が不正(`/` で始まる空白の無い1語が必要): "
+              <> prefix,
+          ))
+      }
   }
+}
+
+fn valid_prefix(prefix: String) -> Bool {
+  string.starts_with(prefix, "/")
+  && !string.contains(prefix, " ")
+  && !string.contains(prefix, "\t")
+  && !string.contains(prefix, "\n")
+  && !string.contains(prefix, "\r")
 }
 
 fn face_notes(

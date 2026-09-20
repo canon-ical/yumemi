@@ -2,10 +2,13 @@
 import entity/photo
 import framework/effect.{type Effect, Read}
 import framework/step.{type Start, type Step}
+import gen/face.{type Face, Test}
 import gen/query as q
 import gen/root/photo_filter.{type Actor, type Root, type Service, Service}
 
 pub const effect: Effect = Read
+
+pub const faces: List(Face) = [Test]
 
 pub type Args {
   Args(name: String)

@@ -91,7 +91,11 @@ pub fn worst(notes: List(Note)) -> Int {
                     False ->
                       case codes {
                         [] -> 0
-                        _ -> 0
+                        _ ->
+                          case list.contains(codes, 1) {
+                            True -> 1
+                            False -> 0
+                          }
                       }
                   }
               }
