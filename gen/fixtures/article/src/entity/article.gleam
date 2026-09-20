@@ -52,7 +52,7 @@ pub const verbs: List(verbs.Rule(Phase)) = [
 
 pub const ordered_by: verbs.Order = verbs.Order(
   field: "order",
-  within: "category",
+  within: ["category"],
 )
 
 pub const upsert_key: List(String) = ["category", "order"]

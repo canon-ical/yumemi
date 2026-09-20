@@ -17,5 +17,5 @@ pub const collection: String = "photos"
 
 pub const ordered_by: verbs.Order = verbs.Order(
   field: "caption",
-  within: "album",
+  within: ["album"],
 )

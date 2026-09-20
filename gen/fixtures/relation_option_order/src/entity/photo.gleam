@@ -16,4 +16,4 @@ pub fn key(it: Photo) -> PhotoId {
 
 pub const collection: String = "photos"
 
-pub const ordered_by: verbs.Order = verbs.Order(field: "order", within: "album")
+pub const ordered_by: verbs.Order = verbs.Order(field: "order", within: ["album"])

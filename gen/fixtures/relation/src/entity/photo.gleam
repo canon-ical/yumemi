@@ -26,4 +26,4 @@ pub fn key(it: Photo) -> PhotoId {
 pub const collection: String = "photos"
 
 /// 順序列は値域つき(`Range(min: 1, max: 10)`)── 確定値は 1 から、一時値は 10 から下へ。
-pub const ordered_by: verbs.Order = verbs.Order(field: "order", within: "album")
+pub const ordered_by: verbs.Order = verbs.Order(field: "order", within: ["album"])

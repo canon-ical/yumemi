@@ -59,6 +59,8 @@ const route_external_fixture = "fixtures/route_external"
 
 const route_nested_fixture = "fixtures/route_nested"
 
+const verb_fixture = "fixtures/verb_features"
+
 pub fn main() {
   gleeunit.main()
 }
@@ -731,6 +733,59 @@ pub fn verb_bundle_covers_declared_actions_test() {
   string.contains(found, "pub fn advance_article(") |> should.be_true
 }
 
+pub fn verb_fixture_reads_handwritten_sealed_and_external_declarations_test() {
+  let assert Ok(units) = source.load(verb_fixture)
+  let assert Ok(loaded) = reader.read(units)
+  let assert Ok(external) =
+    list.find(loaded.collections, fn(item) { item.module == "ledger" })
+  external.collection |> should.equal("ledger_rows")
+  let assert Ok(handwritten) =
+    list.find(loaded.entities, fn(item) { item.module == "handwritten" })
+  handwritten.handwritten_verbs
+  |> should.equal(["create_handwritten", "unknown_handwritten"])
+}
+
+pub fn handwritten_verbs_suppress_matching_output_and_warn_once_per_miss_test() {
+  let paths = list.map(files_of(verb_fixture), fn(entry) { entry.0 })
+  list.contains(paths, "db/queries/verb/create_handwritten.sql")
+  |> should.be_false
+  let found = text_of(verb_fixture, "src/gen/verb.gleam")
+  string.contains(found, "//// handwritten: ") |> should.be_true
+  string.contains(found, "create_handwritten") |> should.be_true
+  string.contains(found, "external_handwritten") |> should.be_true
+  let notes = notes_of(verb_fixture)
+  stop.worst(notes) |> should.equal(0)
+  notes
+  |> list.filter(fn(note) { string.contains(note.text, "unknown_handwritten") })
+  |> list.length
+  |> should.equal(1)
+  notes
+  |> list.filter(fn(note) { string.contains(note.text, "external_handwritten") })
+  |> list.length
+  |> should.equal(1)
+}
+
+pub fn verb_fixture_emits_phase_gate_casts_sealed_and_multi_scope_test() {
+  let create = text_of(verb_fixture, "db/queries/verb/create_feature.sql")
+  string.contains(create, "phase,entered_draft") |> should.be_true
+  string.contains(create, "'draft'") |> should.be_true
+  string.contains(create, "::timestamptz") |> should.be_true
+
+  let update = text_of(verb_fixture, "db/queries/verb/rename_feature.sql")
+  string.contains(update, "SET title=$2") |> should.be_true
+  string.contains(update, "phase IN ('draft')") |> should.be_true
+
+  let reorder = text_of(verb_fixture, "db/queries/verb/reorder_features.sql")
+  string.contains(reorder, "$3::jsonb") |> should.be_true
+  string.contains(reorder, "owner_id=$1::uuid") |> should.be_true
+  string.contains(reorder, "space_id IS NOT DISTINCT FROM $2::uuid")
+  |> should.be_true
+
+  let sealed = text_of(verb_fixture, "db/queries/verb/create_sealed_record.sql")
+  string.contains(sealed, "body_key_id") |> should.be_true
+  string.contains(sealed, "decode($2,'hex')") |> should.be_true
+}
+
 pub fn put_does_not_update_keys_versions_or_phase_gated_fields_test() {
   let found = text("db/queries/verb/put_article.sql")
   string.contains(found, "body=EXCLUDED.body") |> should.be_true
@@ -805,7 +860,7 @@ pub fn reorder_uses_range_bounds_of_the_order_type_test() {
     "AND candidate NOT BETWEEN 1::bigint AND 1::bigint+c.expected-1",
   )
   |> should.be_true
-  string.contains(stage, "FROM app.photo e WHERE e.album_id=$1 FOR UPDATE")
+  string.contains(stage, "FROM app.photo e WHERE e.album_id=$1::uuid FOR UPDATE")
   |> should.be_true
   let apply =
     text_of(relation_fixture, "db/queries/verb/reorder_photos.sql")
@@ -940,7 +995,7 @@ pub fn draft_keeps_input_keys_and_create_sql_arguments_test() {
   let article_create = text("db/queries/verb/create_article.sql")
   string.contains(
     article_create,
-    "INSERT INTO app.article(slug,title,body,version,\"order\",category_id)",
+    "INSERT INTO app.article(slug,title,body,version,\"order\",category_id,phase,entered_draft)",
   )
   |> should.be_true
 }

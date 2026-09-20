@@ -12,6 +12,7 @@ import yumemi_gen/emit/types.{type File, File}
 import yumemi_gen/emit/typing
 import yumemi_gen/model
 import yumemi_gen/naming
+import yumemi_gen/stop
 
 type Param {
   Param(label: String, ty: typing.Ty)
@@ -55,13 +56,16 @@ pub fn emit(app: model.App, hashes: hash.Hashes) -> List(File) {
     functions
     |> list.map(render_function(_, style))
     |> string.join("\n")
+  let header = handwritten_header(app)
   [
     File(
       path: "src/gen/verb.gleam",
       text: string.concat([
         "//// GENERATED from entity declarations [sha256:",
         hashes.entities,
-        "] — 手で編集しない\n\n",
+        "] — 手で編集しない\n",
+        header,
+        "\n",
         imports,
         "\n\n",
         "@external(javascript, \"../operations_ffi.mjs\", \"stage\")\n",
@@ -70,6 +74,34 @@ pub fn emit(app: model.App, hashes: hash.Hashes) -> List(File) {
       ]),
     ),
   ]
+}
+
+/// 手書き札の照合。未一致は止めず、指定された名前ごとに1行の警告を返す。
+pub fn notes(app: model.App) -> List(stop.Note) {
+  let generated =
+    app.entities
+    |> list.flat_map(candidate_names)
+    |> list.unique
+  let declarations = list.append(
+    app.entities
+    |> list.map(fn(entity) { #(entity.module, entity.handwritten_verbs) }),
+    app.handwritten_verbs,
+  )
+  declarations
+  |> list.flat_map(fn(entry) {
+    let #(module, names) = entry
+    names
+    |> list.unique
+    |> list.filter_map(fn(name) {
+      case list.contains(generated, name) {
+        True -> Error(Nil)
+        False -> Ok(stop.Note(
+          class: stop.Warning,
+          text: module <> ": handwritten_verbs に生成名が無い: " <> name,
+        ))
+      }
+    })
+  })
 }
 
 pub fn sql(app: model.App, hashes: hash.Hashes) -> List(File) {
@@ -83,6 +115,90 @@ fn entities_in_order(app: model.App) -> List(model.Entity) {
   |> list.sort(fn(left, right) { string.compare(left.module, right.module) })
 }
 
+fn emits(app: model.App, entity: model.Entity, name: String) -> Bool {
+  !list.contains(entity.handwritten_verbs, name)
+  && !list.any(app.handwritten_verbs, fn(entry) {
+    list.contains(entry.1, name)
+  })
+}
+
+fn emits_reorder(app: model.App, entity: model.Entity, name: String) -> Bool {
+  emits(app, entity, name)
+  && !list.contains(entity.handwritten_verbs, name <> "_stage")
+  && !list.any(app.handwritten_verbs, fn(entry) {
+    list.contains(entry.1, name <> "_stage")
+  })
+}
+
+fn handwritten_header(app: model.App) -> String {
+  let names = list.unique(list.append(
+    app.entities
+    |> list.flat_map(fn(entity) { entity.handwritten_verbs }),
+    app.handwritten_verbs
+    |> list.flat_map(fn(entry) { entry.1 }),
+  ))
+  case names {
+    [] -> ""
+    _ -> "//// handwritten: " <> string.join(names, ", ") <> "\n"
+  }
+}
+
+fn candidate_names(entity: model.Entity) -> List(String) {
+  let generic_updates = case model.has_key(entity) {
+    True -> list.map(writable_props(entity), fn(prop) {
+      "update_" <> entity.module <> "_" <> prop.name
+    })
+    False -> []
+  }
+  let named_updates = entity.verbs |> list.filter_map(fn(rule) {
+    case rule {
+      model.UpdateRule(name, ..) -> Ok(name <> "_" <> entity.module)
+      _ -> Error(Nil)
+    }
+  })
+  let extras = entity.verbs |> list.flat_map(fn(rule) {
+    case rule {
+      model.DeleteWhereRule(field) ->
+        case model.has_key(entity) {
+          True -> ["delete_" <> entity.module <> "_by_" <> field]
+          False -> []
+        }
+      model.CreateManyRule -> ["create_" <> entity.collection]
+      _ -> []
+    }
+  })
+  let lifecycle = case model.has_key(entity), model.has_transitions(entity) {
+    True, True -> ["advance_" <> entity.module]
+    _, _ -> []
+  }
+  let delete = case model.has_key(entity) {
+    True -> ["delete_" <> entity.module]
+    False -> []
+  }
+  let reorder = case model.has_key(entity), entity.ordered_by {
+    True, Some(_) ->
+      [
+        "reorder_" <> entity.collection,
+        "reorder_" <> entity.collection <> "_stage",
+      ]
+    _, _ -> []
+  }
+  let put = case model.has_key(entity), entity.upsert_key {
+    True, [_first, ..] -> ["put_" <> entity.module]
+    _, _ -> []
+  }
+  list.unique(list.flatten([
+    ["create_" <> entity.module],
+    generic_updates,
+    named_updates,
+    lifecycle,
+    delete,
+    extras,
+    reorder,
+    put,
+  ]))
+}
+
 // ── 関数 ─────────────────────────────────────────────────────────────────────
 
 fn functions_for(entity: model.Entity, app: model.App) -> List(Fn) {
@@ -92,17 +208,23 @@ fn functions_for(entity: model.Entity, app: model.App) -> List(Fn) {
     False -> []
     True ->
       writable_props(entity)
-      |> list.map(fn(prop) {
-        let params =
-          list.append(list.append(key, version), [
-            Param(label: prop.name, ty: prop_type(entity, app, prop.name)),
-          ])
-        Fn(
-          name: "update_" <> entity.module <> "_" <> prop.name,
-          params: params,
-          result: verb(typing.TyRef(None, "Nil")),
-          input: input_of(params),
-        )
+      |> list.filter_map(fn(prop) {
+        let name = "update_" <> entity.module <> "_" <> prop.name
+        case emits(app, entity, name) {
+          False -> Error(Nil)
+          True -> {
+            let params =
+              list.append(list.append(key, version), [
+                Param(label: prop.name, ty: prop_type(entity, app, prop.name)),
+              ])
+            Ok(Fn(
+              name: name,
+              params: params,
+              result: verb(typing.TyRef(None, "Nil")),
+              input: input_of(params),
+            ))
+          }
+        }
       })
   }
   let named_updates = case model.has_key(entity) {
@@ -113,6 +235,7 @@ fn functions_for(entity: model.Entity, app: model.App) -> List(Fn) {
         case rule {
           model.UpdateRule(name, fields, ignored) -> {
             let _ = ignored
+            let name = name <> "_" <> entity.module
             let params =
               list.append(
                 list.append(key, version),
@@ -120,68 +243,106 @@ fn functions_for(entity: model.Entity, app: model.App) -> List(Fn) {
                   Param(label: field, ty: prop_type(entity, app, field))
                 }),
               )
-            Ok(Fn(
-              name: name <> "_" <> entity.module,
-              params: params,
-              result: verb(typing.TyRef(None, "Nil")),
-              input: input_of(params),
-            ))
+            case emits(app, entity, name) {
+              True -> Ok(Fn(
+                name: name,
+                params: params,
+                result: verb(typing.TyRef(None, "Nil")),
+                input: input_of(params),
+              ))
+              False -> Error(Nil)
+            }
           }
           _ -> Error(Nil)
         }
       })
   }
   let advance = case model.has_key(entity), model.has_transitions(entity) {
-    True, True -> [
-      Fn(
-        name: "advance_" <> entity.module,
-        params: list.append(list.append(key, version), [
-          Param(
-            label: "step",
-            ty: typing.TyRef(Some("gen/phase"), entity.name <> "Step"),
+    True, True -> {
+      let name = "advance_" <> entity.module
+      case emits(app, entity, name) {
+        True -> [
+          Fn(
+            name: name,
+            params: list.append(list.append(key, version), [
+              Param(
+                label: "step",
+                ty: typing.TyRef(Some("gen/phase"), entity.name <> "Step"),
+              ),
+            ]),
+            result: verb(typing.TyRef(None, "Nil")),
+            input: input_of(
+              list.append(list.append(key, version), [
+                Param(label: "step", ty: typing.TyRef(None, entity.name <> "Step")),
+              ]),
+            ),
           ),
-        ]),
-        result: verb(typing.TyRef(None, "Nil")),
-        input: input_of(
-          list.append(list.append(key, version), [
-            Param(label: "step", ty: typing.TyRef(None, entity.name <> "Step")),
-          ]),
-        ),
-      ),
-    ]
+        ]
+        False -> []
+      }
+    }
     _, _ -> []
   }
   let delete = case model.has_key(entity) {
     False -> []
-    True -> [
-      Fn(
-        name: "delete_" <> entity.module,
-        params: key,
-        result: verb(typing.TyRef(None, "Nil")),
-        input: input_of(key),
-      ),
-    ]
+    True -> {
+      let name = "delete_" <> entity.module
+      case emits(app, entity, name) {
+        True -> [
+          Fn(
+            name: name,
+            params: key,
+            result: verb(typing.TyRef(None, "Nil")),
+            input: input_of(key),
+          ),
+        ]
+        False -> []
+      }
+    }
   }
-  let extra = [
-    create(entity),
-    ..list.filter_map(entity.verbs, fn(rule) {
+  let extra = list.append(
+    case emits(app, entity, "create_" <> entity.module) {
+      True -> [create(entity)]
+      False -> []
+    },
+    list.filter_map(entity.verbs, fn(rule) {
       case rule {
         model.DeleteWhereRule(field) ->
           case model.has_key(entity) {
-            True -> Ok(delete_where(entity, app, field))
+            True -> {
+              let name = "delete_" <> entity.module <> "_by_" <> field
+              case emits(app, entity, name) {
+                True -> Ok(delete_where(entity, app, field))
+                False -> Error(Nil)
+              }
+            }
             False -> Error(Nil)
           }
-        model.CreateManyRule -> Ok(create_many(entity))
+        model.CreateManyRule -> {
+          let name = "create_" <> entity.collection
+          case emits(app, entity, name) {
+            True -> Ok(create_many(entity))
+            False -> Error(Nil)
+          }
+        }
         _ -> Error(Nil)
       }
-    })
-  ]
+    }),
+  )
   let reorder = case model.has_key(entity), entity.ordered_by {
-    True, Some(ordered) -> [reorder(entity, app, ordered)]
+    True, Some(ordered) ->
+      case emits_reorder(app, entity, "reorder_" <> entity.collection) {
+        True -> [reorder(entity, app, ordered)]
+        False -> []
+      }
     _, _ -> []
   }
   let put = case model.has_key(entity), entity.upsert_key {
-    True, [_first, ..] -> [put(entity, app)]
+    True, [_first, ..] ->
+      case emits(app, entity, "put_" <> entity.module) {
+        True -> [put(entity, app)]
+        False -> []
+      }
     _, _ -> []
   }
   list.append(
@@ -231,28 +392,40 @@ fn reorder(
   app: model.App,
   ordered: model.OrderedBy,
 ) -> Fn {
-  let within_type = case model.field_for_prop(entity, ordered.within) {
-    Some(model.FieldDef(
-      value: model.RelValue(
-        target_module: target_module,
-        target_type: target_type,
-      ),
-      ..,
-    )) ->
-      typing.key_of(typing.TyRef(Some("entity/" <> target_module), target_type))
-    _ -> prop_type(entity, app, ordered.within)
-  }
   let key_type = key_type(entity, app)
-  let params = [
-    Param(label: ordered.within, ty: within_type),
+  let within_params = list.map(ordered.within, fn(within) {
+    Param(label: within, ty: reorder_within_type(entity, app, within))
+  })
+  let params = list.append(within_params, [
     Param(label: "ids", ty: typing.list_of(key_type)),
-  ]
+  ])
   Fn(
     name: "reorder_" <> entity.collection,
     params: params,
     result: verb(typing.TyRef(None, "Nil")),
     input: input_of(params),
   )
+}
+
+fn reorder_within_type(
+  entity: model.Entity,
+  app: model.App,
+  name: String,
+) -> typing.Ty {
+  case model.field_for_prop(entity, name) {
+    Some(field) -> {
+      let base = case field.value {
+        model.RelValue(target_module: target_module, target_type: target_type) ->
+          typing.key_of(typing.TyRef(Some("entity/" <> target_module), target_type))
+        _ -> prop_type(entity, app, name)
+      }
+      case field.optional {
+        True -> typing.option(base)
+        False -> base
+      }
+    }
+    None -> prop_type(entity, app, name)
+  }
 }
 
 fn put(entity: model.Entity, app: model.App) -> Fn {
@@ -464,13 +637,17 @@ fn sql_files(
     False -> []
     True ->
       writable_props(entity)
-      |> list.map(fn(prop) {
-        sql_file(
-          entity,
-          hashes,
-          "update_" <> entity.module <> "_" <> prop.name,
-          update_sql(entity, app, [prop.name], model.AnyPhase),
-        )
+      |> list.filter_map(fn(prop) {
+        let name = "update_" <> entity.module <> "_" <> prop.name
+        case emits(app, entity, name) {
+          True -> Ok(sql_file(
+            entity,
+            hashes,
+            name,
+            update_sql(entity, app, [prop.name], model.AnyPhase),
+          ))
+          False -> Error(Nil)
+        }
       })
   }
   let named_updates = case model.has_key(entity) {
@@ -479,85 +656,129 @@ fn sql_files(
       entity.verbs
       |> list.filter_map(fn(rule) {
         case rule {
-          model.UpdateRule(name, fields, at) ->
-            Ok(sql_file(
-              entity,
-              hashes,
-              name <> "_" <> entity.module,
-              update_sql(entity, app, fields, at),
-            ))
+          model.UpdateRule(name, fields, at) -> {
+            let name = name <> "_" <> entity.module
+            case emits(app, entity, name) {
+              True -> Ok(sql_file(
+                entity,
+                hashes,
+                name,
+                update_sql(entity, app, fields, at),
+              ))
+              False -> Error(Nil)
+            }
+          }
           _ -> Error(Nil)
         }
       })
   }
   let advance = case model.has_key(entity), model.has_transitions(entity) {
-    True, True -> [
-      sql_file(
-        entity,
-        hashes,
-        "advance_" <> entity.module,
-        advance_sql(entity, model.advance_bump(entity)),
-      ),
-    ]
+    True, True -> {
+      let name = "advance_" <> entity.module
+      case emits(app, entity, name) {
+        True -> [
+          sql_file(
+            entity,
+            hashes,
+            name,
+            advance_sql(entity, app, model.advance_bump(entity)),
+          ),
+        ]
+        False -> []
+      }
+    }
     _, _ -> []
   }
   let delete = case model.has_key(entity) {
     False -> []
-    True -> [
-      sql_file(entity, hashes, "delete_" <> entity.module, delete_sql(entity)),
-    ]
+    True -> {
+      let name = "delete_" <> entity.module
+      case emits(app, entity, name) {
+        True -> [sql_file(entity, hashes, name, delete_sql(entity, app))]
+        False -> []
+      }
+    }
   }
   let extras =
     list.filter_map(entity.verbs, fn(rule) {
       case rule {
         model.DeleteWhereRule(field) ->
           case model.has_key(entity) {
-            True ->
-              Ok(sql_file(
-                entity,
-                hashes,
-                "delete_" <> entity.module <> "_by_" <> field,
-                delete_where_sql(entity, field),
-              ))
+            True -> {
+              let name = "delete_" <> entity.module <> "_by_" <> field
+              case emits(app, entity, name) {
+                True -> Ok(sql_file(
+                  entity,
+                  hashes,
+                  name,
+                  delete_where_sql(entity, app, field),
+                ))
+                False -> Error(Nil)
+              }
+            }
             False -> Error(Nil)
           }
-        model.CreateManyRule ->
-          Ok(sql_file(
-            entity,
-            hashes,
-            "create_" <> entity.collection,
-            create_many_sql(entity, app),
-          ))
+        model.CreateManyRule -> {
+          let name = "create_" <> entity.collection
+          case emits(app, entity, name) {
+            True -> Ok(sql_file(
+              entity,
+              hashes,
+              name,
+              create_many_sql(entity, app),
+            ))
+            False -> Error(Nil)
+          }
+        }
         _ -> Error(Nil)
       }
     })
   let reorder = case model.has_key(entity), entity.ordered_by {
-    True, Some(ordered) -> [
-      sql_file(
-        entity,
-        hashes,
-        "reorder_" <> entity.collection <> "_stage",
-        reorder_stage_sql(entity, app, ordered),
-      ),
-      sql_file(
-        entity,
-        hashes,
-        "reorder_" <> entity.collection,
-        reorder_sql(entity, app, ordered),
-      ),
-    ]
+    True, Some(ordered) -> {
+      let name = "reorder_" <> entity.collection
+      case emits_reorder(app, entity, name) {
+        True -> [
+          sql_file(
+            entity,
+            hashes,
+            name <> "_stage",
+            reorder_stage_sql(entity, app, ordered),
+          ),
+          sql_file(
+            entity,
+            hashes,
+            name,
+            reorder_sql(entity, app, ordered),
+          ),
+        ]
+        False -> []
+      }
+    }
     _, _ -> []
   }
   let put = case model.has_key(entity), entity.upsert_key {
-    True, [_first, ..] -> [
-      sql_file(entity, hashes, "put_" <> entity.module, put_sql(entity)),
-    ]
+    True, [_first, ..] -> {
+      let name = "put_" <> entity.module
+      case emits(app, entity, name) {
+        True -> [sql_file(entity, hashes, name, put_sql(entity, app))]
+        False -> []
+      }
+    }
     _, _ -> []
   }
+  let create_files = case emits(app, entity, "create_" <> entity.module) {
+    True -> [
+      sql_file(
+        entity,
+        hashes,
+        "create_" <> entity.module,
+        create_sql(entity, app),
+      ),
+    ]
+    False -> []
+  }
   list.append(
-    [
-      sql_file(entity, hashes, "create_" <> entity.module, create_sql(entity)),
-    ],
+    create_files,
     list.append(
       list.append(generic_updates, named_updates),
       list.append(
@@ -585,52 +806,118 @@ fn sql_file(
   )
 }
 
-fn create_sql(entity: model.Entity) -> String {
+fn create_sql(entity: model.Entity, app: model.App) -> String {
   let fields = create_fields(entity)
   case fields {
     [] ->
       "INSERT INTO "
       <> table(entity)
       <> " DEFAULT VALUES RETURNING "
-      <> returning(entity)
+      <> returning_created(app, entity)
       <> ";\n"
     _ ->
       "INSERT INTO "
       <> table(entity)
       <> "("
-      <> string.join(list.map(fields, fn(field) { quoted(field.column) }), ",")
+      <> string.join(
+        list.map(fields, fn(field) { quoted(verb_field_column(app, field)) }),
+        ",",
+      )
       <> ")\nVALUES("
-      <> string.join(placeholders(1, list.length(fields)), ",")
+      <> string.join(create_values(app, entity, fields, 1), ",")
       <> ") RETURNING "
-      <> returning(entity)
+      <> returning_created(app, entity)
       <> ";\n"
   }
 }
 
 fn create_many_sql(entity: model.Entity, app: model.App) -> String {
-  let fields = create_fields(entity)
+  let fields = base_create_fields(entity)
   case fields {
-    [] -> create_sql(entity)
+    [] -> create_sql(entity, app)
     _ -> {
       let selected =
         fields
         |> list.map(fn(field) {
-          "(item->>'"
-          <> field.column
-          <> "')"
-          <> cast_for_json(sql_type(app, field.value))
+          json_value(app, field)
         })
         |> string.join(",")
       "INSERT INTO "
       <> table(entity)
       <> "("
-      <> string.join(list.map(fields, fn(field) { quoted(field.column) }), ",")
+      <> string.join(
+        list.map(fields, fn(field) { quoted(verb_field_column(app, field)) }),
+        ",",
+      )
       <> ")\nSELECT "
       <> selected
       <> "\nFROM jsonb_array_elements($1::jsonb) AS item\nRETURNING "
-      <> returning(entity)
+  <> returning_created(app, entity)
       <> ";\n"
     }
+  }
+}
+
+fn create_values(
+  app: model.App,
+  entity: model.Entity,
+  fields: List(model.FieldDef),
+  place: Int,
+) -> List(String) {
+  case fields {
+    [] -> []
+    [field, ..rest] -> {
+      let value = case field.column {
+        "phase" -> initial_phase_literal(entity)
+        _ -> parameter_value(app, field, place)
+      }
+      let next_place = case field.column {
+        "phase" -> place
+        _ -> place + 1
+      }
+      [value, ..create_values(app, entity, rest, next_place)]
+    }
+  }
+}
+
+fn parameter_value(
+  app: model.App,
+  field: model.FieldDef,
+  place: Int,
+) -> String {
+  let placeholder = "$" <> int.to_string(place)
+  case field.value {
+    model.TypeValue(reference) if reference.name == "Sealed" ->
+      "decode(" <> placeholder <> ",'hex')"
+    _ -> placeholder <> cast_of(sql_type_field(app, field))
+  }
+}
+
+fn json_value(app: model.App, field: model.FieldDef) -> String {
+  case field.value {
+    model.TypeValue(reference) if reference.name == "Sealed" ->
+      "decode(item->>'"
+      <> verb_field_column(app, field)
+      <> "','hex')"
+    _ ->
+      "(item->>'"
+      <> verb_field_column(app, field)
+      <> "')"
+      <> cast_of(sql_type_field(app, field))
+  }
+}
+
+fn initial_phase_literal(entity: model.Entity) -> String {
+  case initial_phase(entity) {
+    Some(phase) -> "'" <> naming.snake(phase) <> "'"
+    None -> "NULL"
+  }
+}
+
+fn initial_phase(entity: model.Entity) -> Option(String) {
+  case entity.edges {
+    [#(from, _), ..] -> Some(from)
+    [] -> option.from_result(list.first(entity.phases))
   }
 }
 
@@ -648,9 +935,14 @@ fn update_sql(
   let assignments =
     props
     |> list.index_map(fn(prop, index) {
-      quoted(prop_column(entity, prop))
-      <> "=$"
-      <> int.to_string(first_value + index)
+      quoted(verb_prop_column(app, entity, prop))
+      <> "="
+      <> parameter_for_prop(
+        app,
+        entity,
+        prop,
+        first_value + index,
+      )
     })
   let assignments = case has_version(entity) {
     True -> list.append(assignments, ["version=version+1"])
@@ -658,7 +950,7 @@ fn update_sql(
   }
   let where =
     list.append(
-      key_conditions(entity, 1, None),
+      key_conditions(app, entity, 1, None),
       version_condition(entity, list.length(entity.key_columns) + 1),
     )
   let where = list.append(where, gate_condition(gate))
@@ -674,7 +966,11 @@ fn update_sql(
   <> ")\nSELECT framework.require_rows(count(*),'conflict') FROM changed;\n"
 }
 
-fn advance_sql(entity: model.Entity, bump: model.VerbBump) -> String {
+fn advance_sql(
+  entity: model.Entity,
+  app: model.App,
+  bump: model.VerbBump,
+) -> String {
   let key_count = list.length(entity.key_columns)
   let version_place = key_count + 1
   let version_offset = case has_version(entity) {
@@ -711,7 +1007,7 @@ fn advance_sql(entity: model.Entity, bump: model.VerbBump) -> String {
     )
   let where =
     list.append(
-      key_conditions(entity, 1, None),
+      key_conditions(app, entity, 1, None),
       list.append(version_condition(entity, version_place), [
         "phase=$" <> int.to_string(from_place),
       ]),
@@ -743,22 +1039,24 @@ fn bump_sql(bump: model.VerbBump, from_place: Int, to_place: Int) -> String {
   }
 }
 
-fn delete_sql(entity: model.Entity) -> String {
+fn delete_sql(entity: model.Entity, app: model.App) -> String {
   "DELETE FROM "
   <> table(entity)
   <> " WHERE "
-  <> string.join(key_conditions(entity, 1, None), " AND ")
+  <> string.join(key_conditions(app, entity, 1, None), " AND ")
   <> " RETURNING "
   <> returning(entity)
   <> ";\n"
 }
 
-fn delete_where_sql(entity: model.Entity, field: String) -> String {
+fn delete_where_sql(entity: model.Entity, app: model.App, field: String) -> String {
   "DELETE FROM "
   <> table(entity)
   <> " WHERE "
-  <> quoted(prop_column(entity, field))
-  <> "=$1 RETURNING "
+  <> quoted(verb_prop_column(app, entity, field))
+  <> "="
+  <> parameter_for_prop(app, entity, field, 1)
+  <> " RETURNING "
   <> returning(entity)
   <> ";\n"
 }
@@ -770,10 +1068,12 @@ fn reorder_sql(
   app: model.App,
   ordered: model.OrderedBy,
 ) -> String {
-  let within_column = prop_column(entity, ordered.within)
-  let order_column = prop_column(entity, ordered.field)
+  let order_column = verb_prop_column(app, entity, ordered.field)
   let key_column = first_key_column(entity)
   let #(first, _lo, _hi) = order_span(entity, app, ordered)
+  let ids_place = list.length(ordered.within) + 1
+  let within = within_conditions(app, entity, ordered, Some("e"), 1)
+  let within_text = string.join(within, " AND ")
   "WITH positions AS (\n"
   <> " SELECT value"
   <> key_cast(app, entity)
@@ -781,7 +1081,9 @@ fn reorder_sql(
   <> int.to_string(first)
   <> "+ord-1)::integer AS new_order,ord"
   <> "\n"
-  <> " FROM jsonb_array_elements_text($2::jsonb) WITH ORDINALITY AS items(value,ord)\n"
+  <> " FROM jsonb_array_elements_text($"
+  <> int.to_string(ids_place)
+  <> "::jsonb) WITH ORDINALITY AS items(value,ord)\n"
   <> "), target AS MATERIALIZED (\n"
   <> " SELECT e."
   <> quoted(key_column)
@@ -789,9 +1091,9 @@ fn reorder_sql(
   <> table(entity)
   <> " e JOIN positions p ON e."
   <> quoted(key_column)
-  <> "=p.id WHERE e."
-  <> quoted(within_column)
-  <> "=$1\n"
+  <> "=p.id WHERE "
+  <> within_text
+  <> "\n"
   <> "), changed AS (\n"
   <> " UPDATE "
   <> table(entity)
@@ -800,9 +1102,9 @@ fn reorder_sql(
   <> "=t.new_order\n"
   <> " FROM target t WHERE e."
   <> quoted(key_column)
-  <> "=t.id AND e."
-  <> quoted(within_column)
-  <> "=$1\n RETURNING "
+  <> "=t.id AND "
+  <> within_text
+  <> "\n RETURNING "
   <> returning_with_alias(entity, "e")
   <> ",e."
   <> quoted(order_column)
@@ -829,10 +1131,12 @@ fn reorder_stage_sql(
   app: model.App,
   ordered: model.OrderedBy,
 ) -> String {
-  let within_column = prop_column(entity, ordered.within)
-  let order_column = prop_column(entity, ordered.field)
+  let order_column = verb_prop_column(app, entity, ordered.field)
   let key_column = first_key_column(entity)
   let #(first, lo, hi) = order_span(entity, app, ordered)
+  let ids_place = list.length(ordered.within) + 1
+  let within = within_conditions(app, entity, ordered, Some("e"), 1)
+  let within_text = string.join(within, " AND ")
   let first_text = int.to_string(first) <> "::bigint"
   let lo_text = int.to_string(lo) <> "::bigint"
   let hi_text = int.to_string(hi) <> "::bigint"
@@ -840,7 +1144,9 @@ fn reorder_stage_sql(
   <> " SELECT value"
   <> key_cast(app, entity)
   <> " AS id,ord\n"
-  <> " FROM jsonb_array_elements_text($2::jsonb) WITH ORDINALITY AS items(value,ord)\n"
+  <> " FROM jsonb_array_elements_text($"
+  <> int.to_string(ids_place)
+  <> "::jsonb) WITH ORDINALITY AS items(value,ord)\n"
   <> "), scope AS MATERIALIZED (\n"
   <> " SELECT e."
   <> quoted(key_column)
@@ -848,9 +1154,9 @@ fn reorder_stage_sql(
   <> quoted(order_column)
   <> " AS current FROM "
   <> table(entity)
-  <> " e WHERE e."
-  <> quoted(within_column)
-  <> "=$1 FOR UPDATE\n"
+  <> " e WHERE "
+  <> within_text
+  <> " FOR UPDATE\n"
   <> "), target AS MATERIALIZED (\n"
   <> " SELECT s.id,p.ord FROM scope s JOIN positions p ON s.id=p.id\n"
   <> "), counts AS MATERIALIZED (\n"
@@ -882,14 +1188,54 @@ fn reorder_stage_sql(
   <> " FROM target t JOIN free f ON f.slot=t.ord\n"
   <> " WHERE e."
   <> quoted(key_column)
-  <> "=t.id AND e."
-  <> quoted(within_column)
-  <> "=$1 AND (SELECT count(*) FROM free)=(SELECT expected FROM counts)\n"
+  <> "=t.id AND "
+  <> within_text
+  <> " AND (SELECT count(*) FROM free)=(SELECT expected FROM counts)\n"
   <> " RETURNING e."
   <> quoted(key_column)
   <> "\n)\nSELECT framework.require_rows("
   <> "CASE WHEN c.expected=c.matched THEN GREATEST(c.expected,1) ELSE 0 END,"
   <> "'conflict') AS ok,(SELECT count(*) FROM staged) AS staged,(SELECT count(*) FROM free) AS room FROM counts c;\n"
+}
+
+fn within_conditions(
+  app: model.App,
+  entity: model.Entity,
+  ordered: model.OrderedBy,
+  alias: Option(String),
+  first_place: Int,
+) -> List(String) {
+  ordered.within
+  |> list.index_map(fn(name, index) {
+    let prefix = case alias {
+      Some(value) -> value <> "."
+      None -> ""
+    }
+    let column = quoted(verb_prop_column(app, entity, name))
+    let place = first_place + index
+    let parameter = parameter_for_prop_field(app, entity, name, place)
+    case model.field_for_prop(entity, name) {
+      Some(field) ->
+        case field.optional {
+          True -> prefix <> column <> " IS NOT DISTINCT FROM " <> parameter
+          False -> prefix <> column <> "=" <> parameter
+        }
+      None -> prefix <> column <> "=" <> parameter
+    }
+  })
+}
+
+fn parameter_for_prop_field(
+  app: model.App,
+  entity: model.Entity,
+  prop: String,
+  place: Int,
+) -> String {
+  let placeholder = "$" <> int.to_string(place)
+  case model.field_for_prop(entity, prop) {
+    Some(field) -> placeholder <> cast_of(sql_type(app, field.value))
+    None -> placeholder
+  }
 }
 
 /// 順序列の(確定の起点, 値域の下端, 値域の上端)。reader が整数の列だけを通しているので、
@@ -918,14 +1264,10 @@ fn key_cast(app: model.App, entity: model.Entity) -> String {
     Ok(field) -> sql_type(app, field.value)
     Error(_) -> "text"
   }
-  case key_kind {
-    "uuid" -> "::uuid"
-    "integer" -> "::integer"
-    _ -> ""
-  }
+  cast_of(key_kind)
 }
 
-fn put_sql(entity: model.Entity) -> String {
+fn put_sql(entity: model.Entity, app: model.App) -> String {
   let props = put_props(entity)
   let update_props = put_update_props(entity)
   let ordered =
@@ -936,12 +1278,14 @@ fn put_sql(entity: model.Entity) -> String {
         |> list.filter(fn(name) { !list.contains(entity.upsert_key, name) }),
     )
   let columns =
-    list.map(ordered, fn(prop) { quoted(prop_column(entity, prop)) })
+    list.map(ordered, fn(prop) {
+      quoted(verb_prop_column(app, entity, prop))
+    })
   let updates =
     list.map(update_props, fn(prop) {
-      quoted(prop_column(entity, prop.name))
+      quoted(verb_prop_column(app, entity, prop.name))
       <> "=EXCLUDED."
-      <> quoted(prop_column(entity, prop.name))
+      <> quoted(verb_prop_column(app, entity, prop.name))
     })
   let ordered_version = version_place(ordered)
   let updates = case has_version(entity), ordered_version {
@@ -968,10 +1312,12 @@ fn put_sql(entity: model.Entity) -> String {
     <> " AS target("
     <> string.join(columns, ",")
     <> ")\nVALUES("
-    <> string.join(placeholders(1, list.length(columns)), ",")
+    <> string.join(put_values(app, entity, ordered, 1), ",")
     <> ")\nON CONFLICT ("
     <> string.join(
-      list.map(entity.upsert_key, fn(prop) { quoted(prop_column(entity, prop)) }),
+      list.map(entity.upsert_key, fn(prop) {
+        quoted(verb_prop_column(app, entity, prop))
+      }),
       ",",
     )
     <> conflict
@@ -988,10 +1334,44 @@ fn put_sql(entity: model.Entity) -> String {
 }
 
 fn create_fields(entity: model.Entity) -> List(model.FieldDef) {
+  list.append(
+    base_create_fields(entity),
+    initial_phase_fields(entity),
+  )
+}
+
+fn base_create_fields(entity: model.Entity) -> List(model.FieldDef) {
   persisted_fields(entity)
   |> list.filter(fn(field) {
     !list.contains(entity.auto_key, prop_for_field(entity, field.name))
   })
+}
+
+fn initial_phase_fields(entity: model.Entity) -> List(model.FieldDef) {
+  case initial_phase(entity) {
+    None -> []
+    Some(phase) ->
+      entity.fields
+      |> list.filter(fn(field) {
+        field.column == "phase"
+        || field.column == "entered_" <> naming.snake(phase)
+      })
+  }
+}
+
+fn put_values(
+  app: model.App,
+  entity: model.Entity,
+  props: List(String),
+  place: Int,
+) -> List(String) {
+  case props {
+    [] -> []
+    [prop, ..rest] -> [
+      parameter_for_prop(app, entity, prop, place),
+      ..put_values(app, entity, rest, place + 1),
+    ]
+  }
 }
 
 fn prop_for_field(entity: model.Entity, field_name: String) -> String {
@@ -1045,6 +1425,7 @@ fn gate_condition(gate: model.VerbGate) -> List(String) {
 }
 
 fn key_conditions(
+  app: model.App,
   entity: model.Entity,
   first_place: Int,
   alias: Option(String),
@@ -1055,22 +1436,74 @@ fn key_conditions(
       Some(value) -> value <> "."
       None -> ""
     }
-    prefix <> quoted(column) <> "=$" <> int.to_string(first_place + index)
+    prefix
+      <> quoted(column)
+      <> "="
+      <> parameter_for_column(app, entity, column, first_place + index)
   })
+}
+
+fn parameter_for_column(
+  app: model.App,
+  entity: model.Entity,
+  column: String,
+  place: Int,
+) -> String {
+  let placeholder = "$" <> int.to_string(place)
+  case list.find(entity.fields, fn(field) { field.column == column }) {
+    Ok(field) -> placeholder <> cast_of(sql_type_field(app, field))
+    Error(_) -> placeholder
+  }
+}
+
+fn parameter_for_prop(
+  app: model.App,
+  entity: model.Entity,
+  prop: String,
+  place: Int,
+) -> String {
+  case model.field_for_prop(entity, prop) {
+    Some(field) -> parameter_value(app, field, place)
+    None -> "$" <> int.to_string(place)
+  }
 }
 
 fn persisted_fields(entity: model.Entity) -> List(model.FieldDef) {
   entity.props
-  |> list.filter_map(fn(prop) {
-    model.field_for_prop(entity, prop.name)
-    |> option.to_result(Nil)
+  |> list.flat_map(fn(prop) {
+    let main = case model.field_for_prop(entity, prop.name) {
+      Some(field) -> [field]
+      None -> []
+    }
+    let auxiliary_name =
+      entity.name <> naming.pascal(prop.name) <> "KeyId"
+    list.append(
+      main,
+      entity.verb_fields
+      |> list.filter(fn(field) { field.name == auxiliary_name }),
+    )
+  })
+  |> list.filter(fn(field) {
+    field.column != "phase" && !string.starts_with(field.column, "entered_")
   })
 }
 
-fn prop_column(entity: model.Entity, prop: String) -> String {
+fn verb_prop_column(app: model.App, entity: model.Entity, prop: String) -> String {
   case model.field_for_prop(entity, prop) {
-    Some(field) -> field.column
+    Some(field) -> verb_field_column(app, field)
     None -> prop
+  }
+}
+
+fn verb_field_column(app: model.App, field: model.FieldDef) -> String {
+  let _ = app
+  case field.value {
+    model.TypeValue(reference) ->
+      case reference.module, reference.name {
+        Some("ledger"), "LedgerStoreId" -> field.column <> "_id"
+        _, _ -> field.column
+      }
+    _ -> field.column
   }
 }
 
@@ -1092,6 +1525,21 @@ fn returning(entity: model.Entity) -> String {
   }
 }
 
+fn returning_created(app: model.App, entity: model.Entity) -> String {
+  let columns =
+    entity.props
+    |> list.filter_map(fn(prop) {
+      case model.field_for_prop(entity, prop.name) {
+        Some(field) -> Ok(verb_field_column(app, field))
+        None -> Error(Nil)
+      }
+    })
+  case columns {
+    [] -> "*"
+    _ -> string.join(list.map(columns, quoted), ",")
+  }
+}
+
 fn returning_with_alias(entity: model.Entity, alias: String) -> String {
   case returned_columns(entity) {
     [] -> alias <> ".*"
@@ -1106,13 +1554,6 @@ fn returned_columns(entity: model.Entity) -> List(String) {
   case entity.key_columns {
     [] -> list.map(persisted_fields(entity), fn(field) { field.column })
     columns -> columns
-  }
-}
-
-fn placeholders(first: Int, count: Int) -> List(String) {
-  case count {
-    0 -> []
-    _ -> ["$" <> int.to_string(first), ..placeholders(first + 1, count - 1)]
   }
 }
 
@@ -1155,7 +1596,15 @@ fn sql_type(app: model.App, value: model.FieldValue) -> String {
                   }
                 None -> "text"
               }
-            False -> "text"
+            False ->
+              case path, reference.name {
+                "ledger", "LedgerStoreId" -> "uuid"
+                _, _ ->
+                  case string.starts_with(path, "entity/") {
+                    True -> "jsonb"
+                    False -> "text"
+                  }
+              }
           }
         None ->
           case reference.name {
@@ -1168,10 +1617,35 @@ fn sql_type(app: model.App, value: model.FieldValue) -> String {
   }
 }
 
-fn cast_for_json(kind: String) -> String {
+fn sql_type_field(app: model.App, field: model.FieldDef) -> String {
+  case field.repeated, string.ends_with(field.name, "Kind") {
+    True, _ -> "jsonb"
+    False, True -> "text"
+    False, False ->
+      case enum_field(field) {
+        True -> "text"
+        False -> sql_type(app, field.value)
+      }
+  }
+}
+
+fn enum_field(field: model.FieldDef) -> Bool {
+  case field.value {
+    model.TypeValue(reference) ->
+      case reference.module {
+        Some(path) ->
+          string.starts_with(path, "entity/")
+          && string.ends_with(field.name, reference.name)
+        None -> False
+      }
+    _ -> False
+  }
+}
+
+fn cast_of(kind: String) -> String {
   case kind {
-    "text" -> ""
-    _ -> "::" <> kind
+    "jsonb" | "uuid" | "date" | "timestamptz" -> "::" <> kind
+    _ -> ""
   }
 }
 

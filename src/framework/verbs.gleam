@@ -27,5 +27,5 @@ pub type Bump(phase) {
 
 /// reorder の宣言用。順の列と並べ替えの範囲。
 pub type Order {
-  Order(field: String, within: String)
+  Order(field: String, within: List(String))
 }
