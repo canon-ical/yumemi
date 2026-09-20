@@ -221,3 +221,68 @@ pub const upsert_key: List(String) = ["category", "order"]
 - P0-3 → P1: `reorder` の交換方式。負の一時値は順序列が制限なし Int のとき実値と衝突する(23505)、非負 CHECK でも落ちる(23514)。宣言の値域・制約と整合する方式に替えるか、対応不能な宣言は生成時に名指しで止める
 - P0-5 → P1: root 相対 read が `Held`(key だけ)を Entity として継続関数へ渡し、関係先の取得・復号をしない。真壁の `verify-root-ffi.mjs` は検証側で作った resolve() を呼んでいて経路を外していた。framework の Context 契約として実装し、実 `makeContext` / decode で検証する
 - 継続:probe 段 3 の Service 側 error 129(手書き未追従、musearch 追随便)、draft module 不在、musearch main `fe7c53f` への前進、上記「未決」3 点
+
+## gen-3b ── 残 P0 2 件を閉じた(役員 人見 2026-09-20 の指示、鷹野[PDM] → 庵野[EXP])
+
+**役員 人見 2026-09-20 の指示で、gen-4 へ送らず gen-3b で閉じた。**贄川も柏木のゲートも挟まず、閉じるのは鷹野の検算。branch は `gen-3b`(main `9091c02` から)、musearch は `fe7c53f` を読むだけ。作業は 2026-09-20 18:30〜、PG 16 は自前で initdb して 55432 に立て、終わったら止めた。
+
+### 何を変えたか
+
+| 対象 | 変更 |
+|---|---|
+| `src/framework/io.gleam` / `io_ffi.mjs` | `root_arrow` / `rootArrow`(名前推測 + 関係値の素通し)を消し、**Context の契約 `relation`** に置き換えた。`io.Relation`(service / query / arrow / from / prop / target)と `relation_one` / `relation_option` / `relation_many` の 3 本。JS 側は `context.relation(relation, keys)` を要求し、無ければ **`relation_contract` で名指しで落とす**(Held を Entity として渡す経路が無い)。戻りの本数が鍵の数と違えば同じ code で落とす |
+| `src/framework/er.gleam` | `Multi(entity)`(`Multi(List(Key))`、20 の形)と `of_multi` / `multi_from_rows` を足した。gen-3 まで framework に無かった(40 の指摘) |
+| `gen/.../emit/reads.gleam` | 矢印の read は **`const to_<prop>_relation = io.Relation(...)`** を宣言から写し、root の欄を型付きで参照して鍵を取り出す(`er.to_string(er.of_held(it.article.muse))` / `option.map(it.widget.space, fn(held) {...})` / `list.map(er.of_multi(it.article.tags), er.to_string)`)。形は Has / Held → `relation_one`、Link / Option(Has・Held) → `relation_option`、Multi → `relation_many` |
+| `gen/.../emit/sql.gleam` | 矢印 1 本につき SQL 1 文 **`gen/sql/queries/<service>/to_<prop>.sql`**(鍵の jsonb 配列 → 関係先の行、鍵の順)。実行側はこれを `relation` で流す。複合 key の Entity へ向く矢印は exit 1 で止める |
+| `gen/.../emit/verb.gleam` | `reorder_*_stage` の一時値を **負値から「宣言の値域の上端から下へ、範囲(scope)の現在値と確定値の帯を避けた空き値」** に替えた。範囲は `FOR UPDATE` で押さえる。`reorder_*` の確定値は値域の起点から(`Int` は 0、`Range(min:, max:)` は min) |
+| `gen/.../reader.gleam` / `model.gleam` | `Range(min:, max:)` の両端を `ValueType.range` に読む(桁区切り `_`、負数も)。**`ordered_by.field` が Int / Range の必須列でない宣言は exit 4 で名指しで止める**(文字列・Option・List・値域に起点が入らない Range)。関係の `List(Has/Held/Link)` は「Multi で宣言する」で止める |
+| fixtures | `relation`(photo_read:Held / Link / Multi、`order: Range(1, 10)`)、`relation_text_order` / `relation_option_order`(止まる 2 例)。既存 fixture は触っていない |
+| scripts | `verify-root-ffi.mjs` を柏木の `root-real.mjs` の経路へ作り替え、`verify-gate2-sql.mjs` に P0-3 の一式と Range の列、矢印 SQL を足した。柏木の再現 4 本は `gen/scripts/gate2c/`(接続先と生成物の在処を環境変数にしただけ、`run.sh` で一括) |
+
+### 方式の根拠
+
+**P0-3(reorder)。**一意制約 `(within, order)` が deferrable でないとき、確定値を 1 文で入れると行ごとの検査で衝突する。だから退避が要るが、負の一時値は「順序列が制限なし `Int`」の実値と衝突し(23505)、非負 CHECK でも落ちる(23514)── 柏木 3 回目の再現。**生成器が知っている値域は宣言だけ**(`Int` なら int4 の全域、`Range` なら両端。DB の CHECK は生成器から見えない)ので、一時値は宣言の値域の中で選ぶ。上端から下へ選ぶのは、実務の CHECK が `>= 0` / `>= 1` の形で、上端側は宣言と DB で食い違いにくいから。窓は `held + 2N + 1` 個 ── 範囲の現在値が最大 `held` 個、確定値の帯 `[first, first+N)` を除いても鳩の巣で N 個以上の空きが残る。確定値の帯を除くのは、退避先が確定値と同じだと確定の 1 文で(退避中の別の行と)衝突するから(試作で実測)。**値域が窓より狭くて空きが足りないときは退避せず確定へ進む** ── UNIQUE が無ければ通り、あれば 23505 で rollback(Range(1,10) に 6 行のとき、検算に含めた)。それ以上は deferrable 制約の領分で、生成器では書けない。`FOR UPDATE` は同一 scope の同時実行を直列にし、2 本目が確定後の値で空きを選べるようにする(柏木の `reorder-concurrent` は Lock 待ちのまま PASS)。
+
+**P0-5(root read)。**framework は表も列も復号関数も知らない(それらはアプリの codec / runtime の持ち物)ので、関係先の取得・復号は **Context の契約** として要求し、framework は (1) 宣言の名前を渡す、(2) 鍵の取り出しを型付きの生成 Gleam で行う、(3) 本数と形(One / Option / List)を検査する、(4) 契約が無ければ名指しで落とす、を持つ。名前推測(`arrowProperty`)は消えた。**musearch の runtime(`fe7c53f`)はこの契約を未実装**なので、実 `makeContext` そのままでは framework が `relation_contract` で落ちる(= 柏木の `root-real` が「再現しない」形)。復号まで通す検算は、実 `makeContext` に契約の相手側 1 関数(生成 SQL を `db.query` に流し、実 `codec.decodeMuse` 等で復号)を足して行った ── 検証側が resolve() を自作して経路を外すのではなく、契約が要求する runtime 側の最小形。musearch の runtime へ `relation` を足すのは追随便。
+
+### 検算の数字(2026-09-20、HEAD は commit を参照)
+
+実行したコマンド(生成先は scratchpad、PG は `127.0.0.1:55432` の自前 PG 16.15):
+
+```
+cd gen && gleam test
+gleam run -m yumemi_gen -- fixtures/article <article-out>        # 53 ファイル(45 + 矢印 SQL 8)
+gleam run -m yumemi_gen -- fixtures/flag <flag-out>              # 27 ファイル
+gleam run -m yumemi_gen -- fixtures/relation <relation-out>      # 37 ファイル
+gleam run -m yumemi_gen -- ~/yumemism_repo/musearch/app <musearch-out>
+scripts/probe-compile.sh ~/yumemism_repo/musearch/app <musearch-out> <probe>
+PGHOST=127.0.0.1 PGPORT=55432 PGUSER=yumemism PGDATABASE=postgres node scripts/verify-gate2-sql.mjs <musearch-out> <article-out> <flag-out> <relation-out>
+PGHOST=... node scripts/verify-root-ffi.mjs <musearch-out> <relation-out> <work>
+PGHOST=... scripts/gate2c/run.sh <musearch-out> <article-out> <flag-out> <relation-out> <work>
+```
+
+| 検算 | 結果 |
+|---|---|
+| `gleam test` | **59 passed, no failures**(52 + 7:矢印 SQL、Relation 契約、3 形、Int 値域、Range 値域、止まる 2 例、Range の読み) |
+| musearch への生成 | **629 ファイル**(572 + 矢印 SQL 57)、exit 3(`entity/ledger` の key 無し、既知)、警告 21、exit 1 の notes 4(gen-3 と同じ)。verb SQL 241、root 92、reads 67(矢印を持つ module 36)、draft 33 |
+| 生成 SQL に Service 名 | verb SQL のリテラル ∩ Service 名 92 = **0**。全 SQL 本文(ヘッダ行を除く)でも 0。advance の引数は最大 `$5` |
+| probe-compile | 基準 0、段 1/2/3 **338 / 134 / 129**(gen-3 と同じ)、生成ファイル起点の error **0** |
+| `verify-gate2-sql.mjs` | **7 行 PASS**:P0-1 / P0-7 / P0-2 / **P0-3(交換・Int 上限・負値・両端値(int4 下限と上限が同居)・上端に詰まった scope・別 scope 不変・不明 id は 'conflict' で rollback・部分並べ替えの UNIQUE 衝突は 23505 で rollback・非負 CHECK・同一 scope 同時実行は Lock 待ちで最終値一致)** / **P0-3 Range(1,10)(逆順・上端詰まり・5/10 行・6/10 行の飽和は UNIQUE ありで 23505 rollback、無しで通る)** / P0-5(矢印 SQL:uuid / text の鍵、鍵の順、無い鍵は 0 行)/ P0-4 |
+| `verify-root-ffi.mjs` | **8 checks PASS**:(a) 契約の無い実 makeContext → `relation_contract` で拒否、継続関数 0 回、db 0 回、(b) Held(Muse) → 実 `decodeMuse` → `Muse` が `fn(Muse)` に届く(db 1 回、key `article_read/to_muse`、params は鍵 1 個の jsonb)、(c) 行の無い Held → `expected 1 target row(s), found 0` で拒否、(d) 実 `decodeWidget` の `Option(Held)` Some → `Some(FreeSpace)` / `Some(MuseHeaven)`、(e) None → None で db 0 回、(f) fixture:Held → Album、Link → Some(Shelf)、Multi → List(Label) が鍵の順(L22,L21,L23)、(g) Link None / 空 Multi は読まずに None / []、(h) Multi の欠けは拒否 |
+| 柏木の再現 `reorder-negative.mjs` | **再現しない**:`a=-1,b=-2` に `[b,a]` → 退避 → 確定 → **`b=0, a=1` で COMMIT**(要求値そのもの)。script の `assert.equal(code,'23505')` が落ちて exit 1 |
+| 柏木の再現 `root-real.mjs` | **再現しない**:実 `decodeArticle` + 実 `makeContext` で `interpret` が `relation_contract`「Context does not implement relation(relation, keys)」で reject、`REPRODUCED` の行は出ない、exit 1 |
+| 柏木の `reorder-concurrent.mjs` / `draft-typed.mjs` | どちらも PASS(2 本目の Lock 待ちと最終値 `a=0,b=1`、`(11,7,1)` の保存) |
+| musearch の後状態 | `git status --short` は前後とも `?? docs/__pycache__/` のみ |
+| `git diff --check` | 指摘なし |
+
+### 残るもの(gen-3b で閉じない)
+
+- musearch の runtime に `relation(relation, keys)` を足す(生成 SQL `to_<prop>` を `SQL[service/query]` で引き、`target` の復号関数で復号する 1 関数)── musearch 追随便。手書き `reads/article_read.gleam` の `then(it.muse)` と Root の余分な欄 `muse` は、それまで手書きのまま
+- 値域が飽和した scope の reorder(空きが N 個無いとき)は、UNIQUE ありなら 23505。deferrable 制約でしか閉じない
+- 宣言の値域より狭い DB の CHECK(★ と DDL の食い違い)は生成器から見えない。DDL 生成が入るまでは運用で合わせる
+
+### 20 への記述案
+
+矢印の read は「root の個体から ER の矢印を辿る」の生成関数(`reads.to_category(it)`)で、**関係値には鍵しか無いので、関係先の取得と復号は実行側の Context が契約 `relation` として担う。**生成器は矢印ごとに `io.Relation`(Service・SQL 名・矢印名・元 Entity・Property・先 Entity)を宣言から写し、鍵の取り出しを型付きで書く(`er.of` / `er.of_held` / `er.of_multi`)。出力の形は宣言から決まる ── `Has` / `Held` は `Entity`、`Link` と `Option(Has/Held)` は `Option(Entity)`、`Multi` は `List(Entity)`。framework は契約が無ければ名指しで落とし、鍵と行の本数が違えば落とす。関係先の行は矢印ごとの生成 SQL(`gen/sql/queries/<service>/to_<prop>.sql`、鍵の配列 → 鍵の順の行)で引く。
+
+`ordered_by` の並べ替えは 2 文の compound(退避 → 確定)で、退避の一時値は**宣言の値域の上端から下へ、範囲の現在値と確定値の帯を避けた空き値**、確定値は値域の起点から詰める。順序列は必須の `Int` か `Range` に限り、それ以外の宣言は生成器が止める。一意制約が deferrable でない前提の設計で、値域が飽和した範囲では退避できず、UNIQUE があれば衝突で rollback する。
