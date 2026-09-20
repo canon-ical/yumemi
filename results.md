@@ -125,3 +125,38 @@
 - `gen/build/a3-h-diff-check.txt` と `gen/build/a3-h-node-check.txt`: 出力なし、問題なし。
 
 詳細な 27 本の表、H SQL 本文、残差、20 への記述案は `docs/reports/verb-1.md`。
+
+---
+
+# 指示 A4 真壁 巡4 作業結果(2026-09-21)
+
+## 状態
+
+- branch `verb-1`。開始 `1472f19`。P0-6 を実装し、`ordered_by.field` を `*Draft` から除外、`*Created` には残した。
+- 生成器 test に Draft 欄数と create SQL の呼び手入力 placeholder 数の一致検査を追加した。ordered create の有効 fixture 4本(`relation` / `article` / `verb_features` / `ordered_create`)と通常 create の `flag` を検査する。
+- `verify-verb-sql` は型の多重集合を正典、placeholder 番号を参考として表示する表記だけを変更した。判定ロジックは変更していない。
+- `docs/reports/verb-1.md` を裁定3の合格線、29本の全類別表、I の F3移送に合わせて更新した。
+- 固定の `musearch-main` は読取のみ。`musearch-decl` に新しい宣言は足していない。musearch 実体、DDL、staging、production、push は未変更。
+
+## DDL
+
+無し。migration / schema変更は無く、staging / productionへ適用していない。
+
+## 検証証拠
+
+- `gen/build/a4-gleam-test-final.txt`: `77 passed, no failures`。
+- `gen/build/a4-route-table.txt`: `verify-route-table: PASS (7 rows, face/http scratch build)`。
+- `gen/build/a4-gate2.txt`: P0-1 / P0-7 / P0-2 / P0-3 / Range / P0-5 / P0-4 の7 checks PASS。
+- `gen/build/a4-root-ffi.txt`: `verify-root-ffi: 8 checks PASS`。固定写しのソースと実体 build の codec/runtime を組み合わせた一時 harnessで実行。固定写し自体は変更していない。
+- `gen/build/a4-main-generate.txt` / `gen/build/a4-output-counts.txt`: 固定写し clean run は635 files、exit 4、exit 4診断34行。全診断ファイルは56行で、exit 4行を34行として数えた。
+- `gen/build/a4-main-vs-n2.txt`: `diff -r` の出力なし、差0。
+- `gen/build/a4-draft-sql-counts.txt`: 仮宣言コピーの `free_space` は Draft4欄 / SQL4 placeholder、`link` は4 / 4、`widget` は16 / 16。`order` はCreatedに残る。
+- `gen/build/a4-verify-main.txt`: by-type `4本/5`、by-placeholder `5本/7`、段2一致10、両側28。
+- `gen/build/a4-verify-decl.txt`: by-type `1本/1`、by-placeholder `2本/3`、段2一致11、両側29。
+- `gen/build/a4-verb-self-test.txt`: 既存2 + A3追加2の4 checks PASS。
+
+## 残差
+
+- 型の多重集合で残る唯一の欠落は `advance_roster[$2::integer]`。`advance_muse_heaven` は型の多重集合で欠落0。
+- I(`create_roster`)は裁定3で本便から外しF3へ移した。`auto_key`相当の語彙追加、仮宣言の実演はしていない。指示書の対象本数は27→26へ更新した。
+- Hの意味突合は `create_free_space` / `create_link` / `create_widget`。`create_links` は語彙に無い名指し残差。上限の推測実装はしていない。

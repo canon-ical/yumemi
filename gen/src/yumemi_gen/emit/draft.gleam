@@ -61,7 +61,13 @@ fn fields(
 ) -> List(#(typing.Ty, String)) {
   entity.props
   |> list.filter_map(fn(prop) {
-    case include_created_key || !list.contains(entity.auto_key, prop.name) {
+    let generated_by_database = case entity.ordered_by {
+      Some(ordered) -> ordered.field == prop.name
+      None -> False
+    }
+    let supplied_on_create =
+      !list.contains(entity.auto_key, prop.name) && !generated_by_database
+    case include_created_key || supplied_on_create {
       False -> Error(Nil)
       True ->
         case model.field_for_prop(entity, prop.name) {

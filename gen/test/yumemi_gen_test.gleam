@@ -39,6 +39,8 @@ const relation_text_order_fixture = "fixtures/relation_text_order"
 
 const relation_option_order_fixture = "fixtures/relation_option_order"
 
+const ordered_fixture = "fixtures/ordered_create"
+
 const entry_prefix_fixture = "fixtures/entry_prefix_validation"
 
 const faces_missing_entry_fixture = "fixtures/faces_missing_entry"
@@ -826,6 +828,25 @@ pub fn ordered_create_locks_parent_and_assigns_next_order_test() {
   |> should.be_true
 }
 
+/// Draft の欄は呼び手の入力、create SQL の呼び手入力 placeholder はその数で揃える。
+/// ordered_by の採番欄を Draft に残す、または SQL 側だけ入力を増やすとこの比較が落ちる。
+pub fn draft_fields_match_create_sql_placeholders_test() {
+  [
+    #(relation_fixture, "photo", "PhotoDraft"),
+    #(fixture, "article", "ArticleDraft"),
+    #(verb_fixture, "feature", "FeatureDraft"),
+    #(ordered_fixture, "child", "ChildDraft"),
+    #(flag_fixture, "widget", "WidgetDraft"),
+  ]
+  |> list.each(fn(entry) {
+    let #(app_dir, module, draft_name) = entry
+    let draft = text_of(app_dir, "src/gen/draft/" <> module <> ".gleam")
+    let create = text_of(app_dir, "db/queries/verb/create_" <> module <> ".sql")
+    draft_field_count(draft, draft_name)
+    |> should.equal(create_sql_input_placeholder_count(create))
+  })
+}
+
 /// gen-3b(P0-3)── 退避の一時値は負値でなく、**宣言の値域の上端から下へ、範囲に無い値**を選ぶ。
 /// `Int` は int4 の全域、確定値は 0 から。範囲は FOR UPDATE で押さえる。
 pub fn reorder_stage_picks_free_values_inside_declared_int_bounds_test() {
@@ -1028,6 +1049,54 @@ fn reader_error(app_dir: String) -> reader.Error {
   let assert Ok(units) = source.load(app_dir)
   let assert Error(error) = reader.read(units)
   error
+}
+
+fn draft_field_count(source: String, draft_name: String) -> Int {
+  count_draft_fields(
+    string.split(source, "\n"),
+    "  " <> draft_name <> "(",
+    False,
+    0,
+  )
+}
+
+fn count_draft_fields(
+  lines: List(String),
+  marker: String,
+  inside: Bool,
+  count: Int,
+) -> Int {
+  case lines {
+    [] -> count
+    [line, ..rest] ->
+      case inside {
+        False ->
+          case line == marker {
+            True -> count_draft_fields(rest, marker, True, 0)
+            False -> count_draft_fields(rest, marker, False, count)
+          }
+        True ->
+          case line == "  )" {
+            True -> count
+            False -> count_draft_fields(rest, marker, True, count + 1)
+          }
+      }
+  }
+}
+
+fn create_sql_input_placeholder_count(sql: String) -> Int {
+  let assert Ok(values) =
+    sql
+    |> string.split("\n")
+    |> list.find(fn(line) {
+      string.contains(line, "SELECT $1") || string.contains(line, "VALUES($1")
+    })
+  let input_values = case string.split(values, ",'draft'") {
+    [before, ..] -> before
+    [] -> values
+  }
+  let pieces = string.split(input_values, "$")
+  list.length(pieces) - 1
 }
 
 pub fn advance_all_is_exit_five_with_reason_test() {

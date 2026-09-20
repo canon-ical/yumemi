@@ -245,8 +245,12 @@ function missingCastReport(names, missingByName) {
 }
 
 function reportMissingCasts(label, names, missingByName) {
+  const castCount = names.reduce(
+    (total, name) => total + missingByName.get(name).length,
+    0,
+  );
   console.log(
-    `${label}: ${names.length} (${missingCastReport(names, missingByName)})`,
+    `${label}: ${names.length}本/${castCount} (${missingCastReport(names, missingByName)})`,
   );
 }
 
@@ -367,14 +371,14 @@ function compare() {
   report("mismatch (stage 2)", mismatches);
   report("stage 1 -> stage 2 difference (cast-only)", castOnly);
   reportMissingCasts(
-    "missing casts (by placeholder)",
-    [...missingByPlaceholder.keys()],
-    missingByPlaceholder,
-  );
-  reportMissingCasts(
-    "missing casts (by type)",
+    "missing-cast(by-type, 正)",
     [...missingByType.keys()],
     missingByType,
+  );
+  reportMissingCasts(
+    "missing-cast(by-placeholder, 参考)",
+    [...missingByPlaceholder.keys()],
+    missingByPlaceholder,
   );
 
   console.log(
