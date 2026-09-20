@@ -45,3 +45,11 @@
 - client bundle は `npx esbuild`、Worker は `npx wrangler dev`（workerd）で起動する。
 - Playwright import は `/home/yumemism/yumemi-front-poc/node_modules/playwright/index.mjs` の絶対パス。Chromium は Playwright の cache を使用する。
 - 実行ログは `build/verify-front-ssr.txt`、`build/verify-front-isolate.txt`、scratch 内の `gleam-build.txt` / `esbuild.txt` / `wrangler.txt`。
+
+## gen-5 への申し送り
+
+- fixture の `src/front/types.gleam` に置いた enum と各 Block の `In` は暫定。生成先は `src/gen/front/blocks.gleam`、`src/gen/front/widgets.gleam`、`src/gen/out/<service>.gleam`、`src/gen/service.gleam`。
+- interactive Component 内の手書き `update` と通信処理は、`src/gen/front/live/<service>.gleam` 側へ引き継ぐ。今回の島クリックは scratch の API に対する実測で、生成した Service との接続は未検証。
+- WebSocket push は `reloads` に無い。外から起きる合図の入口は未実装で、後段の設計が要る。
+- 島の再訪問時に古い Model が残る挙動は未検証。`count` は初期属性としての実機確認まで。
+- `blocks-<layout>.html` と client bundle / style の生成は gen-5 の仕事。今回の検証 Worker は Block を直接描画し、Page / Layout の配置表からの描画は未検証。
