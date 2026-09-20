@@ -87,9 +87,10 @@ fn text_of(app_dir: String, path: String) -> String {
 
 // ── 入力 ────────────────────────────────────────────────────────────────────
 
-pub fn all_eleven_star_files_parse_test() {
+pub fn all_fixture_star_files_parse_test() {
   let assert Ok(units) = source.load(fixture)
-  list.length(units) |> should.equal(11)
+  // front の手書き便も parse 対象。生成に使わないが、壊れた file は束を止める。
+  list.length(units) |> should.equal(17)
 }
 
 pub fn types_entities_services_counted_test() {

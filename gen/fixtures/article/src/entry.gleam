@@ -1,6 +1,6 @@
 // ★ src/entry.gleam ── 人が来る入口の群。prefix 以外の URL は Service と Entity から生成する。
 import framework/entry.{
-  type Entry, All, Anonymous, AnySubject, Authenticated, Http, ReadOnly,
+  type Entry, All, Anonymous, AnySubject, Authenticated, Http, NoPages, ReadOnly,
   Subjects,
 }
 
@@ -21,6 +21,8 @@ pub const entries: List(Entry(Subject, Host)) = [
     admit: Anonymous,
     subject: AnySubject,
     services: ReadOnly,
+    pages: NoPages,
+    frame_src: [],
   ),
   Http(
     name: "admin",
@@ -29,5 +31,7 @@ pub const entries: List(Entry(Subject, Host)) = [
     admit: Authenticated,
     subject: Subjects([Staff]),
     services: All,
+    pages: NoPages,
+    frame_src: [],
   ),
 ]
