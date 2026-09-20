@@ -41,8 +41,8 @@ missing casts (by type): 1 (advance_roster[$2::integer])
 
 | verb | 手書き有無 | 生成有無 | 段 2 | 段 1(参考) | 欠落キャスト | 残差の理由 |
 |---|---:|---:|---:|---:|---|---|
-| advance_muse_heaven | 有 | 有 | — | — | `$5::timestamptz` | version 入力はあるが、手書きとの cast 差。 |
-| advance_roster | 有 | 有 | — | — | `$5::timestamptz`, `$2::integer` | version 以外の cast 差。楽観ロックは語彙から追加不能。 |
+| advance_muse_heaven | 有 | 有 | — | — | `$5::timestamptz` | ★ MuseHeaven に version の入力が無く、手書きの `AND version=$2` と `version=version+1` を導けない。生成はキャストを出し忘れてはおらず、引数が 1 つ少ないためパラメータ番号が寄っている(手書き `$5::timestamptz` = 生成 `$4::timestamptz`)。型の多重集合で数えれば欠落 0。**実行時に競合を素通しする。** |
+| advance_roster | 有 | 有 | — | — | `$5::timestamptz`, `$2::integer` | 同上のパラメータのずれに加え、手書きが取る `$2::integer IS NOT NULL`(version 相当のシム)が ★ に無い。型の多重集合で数えても `::integer` の欠落 1 が残る ── **本便で欠落 0 に届かない唯一の本**。**実行時に競合を素通しする。** |
 | create_article | 有 | 有 | — | — | — | `*Created` 不一致。`posted_on` / `publish_at` は auto_key 相当の宣言が無く I 残差。 |
 | create_consent | 有 | 有 | — | — | — | 手書き `*Created` と生成型を揃える F3 対象。 |
 | create_fan | 有 | 有 | ○ | — | — | — |
@@ -70,6 +70,26 @@ missing casts (by type): 1 (advance_roster[$2::integer])
 | update_widget_visible | 有 | 有 | ○ | ○ | — | — |
 
 main 側だけには `advance_article`、`delete_roster_photo`、`delete_store_schedule` が追加で両側に現れる。宣言コピーでは handwritten の札により生成 SQL から消えている。
+
+## 生成物に出てはいけない 11 本(手書きの札の効き)
+
+裁定 1 / 3〜6 で手書きに残した 11 本。宣言コピー(`handwritten_verbs` を当てたもの)への clean run で **11 本すべてが生成 SQL から消える**ことを確かめた。固定の写し(宣言ゼロ)では札が無いので、`advance_article` / `delete_roster_photo` / `delete_store_schedule` の 3 本は依然として出る ── これが札の効きの証拠である。
+
+| verb | 手書きに残した理由 | 固定の写し(宣言ゼロ) | 宣言コピー(札あり) |
+|---|---|---|---|
+| `rollup_day` | 集計 INSERT…SELECT、key を取らない | 出ない | 出ない |
+| `rollup_month` | 同上 | 出ない | 出ない |
+| `purge_page_views` | 保持期間の連鎖削除 | 出ない | 出ない |
+| `replace_chunks` | 親ロック + 旧版 delete + `jsonb_to_recordset` | 出ない | 出ない |
+| `create_ledger_store` | ER の外 | 出ない | 出ない |
+| `record_page_view` | 重複抑止・レート上限・最新 visit への従属 | 出ない | 出ない |
+| `issue_roster_code` | 戻りが `Verb(Nil)` でない(runtime の採番・digest 由来) | 出ない | 出ない |
+| `issue_store_api_key` | 同上 | 出ない | 出ない |
+| `advance_article` | `publish_at` の消去と呼び手を条件にした bump 抑止 | **出る** | **消えた** |
+| `delete_roster_photo` | 親の `FOR UPDATE` + `phase='active'` + 複合鍵 | **出る** | **消えた** |
+| `delete_store_schedule` | 同上 | **出る** | **消えた** |
+
+札の名が生成候補と一致しないときは 1 名 1 行の警告で `exit 0`。宣言コピーでは 8 本が警告になった(この 8 本はもともと生成候補に無い名)。
 
 ## H 類の生成 SQL
 
