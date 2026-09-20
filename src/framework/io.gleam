@@ -46,6 +46,20 @@ pub type Relation {
 
 /// Context の契約 ── `context.relation(relation, keys)` が、鍵の列と同じ長さ・同じ順で
 /// 復号済みの関係先を返す。無い鍵は欠けさせず、実行側が失敗させる。
+///
+/// runtime が持つべき 1 関数の雛形(JS のまま):
+/// ```js
+/// function relationCapability(db, sqlMap, decoders) {
+///   return async (relation, keys) => {
+///     const sql = sqlMap[`${relation.service}/${relation.query}`];
+///     if (!sql) throw new Error(`generated SQL is missing: ${relation.service}/${relation.query}`);
+///     const decode = decoders[relation.target];
+///     if (!decode) throw new Error(`decoder is missing for target ${relation.target}`);
+///     const rows = await db.query(sql, [JSON.stringify(keys)], `${relation.service}/${relation.query}`);
+///     return rows.map(decode);
+///   };
+/// }
+/// ```
 @external(javascript, "./io_ffi.mjs", "relation")
 fn relation_rows(
   context: Context,

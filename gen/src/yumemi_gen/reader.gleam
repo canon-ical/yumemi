@@ -350,7 +350,11 @@ pub fn missing_key_notes(units: List(Unit)) -> List(stop.Note) {
     let module = g.in_order(unit.module)
     case g.find_function(module, "key"), g.find_function(module, "path_key") {
       None, None ->
-        Ok(stop.Note(class: stop.Missing, text: unit.path <> ": key 関数が無い"))
+        Ok(stop.Note(
+          class: stop.Missing,
+          text: unit.path
+            <> ": key 関数が無い ── ER の外の型だけの宣言は src/types.gleam へ(src/entity/** は Entity だけ)",
+        ))
       _, _ -> Error(Nil)
     }
   })
@@ -1098,6 +1102,184 @@ pub fn arrows(entities: List(Entity)) -> List(model.Arrow) {
   })
 }
 
+// ── entry.gleam ──────────────────────────────────────────────────────────────
+
+/// 入口は無い古い fixture も reader の他の束を検査できるように、entry.gleam が無ければ
+/// 空で返す。entry.gleam がある場合は `entries` を全て読み、route 束はそこからだけ導く。
+pub fn entry_declarations(
+  units: List(Unit),
+) -> Result(List(model.Entry), Error) {
+  case list.find(units, fn(unit) { unit.path == "entry" }) {
+    Error(_) -> Ok([])
+    Ok(unit) -> {
+      let module = g.in_order(unit.module)
+      case public_constant(module, "entries") {
+        None -> Error(Unsupported("entry", "pub const entries が無い"))
+        Some(constant) -> {
+          use expressions <- result.try(expression_list(
+            constant.value,
+            "entry",
+            "entries",
+          ))
+          list.try_map(expressions, entry_of(_, "entry"))
+        }
+      }
+    }
+  }
+}
+
+fn entry_of(
+  expression: glance.Expression,
+  where: String,
+) -> Result(model.Entry, Error) {
+  case g.ctor_name(expression) {
+    Some("Http") -> entry_http(expression, where, model.SessionCredential)
+    Some("HttpApi") -> {
+      use raw_credential <- result.try(required_expression(
+        expression,
+        "credential",
+        where,
+      ))
+      use credential <- result.try(credential_of(raw_credential, where))
+      entry_http(expression, where, credential)
+    }
+    Some(name) -> Error(Unsupported(where, "入口の構成子が不明: " <> name))
+    None -> Error(Unsupported(where, "入口の構成子が読めない"))
+  }
+}
+
+fn entry_http(
+  expression: glance.Expression,
+  where: String,
+  credential: model.Credential,
+) -> Result(model.Entry, Error) {
+  use name <- result.try(required_string(expression, "name", where))
+  // 旧 ★ は gen-4 前の entry API なので欄が無い。空文字は「prefix なし」であり、
+  // `/api` を暗黙に補わない。新しい宣言では prefix を読み、その値だけを使う。
+  use prefix <- result.try(prefix_of(expression, where))
+  use admit_expression <- result.try(required_expression(
+    expression,
+    "admit",
+    where,
+  ))
+  use admit <- result.try(admit_of(admit_expression, where))
+  use subject_expression <- result.try(required_expression(
+    expression,
+    "subject",
+    where,
+  ))
+  use subject <- result.try(entry_subject_of(subject_expression, where))
+  use services_expression <- result.try(required_expression(
+    expression,
+    "services",
+    where,
+  ))
+  use services <- result.try(entry_services_of(services_expression, where))
+  Ok(model.Entry(
+    name: name,
+    prefix: prefix,
+    admit: admit,
+    subject: subject,
+    services: services,
+    credential: credential,
+  ))
+}
+
+fn required_string(
+  expression: glance.Expression,
+  label: String,
+  where: String,
+) -> Result(String, Error) {
+  case g.labelled(expression, label) {
+    Some(value) ->
+      g.string_value(value)
+      |> option.to_result(Unsupported(where, "入口." <> label <> " が String でない"))
+    None -> Error(Unsupported(where, "入口." <> label <> " が無い"))
+  }
+}
+
+fn required_expression(
+  expression: glance.Expression,
+  label: String,
+  where: String,
+) -> Result(glance.Expression, Error) {
+  g.labelled(expression, label)
+  |> option.to_result(Unsupported(where, "入口." <> label <> " が無い"))
+}
+
+fn prefix_of(
+  expression: glance.Expression,
+  where: String,
+) -> Result(String, Error) {
+  case g.labelled(expression, "prefix") {
+    None -> Ok("")
+    Some(value) ->
+      g.string_value(value)
+      |> option.to_result(Unsupported(where, "入口.prefix が String でない"))
+  }
+}
+
+fn credential_of(
+  expression: glance.Expression,
+  where: String,
+) -> Result(model.Credential, Error) {
+  case g.ctor_name(expression) {
+    Some("Session") -> Ok(model.SessionCredential)
+    Some("ApiKey") -> Ok(model.ApiKeyCredential)
+    Some(name) -> Error(Unsupported(where, "credential が不明: " <> name))
+    None -> Error(Unsupported(where, "credential が読めない"))
+  }
+}
+
+fn admit_of(
+  expression: glance.Expression,
+  where: String,
+) -> Result(model.Admit, Error) {
+  case g.ctor_name(expression) {
+    Some("Anonymous") -> Ok(model.AnonymousAdmit)
+    Some("Authenticated") -> Ok(model.AuthenticatedAdmit)
+    Some(name) -> Error(Unsupported(where, "admit が不明: " <> name))
+    None -> Error(Unsupported(where, "admit が読めない"))
+  }
+}
+
+fn entry_subject_of(
+  expression: glance.Expression,
+  where: String,
+) -> Result(model.EntrySubjects, Error) {
+  case g.ctor_name(expression) {
+    Some("AnySubject") -> Ok(model.AnyEntrySubject)
+    Some("Subjects") ->
+      case g.args(expression) {
+        [list_expression] -> {
+          let elements = g.list_elements(list_expression)
+          use names <- result.try(
+            list.try_map(elements, fn(element) {
+              g.ctor_name(element)
+              |> option.to_result(Unsupported(where, "Subjects の構成子名が読めない"))
+            }),
+          )
+          Ok(model.NamedEntrySubjects(names))
+        }
+        _ -> Error(Unsupported(where, "Subjects の引数が List でない"))
+      }
+    Some(name) -> Error(Unsupported(where, "subject が不明: " <> name))
+    None -> Error(Unsupported(where, "subject が読めない"))
+  }
+}
+
+fn entry_services_of(
+  expression: glance.Expression,
+  where: String,
+) -> Result(model.EntryServices, Error) {
+  case g.ctor_name(expression) {
+    Some("ReadOnly") -> Ok(model.ReadOnlyServices)
+    Some("All") -> Ok(model.AllServices)
+    Some(name) -> Error(Unsupported(where, "services が不明: " <> name))
+    None -> Error(Unsupported(where, "services が読めない"))
+  }
+}
+
 // ── service/*.gleam ──────────────────────────────────────────────────────────
 
 pub fn services(units: List(Unit)) -> Result(List(model.Service), Error) {
@@ -1113,6 +1295,8 @@ fn service_of(unit: Unit) -> Result(model.Service, Error) {
     Some(custom) -> list.map(custom.variants, fn(variant) { variant.name })
     None -> []
   }
+  use effect <- result.try(effect_of(module, unit.path))
+  use #(faces, faces_declared) <- result.try(faces_of(module, unit.path))
   use args <- result.try(args_of(module, imports, unit.path))
   use subjects <- result.try(subjects_of(module, unit.path))
   use queries <- result.try(
@@ -1138,7 +1322,52 @@ fn service_of(unit: Unit) -> Result(model.Service, Error) {
     args: args,
     allow_module: allow_module_of(module),
     subjects: subjects,
+    effect: effect,
+    faces: faces,
+    faces_declared: faces_declared,
   ))
+}
+
+fn effect_of(
+  module: glance.Module,
+  where: String,
+) -> Result(model.Effect, Error) {
+  case public_constant(module, "effect") {
+    None -> Error(Unsupported(where, "Service.effect が無い"))
+    Some(constant) ->
+      case g.ctor_name(constant.value) {
+        Some("Read") -> Ok(model.ReadEffect)
+        Some("Write") -> Ok(model.WriteEffect)
+        Some(name) -> Error(Unsupported(where, "Service.effect が不明: " <> name))
+        None -> Error(Unsupported(where, "Service.effect が読めない"))
+      }
+  }
+}
+
+/// `faces` は ★ の Service に必須。ただし不足は全 Service を診断へ載せるため、ここでは
+/// 空の値と「宣言があったか」を分けて返し、矛盾の検査は `entry_notes` でまとめて行う。
+fn faces_of(
+  module: glance.Module,
+  where: String,
+) -> Result(#(List(String), Bool), Error) {
+  case public_constant(module, "faces") {
+    None -> Ok(#([], False))
+    Some(constant) ->
+      case constant.value {
+        glance.List(elements: elements, ..) -> {
+          use names <- result.try(
+            list.try_map(elements, fn(element) {
+              case g.ctor_name(element) {
+                Some(name) -> Ok(name)
+                None -> Error(Unsupported(where, "Service.faces の面名が読めない"))
+              }
+            }),
+          )
+          Ok(#(names, True))
+        }
+        _ -> Error(Unsupported(where, "Service.faces が List でない"))
+      }
+  }
 }
 
 fn allow_module_of(module: glance.Module) -> Option(String) {
@@ -1259,6 +1488,159 @@ fn shorthand_subject(
         module: naming.snake(name),
         type_name: naming.pascal(name),
       ))
+  }
+}
+
+/// 入口と Service の結びを検査する。faces の不足は Service ごとに名指しするため、
+/// reader の単一 Result ではなく全件の Note として返す。
+pub fn entry_notes(app: model.App) -> List(stop.Note) {
+  case app.entries {
+    [] -> []
+    _ ->
+      list.flat_map(app.services, fn(service) {
+        case service.faces_declared {
+          False -> [
+            stop.Note(
+              class: stop.Conflict,
+              text: "service." <> service.module <> ": faces const が無い",
+            ),
+          ]
+          True -> face_notes(app.entries, service)
+        }
+      })
+  }
+}
+
+fn face_notes(
+  entries: List(model.Entry),
+  service: model.Service,
+) -> List(stop.Note) {
+  let known =
+    list.filter(service.faces, fn(face) { entry_by_name(entries, face) != None })
+  let unknown =
+    list.filter(service.faces, fn(face) { entry_by_name(entries, face) == None })
+  let unknown_notes =
+    list.map(unknown, fn(face) {
+      stop.Note(
+        class: stop.Conflict,
+        text: "service." <> service.module <> ": 未知の面名: " <> face,
+      )
+    })
+  let system_only =
+    service.subjects != []
+    && list.all(service.subjects, fn(subject) {
+      case subject {
+        model.SubjectSystem -> True
+        _ -> False
+      }
+    })
+  let empty_notes = case service.faces {
+    [] ->
+      case system_only {
+        True -> []
+        False -> [
+          stop.Note(
+            class: stop.Conflict,
+            text: "service."
+              <> service.module
+              <> ": System でない Service の faces が []",
+          ),
+        ]
+      }
+    _ ->
+      case system_only {
+        True -> [
+          stop.Note(
+            class: stop.Conflict,
+            text: "service."
+              <> service.module
+              <> ": System-only Service が面を名指し: "
+              <> string.join(service.faces, ", "),
+          ),
+        ]
+        False -> []
+      }
+  }
+  let subject_notes =
+    list.filter_map(service.subjects, fn(subject) {
+      case subject {
+        model.SubjectEntity(type_name: type_name, ..) ->
+          case
+            list.any(known, fn(face) {
+              case entry_by_name(entries, face) {
+                Some(entry) -> entry_accepts(entry.subject, type_name)
+                None -> False
+              }
+            })
+          {
+            True -> Error(Nil)
+            False ->
+              Ok(stop.Note(
+                class: stop.Conflict,
+                text: "service."
+                  <> service.module
+                  <> ": who As"
+                  <> type_name
+                  <> " に対応する面が無い: "
+                  <> string.join(service.faces, ", "),
+              ))
+          }
+        _ -> Error(Nil)
+      }
+    })
+  let read_only_note = case service.effect, service.faces {
+    model.WriteEffect, [_first, ..] ->
+      case
+        list.filter_map(known, fn(face) {
+          case entry_by_name(entries, face) {
+            Some(entry) -> Ok(entry)
+            None -> Error(Nil)
+          }
+        })
+      {
+        [] -> None
+        face_entries ->
+          case
+            list.all(face_entries, fn(entry) {
+              entry.services == model.ReadOnlyServices
+            })
+          {
+            True ->
+              Some(stop.Note(
+                class: stop.Warning,
+                text: "service."
+                  <> service.module
+                  <> ": Write Service の faces が ReadOnly の面だけなので route 0 本: "
+                  <> string.join(service.faces, ", "),
+              ))
+            False -> None
+          }
+      }
+    _, _ -> None
+  }
+  list.append(
+    list.append(unknown_notes, empty_notes),
+    list.append(subject_notes, case read_only_note {
+      Some(note) -> [note]
+      None -> []
+    }),
+  )
+}
+
+fn entry_by_name(
+  entries: List(model.Entry),
+  name: String,
+) -> Option(model.Entry) {
+  case list.find(entries, fn(entry) { naming.pascal(entry.name) == name }) {
+    Ok(entry) -> Some(entry)
+    Error(_) -> None
+  }
+}
+
+fn entry_accepts(subject: model.EntrySubjects, type_name: String) -> Bool {
+  case subject {
+    model.AnyEntrySubject -> True
+    model.NamedEntrySubjects(names) -> list.contains(names, type_name)
   }
 }
 
@@ -1502,11 +1884,13 @@ pub fn read(units: List(Unit)) -> Result(App, Error) {
   use _ <- result.try(validate_order_columns(entity_list, types))
   use _ <- result.try(validate_relation_shapes(entity_list))
   use service_list <- result.try(services(units))
+  use entry_list <- result.try(entry_declarations(units))
   Ok(model.App(
     value_types: types,
     entities: entity_list,
     services: service_list,
     arrows: arrows(entity_list),
+    entries: entry_list,
   ))
 }
 

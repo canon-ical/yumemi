@@ -1,0 +1,6 @@
+name = "yumemi_route_table_scratch"
+version = "0.1.0"
+target = "javascript"
+
+[dependencies]
+gleam_stdlib = { path = "__STDLIB_PATH__" }

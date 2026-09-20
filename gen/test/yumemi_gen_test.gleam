@@ -95,6 +95,31 @@ pub fn lifecycle_read_from_edges_test() {
   article.collection |> should.equal("articles")
 }
 
+pub fn article_http_route_table_has_seven_rows_test() {
+  let face = text("src/gen/face.gleam")
+  string.contains(face, "pub type Face {\n  Public\n  Admin\n}")
+  |> should.be_true
+  let http = text("src/gen/entry/http.gleam")
+  [
+    "Route(face: \"admin\", method: \"POST\", path: \"/api/admin/articles\", service: \"article_create\", path_keys: [], credential: Session),",
+    "Route(face: \"public\", method: \"GET\", path: \"/api/articles\", service: \"article_list\", path_keys: [], credential: Session),",
+    "Route(face: \"admin\", method: \"GET\", path: \"/api/admin/articles\", service: \"article_list\", path_keys: [], credential: Session),",
+    "Route(face: \"public\", method: \"GET\", path: \"/api/articles/{slug}\", service: \"article_read\", path_keys: [\"slug\"], credential: Session),",
+    "Route(face: \"admin\", method: \"GET\", path: \"/api/admin/articles/{slug}\", service: \"article_read\", path_keys: [\"slug\"], credential: Session),",
+    "Route(face: \"admin\", method: \"POST\", path: \"/api/admin/articles/{slug}/publish\", service: \"article_publish\", path_keys: [\"slug\"], credential: Session),",
+    "Route(face: \"admin\", method: \"POST\", path: \"/api/admin/articles/{slug}/retract\", service: \"article_retract\", path_keys: [\"slug\"], credential: Session),",
+  ]
+  |> list.each(fn(row) { string.contains(http, row) |> should.be_true })
+  http
+  |> string.split("\n")
+  |> list.filter(fn(line) {
+    string.starts_with(line, "  Route(face:")
+    && string.contains(line, "path: \"")
+  })
+  |> list.length
+  |> should.equal(7)
+}
+
 // ── 束1 Type の値 ───────────────────────────────────────────────────────────
 
 pub fn one_module_per_spec_test() {

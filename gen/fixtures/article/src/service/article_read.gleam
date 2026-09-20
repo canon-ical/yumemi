@@ -1,16 +1,20 @@
-// ★ src/service/article_read.gleam
 //// Service read ── 記事を1件読む。一般に見えるのは Published だけ。下書きと取り下げ済みは Staff にしか見えない。
+
+// ★ src/service/article_read.gleam
 import entity/article
 import entity/category
 import entity/tag
 import framework/effect.{type Effect, Read}
 import framework/step.{type Start, type Step}
 import gen/allow/article as allow
+import gen/face.{type Face, Admin, Public}
 import gen/reads/article_read as reads
 import gen/root/article_read.{type Actor, type Root, type Service, Service}
 import gen/types/slug.{type Slug}
 
 pub const effect: Effect = Read
+
+pub const faces: List(Face) = [Public, Admin]
 
 pub type Args {
   Args(slug: Slug)
