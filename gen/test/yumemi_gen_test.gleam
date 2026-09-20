@@ -51,6 +51,14 @@ const composite_root_route_fixture = "fixtures/composite_root_route"
 
 const sql_unsupported_fixture = "fixtures/sql_unsupported"
 
+const route_suffix_fixture = "fixtures/route_suffix"
+
+const route_ambiguous_fixture = "fixtures/route_ambiguous"
+
+const route_external_fixture = "fixtures/route_external"
+
+const route_nested_fixture = "fixtures/route_nested"
+
 pub fn main() {
   gleeunit.main()
 }
@@ -215,6 +223,106 @@ pub fn composite_root_counts_each_key_component_in_route_test() {
     && string.contains(note.text, "パス変数が3個以上")
   })
   |> should.be_true
+}
+
+pub fn route_target_uses_longest_entity_suffix_and_keeps_residue_test() {
+  let http = text_of(route_suffix_fixture, "src/gen/entry/http.gleam")
+  string.contains(
+    http,
+    "Route(face: \"test\", method: \"POST\", path: \"/test/free_spaces/add\", service: \"space_add\", path_keys: [], credential: Session),",
+  )
+  |> should.be_true
+  string.contains(
+    http,
+    "Route(face: \"test\", method: \"GET\", path: \"/test/muse_heavens/embed_code\", service: \"heaven_embed_code\", path_keys: [], credential: Session),",
+  )
+  |> should.be_true
+  let notes = notes_of(route_suffix_fixture)
+  stop.worst(notes) |> should.equal(4)
+  notes
+  |> list.any(fn(note) {
+    note.class == stop.Conflict
+    && string.contains(note.text, "space_")
+    && string.contains(note.text, "動詞が空")
+  })
+  |> should.be_true
+}
+
+pub fn route_target_stops_on_same_length_suffix_ambiguity_test() {
+  let notes = notes_of(route_ambiguous_fixture)
+  stop.worst(notes) |> should.equal(4)
+  notes
+  |> list.any(fn(note) {
+    note.class == stop.Conflict
+    && string.contains(note.text, "schedule_add")
+    && string.contains(note.text, "muse_schedule")
+    && string.contains(note.text, "store_schedule")
+  })
+  |> should.be_true
+}
+
+pub fn route_target_reads_external_collection_and_rejects_item_verbs_test() {
+  let assert Ok(units) = source.load(route_external_fixture)
+  let assert Ok(loaded) = reader.read(units)
+  let assert Ok(collection) =
+    list.find(loaded.collections, fn(item) { item.module == "ledger_store" })
+  collection.collection |> should.equal("ledger_stores")
+
+  let http = text_of(route_external_fixture, "src/gen/entry/http.gleam")
+  string.contains(
+    http,
+    "Route(face: \"test\", method: \"GET\", path: \"/test/ledger_stores/search\", service: \"ledger_store_search\", path_keys: [], credential: Session),",
+  )
+  |> should.be_true
+  string.contains(
+    http,
+    "Route(face: \"test\", method: \"GET\", path: \"/test/ledger_stores\", service: \"ledger_store_list\", path_keys: [], credential: Session),",
+  )
+  |> should.be_true
+  string.contains(
+    http,
+    "Route(face: \"test\", method: \"POST\", path: \"/test/ledger_stores\", service: \"ledger_store_create\", path_keys: [], credential: Session),",
+  )
+  |> should.be_true
+  let notes = notes_of(route_external_fixture)
+  stop.worst(notes) |> should.equal(4)
+  notes
+  |> list.any(fn(note) {
+    string.contains(note.text, "ledger_store_read")
+    && string.contains(note.text, "個体レベル")
+  })
+  |> should.be_true
+  notes
+  |> list.any(fn(note) {
+    string.contains(note.text, "ghost_search")
+    && string.contains(note.text, "対象が無い")
+  })
+  |> should.be_true
+  notes
+  |> list.any(fn(note) {
+    string.contains(note.text, "store_search")
+    && string.contains(note.text, "対象が無い")
+  })
+  |> should.be_true
+}
+
+pub fn route_target_stops_nested_entity_reserved_name_but_keeps_counterexamples_test() {
+  let http = text_of(route_nested_fixture, "src/gen/entry/http.gleam")
+  [
+    "service: \"store_link_ledger\"",
+    "path: \"/test/ledger_stores/search\"",
+    "service: \"ledger_store_search\"",
+    "service: \"store_api_key_issue\"",
+    "service: \"muse_heaven_list\"",
+  ]
+  |> list.each(fn(service) { string.contains(http, service) |> should.be_true })
+  let notes = notes_of(route_nested_fixture)
+  list.length(notes) |> should.equal(1)
+  let assert [note] = notes
+  note.class |> should.equal(stop.Conflict)
+  string.contains(note.text, "store_roster_list") |> should.be_true
+  string.contains(note.text, "roster") |> should.be_true
+  string.contains(note.text, "予約動詞") |> should.be_true
 }
 
 // ── 束1 Type の値 ───────────────────────────────────────────────────────────
@@ -471,9 +579,7 @@ pub fn forward_with_stops_as_unimplemented_test() {
   string.contains(note.text, "with の順方向は未対応: ArticleToCategory")
   |> should.be_true
   files_of(sql_unsupported_fixture)
-  |> list.any(fn(file) {
-    file.0 == "gen/sql/queries/article_list/items.sql"
-  })
+  |> list.any(fn(file) { file.0 == "gen/sql/queries/article_list/items.sql" })
   |> should.be_false
 }
 
@@ -488,9 +594,7 @@ pub fn multi_has_stops_as_unimplemented_test() {
   string.contains(note.text, "Has / HasNone は Multi の矢印に未対応")
   |> should.be_true
   files_of(sql_unsupported_fixture)
-  |> list.any(fn(file) {
-    file.0 == "gen/sql/queries/photo_filter/related.sql"
-  })
+  |> list.any(fn(file) { file.0 == "gen/sql/queries/photo_filter/related.sql" })
   |> should.be_false
 }
 
@@ -949,12 +1053,22 @@ pub fn root_module_mismatch_is_a_nonblocking_warning_test() {
   let found = text_of(root_warning_fixture, "src/gen/root/store_check.gleam")
   string.contains(found, "widget: widget.Widget") |> should.be_true
   let notes = notes_of(root_warning_fixture)
-  list.length(notes) |> should.equal(1)
-  let assert [note] = notes
-  note.class |> should.equal(stop.Warning)
-  stop.worst(notes) |> should.equal(0)
-  string.contains(note.text, "store_check") |> should.be_true
-  string.contains(note.text, "widget") |> should.be_true
+  list.length(notes) |> should.equal(2)
+  stop.worst(notes) |> should.equal(4)
+  notes
+  |> list.any(fn(note) {
+    note.class == stop.Warning
+    && string.contains(note.text, "store_check")
+    && string.contains(note.text, "widget")
+  })
+  |> should.be_true
+  notes
+  |> list.any(fn(note) {
+    note.class == stop.Conflict
+    && string.contains(note.text, "store_check")
+    && string.contains(note.text, "対象が無い")
+  })
+  |> should.be_true
 }
 
 // ── header の入力ハッシュ(20 の規約①、柏木 P2-5) ────────────────────────────

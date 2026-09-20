@@ -185,6 +185,42 @@ pub fn entities(units: List(Unit)) -> Result(List(Entity), Error) {
   )
 }
 
+/// Entity でないトップレベル module の `pub const collection: String`。
+/// `entity/` と `service/` の下は ER / Service の読み取りが所有するため、
+/// ここでは拾わない。
+pub fn collections(units: List(Unit)) -> Result(List(model.Collection), Error) {
+  units
+  |> list.filter(fn(unit) { !string.contains(unit.path, "/") })
+  |> list.try_map(collection_of)
+  |> result.map(fn(found) {
+    list.filter_map(found, fn(item) {
+      case item {
+        Some(collection) -> Ok(collection)
+        None -> Error(Nil)
+      }
+    })
+  })
+}
+
+fn collection_of(unit: Unit) -> Result(Option(model.Collection), Error) {
+  let module = g.in_order(unit.module)
+  case public_constant(module, "collection") {
+    None -> Ok(None)
+    Some(constant) ->
+      case constant.annotation, g.string_value(constant.value) {
+        Some(annotation), Some(collection) ->
+          case g.type_name(annotation) {
+            Some("String") ->
+              Ok(
+                Some(model.Collection(module: unit.path, collection: collection)),
+              )
+            _ -> Error(Unsupported(unit.path, "collection が String でない"))
+          }
+        _, _ -> Error(Unsupported(unit.path, "collection が String でない"))
+      }
+  }
+}
+
 /// key が無くても通常のレコード型なら Entity として読み続ける。
 /// レコード型の無い型置き場(例: entity/ledger)は Entity にはしない。
 fn entity_of(unit: Unit, table: Registry) -> Result(Option(Entity), Error) {
@@ -1910,6 +1946,7 @@ fn limit(expression: glance.Expression) -> model.Limit {
 pub fn read(units: List(Unit)) -> Result(App, Error) {
   use types <- result.try(value_types(units))
   use entity_list <- result.try(entities(units))
+  use collection_list <- result.try(collections(units))
   use _ <- result.try(validate_order_columns(entity_list, types))
   use _ <- result.try(validate_relation_shapes(entity_list))
   use service_list <- result.try(services(units))
@@ -1917,6 +1954,7 @@ pub fn read(units: List(Unit)) -> Result(App, Error) {
   Ok(model.App(
     value_types: types,
     entities: entity_list,
+    collections: collection_list,
     services: service_list,
     arrows: arrows(entity_list),
     entries: entry_list,

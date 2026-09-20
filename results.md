@@ -1,3 +1,33 @@
+# gen-5 真壁 route 段3 作業結果
+
+## 状態
+
+- branch: `gen-5`。段3をR0〜R5へ変更した。Entityは末尾語の最長一致、ER外moduleは`collection`宣言の完全一致だけで対象を引く。
+- scratchpadの87 Serviceは正しく出る82、止まる5。停止は`schedule_add/list/withdraw`の曖昧、`pageview_record`の無一致、`store_roster_list`のR4入れ子。
+- mainのmusearchは変更していない。台帳2 + metrics2のcollection宣言、`ledger`改名、参照書換は写しだけに行った。
+- route registry突合は`gen/_out/gen-5/scratch/service-table-final.tsv`（87行）と`registry-compare-final.tsv`（98行）。検証器の`silent_mismatch`集計は0、raw URLの末尾形差は別欄。検証器の未知collectionを一致扱いするP1があり、0だけを完全な検出保証とは扱わない（`docs/reports/gen-5.md`）。
+
+## DDL
+
+無し。migration / schema変更は無く、staging / productionへ適用していない。
+
+## 検証証拠
+
+- `gen/build/gen-5-gleam-test-final.txt`: `gleam test` 72 passed, no failures。
+- `gen/build/gen-5-probe-scratch-final2.txt`: probe 0 → 333 → 129 → 129。
+- `gen/build/gen-5-verify-route-table-final.txt`: route table PASS、7 rows。
+- `gen/build/gen-5-verify-gate2-sql-final.txt`: 7 checks PASS。
+- `gen/build/gen-5-verify-root-ffi-final.txt`: 8 checks PASS。
+- `gen/build/gen-5-audit-final.json`: Service 87、route 326、registry 98、正しく出る82・止まる5。
+- ゲート2: `gen/_out/kashiwagi-gate2/route-build.txt` / `compiled-route.txt`。生成route表を独立buildし、コンパイル後の326行・82 Serviceの全フィールドをソースと照合した。probeの129エラーが残るbuildだけではこの確認は成立していなかった。
+
+## gen-4 差分と残差
+
+- 検証器の黙って誤り集計は0（前記P1の限界あり）。gen-4の正しく停止だった台帳2 + metrics2は、mainでは宣言無しで停止し、scratchpadではroute化した。
+- 末尾形・単複・prefix・root/key・foldedのregistry差は残差として別欄に保持した。Logic / readsによる曖昧解消、`pageview_record`、`store_roster_list`の扱いは別便。
+
+---
+
 # gen-4 真壁 巡2 作業結果
 
 ## 状態
