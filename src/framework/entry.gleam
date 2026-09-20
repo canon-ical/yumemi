@@ -3,10 +3,11 @@
 //// [26-dispatch](../../../../canonical/tech/_drafts/gleam-framework/26-dispatch.v0.md) 88〜113 行の起案(柏木 C1〜C3、人見の裁定 A / B / C)の実装。
 //// **`admit` には触らない** ── 変えるのは「誰か」の運び方であって「未ログインを通すか」ではない(人見 2026-09-10 の 2 値は据え置き)。
 ////
-//// **既定 `Session` を 2 つ目の constructor で表す** ── Gleam の record は既定値を持てず、`Http` に `prefix` 欄を足すと
-//// 既存 3 入口の宣言が全部書き換えになる(26 の負例 (o)「既存 3 入口に `credential` を書かないまま (a)〜(j) が通る」が成立しなくなる)。
+//// **既定 `Session` を 2 つ目の constructor で表す** ── Gleam の record は既定値を持てず、`credential` を
+//// `Http` に足すと既存 3 入口の宣言が全部書き換えになる(26 の負例 (o)「既存 3 入口に `credential` を書かないまま (a)〜(j) が通る」が成立しなくなる)。
 //// `Http` は `credential: Session` の略記、`HttpApi` が `credential` を明示する形。**6 欄の並びを共通にしてある**ので
 //// `entry.name` / `.hosts` / `.prefix` / `.admit` / `.subject` / `.services` の accessor は両方の constructor で効き、読む側は分岐を持たない。
+//// **`prefix` は `Http` / `HttpApi` の両方に足す** ── 既存の入口宣言は面ごとに 1 語を足す書き換えになる(musearch 追随便で 5 語)。
 //// 媒体が増えても constructor は増やさない ── 足すのは `Credential` の variant(`HttpApi(.., credential: Session)` は `Http` と同値、書いてよい)。
 ////
 //// ▲ への契約 ── 入口の媒体を読む口は `entry.credential(Entry) -> Credential` 1 本(`Http` は `Session`)。gen は各入口の宣言からこの値を吐く。
