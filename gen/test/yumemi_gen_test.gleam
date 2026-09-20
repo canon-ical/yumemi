@@ -538,8 +538,7 @@ pub fn one_statement_per_named_query_test() {
 }
 
 pub fn relation_presence_and_with_become_sql_test() {
-  let related =
-    text_of(relation_fixture, "db/queries/photo_filter/related.sql")
+  let related = text_of(relation_fixture, "db/queries/photo_filter/related.sql")
   string.contains(
     related,
     "WHERE EXISTS(\n"
@@ -605,8 +604,7 @@ pub fn multi_has_stops_as_unimplemented_test() {
 pub fn one_statement_per_root_arrow_test() {
   let paths = list.map(files(), fn(entry) { entry.0 })
   list.filter(paths, fn(path) {
-    string.starts_with(path, "db/queries/")
-    && string.contains(path, "/to_")
+    string.starts_with(path, "db/queries/") && string.contains(path, "/to_")
   })
   |> list.sort(string.compare)
   |> should.equal([
@@ -634,8 +632,7 @@ pub fn one_statement_per_root_arrow_test() {
   |> should.be_true
   string.contains(found, "ORDER BY keys.ord;") |> should.be_true
   // uuid の鍵は uuid に寄せる
-  let album =
-    text_of(relation_fixture, "db/queries/photo_read/to_album.sql")
+  let album = text_of(relation_fixture, "db/queries/photo_read/to_album.sql")
   string.contains(album, "JOIN app.album t ON t.id=keys.value::uuid")
   |> should.be_true
 }
@@ -814,6 +811,21 @@ pub fn reorder_uses_declared_order_column_and_returning_alias_test() {
   string.contains(verb, "reorder_articles_stage") |> should.be_true
 }
 
+pub fn ordered_create_locks_parent_and_assigns_next_order_test() {
+  let found = text_of(relation_fixture, "db/queries/verb/create_photo.sql")
+  string.contains(found, "FROM app.album") |> should.be_true
+  string.contains(found, "WHERE id=$2::uuid FOR UPDATE") |> should.be_true
+  string.contains(found, "COALESCE(max(existing.\"order\")+1,0)")
+  |> should.be_true
+  string.contains(found, "existing.album_id IS NOT DISTINCT FROM $2::uuid")
+  |> should.be_true
+  string.contains(
+    found,
+    "SELECT $1::uuid,$2::uuid,$3::uuid,$4,next_order.next_order",
+  )
+  |> should.be_true
+}
+
 /// gen-3b(P0-3)── 退避の一時値は負値でなく、**宣言の値域の上端から下へ、範囲に無い値**を選ぶ。
 /// `Int` は int4 の全域、確定値は 0 から。範囲は FOR UPDATE で押さえる。
 pub fn reorder_stage_picks_free_values_inside_declared_int_bounds_test() {
@@ -860,10 +872,12 @@ pub fn reorder_uses_range_bounds_of_the_order_type_test() {
     "AND candidate NOT BETWEEN 1::bigint AND 1::bigint+c.expected-1",
   )
   |> should.be_true
-  string.contains(stage, "FROM app.photo e WHERE e.album_id=$1::uuid FOR UPDATE")
+  string.contains(
+    stage,
+    "FROM app.photo e WHERE e.album_id=$1::uuid FOR UPDATE",
+  )
   |> should.be_true
-  let apply =
-    text_of(relation_fixture, "db/queries/verb/reorder_photos.sql")
+  let apply = text_of(relation_fixture, "db/queries/verb/reorder_photos.sql")
   string.contains(apply, "(1+ord-1)::integer AS new_order") |> should.be_true
   string.contains(apply, "SELECT value::uuid AS id") |> should.be_true
 }
@@ -950,9 +964,7 @@ pub fn advance_sql_has_no_service_argument_test() {
 
 pub fn verb_sql_uses_entity_only_headers_test() {
   files()
-  |> list.filter(fn(entry) {
-    string.starts_with(entry.0, "db/queries/verb/")
-  })
+  |> list.filter(fn(entry) { string.starts_with(entry.0, "db/queries/verb/") })
   |> list.each(fn(entry) {
     string.starts_with(entry.1, "-- GENERATED from entity.")
     |> should.be_true
@@ -962,8 +974,7 @@ pub fn verb_sql_uses_entity_only_headers_test() {
 }
 
 pub fn composite_key_is_present_in_signature_where_and_returning_test() {
-  let update =
-    text_of(flag_fixture, "db/queries/verb/update_chunk_text.sql")
+  let update = text_of(flag_fixture, "db/queries/verb/update_chunk_text.sql")
   let delete = text_of(flag_fixture, "db/queries/verb/delete_chunk.sql")
   string.contains(update, "WHERE a=$1 AND b=$2 AND c=$3")
   |> should.be_true
@@ -1186,8 +1197,7 @@ pub fn empty_order_falls_back_to_the_key_test() {
 }
 
 pub fn optional_column_asc_gets_nulls_last_test() {
-  let found =
-    text_of(flag_fixture, "db/queries/widget_list/first_place.sql")
+  let found = text_of(flag_fixture, "db/queries/widget_list/first_place.sql")
   string.contains(found, "ORDER BY w.place ASC NULLS LAST,w.id ASC")
   |> should.be_true
   string.contains(found, "LIMIT 1") |> should.be_true

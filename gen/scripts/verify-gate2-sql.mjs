@@ -135,6 +135,8 @@ try {
   await draftClient.query(`
     CREATE TABLE gate2_r7_draft.chunk(a integer,b integer,c integer,text text,
       PRIMARY KEY(a,b,c));
+    CREATE TABLE gate2_r7_draft.category(name text PRIMARY KEY);
+    INSERT INTO gate2_r7_draft.category(name) VALUES ('cat');
     CREATE TABLE gate2_r7_draft.article(
       slug text PRIMARY KEY,title text,body text,version integer,
       "order" integer,category_id text,phase text,entered_draft timestamptz);
@@ -150,7 +152,6 @@ try {
     "title",
     "body",
     1,
-    0,
     "cat",
     "2026-01-01T00:00:00Z",
   ]);

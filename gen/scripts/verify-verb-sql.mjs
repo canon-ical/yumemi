@@ -150,15 +150,104 @@ function removeCastsOutsideQuotes(sql) {
       cursor = token.next;
       continue;
     }
-    const match = sql.slice(cursor).match(castPattern);
-    if (match && match.index === 0) {
-      cursor += match[0].length;
+    const cast = castAt(sql, cursor);
+    if (cast) {
+      cursor += cast.length;
       continue;
     }
     output += sql[cursor];
     cursor += 1;
   }
   return output;
+}
+
+function castAt(sql, index) {
+  const match = sql.slice(index).match(castPattern);
+  return match && match.index === 0 ? match[0] : null;
+}
+
+function normalizedCast(cast) {
+  return cast.replace(/\s+/g, " ").replace(/^::\s*/, "::").trim();
+}
+
+function castsOutsideQuotes(sql) {
+  const casts = [];
+  let cursor = 0;
+  while (cursor < sql.length) {
+    const token = quotedTokenAt(sql, cursor);
+    if (token) {
+      cursor = token.next;
+      continue;
+    }
+
+    const cast = castAt(sql, cursor);
+    if (cast) {
+      const normalized = normalizedCast(cast);
+      const placeholder = sql.slice(0, cursor).match(/\$(\d+)\s*$/);
+      casts.push({
+        placeholder: placeholder ? Number(placeholder[1]) : null,
+        text: normalized,
+        type: normalized.slice(2),
+      });
+      cursor += cast.length;
+      continue;
+    }
+    cursor += 1;
+  }
+  return casts;
+}
+
+function placeholderKey(cast) {
+  return cast.placeholder === null
+    ? null
+    : `${cast.placeholder}\u0000${cast.type}`;
+}
+
+function missingCastsByPlaceholder(handwrittenSql, generatedSql) {
+  const generated = new Set(
+    castsOutsideQuotes(generatedSql)
+      .map(placeholderKey)
+      .filter((key) => key !== null),
+  );
+  const seen = new Set();
+  return castsOutsideQuotes(handwrittenSql).filter((cast) => {
+    const key = placeholderKey(cast);
+    if (key === null || generated.has(key) || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function missingCastsByType(handwrittenSql, generatedSql) {
+  const generated = new Map();
+  for (const cast of castsOutsideQuotes(generatedSql)) {
+    generated.set(cast.type, (generated.get(cast.type) ?? 0) + 1);
+  }
+  return castsOutsideQuotes(handwrittenSql).filter((cast) => {
+    const remaining = generated.get(cast.type) ?? 0;
+    if (remaining === 0) return true;
+    generated.set(cast.type, remaining - 1);
+    return false;
+  });
+}
+
+function castDisplay(cast) {
+  return cast.placeholder === null
+    ? cast.text
+    : `$${cast.placeholder}${cast.text}`;
+}
+
+function missingCastReport(names, missingByName) {
+  const details = names
+    .filter((name) => missingByName.has(name))
+    .map((name) => `${name}[${missingByName.get(name).map(castDisplay).join(" ")}]`);
+  return details.length === 0 ? "(none)" : details.join(", ");
+}
+
+function reportMissingCasts(label, names, missingByName) {
+  console.log(
+    `${label}: ${names.length} (${missingCastReport(names, missingByName)})`,
+  );
 }
 
 function readSqlMap(directory, names) {
@@ -203,6 +292,26 @@ function selfTest(appDir, outDir) {
     throw new Error("update_free_space_title is not a stage 1 match");
   }
   console.log("self-test update_free_space_title stage 1 match: PASS");
+
+  const handwrittenCasts = "SELECT $1::uuid,$2::jsonb;";
+  const generatedCasts = "SELECT $1::uuid,$2::jsonb,$3::date;";
+  if (
+    missingCastsByPlaceholder(handwrittenCasts, generatedCasts).length !== 0 ||
+    missingCastsByType(handwrittenCasts, generatedCasts).length !== 0
+  ) {
+    throw new Error("generated casts did not contain the handwritten casts");
+  }
+  console.log("self-test missing cast set and multiset: PASS");
+
+  const literalOnly = "SELECT '$1::uuid';";
+  const uncast = "SELECT $1;";
+  if (
+    missingCastsByPlaceholder(literalOnly, uncast).length !== 0 ||
+    missingCastsByType(literalOnly, uncast).length !== 0
+  ) {
+    throw new Error("cast inside a quoted literal was counted");
+  }
+  console.log("self-test quoted literal casts ignored: PASS");
 }
 
 function compare() {
@@ -237,6 +346,17 @@ function compare() {
   const castOnly = both.filter((name) => stage2.get(name) && !stage1.get(name));
   const mismatches = both.filter((name) => !stage2.get(name));
 
+  const missingByPlaceholder = new Map();
+  const missingByType = new Map();
+  for (const name of both) {
+    const handwrittenSql = handwritten.get(name);
+    const generatedSql = generated.get(name);
+    const byPlaceholder = missingCastsByPlaceholder(handwrittenSql, generatedSql);
+    const byType = missingCastsByType(handwrittenSql, generatedSql);
+    if (byPlaceholder.length > 0) missingByPlaceholder.set(name, byPlaceholder);
+    if (byType.length > 0) missingByType.set(name, byType);
+  }
+
   console.log(`generated verb SQL: ${generatedNames.length}`);
   console.log(`handwritten verb SQL: ${handwrittenNames.length}`);
   report("both", both);
@@ -246,12 +366,23 @@ function compare() {
   report("stage 2 match (whitespace + casts)", stage2Matches);
   report("mismatch (stage 2)", mismatches);
   report("stage 1 -> stage 2 difference (cast-only)", castOnly);
+  reportMissingCasts(
+    "missing casts (by placeholder)",
+    [...missingByPlaceholder.keys()],
+    missingByPlaceholder,
+  );
+  reportMissingCasts(
+    "missing casts (by type)",
+    [...missingByType.keys()],
+    missingByType,
+  );
 
   console.log(
     `verify-verb-sql: generated=${generatedNames.length} handwritten=${handwrittenNames.length} ` +
       `both=${both.length} generated-only=${generatedOnly.length} ` +
       `handwritten-only=${handwrittenOnly.length} stage1=${stage1Matches.length} ` +
-      `stage2=${stage2Matches.length} mismatch=${mismatches.length} cast-only=${castOnly.length}`,
+      `stage2=${stage2Matches.length} mismatch=${mismatches.length} cast-only=${castOnly.length} ` +
+      `missing-cast-ph=${missingByPlaceholder.size} missing-cast-ty=${missingByType.size}`,
   );
 }
 
