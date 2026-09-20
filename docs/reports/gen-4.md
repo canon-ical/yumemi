@@ -27,13 +27,13 @@ fixture article は 53 → 55 files。`gleam test` は 59 → 61 passed(gen-4-sq
 
 | 検査 | 実測 | 証拠 |
 |---|---|---|
-| fixture `gleam test` | 60 passed, no failures | `gen/build/route-table-test-final-pre.txt` |
-| route table scratch build | PASS、7 rows | `gen/build/verify-route-table-final.txt` |
-| gate 2 SQL | 7 checks PASS | `gen/build/final-gate2-sql.txt` |
-| root FFI | 8 checks PASS | `gen/build/final-root-ffi.txt` |
-| probe original musearch | 0 / 338 / 134 / 129 | `gen/build/final-probe-compile.txt` |
+| fixture `gleam test` | 61 passed, no failures | `gen/_out/kashiwagi-gate2-test.txt` |
+| route table scratch build | PASS、7 rows | `gen/_out/kashiwagi-gate2/evidence/route.txt` |
+| gate 2 SQL | 7 checks PASS | `gen/_out/kashiwagi-gate2/evidence/gate2-sql.txt` |
+| root FFI | 8 checks PASS | `gen/_out/kashiwagi-gate2/evidence/root-ffi.txt` |
+| probe original musearch | 0 / 338 / 134 / 129 | `gen/_out/kashiwagi-gate2/evidence/probe.txt` |
 
-指定 port `55432` は接続拒否だったため、既存の local PG `55466` に専用DB `yumemi_gen4_verify_20260920` を作り、staging / production には当てていない。
+上表は merge 後の木を柏木が再検証した実測。PG は `127.0.0.1:55432`、DB `postgres` の検証用スキーマを使用した。上表の既存検証だけでは、下記ゲート2の反例は検出しない。
 
 ## musearch 7a: current ★
 
@@ -43,7 +43,7 @@ fixture article は 53 → 55 files。`gleam test` は 59 → 61 passed(gen-4-sq
 
 対象は current ★の写しだけ。優先順は `method: null → faces=[] / System`、`credential: 'api_key' → [Api]`、`/api/store/ → [Store]`、`/api/staff/ → [Admin]`、残り → `[Front, Console]`。結果は Api 6 / Store 13 / Admin 5 / Front+Console 63 / System 5 = 92 Service。entry prefix は5語を明示した。生成は 631 files、route は133行。
 
-仮割当と `who` の突合で Store 面の `who AsStaff` 6本が exit 4。対象 Entity が無い route は heaven_link(2)、heaven_resolve(2)、ledger_store_add(1)、ledger_store_search(2)、metrics_muse(2)、metrics_store(2)、schedule_add(2)、space_add(2)、space_reorder(2)の17行。URL は変更していない。
+仮割当と `who` の突合で Store 面の `who AsStaff` 6本が exit 4。対象 Entity が無い route は heaven_link(2)、heaven_resolve(2)、ledger_store_add(1)、ledger_store_search(2)、metrics_muse(2)、metrics_store(2)、schedule_add(2)、space_add(2)、space_reorder(2)の17行。これも現実装は警告ではなく exit 4 (`stop.Conflict`) とする。URL は変更していない。
 
 ## registry.mjs 98行との突合
 
@@ -178,6 +178,18 @@ fixture article は 53 → 55 files。`gleam test` は 59 → 61 passed(gen-4-sq
 - current musearch ★はprefix未追随なので7aでは空文字を読み、`/api`は補っていない。5語を足した7b scratchが明示形。
 - registryの既存URLと4段規則の割れは直していない。単複、末尾形、root / 鍵の違いはmusearch側の別便で裁定する。
 - scratchで `対象 Entity が無い` となるサービスは、Entity外の型置き場と route の扱いを別途決める。
+- 26 検査1「同じ host に2入口で停止」と付属入口の生成は本便の射程外で未実装。
+
+## 柏木ゲート2の反例
+
+判定は **P0 あり(4件)**。実装は未修正。再現入力・出力・実PGのエラーは `gen/_out/kashiwagi-gate2/`、再実行は `python3 gen/_out/kashiwagi-gate2/evidence/recheck.py`。
+
+1. entry の `prefix` を削除すると生成は exit 0 で、`article_create` の path が `/articles` になる。必須欄の不足を空文字として受け入れている。
+2. entry と全 Service の faces を削除すると生成は exit 0 で、faces 不足を一件も診断せず route 表も出ない。
+3. root の key が `#(Slug, Title)`、Args が `slug: Slug, title: Title, name: CategoryName` の `category_read` は root を認識せず、exit 0 で `/api/admin/categories/{name}` を出す。plan D5 の複合key照合と3変数停止を満たさない。
+4. 順方向 `with: [ArticleToCategory]` は `c.category_id=a.slug`、Multi の `Has(PhotoToLabels, ...)` は `l.id=p.labels_id` を生成して exit 0。どちらも実PGで列不存在となる。本便の4クエリ以外の未対応形も成功扱いせず、正しく生成するか未実装として停止する必要がある。
+
+P1: route の入力ハッシュは Entity を含まず、collection の変更でURLが変わっても同じ値になる。入口負例とSQL関係種別の回帰検査も必要。対象Entity無し・動詞空の警告予定に対する exit 4 は残差として記録する。
 
 ## 実行記録
 
