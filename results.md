@@ -4,7 +4,7 @@
 
 - branch: `front-1`、開始 HEAD: `b64df221d0da8dde0c2ddba4be435904fd77f33d`。
 - framework の front 型、入口欄、article fixture、scratch 検証、報告を作業域へ追加した。
-- commit: framework `88f6bd5`、fixture `92466f1`、verification `7209c95`。報告書とこの結果書きは次の commit に含める。
+- commit: framework `88f6bd5`、fixture `92466f1`、verification `7209c95`、報告書とこの結果書きは `2390b5c`。
 - generator 本体 `gen/src/**`、route 表の生成処理、musearch、canonical は変更していない。
 
 ## DDL
