@@ -1,71 +1,51 @@
+import { toList } from "../gleam.mjs";
+
 export const resolve = (value) => Promise.resolve(value);
 export const then = (value, next) => value.then(next);
 export const commit = (context, carry) => context.commit(carry);
 export const finish = (context) => context.finish();
-export const reject=(context,stage)=>context.reject(stage);
+export const reject = (context, stage) => context.reject(stage);
 
-const rootArrowImplementation = async (context, service, arrow, root) => {
-  if (typeof context.readRootArrow === "function") {
-    return context.readRootArrow(service, arrow, root);
+/// The Context contract for arrow reads. The runtime must implement
+/// `relation(relation, keys)` and return the decoded target entities, one per
+/// key and in key order. The framework never guesses property names, never
+/// returns the relation value itself, and never treats a missing capability
+/// as "already decoded".
+export const relation = async (context, relation, keys) => {
+  if (typeof context?.relation !== "function") {
+    throw relationError(
+      relation,
+      "Context does not implement relation(relation, keys)",
+    );
   }
-  if (typeof context.decodeRootArrow === "function") {
-    return context.decodeRootArrow(service, arrow, root);
+  const wanted = [...keys];
+  const rows = await context.relation(relation, wanted);
+  if (!Array.isArray(rows)) {
+    throw relationError(relation, "relation() must return an array");
   }
-
-  const property = arrowProperty(arrow);
-  const source = rootSource(root, property);
-  if (source === undefined) {
-    throw new Error(`root arrow source is missing: ${service}/${arrow}`);
-  }
-  const relation = source[property];
-  if (typeof relation === "function") {
-    return relation(context, service, arrow, root);
-  }
-  if (relation && typeof relation.read === "function") {
-    return relation.read(context, service, arrow, root);
-  }
-  if (relation && typeof relation.resolve === "function") {
-    return relation.resolve(context, service, arrow, root);
-  }
-  return relation;
+  return toList(rows);
 };
 
-function arrowProperty(arrow) {
-  const marker = arrow.indexOf("To");
-  if (marker < 1 || marker + 2 >= arrow.length) {
-    throw new Error(`invalid root arrow: ${arrow}`);
-  }
-  const name = arrow.slice(marker + 2);
-  return name[0].toLowerCase() + name.slice(1);
-}
+export const relationBroken = (relation, keys, found) =>
+  Promise.reject(
+    relationError(
+      relation,
+      `expected ${[...keys].length} target row(s), found ${found}; keys=${JSON.stringify([...keys])}`,
+    ),
+  );
 
-function rootSource(root, property) {
-  if (!root || typeof root !== "object") return undefined;
-  if (Object.prototype.hasOwnProperty.call(root, property)) return root;
-  for (const value of Object.values(root)) {
-    if (value && typeof value === "object" && property in value) return value;
-  }
-  return undefined;
+function relationError(relation, detail) {
+  const error = new Error(
+    `relation ${relation.service}/${relation.arrow} (${relation.from}.${relation.prop} -> ${relation.target}): ${detail}`,
+  );
+  error.code = "relation_contract";
+  error.relation = {
+    service: relation.service,
+    query: relation.query,
+    arrow: relation.arrow,
+    from: relation.from,
+    prop: relation.prop,
+    target: relation.target,
+  };
+  return error;
 }
-
-function installRootArrow(context) {
-  const implementation = (service, arrow, root) =>
-    rootArrowImplementation(context, service, arrow, root);
-  Object.defineProperty(context, "rootArrow", {
-    configurable: true,
-    enumerable: false,
-    value: implementation,
-    writable: false,
-  });
-  return implementation;
-}
-
-/// The framework owns this capability. Existing runtimes may expose a richer
-/// implementation; a plain Context receives the decoded-root adapter above.
-export const rootArrow = (context, service, arrow, root) => {
-  const implementation =
-    typeof context.rootArrow === "function"
-      ? context.rootArrow
-      : installRootArrow(context);
-  return implementation(service, arrow, root);
-};

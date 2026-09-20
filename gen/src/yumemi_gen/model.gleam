@@ -2,6 +2,7 @@
 
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/string
 import yumemi_gen/naming
 
 /// 値型(types.gleam の `pub const <name>: Spec`)。
@@ -19,6 +20,8 @@ pub type ValueType {
     /// "Uuid" / "Pattern" / "Text" / "Markdown" / "MarkdownText" / "Range" / "Url"
     spec: String,
     backing: Backing,
+    /// `Range(min:, max:)` の両端。Range 以外は None。
+    range: Option(#(Int, Int)),
   )
 }
 
@@ -366,5 +369,24 @@ pub fn value_type_by_name(
   case list.find(types, fn(value) { value.type_name == type_name }) {
     Ok(value) -> Some(value)
     Error(_) -> None
+  }
+}
+
+/// 順序列の宣言上の値域。`Int` は int4 の全域、`Range` は宣言の両端。それ以外は None。
+pub fn order_bounds(prop: Prop, types: List(ValueType)) -> Option(#(Int, Int)) {
+  case prop.kind {
+    ValueProp(type_ref: TypeRef(module: None, name: "Int", ..)) ->
+      Some(#(-2_147_483_648, 2_147_483_647))
+    ValueProp(type_ref: TypeRef(module: Some(path), name: name, ..)) ->
+      case string.starts_with(path, "gen/types/") {
+        True ->
+          case value_type_by_name(types, name) {
+            Some(ValueType(spec: "Range", range: Some(bounds), ..)) ->
+              Some(bounds)
+            _ -> None
+          }
+        False -> None
+      }
+    _ -> None
   }
 }

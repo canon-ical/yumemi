@@ -21,10 +21,13 @@ rm -rf "$work"
 mkdir -p "$work"
 cp -r "$app/../framework" "$work/framework"
 cp -r "$app" "$work/app"
-# The generated root reads use the framework-owned rootArrow contract. Keep
-# the app copy isolated, but make the probe package use this worktree's FFI.
+# The generated root reads use the framework-owned Context contract
+# (`io.Relation` / `io.relation_one` / `relation_option` / `relation_many`, gen-3b)
+# and `er.of_multi`. Keep the app copy isolated, but make the probe package use
+# this worktree's io / er so the generated reads type-check against them.
 cp "$framework_source/src/framework/io.gleam" "$work/framework/src/framework/io.gleam"
 cp "$framework_source/src/framework/io_ffi.mjs" "$work/framework/src/framework/io_ffi.mjs"
+cp "$framework_source/src/framework/er.gleam" "$work/framework/src/framework/er.gleam"
 rm -rf "$work/app/build"
 
 errors() {

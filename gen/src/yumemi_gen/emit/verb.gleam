@@ -763,6 +763,8 @@ fn delete_where_sql(entity: model.Entity, field: String) -> String {
   <> ";\n"
 }
 
+/// 並べ替えの本番。stage で一時値へ退避済みの行に、要求の順で確定値を入れる。
+/// 確定値は宣言の値域の下端から詰める(`Int` は 0 から、`Range(min:, max:)` は min から)。
 fn reorder_sql(
   entity: model.Entity,
   app: model.App,
@@ -771,10 +773,13 @@ fn reorder_sql(
   let within_column = prop_column(entity, ordered.within)
   let order_column = prop_column(entity, ordered.field)
   let key_column = first_key_column(entity)
+  let #(first, _lo, _hi) = order_span(entity, app, ordered)
   "WITH positions AS (\n"
   <> " SELECT value"
   <> key_cast(app, entity)
-  <> " AS id,(ord-1)::integer AS new_order,ord"
+  <> " AS id,("
+  <> int.to_string(first)
+  <> "+ord-1)::integer AS new_order,ord"
   <> "\n"
   <> " FROM jsonb_array_elements_text($2::jsonb) WITH ORDINALITY AS items(value,ord)\n"
   <> "), target AS MATERIALIZED (\n"
@@ -810,6 +815,15 @@ fn reorder_sql(
   <> ";\n"
 }
 
+/// 並べ替えの退避。要求の行を、**宣言の値域の中で今その範囲に無い値**へ一時退避する。
+///
+/// 一意制約(within, order)が deferrable でないとき、確定値を直接入れると行ごとの検査で
+/// 衝突する。負の一時値は制限なし `Int` の実値と衝突し、非負 CHECK でも落ちる(柏木 P0-3)。
+/// ここでは値域の上端から下へ、範囲(scope)の現在値と確定値の帯 [first, first+N) を避けて
+/// N 個の空き値を選ぶ。窓は held + 2N + 1 個で、鳩の巣で必ず N 個以上の空きがある
+/// (値域が窓より狭いときだけ足りず、そのときは退避せず確定へ進む ── 一意制約が無ければ通り、
+/// あれば 23505 で rollback)。範囲の行は FOR UPDATE で押さえ、同一 scope の同時実行は直列になる。
+/// 要求の id が範囲に無ければ 'conflict'。
 fn reorder_stage_sql(
   entity: model.Entity,
   app: model.App,
@@ -818,39 +832,81 @@ fn reorder_stage_sql(
   let within_column = prop_column(entity, ordered.within)
   let order_column = prop_column(entity, ordered.field)
   let key_column = first_key_column(entity)
+  let #(first, lo, hi) = order_span(entity, app, ordered)
+  let first_text = int.to_string(first) <> "::bigint"
+  let lo_text = int.to_string(lo) <> "::bigint"
+  let hi_text = int.to_string(hi) <> "::bigint"
   "WITH positions AS (\n"
   <> " SELECT value"
   <> key_cast(app, entity)
   <> " AS id,ord\n"
   <> " FROM jsonb_array_elements_text($2::jsonb) WITH ORDINALITY AS items(value,ord)\n"
-  <> "), target AS MATERIALIZED (\n"
+  <> "), scope AS MATERIALIZED (\n"
   <> " SELECT e."
   <> quoted(key_column)
-  <> " AS id,p.ord FROM "
+  <> " AS id,e."
+  <> quoted(order_column)
+  <> " AS current FROM "
   <> table(entity)
-  <> " e JOIN positions p ON e."
-  <> quoted(key_column)
-  <> "=p.id WHERE e."
+  <> " e WHERE e."
   <> quoted(within_column)
-  <> "=$1\n"
-  <> "), changed AS (\n"
+  <> "=$1 FOR UPDATE\n"
+  <> "), target AS MATERIALIZED (\n"
+  <> " SELECT s.id,p.ord FROM scope s JOIN positions p ON s.id=p.id\n"
+  <> "), counts AS MATERIALIZED (\n"
+  <> " SELECT (SELECT count(*) FROM positions) AS expected,"
+  <> "(SELECT count(*) FROM target) AS matched,"
+  <> "(SELECT count(*) FROM scope) AS held\n"
+  <> "), free AS MATERIALIZED (\n"
+  <> " SELECT candidate::integer AS candidate,row_number() OVER (ORDER BY candidate DESC) AS slot\n"
+  <> " FROM counts c,generate_series("
+  <> hi_text
+  <> ",GREATEST("
+  <> lo_text
+  <> ","
+  <> hi_text
+  <> "-(c.held+2*c.expected)),-1) AS candidate\n"
+  <> " WHERE NOT EXISTS (SELECT 1 FROM scope s WHERE s.current=candidate)\n"
+  <> "  AND candidate NOT BETWEEN "
+  <> first_text
+  <> " AND "
+  <> first_text
+  <> "+c.expected-1\n"
+  <> " ORDER BY candidate DESC LIMIT (SELECT expected FROM counts)\n"
+  <> "), staged AS (\n"
   <> " UPDATE "
   <> table(entity)
   <> " e SET "
   <> quoted(order_column)
-  <> "=(-t.ord)::integer\n"
-  <> " FROM target t WHERE e."
+  <> "=f.candidate\n"
+  <> " FROM target t JOIN free f ON f.slot=t.ord\n"
+  <> " WHERE e."
   <> quoted(key_column)
   <> "=t.id AND e."
   <> quoted(within_column)
-  <> "=$1 RETURNING e."
+  <> "=$1 AND (SELECT count(*) FROM free)=(SELECT expected FROM counts)\n"
+  <> " RETURNING e."
   <> quoted(key_column)
-  <> "\n), counts AS (\n"
-  <> " SELECT (SELECT count(*) FROM positions) AS expected,"
-  <> "(SELECT count(*) FROM changed) AS actual\n"
-  <> ") SELECT framework.require_rows("
-  <> "CASE WHEN expected=0 OR expected=actual THEN GREATEST(actual,1) ELSE 0 END,"
-  <> "'conflict') FROM counts;\n"
+  <> "\n)\nSELECT framework.require_rows("
+  <> "CASE WHEN c.expected=c.matched THEN GREATEST(c.expected,1) ELSE 0 END,"
+  <> "'conflict') AS ok,(SELECT count(*) FROM staged) AS staged,(SELECT count(*) FROM free) AS room FROM counts c;\n"
+}
+
+/// 順序列の(確定の起点, 値域の下端, 値域の上端)。reader が整数の列だけを通しているので、
+/// ここで None になる宣言は無い ── 万一の場合は int4 の全域。
+fn order_span(
+  entity: model.Entity,
+  app: model.App,
+  ordered: model.OrderedBy,
+) -> #(Int, Int, Int) {
+  let bounds = case model.prop_by_name(entity, ordered.field) {
+    Some(prop) -> model.order_bounds(prop, app.value_types)
+    None -> None
+  }
+  case bounds {
+    Some(#(lo, hi)) -> #(int.max(lo, 0), lo, hi)
+    None -> #(0, -2_147_483_648, 2_147_483_647)
+  }
 }
 
 fn key_cast(app: model.App, entity: model.Entity) -> String {

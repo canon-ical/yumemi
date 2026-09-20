@@ -7,6 +7,7 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
 import yumemi_gen/emit/hash
+import yumemi_gen/emit/reads
 import yumemi_gen/emit/types.{type File, File}
 import yumemi_gen/model.{type App, type Entity, type Select}
 import yumemi_gen/naming
@@ -52,6 +53,86 @@ pub fn notes(app: App, hashes: hash.Hashes) -> List(stop.Note) {
 }
 
 pub fn build(app: App, hashes: hash.Hashes) -> #(List(File), List(Skipped)) {
+  let #(files, skipped) = build_queries(app, hashes)
+  let #(arrow_files, arrow_skipped) = build_arrows(app, hashes)
+  #(list.append(files, arrow_files), list.append(skipped, arrow_skipped))
+}
+
+/// 矢印の read の SQL ── `gen/sql/queries/<service>/to_<prop>.sql`。鍵の列(jsonb 配列)を
+/// 受けて関係先の行を鍵の順で返す。実行側は Context の `relation` でこれを流し、復号して返す。
+fn build_arrows(app: App, hashes: hash.Hashes) -> #(List(File), List(Skipped)) {
+  list.fold(app.services, #([], []), fn(acc, service) {
+    list.fold(reads.root_arrows(app, service), acc, fn(inner, arrow) {
+      let #(files, skipped) = inner
+      let query = reads.arrow_query(arrow)
+      case arrow_statement(app, arrow) {
+        Ok(text) -> #(
+          [
+            File(
+              path: "gen/sql/queries/"
+                <> service.module
+                <> "/"
+                <> query
+                <> ".sql",
+              text: "-- GENERATED from service."
+                <> service.module
+                <> " / "
+                <> arrow.name
+                <> " [sha256:"
+                <> hash.service(hashes, service.module)
+                <> "] — 手で編集しない\n"
+                <> text,
+            ),
+            ..files
+          ],
+          skipped,
+        )
+        Error(reason) -> #(files, [
+          Skipped(service: service.module, query: query, reason: reason),
+          ..skipped
+        ])
+      }
+    })
+  })
+}
+
+fn arrow_statement(app: App, arrow: model.Arrow) -> Result(String, Reason) {
+  use target <- try(
+    model.entity_by_name(app.entities, arrow.target_entity)
+    |> option.to_result(clash("矢印の先が無い: " <> arrow.target_entity)),
+  )
+  use key_column <- try(case target.key_columns {
+    [single] -> Ok(single)
+    [] ->
+      case target.key_column {
+        "" -> Error(clash("矢印の先に key が無い: " <> target.module))
+        column -> Ok(column)
+      }
+    _ -> Error(undone("矢印の先が複合 key: " <> target.module <> "(Key は1列の鍵しか運ばない)"))
+  })
+  let cast = case
+    list.find(target.fields, fn(field) { field.column == key_column })
+  {
+    Ok(field) -> keyset_cast(sql_type(app, field.value))
+    Error(_) -> "::text"
+  }
+  Ok(
+    "SELECT t.*\nFROM jsonb_array_elements_text($1::jsonb) WITH ORDINALITY AS keys(value,ord)\nJOIN "
+    <> schema.app
+    <> "."
+    <> target.table
+    <> " t ON t."
+    <> quoted(key_column)
+    <> "=keys.value"
+    <> cast
+    <> "\nORDER BY keys.ord;\n",
+  )
+}
+
+fn build_queries(
+  app: App,
+  hashes: hash.Hashes,
+) -> #(List(File), List(Skipped)) {
   list.fold(app.services, #([], []), fn(acc, service) {
     list.fold(service.queries, acc, fn(inner, query) {
       let #(files, skipped) = inner

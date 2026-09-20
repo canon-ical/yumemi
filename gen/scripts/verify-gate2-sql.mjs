@@ -1,16 +1,23 @@
 #!/usr/bin/env node
 
+//// 生成 SQL を実 PG に流す検算(柏木ゲート 2 の P0-1 / 2 / 3 / 4 / 5 / 7)。
+////
+////   PGHOST=127.0.0.1 PGPORT=55432 PGUSER=yumemism PGDATABASE=postgres \
+////   node gen/scripts/verify-gate2-sql.mjs <musearch-out> <article-out> <flag-out> <relation-out>
+////
+//// gen-3b:P0-3 は負値・両端値(int4 の上限 / 下限)・実 CHECK / UNIQUE・同一 scope の同時実行・失敗時 rollback、
+//// それに `Range(min: 1, max: 10)` の順序列(fixtures/relation)を足した。P0-5 はここでは矢印の生成 SQL
+//// (`gen/sql/queries/<service>/to_<prop>.sql`)を PG で流す ── Context 契約を通した復号は verify-root-ffi.mjs。
+
 import fs from "node:fs";
 import { spawnSync } from "node:child_process";
 import pg from "/home/yumemism/yumemism_repo/musearch/app/node_modules/pg/lib/index.js";
-import { rootArrow } from "../../src/framework/io_ffi.mjs";
-import { makeContext } from "/home/yumemism/yumemism_repo/musearch/app/build/dev/javascript/musearch_app/gen/runtime.mjs";
 
-const [, , musearchOut, articleOut, flagOut] = process.argv;
+const [, , musearchOut, articleOut, flagOut, relationOut] = process.argv;
 
-if (!musearchOut || !articleOut || !flagOut) {
+if (!musearchOut || !articleOut || !flagOut || !relationOut) {
   console.error(
-    "usage: verify-gate2-sql.mjs <musearch-out> <article-out> <flag-out>",
+    "usage: verify-gate2-sql.mjs <musearch-out> <article-out> <flag-out> <relation-out>",
   );
   process.exit(2);
 }
@@ -300,77 +307,239 @@ try {
       await reorderClient.query(stage, [scope, JSON.stringify(ids)]);
       return reorderClient.query(apply, [scope, JSON.stringify(ids)]);
     });
-  await reorderClient.query(
-    "INSERT INTO gate2_r7_reorder.article VALUES ('a',0,'cat'),('b',1,'cat')",
-  );
+  const rowsOf = async (scope = "cat") =>
+    (
+      await reorderClient.query(
+        'SELECT slug,"order" FROM gate2_r7_reorder.article WHERE category_id=$1 ORDER BY "order",slug',
+        [scope],
+      )
+    ).rows
+      .map((row) => `${row.slug}|${row.order}`)
+      .join(",");
+  const reset = async (values) => {
+    await reorderClient.query("TRUNCATE gate2_r7_reorder.article");
+    for (const [slug, order, scope] of values) {
+      await reorderClient.query(
+        "INSERT INTO gate2_r7_reorder.article VALUES ($1,$2,$3)",
+        [slug, order, scope ?? "cat"],
+      );
+    }
+  };
+  const expectRows = async (expected, label, scope = "cat") => {
+    const found = await rowsOf(scope);
+    if (found !== expected) {
+      throw new Error(`${label}: expected ${expected}, got ${found}`);
+    }
+  };
+  const expectCode = async (action, code, label) => {
+    try {
+      await action();
+    } catch (error) {
+      if (error.code === code) return error;
+      throw new Error(`${label}: expected ${code}, got ${error.code} ${error.message}`);
+    }
+    throw new Error(`${label}: expected ${code}, but it succeeded`);
+  };
+
+  // 交換の確定値(従来)
+  await reset([["a", 0], ["b", 1]]);
   await reorder(["b", "a"]);
-  let rows = (
-    await reorderClient.query(
-      'SELECT slug,"order" FROM gate2_r7_reorder.article ORDER BY "order"',
-    )
-  ).rows;
-  if (rows.map((row) => `${row.slug}|${row.order}`).join(",") !== "b|0,a|1") {
-    throw new Error(`P0-3 swap did not settle exact values: ${JSON.stringify(rows)}`);
-  }
-  await reorderClient.query("TRUNCATE gate2_r7_reorder.article");
-  await reorderClient.query(
-    "INSERT INTO gate2_r7_reorder.article VALUES ('a',0,'cat'),('b',2147483647,'cat')",
-  );
+  await expectRows("b|0,a|1", "P0-3 swap");
+  // int4 の上限を含む(従来)
+  await reset([["a", 0], ["b", 2147483647]]);
   await reorder(["b", "a"]);
-  rows = (
-    await reorderClient.query(
-      'SELECT slug,"order" FROM gate2_r7_reorder.article ORDER BY "order"',
-    )
-  ).rows;
-  if (rows.map((row) => `${row.slug}|${row.order}`).join(",") !== "b|0,a|1") {
-    throw new Error(`P0-3 Int boundary did not settle: ${JSON.stringify(rows)}`);
-  }
-  await reorderClient.query("TRUNCATE gate2_r7_reorder.article");
-  await reorderClient.query(
-    "INSERT INTO gate2_r7_reorder.article VALUES ('a',0,'cat'),('b',1,'cat'),('c',2,'cat')",
-  );
-  let conflict = false;
+  await expectRows("b|0,a|1", "P0-3 Int max");
+  // 負の実値(柏木 3 回目の再現 ── 以前は退避が 23505)
+  await reset([["a", -1], ["b", -2]]);
+  await reorder(["b", "a"]);
+  await expectRows("b|0,a|1", "P0-3 negative values");
+  // 両端値(int4 の下限と上限が同じ scope に在る)
+  await reset([["a", -2147483648], ["b", 2147483647], ["c", 0]]);
+  await reorder(["c", "b", "a"]);
+  await expectRows("c|0,b|1,a|2", "P0-3 Int min and max together");
+  // 上端に詰まった scope(2147483647 と 2147483646 が使われている)── 一時値はそれを避けて選ばれる
+  await reset([["a", 2147483647], ["b", 2147483646], ["c", 2147483645]]);
+  await reorder(["a", "b", "c"]);
+  await expectRows("a|0,b|1,c|2", "P0-3 scope packed at the top");
+  // 別 scope は触らない
+  await reset([["a", 0], ["b", 1], ["x", 0, "dog"], ["y", 1, "dog"]]);
+  await reorder(["b", "a"]);
+  await expectRows("b|0,a|1", "P0-3 own scope");
+  await expectRows("x|0,y|1", "P0-3 other scope untouched", "dog");
+  // 要求の id が scope に無い → 'conflict'(P0001)、rollback
+  await reset([["a", 0], ["b", 1]]);
+  await expectCode(() => reorder(["b", "zzz"]), "P0001", "P0-3 unknown id");
+  await expectRows("a|0,b|1", "P0-3 unknown id rollback");
+  // 部分の並べ替えが実 UNIQUE に当たる → 23505、rollback(従来)
+  await reset([["a", 0], ["b", 1], ["c", 2]]);
+  await expectCode(() => reorder(["c"]), "23505", "P0-3 partial reorder unique conflict");
+  await expectRows("a|0,b|1,c|2", "P0-3 failed reorder atomic");
+  // 実 CHECK(非負)── 柏木 3 回目の補助検証(以前は退避が 23514)
+  await reorderClient.query('ALTER TABLE gate2_r7_reorder.article ADD CONSTRAINT nonneg CHECK ("order">=0)');
+  await reset([["a", 0], ["b", 1]]);
+  await reorder(["b", "a"]);
+  await expectRows("b|0,a|1", "P0-3 nonnegative CHECK");
+  await reset([["a", 0], ["b", 2147483647]]);
+  await reorder(["b", "a"]);
+  await expectRows("b|0,a|1", "P0-3 nonnegative CHECK with Int max");
+  await reorderClient.query("ALTER TABLE gate2_r7_reorder.article DROP CONSTRAINT nonneg");
+  // 同一 scope の同時実行:2 本目は FOR UPDATE で待ち、1 本目の確定後に走る。最終値は 2 本目の要求
+  await reset([["a", 0], ["b", 1]]);
+  const second = gateDb();
+  const monitor = gateDb();
+  await second.connect();
+  await monitor.connect();
   try {
-    await reorder(["b"]);
-  } catch (error) {
-    conflict = error.code === "23505";
+    await reorderClient.query("BEGIN");
+    await second.query("BEGIN");
+    await reorderClient.query(stage, ["cat", JSON.stringify(["b", "a"])]);
+    const pending = second.query(stage, ["cat", JSON.stringify(["a", "b"])]);
+    let locked = false;
+    for (let i = 0; i < 200 && !locked; i++) {
+      const state = await monitor.query(
+        "SELECT wait_event_type FROM pg_stat_activity WHERE pid=$1",
+        [second.processID],
+      );
+      locked = state.rows[0]?.wait_event_type === "Lock";
+      if (!locked) await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    if (!locked) throw new Error("P0-3 concurrent: second transaction did not wait on Lock");
+    await reorderClient.query(apply, ["cat", JSON.stringify(["b", "a"])]);
+    await reorderClient.query("COMMIT");
+    await pending;
+    await second.query(apply, ["cat", JSON.stringify(["a", "b"])]);
+    await second.query("COMMIT");
+    await expectRows("a|0,b|1", "P0-3 concurrent final values");
+  } finally {
+    await second.end();
+    await monitor.end();
   }
-  if (!conflict) {
-    throw new Error("P0-3 same-scope order conflict was accepted");
-  }
-  rows = (
-    await reorderClient.query(
-      'SELECT slug,"order" FROM gate2_r7_reorder.article ORDER BY slug',
-    )
-  ).rows;
-  if (rows.map((row) => `${row.slug}|${row.order}`).join(",") !== "a|0,b|1,c|2") {
-    throw new Error(`P0-3 failed reorder was not atomic: ${JSON.stringify(rows)}`);
-  }
-  console.log("P0-3 reorder exact values, Int max, conflict rollback: PASS");
+  console.log(
+    "P0-3 reorder exact values, Int max/min, negative values, real CHECK/UNIQUE, same-scope concurrency, rollback: PASS",
+  );
 } finally {
   await dropSchema(reorderClient, "gate2_r7_reorder");
   await reorderClient.end();
 }
 
-const rootDecoded = { id: "category-1", name: "decoded" };
-const rootRelation = { resolve: async () => rootDecoded };
-const rootContext = makeContext({
-  record: { name: "root_arrow_probe" },
-  db: {},
-  root: { article: { category: rootRelation } },
-  at: "2026-09-20T00:00:00.000Z",
-  seed: "root-arrow-probe",
-});
-const rootResult = await rootArrow(
-  rootContext,
-  "article_read",
-  "ArticleToCategory",
-  rootContext.root,
-);
-if (rootResult !== rootDecoded || typeof rootContext.rootArrow !== "function") {
-  throw new Error("P0-5 makeContext root arrow did not resolve the relation");
+// 値域つき順序列(`Range(min: 1, max: 10)`)── 確定値は 1 から、一時値は 10 から下へ。
+// 値域が狭くて一時値が足りないときは退避せず確定へ進む:UNIQUE が無ければ通り、あれば 23505 で rollback。
+const photoStageSql = readSql(relationOut, "gen/sql/queries/verb/reorder_photos_stage.sql");
+const photoSql = readSql(relationOut, "gen/sql/queries/verb/reorder_photos.sql");
+const photoClient = gateDb();
+await photoClient.connect();
+try {
+  await dropSchema(photoClient, "gate3b_range");
+  await photoClient.query("CREATE SCHEMA gate3b_range");
+  await photoClient.query(`
+    CREATE FUNCTION gate3b_range.require_rows(affected bigint, code text)
+      RETURNS bigint LANGUAGE plpgsql AS $$
+      BEGIN
+        IF affected=0 THEN RAISE EXCEPTION USING ERRCODE='P0001',MESSAGE=code;
+        END IF;
+        RETURN affected;
+      END $$;
+    CREATE TABLE gate3b_range.photo(
+      id uuid PRIMARY KEY,album_id uuid NOT NULL,"order" integer NOT NULL CHECK ("order" BETWEEN 1 AND 10),
+      CONSTRAINT photo_unique_order UNIQUE(album_id,"order"));
+  `);
+  const stage = scopedSql(photoStageSql, "gate3b_range");
+  const apply = scopedSql(photoSql, "gate3b_range");
+  const album = "00000000-0000-0000-0000-000000000001";
+  const id = (n) => `00000000-0000-0000-0000-0000000000${String(n).padStart(2, "0")}`;
+  const reset = async (orders) => {
+    await photoClient.query("TRUNCATE gate3b_range.photo");
+    for (const [n, order] of orders) {
+      await photoClient.query("INSERT INTO gate3b_range.photo VALUES ($1,$2,$3)", [id(n), album, order]);
+    }
+  };
+  const reorder = (ns) =>
+    transaction(photoClient, async () => {
+      await photoClient.query(stage, [album, JSON.stringify(ns.map(id))]);
+      return photoClient.query(apply, [album, JSON.stringify(ns.map(id))]);
+    });
+  const rows = async () =>
+    (await photoClient.query('SELECT id,"order" FROM gate3b_range.photo ORDER BY "order"')).rows
+      .map((row) => `${Number(row.id.slice(-2))}|${row.order}`)
+      .join(",");
+  const expectRows = async (expected, label) => {
+    const found = await rows();
+    if (found !== expected) throw new Error(`${label}: expected ${expected}, got ${found}`);
+  };
+  // 3 行 {1,2,3} を逆順に:一時値は 10,9,8(範囲に無く、確定の帯 [1,3] を避ける)、確定は 1..3
+  await reset([[1, 1], [2, 2], [3, 3]]);
+  await reorder([3, 2, 1]);
+  await expectRows("3|1,2|2,1|3", "Range reorder inside CHECK 1..10 and UNIQUE");
+  // 上端に詰まった行 {8,9,10} でも、範囲に無い値(7,6,5)が選ばれる
+  await reset([[1, 8], [2, 9], [3, 10]]);
+  await reorder([2, 3, 1]);
+  await expectRows("2|1,3|2,1|3", "Range reorder with rows at the top of the range");
+  // 5 行で値域 10:held 5 + 2*5 = 15 > 10 なので窓は 10..1、空きは {6..10} の 5 個 → 退避できる
+  await reset([[1, 1], [2, 2], [3, 3], [4, 4], [5, 5]]);
+  await reorder([5, 4, 3, 2, 1]);
+  await expectRows("5|1,4|2,3|3,2|4,1|5", "Range reorder with 5 of 10 slots used");
+  // 6 行で値域 10:空きは {7..10} の 4 個 < 6 → 退避せず確定へ → UNIQUE に当たり 23505、rollback
+  await reset([[1, 1], [2, 2], [3, 3], [4, 4], [5, 5], [6, 6]]);
+  let code;
+  try {
+    await reorder([6, 5, 4, 3, 2, 1]);
+  } catch (error) {
+    code = error.code;
+  }
+  if (code !== "23505") throw new Error(`Range saturated: expected 23505, got ${code}`);
+  await expectRows("1|1,2|2,3|3,4|4,5|5,6|6", "Range saturated rollback");
+  // 同じ状態で UNIQUE が無ければ、退避せずの確定が通る
+  await photoClient.query("ALTER TABLE gate3b_range.photo DROP CONSTRAINT photo_unique_order");
+  await reorder([6, 5, 4, 3, 2, 1]);
+  await expectRows("6|1,5|2,4|3,3|4,2|5,1|6", "Range saturated without UNIQUE");
+  console.log("P0-3 Range(1,10) order column: bounds, top-packed rows, saturation with/without UNIQUE: PASS");
+} finally {
+  await dropSchema(photoClient, "gate3b_range");
+  await photoClient.end();
 }
-console.log("P0-5 real makeContext rootArrow relation decode: PASS");
+
+// P0-5 ── 矢印の生成 SQL(鍵の列 → 関係先の行、鍵の順)。Context 契約を通した復号は verify-root-ffi.mjs。
+const arrowSql = readSql(musearchOut, "gen/sql/queries/article_read/to_muse.sql");
+const spaceSql = readSql(musearchOut, "gen/sql/queries/widget_edit/to_space.sql");
+const tagsSql = readSql(articleOut, "gen/sql/queries/article_read/to_tags.sql");
+const arrowClient = gateDb();
+await arrowClient.connect();
+try {
+  await dropSchema(arrowClient, "gate3b_arrow");
+  await arrowClient.query("CREATE SCHEMA gate3b_arrow");
+  await arrowClient.query(`
+    CREATE TABLE gate3b_arrow.muse(id uuid PRIMARY KEY,handle text NOT NULL);
+    CREATE TABLE gate3b_arrow.free_space(id uuid PRIMARY KEY,title text NOT NULL);
+    CREATE TABLE gate3b_arrow.tag(name text PRIMARY KEY);
+    INSERT INTO gate3b_arrow.muse VALUES('00000000-0000-0000-0000-000000000002','hana');
+    INSERT INTO gate3b_arrow.free_space VALUES('00000000-0000-0000-0000-000000000003','space');
+    INSERT INTO gate3b_arrow.tag VALUES('t1'),('t2'),('t3');
+  `);
+  const one = (await arrowClient.query(scopedSql(arrowSql, "gate3b_arrow"), [
+    JSON.stringify(["00000000-0000-0000-0000-000000000002"]),
+  ])).rows;
+  if (one.length !== 1 || one[0].handle !== "hana") {
+    throw new Error(`P0-5 to_muse SQL: ${JSON.stringify(one)}`);
+  }
+  const none = (await arrowClient.query(scopedSql(arrowSql, "gate3b_arrow"), [
+    JSON.stringify(["00000000-0000-0000-0000-000000000009"]),
+  ])).rows;
+  if (none.length !== 0) throw new Error(`P0-5 to_muse SQL missing key: ${JSON.stringify(none)}`);
+  const space = (await arrowClient.query(scopedSql(spaceSql, "gate3b_arrow"), [
+    JSON.stringify(["00000000-0000-0000-0000-000000000003"]),
+  ])).rows;
+  if (space.length !== 1 || space[0].title !== "space") {
+    throw new Error(`P0-5 to_space SQL: ${JSON.stringify(space)}`);
+  }
+  const tags = (await arrowClient.query(scopedSql(tagsSql, "gate3b_arrow"), [
+    JSON.stringify(["t3", "t1"]),
+  ])).rows.map((row) => row.name);
+  if (tags.join(",") !== "t3,t1") throw new Error(`P0-5 to_tags SQL order: ${tags}`);
+  console.log("P0-5 generated arrow SQL (uuid / text keys, key order, missing key): PASS");
+} finally {
+  await dropSchema(arrowClient, "gate3b_arrow");
+  await arrowClient.end();
+}
 
 const pageSql = readSql(flagOut, "gen/sql/queries/widget_page/paged.sql");
 const page = psql(`

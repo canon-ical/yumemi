@@ -110,6 +110,7 @@ pub fn value_types(units: List(Unit)) -> Result(List(ValueType), Error) {
                         type_name: naming.pascal(constant.name),
                         spec: spec,
                         backing: model.backing_of(spec),
+                        range: range_of(constant.value),
                       ))
                     None -> Error(Nil)
                   }
@@ -120,6 +121,34 @@ pub fn value_types(units: List(Unit)) -> Result(List(ValueType), Error) {
         }),
       )
     }
+  }
+}
+
+/// `Range(min: 0, max: 2_147_483_647)` の両端。Gleam の桁区切り `_` は落として読む。
+fn range_of(expression: glance.Expression) -> Option(#(Int, Int)) {
+  case g.ctor_name(expression) {
+    Some("Range") ->
+      case
+        option.then(g.labelled(expression, "min"), int_literal),
+        option.then(g.labelled(expression, "max"), int_literal)
+      {
+        Some(min), Some(max) -> Some(#(min, max))
+        _, _ -> None
+      }
+    _ -> None
+  }
+}
+
+fn int_literal(expression: glance.Expression) -> Option(Int) {
+  case expression {
+    glance.NegateInt(value: inner, ..) ->
+      int_literal(inner) |> option.map(fn(value) { 0 - value })
+    _ ->
+      case g.int_value(expression) {
+        Some(raw) ->
+          int.parse(string.replace(raw, "_", "")) |> option.from_result
+        None -> None
+      }
   }
 }
 
@@ -1470,6 +1499,8 @@ fn limit(expression: glance.Expression) -> model.Limit {
 pub fn read(units: List(Unit)) -> Result(App, Error) {
   use types <- result.try(value_types(units))
   use entity_list <- result.try(entities(units))
+  use _ <- result.try(validate_order_columns(entity_list, types))
+  use _ <- result.try(validate_relation_shapes(entity_list))
   use service_list <- result.try(services(units))
   Ok(model.App(
     value_types: types,
@@ -1477,4 +1508,91 @@ pub fn read(units: List(Unit)) -> Result(App, Error) {
     services: service_list,
     arrows: arrows(entity_list),
   ))
+}
+
+/// `ordered_by.field` は整数の列に限る(`Int` か `Range` の値型、Option / List でない)。
+/// reorder は宣言の値域の中で一時値を選ぶので、値域が読めない列には SQL を出さず名指しで止める。
+fn validate_order_columns(
+  entities: List(Entity),
+  types: List(ValueType),
+) -> Result(Nil, Error) {
+  list.try_each(entities, fn(entity) {
+    case entity.ordered_by {
+      None -> Ok(Nil)
+      Some(ordered) -> {
+        let where = "entity/" <> entity.module
+        case model.prop_by_name(entity, ordered.field) {
+          None ->
+            Error(Unsupported(
+              where,
+              "ordered_by.field の Property が無い: " <> ordered.field,
+            ))
+          Some(prop) ->
+            case prop.optional, prop.repeated, model.order_bounds(prop, types) {
+              True, _, _ ->
+                Error(Unsupported(
+                  where,
+                  "ordered_by.field が Option の列: "
+                    <> ordered.field
+                    <> "(順序列は必須の整数に限る)",
+                ))
+              _, True, _ ->
+                Error(Unsupported(
+                  where,
+                  "ordered_by.field が List の列: "
+                    <> ordered.field
+                    <> "(順序列は必須の整数に限る)",
+                ))
+              False, False, Some(#(lo, hi)) ->
+                case hi >= int.max(lo, 0) {
+                  True -> Ok(Nil)
+                  False ->
+                    Error(Unsupported(
+                      where,
+                      "ordered_by.field の値域に確定値の起点が無い: "
+                        <> ordered.field
+                        <> "(Range の max が "
+                        <> int.to_string(int.max(lo, 0))
+                        <> " より小さい)",
+                    ))
+                }
+              False, False, None ->
+                Error(Unsupported(
+                  where,
+                  "ordered_by.field が整数の列でない: "
+                    <> ordered.field
+                    <> "("
+                    <> prop_type_label(prop)
+                    <> ")── reorder は Int か Range の値型にだけ出せる",
+                ))
+            }
+        }
+      }
+    }
+  })
+}
+
+fn prop_type_label(prop: Prop) -> String {
+  case prop.kind {
+    model.ValueProp(type_ref: reference)
+    | model.SumProp(type_ref: reference, ..) -> reference.name
+    model.RelProp(target_type: target, ..) -> target
+  }
+}
+
+/// 関係の List は `Multi` で宣言する。`List(Has(..))` / `List(Held(..))` / `List(Link(..))` は矢印の 3 形
+/// (必須 / 任意 / 複数)のどれにも写らないので、生成せずに名指しで止める。
+fn validate_relation_shapes(entities: List(Entity)) -> Result(Nil, Error) {
+  list.try_each(entities, fn(entity) {
+    list.try_each(entity.props, fn(prop) {
+      case prop.repeated, prop.kind {
+        True, model.RelProp(kind: kind, ..) if kind != model.Multi ->
+          Error(Unsupported(
+            "entity/" <> entity.module,
+            "関係の List は Multi で宣言する: " <> prop.name,
+          ))
+        _, _ -> Ok(Nil)
+      }
+    })
+  })
 }

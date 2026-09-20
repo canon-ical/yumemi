@@ -32,6 +32,13 @@ const root_warning_fixture = "fixtures/root_warning"
 
 const phase_collision_fixture = "fixtures/flag_phase_collision"
 
+/// gen-3b で置いた fixture ── 矢印 3 形(Held / Link / Multi)と値域つき順序列。
+const relation_fixture = "fixtures/relation"
+
+const relation_text_order_fixture = "fixtures/relation_text_order"
+
+const relation_option_order_fixture = "fixtures/relation_option_order"
+
 pub fn main() {
   gleeunit.main()
 }
@@ -205,13 +212,81 @@ pub fn root_relative_arrows_are_emitted_test() {
   string.contains(found, "then: fn(List(tag.Tag))") |> should.be_true
 }
 
-pub fn root_relative_arrows_use_framework_io_ffi_test() {
+/// gen-3b ── 矢印の read は framework の Context 契約 `relation` を、宣言の名前で呼ぶ。
+/// root の欄と関係 Property は型付きで参照する(`it.article.category`)── 名前推測は無い。
+pub fn root_relative_arrows_use_framework_relation_contract_test() {
   let found = text("src/gen/reads/article_read.gleam")
   string.contains(found, "import framework/io.{type Context, type Promise}")
   |> should.be_true
-  string.contains(found, "io.root_arrow(ctx,") |> should.be_true
+  string.contains(found, "import framework/er") |> should.be_true
+  string.contains(found, "io.root_arrow(") |> should.be_false
   string.contains(found, "operations_ffi.mjs\", \"rootArrow\"")
   |> should.be_false
+  string.contains(
+    found,
+    "const to_category_relation = io.Relation(\n"
+      <> "  service: \"article_read\",\n"
+      <> "  query: \"to_category\",\n"
+      <> "  arrow: \"ArticleToCategory\",\n"
+      <> "  from: \"article\",\n"
+      <> "  prop: \"category\",\n"
+      <> "  target: \"category\",\n"
+      <> ")",
+  )
+  |> should.be_true
+  // Has -> relation_one、Multi -> relation_many
+  string.contains(
+    found,
+    "io.relation_one(\n        ctx,\n        to_category_relation,\n"
+      <> "        er.to_string(er.of(it.article.category)),\n      )",
+  )
+  |> should.be_true
+  string.contains(
+    found,
+    "io.relation_many(\n        ctx,\n        to_labels_relation,",
+  )
+  |> should.be_false
+  string.contains(
+    found,
+    "io.relation_many(\n        ctx,\n        to_tags_relation,\n"
+      <> "        list.map(er.of_multi(it.article.tags), er.to_string),\n      )",
+  )
+  |> should.be_true
+}
+
+/// gen-3b ── 3 形が出力型に一致する:Held -> `album.Album`、Link -> `Option(shelf.Shelf)`、
+/// Multi -> `List(label.Label)`。鍵の取り出しも形ごとに違う。
+pub fn root_relative_arrows_cover_one_option_many_test() {
+  let found = text_of(relation_fixture, "src/gen/reads/photo_read.gleam")
+  string.contains(found, "then: fn(album.Album) -> Step(out, err, state)")
+  |> should.be_true
+  string.contains(
+    found,
+    "io.relation_one(\n        ctx,\n        to_album_relation,\n"
+      <> "        er.to_string(er.of_held(it.photo.album)),\n      )",
+  )
+  |> should.be_true
+  string.contains(
+    found,
+    "then: fn(Option(shelf.Shelf)) -> Step(out, err, state)",
+  )
+  |> should.be_true
+  string.contains(
+    found,
+    "io.relation_option(\n        ctx,\n        to_shelf_relation,\n"
+      <> "        option.map(it.photo.shelf, er.to_string),\n      )",
+  )
+  |> should.be_true
+  string.contains(found, "then: fn(List(label.Label)) -> Step(out, err, state)")
+  |> should.be_true
+  string.contains(
+    found,
+    "io.relation_many(\n        ctx,\n        to_labels_relation,\n"
+      <> "        list.map(er.of_multi(it.photo.labels), er.to_string),\n      )",
+  )
+  |> should.be_true
+  string.contains(found, "import gleam/option.{type Option}") |> should.be_true
+  string.contains(found, "import gleam/list") |> should.be_true
 }
 
 // ── 束4 読みの SQL ──────────────────────────────────────────────────────────
@@ -221,12 +296,53 @@ pub fn one_statement_per_named_query_test() {
   list.filter(paths, fn(path) {
     string.starts_with(path, "gen/sql/queries/")
     && !string.starts_with(path, "gen/sql/queries/verb/")
+    && !string.contains(path, "/to_")
   })
   |> list.sort(string.compare)
   |> should.equal([
     "gen/sql/queries/article_list/counts.sql",
     "gen/sql/queries/article_list/items.sql",
   ])
+}
+
+/// gen-3b ── 矢印 1 本につき SQL 1 文(`gen/sql/queries/<service>/to_<prop>.sql`)。
+/// root Article を持つ 4 Service × 矢印 2 本 = 8 本。
+pub fn one_statement_per_root_arrow_test() {
+  let paths = list.map(files(), fn(entry) { entry.0 })
+  list.filter(paths, fn(path) {
+    string.starts_with(path, "gen/sql/queries/")
+    && string.contains(path, "/to_")
+  })
+  |> list.sort(string.compare)
+  |> should.equal([
+    "gen/sql/queries/article_create/to_category.sql",
+    "gen/sql/queries/article_create/to_tags.sql",
+    "gen/sql/queries/article_publish/to_category.sql",
+    "gen/sql/queries/article_publish/to_tags.sql",
+    "gen/sql/queries/article_read/to_category.sql",
+    "gen/sql/queries/article_read/to_tags.sql",
+    "gen/sql/queries/article_retract/to_category.sql",
+    "gen/sql/queries/article_retract/to_tags.sql",
+  ])
+  let found = text("gen/sql/queries/article_read/to_category.sql")
+  string.starts_with(
+    found,
+    "-- GENERATED from service.article_read / ArticleToCategory",
+  )
+  |> should.be_true
+  string.contains(
+    found,
+    "FROM jsonb_array_elements_text($1::jsonb) WITH ORDINALITY AS keys(value,ord)",
+  )
+  |> should.be_true
+  string.contains(found, "JOIN app.category t ON t.name=keys.value::text")
+  |> should.be_true
+  string.contains(found, "ORDER BY keys.ord;") |> should.be_true
+  // uuid の鍵は uuid に寄せる
+  let album =
+    text_of(relation_fixture, "gen/sql/queries/photo_read/to_album.sql")
+  string.contains(album, "JOIN app.album t ON t.id=keys.value::uuid")
+  |> should.be_true
 }
 
 pub fn keyset_uses_the_order_columns_and_the_key_test() {
@@ -342,11 +458,104 @@ pub fn reorder_uses_declared_order_column_and_returning_alias_test() {
   string.contains(found, "FROM changed ORDER BY changed.\"order\",changed.slug")
   |> should.be_true
   let stage = text("gen/sql/queries/verb/reorder_articles_stage.sql")
-  string.contains(stage, "\"order\"=(-t.ord)::integer") |> should.be_true
-  string.contains(stage, "expected=actual") |> should.be_true
+  string.contains(stage, "\"order\"=(-t.ord)::integer") |> should.be_false
+  string.contains(stage, "\"order\"=f.candidate") |> should.be_true
+  string.contains(stage, "c.expected=c.matched") |> should.be_true
   let verb = text("src/gen/verb.gleam")
   string.contains(verb, "verb.compound(") |> should.be_true
   string.contains(verb, "reorder_articles_stage") |> should.be_true
+}
+
+/// gen-3b(P0-3)── 退避の一時値は負値でなく、**宣言の値域の上端から下へ、範囲に無い値**を選ぶ。
+/// `Int` は int4 の全域、確定値は 0 から。範囲は FOR UPDATE で押さえる。
+pub fn reorder_stage_picks_free_values_inside_declared_int_bounds_test() {
+  let stage = text("gen/sql/queries/verb/reorder_articles_stage.sql")
+  string.contains(stage, "FROM app.article e WHERE e.category_id=$1 FOR UPDATE")
+  |> should.be_true
+  string.contains(
+    stage,
+    "generate_series(2147483647::bigint,GREATEST(-2147483648::bigint,"
+      <> "2147483647::bigint-(c.held+2*c.expected)),-1)",
+  )
+  |> should.be_true
+  string.contains(
+    stage,
+    "WHERE NOT EXISTS (SELECT 1 FROM scope s WHERE s.current=candidate)",
+  )
+  |> should.be_true
+  string.contains(
+    stage,
+    "AND candidate NOT BETWEEN 0::bigint AND 0::bigint+c.expected-1",
+  )
+  |> should.be_true
+  string.contains(
+    stage,
+    "AND (SELECT count(*) FROM free)=(SELECT expected FROM counts)",
+  )
+  |> should.be_true
+  string.contains(stage, "'conflict'") |> should.be_true
+  let apply = text("gen/sql/queries/verb/reorder_articles.sql")
+  string.contains(apply, "(0+ord-1)::integer AS new_order") |> should.be_true
+}
+
+/// gen-3b(P0-3)── `Range(min: 1, max: 10)` の順序列は、一時値が 10 から下へ、確定値が 1 から。
+pub fn reorder_uses_range_bounds_of_the_order_type_test() {
+  let stage =
+    text_of(relation_fixture, "gen/sql/queries/verb/reorder_photos_stage.sql")
+  string.contains(
+    stage,
+    "generate_series(10::bigint,GREATEST(1::bigint,10::bigint-(c.held+2*c.expected)),-1)",
+  )
+  |> should.be_true
+  string.contains(
+    stage,
+    "AND candidate NOT BETWEEN 1::bigint AND 1::bigint+c.expected-1",
+  )
+  |> should.be_true
+  string.contains(stage, "FROM app.photo e WHERE e.album_id=$1 FOR UPDATE")
+  |> should.be_true
+  let apply =
+    text_of(relation_fixture, "gen/sql/queries/verb/reorder_photos.sql")
+  string.contains(apply, "(1+ord-1)::integer AS new_order") |> should.be_true
+  string.contains(apply, "SELECT value::uuid AS id") |> should.be_true
+}
+
+/// gen-3b(P0-3)── 順序列が整数でない宣言、Option の宣言は名指しで止まる(exit 4)。
+pub fn reorder_on_non_integer_order_is_exit_four_test() {
+  let error = reader_error(relation_text_order_fixture)
+  case error {
+    reader.Unsupported(where: where, detail: detail) -> {
+      where |> should.equal("entity/photo")
+      stop.code(stop.Conflict) |> should.equal(4)
+      string.contains(detail, "ordered_by.field が整数の列でない: caption")
+      |> should.be_true
+    }
+    _ -> should.fail()
+  }
+}
+
+pub fn reorder_on_optional_order_is_exit_four_test() {
+  let error = reader_error(relation_option_order_fixture)
+  case error {
+    reader.Unsupported(where: where, detail: detail) -> {
+      where |> should.equal("entity/photo")
+      string.contains(detail, "ordered_by.field が Option の列: order")
+      |> should.be_true
+    }
+    _ -> should.fail()
+  }
+}
+
+/// gen-3b ── Range の両端は types.gleam から読む(桁区切り `_` も)。
+pub fn value_type_range_bounds_are_read_test() {
+  let assert Ok(units) = source.load(relation_fixture)
+  let assert Ok(loaded) = reader.read(units)
+  let assert Some(order) =
+    model.value_type_by_name(loaded.value_types, "PhotoOrder")
+  order.range |> should.equal(Some(#(1, 10)))
+  let assert Some(title) =
+    model.value_type_by_name(loaded.value_types, "AlbumTitle")
+  title.range |> should.equal(None)
 }
 
 pub fn lifecycle_steps_are_entity_qualified_test() {
