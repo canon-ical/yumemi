@@ -16,12 +16,12 @@ fixture article は `public`(Anonymous / AnySubject / ReadOnly / `/api`) と `ad
 | `src/gen/root/*` | 92 | 92 | 0 |
 | `src/gen/draft/*` | 33 | 33 | 0 |
 | `src/gen/verb.gleam` / `phase.gleam` | 2 | 2 | 0 |
-| `gen/sql/**/*.sql` | 348 | 348 | 0 |
+| `gen/sql/**/*.sql` | 348 | 352 | +4 |
 | `src/gen/face.gleam` | 0 | 1 | +1 |
 | `src/gen/entry/http.gleam` | 0 | 1 | +1 |
-| 生成ファイル合計 | 629 | 631 | +2 |
+| 生成ファイル合計 | 629 | 635 | +6 |
 
-fixture article は 53 → 55 files。`gleam test` は 59 → 60 passed。
+fixture article は 53 → 55 files。`gleam test` は 59 → 61 passed(gen-4-sql merge 後。`gen/sql` の +4 は exit 1 の 4 本の SQL)。
 
 ## 検証
 
@@ -37,7 +37,7 @@ fixture article は 53 → 55 files。`gleam test` は 59 → 60 passed。
 
 ## musearch 7a: current ★
 
-`gleam run -m yumemi_gen -- ~/yumemism_repo/musearch/app gen/_out/final-musearch` は 631 files を書いた。`_diagnostics.txt` の内訳は faces const 不足 **92本の exit 4**、exit 3 **1**、warning **21**、exit 1 **4**。exit 3 の文言は `entity/ledger: key 関数が無い ── ER の外の型だけの宣言は src/types.gleam へ(src/entity/** は Entity だけ)` に更新した。
+`gleam run -m yumemi_gen -- ~/yumemism_repo/musearch/app gen/_out/final-musearch` は 631 files を書いた(gen-4-sql merge 前)。`_diagnostics.txt` の内訳は faces const 不足 **92本の exit 4**、exit 3 **1**、warning **21**、exit 1 **4**(merge 後は 635 files、exit 1 **0** ── 下の「exit 1 の4本(SQL)」節)。exit 3 の文言は `entity/ledger: key 関数が無い ── ER の外の型だけの宣言は src/types.gleam へ(src/entity/** は Entity だけ)` に更新した。
 
 ## musearch 7b: scratch の仮割当
 
@@ -171,7 +171,7 @@ fixture article は 53 → 55 files。`gleam test` は 59 → 60 passed。
 
 ## exit 1 の4本(SQL)
 
-`gen-4-sql` branch の merge 後に追記
+`gen-4-sql` branch(真壁 `d723622`)を `gen-4` へ merge 済み。`emit/sql.gleam` に `Has` / `HasNone`(EXISTS / NOT EXISTS)と `with`(相関 `jsonb_agg` で関係先を添える)の SQL 生成を実装し、merge 後の木で **exit 1 は 4 → 0**、生成は **635 files**(≥ 629)。4 本(`store_schedule_list/{all_slots,public_slots}.sql`、`store_roster_list/mine.sql`、`roster_list/listed.sql`)が生成束に出る。手書き SQL とは意味一致で、`listed` は JOIN / GROUP BY ではなく相関サブクエリの形。fixture `relation` に `photo_filter`(Has / HasNone / with)を足して `gleam test` で SQL を固定した。`along` / `FirstPerGroup` / `At` / `KeyOf` は残差のまま触っていない。
 
 ## 未決 / 残差
 
