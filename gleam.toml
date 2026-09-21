@@ -1,5 +1,5 @@
 name = "yumemi"
-version = "0.5.0"
+version = "0.6.0"
 target = "javascript"
 description = "Have a sweet Gleam. A framework for Gleam on Cloudflare Workers: write the design, the code follows."
 licences = ["Apache-2.0"]
@@ -7,3 +7,6 @@ repository = { type = "github", user = "canon-ical", repo = "yumemi" }
 
 [dependencies]
 gleam_stdlib = ">= 0.44.0 and < 2.0.0"
+lustre = ">= 5.7.1 and < 6.0.0"
+sketch = ">= 4.2.1 and < 5.0.0"
+sketch_lustre = ">= 3.1.2 and < 4.0.0"
