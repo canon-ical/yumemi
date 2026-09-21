@@ -34,6 +34,7 @@
 
 ## musearch 追随便への申し送り
 
+- **front の検査 8 本を musearch の現物で効かせるには、`api/src/entry.gleam` に `pages: AllPages` を書き、`api/gleam.toml` の yumemi 依存窓(現 `>= 0.5.0 and < 0.6.0`)を引き上げる**(鷹野の裁定 9、2026-09-22 06:15)。**本便の射程外** ── F4 の「どこまで A」に足す候補で、足すかどうかは鷹野が F4 の BRIEF に書く。gate を外した生成器を `96fb8cc` に当てても診断は 0 件なので、追随便で欄を書いた時点で初めて検査が効く。
 - 入力は引き続き固定 snapshot `ms-96fb8cc`。live の `musearch` は入力にも出力にも使っていない。
 - fixture の WidgetList は route 用の非Entity collection を持つが、Article の query と rootless read だけで成立している。既存 5 Service の Args と Entity は変更していない。
 
