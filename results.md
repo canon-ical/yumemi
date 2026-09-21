@@ -1,3 +1,32 @@
+# front-1c 真壁 道具の向き直しと報告
+
+## 状態
+
+- branch: `front-1c`。道具の checkpoint は `3f22760`、verify 判定の checkpoint は
+  `ed62079`。完了時にこの便の checkpoint を 1 本へ squash する。
+- `gen/scripts/` の front 4 本だけを backup 枝から写し、面の `www/src` を scratch の
+  `src/` へコピーする形にした。`www/src/gen/**` も同時にコピーする。
+- `docs/reports/front-1c.md` に 14 型表、v4 → v5、56 差分、数字、P1 / Y2 の申し送りを
+  記録した。
+- root、gen、musearch の本体・staging・production・push は変更していない。
+
+## DDL
+
+無し。migration / schema 変更は無く、staging / production へ適用していない。
+
+## 検証証拠
+
+- `gleam build`: compile 完了。`build/root-gleam-build-front-1c.txt`
+- `cd gen && gleam test`: **86 passed, no failures**。
+  `build/gen-gleam-test-front-1c.txt`
+- `gleam run -m yumemi_gen -- fixtures/article _out/front-1c-report`:
+  **57 files / input units 11**。`build/generate-front-1c.txt`
+- `node gen/scripts/verify-front-ssr.mjs`: **ALL PASS**、JS 無し本文、style 1 本・body
+  先頭、島 `❤ 1 -> ❤ 13`、browser error 0。
+  `build/verify-front-ssr.txt`
+- `node gen/scripts/verify-front-isolate.mjs`: **ALL PASS**、40 回、style 長 first 322 /
+  second 191、marker 混入 0。`build/verify-front-isolate.txt`
+
 # gen-5 真壁 route 段3 作業結果
 
 ## 状態
