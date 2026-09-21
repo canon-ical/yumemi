@@ -1799,7 +1799,7 @@ pub fn duplicate_top_area_is_exit_four_test() {
   stop.worst(notes) |> should.equal(4)
 }
 
-pub fn missing_page_arg_is_exit_three_test() {
+pub fn missing_page_arg_is_exit_four_test() {
   let notes =
     front_notes(
       [
@@ -1811,8 +1811,8 @@ pub fn missing_page_arg_is_exit_three_test() {
       ],
       app().services,
     )
-  assert_one_note(notes, stop.Missing, "パス変数 missing")
-  stop.worst(notes) |> should.equal(3)
+  assert_one_note(notes, stop.Conflict, "パス変数 missing")
+  stop.worst(notes) |> should.equal(4)
 }
 
 pub fn widget_without_frame_arg_is_exit_four_test() {

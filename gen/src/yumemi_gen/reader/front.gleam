@@ -521,7 +521,7 @@ fn page_arg_notes(
               True -> Error(Nil)
               False ->
                 Ok(stop.Note(
-                  class: stop.Missing,
+                  class: stop.Conflict,
                   text: face
                     <> "/"
                     <> page.module
