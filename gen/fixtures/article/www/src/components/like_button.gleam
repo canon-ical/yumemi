@@ -37,9 +37,9 @@ fn update(model: State, msg: Event) -> #(State, Effect(Event)) {
   }
 }
 
-pub fn view(model: State) -> el.Element(Event) {
-  html.button_([event.on_click(live.Send), attribute.disabled(model.waiting)], [
-    el.text(label(model)),
+pub fn view(it: State) -> el.Element(Event) {
+  html.button_([event.on_click(live.Send), attribute.disabled(it.waiting)], [
+    el.text(label(it)),
   ])
 }
 
