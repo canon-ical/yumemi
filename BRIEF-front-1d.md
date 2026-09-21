@@ -72,7 +72,7 @@
 
 1. **穴 3 の形は「Page ごとの再要求」1 つだけ**(`after_send: Stay / ReloadPage`)。島が別の島 / Block を名指しする口は作らない
 2. **`given` は 1 欄。**`reloads` の戻りも同じ欄
-3. **起こす時期は役員 人見の卓。**codex が減りすぎ(残 18 / −14)でゲート 2 回 ≈ 3pt が乗る。裁定が無ければ **段 5 の頭(codex リセット 9-23 19:21 後)** ── 段 5 = Y1d → (P2 ∥ P3 ∥ P5b ∥ Y2) → P4。段 4 の中で起こすのは人見の「段 4 はそのまま回す」(22:33)の外なので鷹野は起こさない
+3. **起こす時期 ── 役員 人見 2026-09-21 23:12「段 4 で並走できるなら (a) でいい。『リセットを待つ』択はない」。段 4 の中で今起こす(B3 ∥ P1 と並走、codex −3pt は承知の上)。**段 5 = (P2 ∥ P3 ∥ P5b ∥ Y2) → P4 は本便の承認 + Hex 0.7.0 を前提に、codex のリセットを待たない
 4. **2 束目を足す ── 生成器の列名推論**(B3 巡 1 で根因確定:`gen/src/yumemi_gen/reader.gleam:1099` / `:1216` の `<> "_id"` が `RelProp` だけに効き、ER 外 module の id 型を持つ `ValueProp` は綴りのまま列名になる)。**直しは「id 型(`<Module>Id`)を持つ prop は relation と同じく `<prop>_id`」の 1 点**、`gen` の test に負例と正例を 1 本ずつ、fixture 生成 57 file の本文差を報告に。**musearch への追随(F3 の札 7 本 + B3 の `create_course` + read 側を生成に戻す)は本便でも P5b でもなく F4 の「どこまで」に 1 行足す**(鷹野が F4 の BRIEF に書く)。「しないこと」の `reader` / `emit` の変更禁止はこの 1 点だけ例外、front の reader / emit は触らない。**Actor の統一は載せない**(★ 9 本の musearch 追随が付く、別便の候補 ── 段 6 以降)
 5. **束が 2 つになるので巡は 1〜2、Y1c の 1:33 に +30 分を見る。**検収に「`gen` test の増分 2 本」「musearch main への clean run で verb SQL の列名が `ledger_store_id` になった本の一覧(本文差として出るのは想定内、本数を名指し)」を足す ── 基線 597 / exit 4 = 5 / 警告 29 のうち **警告の札 8 本は根因が消えれば減ってよい**、減った本数を報告に
 6. 島の器(client bundle の形)は Y1c の fixture `gen/fixtures/article/www/`(`verify-front-ssr` の ISLAND PASS の道)が正 ── 本便で `given` / `after_send` を通した見本がそのまま P5b と P3 の写す型
