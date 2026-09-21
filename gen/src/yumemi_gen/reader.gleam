@@ -169,11 +169,19 @@ fn registry(units: List(Unit)) -> Registry {
 }
 
 pub fn entities(units: List(Unit)) -> Result(List(Entity), Error) {
+  use collection_list <- result.try(collections(units))
+  entities_with_collections(units, collection_list)
+}
+
+fn entities_with_collections(
+  units: List(Unit),
+  collection_list: List(model.Collection),
+) -> Result(List(Entity), Error) {
   let table = registry(units)
   use candidates <- result.try(
     units
     |> list.filter(fn(unit) { string.starts_with(unit.path, "entity/") })
-    |> list.try_map(entity_of(_, table)),
+    |> list.try_map(entity_of(_, table, collection_list)),
   )
   Ok(
     list.filter_map(candidates, fn(candidate) {
@@ -249,7 +257,11 @@ fn handwritten_verbs_of(
 
 /// key が無くても通常のレコード型なら Entity として読み続ける。
 /// レコード型の無い型置き場(例: entity/ledger)は Entity にはしない。
-fn entity_of(unit: Unit, table: Registry) -> Result(Option(Entity), Error) {
+fn entity_of(
+  unit: Unit,
+  table: Registry,
+  collection_list: List(model.Collection),
+) -> Result(Option(Entity), Error) {
   let module = g.in_order(unit.module)
   let imports = imports_of(module)
   let name = last_segment(unit.path)
@@ -298,12 +310,12 @@ fn entity_of(unit: Unit, table: Registry) -> Result(Option(Entity), Error) {
       }
       use key_props <- result.try(raw_key_props)
       let entity_name = naming.pascal(name)
-      let fields = fields_of(entity_name, name, props, phases)
+      let fields = fields_of(entity_name, name, props, phases, collection_list)
       let verb_fields = verb_fields_of(entity_name, props)
       use key_columns <- result.try(
         list.try_map(key_props, fn(key_prop) {
           case list.find(props, fn(prop) { prop.name == key_prop }) {
-            Ok(_) -> Ok(column_of(props, key_prop))
+            Ok(_) -> Ok(column_of(props, key_prop, collection_list))
             Error(_) ->
               Error(Unsupported(
                 unit.path,
@@ -1082,6 +1094,7 @@ fn fields_of(
   entity_module: String,
   props: List(Prop),
   phases: List(String),
+  collection_list: List(model.Collection),
 ) -> List(model.FieldDef) {
   let from_props =
     list.flat_map(props, fn(prop) {
@@ -1109,7 +1122,7 @@ fn fields_of(
           model.FieldDef(
             name: base,
             entity_name: entity_name,
-            column: property_column(prop),
+            column: property_column(collection_list, prop),
             optional: prop.optional,
             repeated: prop.repeated,
             value: model.TypeValue(reference),
@@ -1163,9 +1176,13 @@ fn fields_of(
   }
 }
 
-fn column_of(props: List(Prop), name: String) -> String {
+fn column_of(
+  props: List(Prop),
+  name: String,
+  collection_list: List(model.Collection),
+) -> String {
   case list.find(props, fn(prop) { prop.name == name }) {
-    Ok(prop) -> property_column(prop)
+    Ok(prop) -> property_column(collection_list, prop)
     Error(_) -> name
   }
 }
@@ -1211,11 +1228,32 @@ fn type_ref_of_shape(shape: model.TypeShape) -> model.TypeRef {
   }
 }
 
-fn property_column(prop: Prop) -> String {
+fn property_column(
+  collection_list: List(model.Collection),
+  prop: Prop,
+) -> String {
   case prop.kind {
     model.RelProp(..) -> prop.name <> "_id"
-    model.ValueProp(_) -> prop.name
+    model.ValueProp(reference) ->
+      case is_collection_id_type(collection_list, reference) {
+        True -> prop.name <> "_id"
+        False -> prop.name
+      }
     model.SumProp(..) -> prop.name
+  }
+}
+
+fn is_collection_id_type(
+  collection_list: List(model.Collection),
+  reference: model.TypeRef,
+) -> Bool {
+  case reference.module {
+    Some(module) ->
+      string.ends_with(reference.name, "Id")
+      && list.any(collection_list, fn(collection) {
+        collection.module == module
+      })
+    None -> False
   }
 }
 
@@ -2046,8 +2084,11 @@ fn limit(expression: glance.Expression) -> model.Limit {
 
 pub fn read(units: List(Unit)) -> Result(App, Error) {
   use types <- result.try(value_types(units))
-  use entity_list <- result.try(entities(units))
   use collection_list <- result.try(collections(units))
+  use entity_list <- result.try(entities_with_collections(
+    units,
+    collection_list,
+  ))
   use _ <- result.try(validate_order_columns(entity_list, types))
   use _ <- result.try(validate_relation_shapes(entity_list))
   use service_list <- result.try(services(units))

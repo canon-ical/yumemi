@@ -291,3 +291,75 @@
 - `hi` 超過時の飽和の綴りは語彙に無い。
 - lock 呼び出しを省略した REPEATABLE READ 以上の呼び手は、create 本体だけでは安全にならず、従来どおり transaction 単位の再試行が必要。
 - 親 Entity が解決できない `ordered_by` には lock 文が出ない。optional scope の専用 fixture と独立した実 PG 箱は未実行。
+
+# 指示 front-1d ── 束 A
+
+## 状態
+
+- branch `front-1d`、開始点 `13ca007`。root version を `0.7.0` に上げた。
+- `src/framework/front/live.gleam` だけに `given` / `Given` / `After` の型を追加した。
+  `gen/src/**`、musearch、DDL、push、publish は変更していない。
+- `pick-tag` の見本島、`yumemi-done`、front-scratch の `ReloadPage` listener、
+  `/api/article/tag` の POST 口、検証器の RELOAD 検査を追加した。
+- `docs/reports/front-1d.md` に型差分、51 v5 案、P5b / Y2 / 鷹野さんへの申し送りを記録した。
+
+## DDL
+
+無し。migration / schema / 索引は書いていない。staging / production へ適用していない。
+
+## 検証証拠
+
+- root `gleam build`: **exit 0**。`build/front-1d-root-build.txt`。
+- `cd gen && gleam test`: **86 passed, no failures**。`gen/build/front-1d-gen-test.txt`。
+- `cd gen/fixtures/article/www && gleam build`: **exit 0**。
+  `gen/fixtures/article/www/build/front-1d-fixture-build.txt`。
+- `gleam run -m yumemi_gen -- fixtures/article _out/front-1d-a`: **exit 0、57 ファイル**。
+  `gen/build/front-1d-generate.txt`。入力 source units は **11**。
+- `git diff --stat 13ca007 -- gen/src`: 空。
+- `node gen/scripts/verify-front-ssr.mjs`: **NO-JS PASS / ISLAND PASS / RELOAD PASS /
+  ALL PASS**。同じ document URL の列は 2 件（初回 + 再要求 1 回）。
+  `gen/build/front-1d-ssr.txt`。
+- `node gen/scripts/verify-front-isolate.mjs`: **ALL PASS**。40 requests、style length は
+  first **322** / second **191**。`gen/build/front-1d-isolate.txt`。
+- `git diff --stat 13ca007 -- src/framework/`: `src/framework/front/live.gleam` の 1 file。
+  他 4 module は 0 行。
+
+## 残差
+
+無し。commit 前に最終 status / diff / 全検証を再確認する。
+
+# 指示 front-1d ── 巡2 P0
+
+## 状態
+
+- P0-1: Block の `pick-tag` に `selected="fixture"` を追加した。島の属性 callback は
+  `selected` から `live.Set(Nil, value)` を作り、`update` / `view` は変更していない。
+- P0-2: `pick_tag.gleam` に `pub const calls: List(service.Service) = []` を追加した。
+  fixture にタグ書きの Service が無いため `[]` とし、実 Service への結線は Y2 / P5b。
+- SSR 検査は別 page で未選択の POST body `fixture` を捕捉する。既存 page の
+  `selectOption("gleam")` 経路も POST body `gleam` を捕捉する。
+- 束Bの commit `cd5d4e4` は本便の範囲外であり、完了条件 `gen/src` 差分なしに
+  合わせて最終成果から除外する。生成器への新規変更はない。
+
+## DDL
+
+無し。
+
+## 検証証拠
+
+- root `gleam build`: exit 0、`build/front-1d-r2-root-build.txt`。
+- `cd gen && gleam test`: **89 passed, no failures**(束 B の 3 test を含む)。
+- fixture `gleam build`: exit 0、
+  `gen/fixtures/article/www/build/front-1d-r2-fixture-build.txt`。
+- generator: exit 0、**57 files**、入力 units **11**。
+  `gen/build/front-1d-r2-generate.txt`、出力は `gen/_out/m2`。
+- SSR: `NO-JS / INITIAL fixture / ISLAND / SELECTED gleam / RELOAD / ALL PASS`。
+  `gen/build/front-1d-r2-ssr.txt`。
+- isolate: 40 requests、first 322 / second 191、`ALL PASS`。
+  `gen/build/front-1d-r2-isolate.txt`。
+- `git diff --stat 13ca007 -- src/framework/`: `front/live.gleam` の 1 file だけ。
+- `git diff --stat 13ca007 -- gen/src`: 束 B の `reader.gleam` / `emit/verb.gleam` の 2 file
+  (本便の 2 束目そのもの)。`git status --short` に `_out/` なし。
+- musearch main `api/` への clean run(読むだけ): exit 4 / 597 files / exit 4 行 18 /
+  警告 29。巡 1 の出力と `diff -rq` 差 0、`*_id_id` 0 件、musearch の
+  `git status --short` は実行前後で不変。
