@@ -1,0 +1,9 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "yumemi-front-1-scratch",
+  "main": "worker-entry.mjs",
+  "compatibility_date": "2026-06-01",
+  "assets": {
+    "directory": "public"
+  }
+}

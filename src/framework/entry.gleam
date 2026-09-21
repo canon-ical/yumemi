@@ -29,6 +29,11 @@ pub type Services {
   All
 }
 
+pub type Pages {
+  AllPages
+  NoPages
+}
+
 pub type Subjects(subject) {
   Subjects(List(subject))
   AnySubject
@@ -50,6 +55,8 @@ pub type Entry(subject, host) {
     admit: Admit,
     subject: Subjects(subject),
     services: Services,
+    pages: Pages,
+    frame_src: List(String),
   )
   HttpApi(
     name: String,
@@ -59,6 +66,8 @@ pub type Entry(subject, host) {
     subject: Subjects(subject),
     services: Services,
     credential: Credential,
+    pages: Pages,
+    frame_src: List(String),
   )
 }
 
@@ -67,5 +76,19 @@ pub fn credential(entry: Entry(subject, host)) -> Credential {
   case entry {
     Http(..) -> Session
     HttpApi(credential: value, ..) -> value
+  }
+}
+
+pub fn pages(entry: Entry(subject, host)) -> Pages {
+  case entry {
+    Http(pages: value, ..) -> value
+    HttpApi(pages: value, ..) -> value
+  }
+}
+
+pub fn frame_src(entry: Entry(subject, host)) -> List(String) {
+  case entry {
+    Http(frame_src: value, ..) -> value
+    HttpApi(frame_src: value, ..) -> value
   }
 }
