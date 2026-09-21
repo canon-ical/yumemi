@@ -2,7 +2,7 @@
 
 ## 状態
 
-`ordered_create_sql` と `ordered_create_many_sql` を、親版を別文で進めてから create 本体を実行する形へ直した。`sql_files` は、親 Entity を解決できる ordered_by について、単体と一括を別々の条件で lock file にする。
+`ordered_create_sql` と `ordered_create_many_sql` を、親行の版を別文で進めてから create 本体を実行する形へ直した。`sql_files` は、親 Entity を解決できる ordered_by について、単体と一括を別々の条件で lock file にする。
 
 - `create_<module>_lock.sql`: `emits(app, entity, "create_" <> entity.module)` が真のときだけ出す。親1行の no-op `UPDATE` で、引数は親鍵の `$1` だけ。
 - `create_<collection>_lock.sql`: `entity.verbs` に `CreateManyRule` があり、かつ `emits(app, entity, "create_" <> entity.collection)` が真のときだけ出す。Draft jsonb 配列に現れる親鍵を distinct にして、親鍵順の `FOR UPDATE` 後に no-op `UPDATE` する。引数は配列の `$1` だけ。

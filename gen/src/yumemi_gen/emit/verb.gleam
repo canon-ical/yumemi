@@ -1004,7 +1004,8 @@ fn ordered_create_many_lock_sql(
   <> " FROM locked);\n"
 }
 
-/// `ordered_by` のある Entity は、親を同じ文でロックしてから scope の末尾へ入れる。
+/// 呼び手が親行の版を先行の lock SQL で進め、create 本体も親を NOWAIT でロックする。
+/// その後に同じ文で scope の末尾を読み、新しい行を入れる。
 /// `order` は入力 Draft から外し、親ロックに依存する LATERAL の集計で決める。
 fn ordered_create_sql(
   entity: model.Entity,
