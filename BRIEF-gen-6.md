@@ -90,3 +90,9 @@
 - `Frame` が断点の値を持たないので `@media 900px` と grid は P1 の手書き ▲ が定数で持つ ── gen-6 はここを 51 v5 の `sp:` / `pc:` から引く(P1 の残 P1 ③ / ⑥ `ByKind` を読む側が yumemi に無い、を本便で閉じる)
 - 突き合わせの相手は musearch main **`96fb8cc`** の `www/src/gen/**`(段 5 で P2 / P3 が追記するので、突合の時点の sha を報告に書く)
 - Y1d は閉じた(Hex 0.7.0、yumemi main 7fb52b2)── `gen/live/<service>.gleam` は 4 欄の `State` と `after_send`。柏木は実行経路 C(`claude-kashiwagi`、Opus xhigh)
+
+## 鷹野の裁定 7 / 8(2026-09-22 05:36、巡 1 のエスカレーション)── 2 点とも贄川の推奨 (a)
+
+7. **生成物 14 種目(裁定 4)は本便で吐かず、musearch 追随便へ送る。**P4 が置く ▲(`www/src/gen/external.gleam` / `src/gen/doc/api_v1.gleam`)がまだ無く、源(`api/src/external_hosts.mjs` は `.mjs`、API v1 本文は `docs/api-v1.md` で `api/priv/` は無い)も生成器の口に載っていない ── 真壁に道と名前を発明させて P4 を合わせる側に回すのは「手書きが先、生成器が後」の逆転。plan §3 #14 を落とし 13 種で段 B〜D を回す。`results.md` の `## musearch 追随便への申し送り` に「14 種目は P4 の ▲ が置かれた後の便で、源は `.mjs` を読む口か `api/priv/` の置き直しかを鷹野が P4 の results を見て裁く」と書く。裁定 4 は本行で上書き。
+8. **裁定 3 の「out_dir の下に package の段」は面だけに効く。**back は out_dir の根(`db/queries/**` / `src/gen/**`)のまま、面は `<out>/<面>/…`。検収「back の 57 file が 1 本も動かない(file 名と本文の diff 0)」が正 ── fixture の basename が `article` で段の名すら立たず、`compare.py` / `verify-verb-sql.mjs` / F 便の突合が全部根の形に載っている。裁定 3 の文面を「面の生成物だけ `<out>/<面>/` の段、back は根」に読み替える。
+- 基線の訂正(`gleam test` 89、musearch の生成 604 file)はそのとおり。段 A の真壁はこのまま起こしてよい。
