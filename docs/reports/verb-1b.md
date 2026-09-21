@@ -294,11 +294,19 @@ WHERE <親鍵> IN (SELECT <親鍵> FROM locked);
 
 証拠は `/home/yumemism/.codex-agents/runs/niekawa-20260921-131116-1974475-16200/a1/evidence/` にある。
 
+## 鷹野の裁定 C(2026-09-21 14:45)── 負の下端の開始値
+
+create の開始値は `int.max(lo, 0)`。`Range(-5, 10)` は 0 から始まる。BRIEF「どこまで 2」の括弧書き
+「`Range(lo, hi)` なら `lo`」はこの裁定で更正された ── 確定値の起点は `reader.gleam:2124` の受理条件
+`hi >= int.max(lo, 0)` と診断文「値域に確定値の起点が無い」が既に定めており(gen-3 / gen-5 で承認済み)、
+reorder の確定値も同じ `order_span` から出るため、create だけ `lo` に寄せると負の下端で両者が食い違う。
+`lo >= 0` の宣言では両者は同じ値で、現物の宣言は全部 `lo >= 1` なので musearch(F3)への影響は 0。
+試験 `T2 negative lower bound starts at 0` はこのまま正典。負の値域を「手で置く領域」として使う設計は本便の外。
+
 ## 残差
 
 - `hi` 超過時の飽和の綴りは本便の語彙に無い。
 - ①を飛ばした RR 以上の呼び手は、②だけでは救えない。`55P03` は競合が重なったときだけである。
 - 親 Entity が引けない `ordered_by`（`within` 先頭が関係でない形）には lock 文が出ない。
 - 親欠落の失敗コードは汎用の `'conflict'`。専用名は語彙が要る。
-- 負の下端は BRIEF の括弧書き(`lo`)とは異なる。reader の受理条件と起点は `int.max(lo, 0)` が正典である。
 - `within` 先頭が optional の形では NULL scope を親検査・親 lock から外す実装にしたが、専用 fixture と実 PG の独立箱は本便では置いていない。

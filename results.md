@@ -227,7 +227,7 @@
 - ①を飛ばした RR 以上の呼び手は、②だけでは救えない。`55P03` は競合が重なったときだけである。
 - 親 Entity が引けない `ordered_by`（`within` 先頭が関係でない形）には lock 文が出ない。
 - 親欠落の失敗コードは汎用の `'conflict'`。専用名は語彙が要る。
-- 負の下端は BRIEF の括弧書き(`lo`)とは異なる。reader の起点 `int.max(lo, 0)` を正典とした。
+- 負の下端の開始値 `int.max(lo, 0)` は鷹野の裁定 C(2026-09-21 14:45)で確定した。BRIEF「どこまで 2」の括弧書き(`lo`)はこの裁定で更正されたので残差ではない。試験 `T2 negative lower bound starts at 0` はそのまま。
 - `within` 先頭が optional の形では NULL scope を親検査・親 lock から外す実装にしたが、専用 fixture と独立した実 PG 箱は未実行。
 
 # 指示 B2 ── lock SQL の出力条件・一括行ロック順・第5引数
