@@ -25,7 +25,9 @@ import yumemi_gen/emit/root
 import yumemi_gen/emit/sql
 import yumemi_gen/emit/types
 import yumemi_gen/emit/verb
+import yumemi_gen/face
 import yumemi_gen/reader
+import yumemi_gen/reader/front
 import yumemi_gen/source
 import yumemi_gen/stop.{type Note, Note}
 
@@ -75,30 +77,55 @@ pub fn generate(
     }),
   )
   use app <- result.try(reader.read(units) |> result.map_error(read_note))
+  use discovered <- result.try(
+    face.discover(app_dir, units)
+    |> result.map_error(source_note),
+  )
+  use front_models <- result.try(
+    list.try_map(discovered.packages, fn(package) {
+      front.read(package.name, package.units, app.services)
+      |> result.map(fn(model) { #(package.pages, model) })
+      |> result.map_error(front_note)
+    }),
+  )
   let hashes = hash.of(units)
   let entry_output = entry.emit(app, hashes)
+  let front_notes =
+    list.append(
+      discovered.notes,
+      list.flat_map(front_models, fn(item) {
+        let #(pages, model) = item
+        case pages {
+          face.AllPages -> front.notes(model, app.services)
+          face.UndeclaredPages | face.NoPages -> []
+        }
+      }),
+    )
   let notes =
     list.append(
-      verb.notes(app),
+      front_notes,
       list.append(
-        reader.missing_key_notes(units),
+        verb.notes(app),
         list.append(
-          reader.entry_notes(app),
+          reader.missing_key_notes(units),
           list.append(
-            list.map(query.collisions(app), fn(entry) {
-              let #(module, name) = entry
-              Note(
-                class: stop.Conflict,
-                text: "名前の衝突 "
-                  <> module
-                  <> ": "
-                  <> name
-                  <> "(構成子は module ごとに1つの名前空間)",
-              )
-            }),
+            reader.entry_notes(app),
             list.append(
-              list.append(root.notes(app), sql.notes(app, hashes)),
-              entry_output.notes,
+              list.map(query.collisions(app), fn(entry) {
+                let #(module, name) = entry
+                Note(
+                  class: stop.Conflict,
+                  text: "名前の衝突 "
+                    <> module
+                    <> ": "
+                    <> name
+                    <> "(構成子は module ごとに1つの名前空間)",
+                )
+              }),
+              list.append(
+                list.append(root.notes(app), sql.notes(app, hashes)),
+                entry_output.notes,
+              ),
             ),
           ),
         ),
@@ -152,6 +179,22 @@ fn read_note(error: reader.Error) -> Note {
       Note(class: stop.Vocabulary, text: where <> ": " <> detail)
     reader.Internal(where: where, detail: detail) ->
       Note(class: stop.NotImplemented, text: where <> ": " <> detail)
+  }
+}
+
+fn source_note(error: source.Error) -> Note {
+  case error {
+    source.ParseFailed(path: path, detail: detail) ->
+      Note(class: stop.Syntax, text: path <> ": " <> detail)
+    source.ReadFailed(path: path) ->
+      Note(class: stop.Missing, text: "読めない: " <> path)
+  }
+}
+
+fn front_note(error: front.Error) -> Note {
+  case error {
+    front.Unsupported(where: where, detail: detail) ->
+      Note(class: stop.Conflict, text: where <> ": " <> detail)
   }
 }
 

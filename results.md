@@ -1,3 +1,58 @@
+# 指示 gen-6 段A ── 面の発見と front model / 検査
+
+## 状態
+
+- branch `gen-6`、開始点 `6cbc9dd`。checkpoint `a0907a4` / `dac8d5b` を作業中に打った。
+- fixture の面を `gen/fixtures/article/www/` から `public/` へ移し、入口 `public` と
+  `gleam.toml` / Layout const / Page の layout 参照 / front harness の写し元を揃えた。
+  `gen/fixtures/article/src/entry.gleam` は変更していない。
+- `gen/src/yumemi_gen/face.gleam` が `dirname(app_dir)` と `app_dir` の直下だけを探索し、
+  `Http` + `gleam.toml` + `src/layout.gleam` の3条件で面を選ぶ。`HttpApi` は面にしない。
+  面の source は `src/gen/` を除いて parse し、parse failure は exit 2、入口/面の不足は
+  `pages: AllPages` と3条件に従う exit 3 で診断する。
+- `gen/src/yumemi_gen/reader/front.gleam` に Layout / Page / Frame / Area / Placement /
+  Block / Component / Style / WidgetKey / Service variant の model と、検査8本の診断を追加。
+  front の emit はまだ無い。`pages` 未宣言の面は model まで読み、legacy の既存入力を
+  新診断で止めず、`AllPages` を明示した入口だけ front notes を CLI に載せる。
+- back の `reader.gleam`、back emit、back 生成物、DDL、musearch は変更していない。
+
+## DDL
+
+無し。migration / schema は作成していない。staging / production にも適用していない。
+
+## 検証証拠
+
+- root `gleam build`: exit 0。既存の `src/framework/secret.gleam` unused private constructor
+  warning 1件のみ。`build/root-gleam-build-gen6-stagea.txt`
+- `cd gen && gleam test`: **105 passed, no failures**。`gen/build/gen6-test-final.txt`
+- fixture generator: **exit 0 / 57 files**。current `/tmp/gen6-fx-current.emStLr` と main
+  `/tmp/gen6-fx-main.FwWK7A` の `diff -r` は **0行**。
+  `gen/build/gen6-fixture-diff.txt`、実行ログは `/tmp/gen6-fx-current-log.3mNfLG` /
+  `/tmp/gen6-fx-main-log.j08VtV`
+- `cd gen/fixtures/article/public && gleam build`: exit 0。既存の transitive dependency
+  warning のみ。`gen/build/gen6-fixture-public-build.txt`
+- musearch は指定 snapshot `/home/yumemism/.codex-agents/runs/niekawa-20260922-053343-3290951-5762/ms-96fb8cc` の `api/` だけを入力にした。
+  `gleam run` は exit 4、`/tmp/gen6-ms` は **604 files**、`_diagnostics.txt` は
+  `exit 0 = 29`、`exit 3 = 0`、`exit 4 = 18`。`gen/build/gen6-musearch-final.txt`
+- live `/home/yumemism/yumemism_repo/musearch` の `git status --short` は空。
+- source-string 負例: discovery 4本、model 4本、検査8本を `gen/test/yumemi_gen_test.gleam`
+  に追加。各検査で stop class と1行文言を確認した。
+
+## 鷹野宛
+
+- front の出力はこの段では1種も追加していない。次段で `src/gen/route.gleam` などを
+  model から emit する入口は `front.Front` に分離してある。
+- `pages` 欄が無い入口は、指定どおり面 folder があれば読み、無ければ Missing を黙って
+  飛ばす。既存の0.7.0未追随 package を止めないため、front content の stop は
+  `pages: AllPages` を明示した入口に限定した。
+
+## musearch 追随便への申し送り
+
+- 入力は引き続き snapshot `ms-96fb8cc` を固定し、live `musearch` を generator の入力/出力に
+  使わないこと。
+- `www/` の source は face reader で読み、Page URL は folder 木から `/muse/{handle}` の形に
+  なる。次段の emit は `www/src/gen/**` の手書き ▲ と `diff -r` で突き合わせる。
+
 # front-1c 真壁 道具の向き直しと報告
 
 ## 状態

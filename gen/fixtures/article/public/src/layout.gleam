@@ -5,7 +5,7 @@ import gen/service
 import gleam/option.{None, Some}
 import style
 
-pub const www: Layout(service.Service, blocks.Block) = Layout(
+pub const public: Layout(service.Service, blocks.Block) = Layout(
   sp: Frame(
     areas: [
       Area(

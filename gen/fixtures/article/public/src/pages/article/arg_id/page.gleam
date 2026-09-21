@@ -8,7 +8,7 @@ import style
 
 pub const page: Page(service.Service, blocks.Block) = Page(
   of: Some(service.ArticleRead),
-  layout: layout.www,
+  layout: layout.public,
   theme: Some("theme"),
   sp: Frame(
     areas: [

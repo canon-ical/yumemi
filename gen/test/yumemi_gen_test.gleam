@@ -2,6 +2,7 @@
 //// 本文から機械的に写したもので、手を入れていない。生成が通ることと、
 //// 20 が本文で名指しした ▲ の形(From / Arrow / 戻りの型)が出ることを見る。
 
+import glance
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
@@ -11,9 +12,11 @@ import yumemi_gen
 import yumemi_gen/digest
 import yumemi_gen/emit/hash
 import yumemi_gen/emit/query
+import yumemi_gen/face
 import yumemi_gen/model
 import yumemi_gen/naming
 import yumemi_gen/reader
+import yumemi_gen/reader/front
 import yumemi_gen/source
 import yumemi_gen/stop
 
@@ -903,11 +906,13 @@ pub fn ordered_create_lock_files_have_one_update_argument_test() {
 
   let single_lock =
     text_of(relation_fixture, "db/queries/verb/create_photo_lock.sql")
-  let many_lock =
-    text_of(fixture, "db/queries/verb/create_articles_lock.sql")
+  let many_lock = text_of(fixture, "db/queries/verb/create_articles_lock.sql")
   string.contains(single_lock, "UPDATE app.album SET id=id WHERE id=$1::uuid;")
   |> should.be_true
-  string.contains(many_lock, "UPDATE app.category SET name=name WHERE name IN (")
+  string.contains(
+    many_lock,
+    "UPDATE app.category SET name=name WHERE name IN (",
+  )
   |> should.be_true
   string.contains(many_lock, "SELECT DISTINCT (item->>'category')")
   |> should.be_true
@@ -947,7 +952,10 @@ pub fn handwritten_create_suppresses_ordered_lock_test() {
 
 pub fn ordered_create_many_lock_orders_parent_rows_before_update_test() {
   let many_lock = text("db/queries/verb/create_articles_lock.sql")
-  string.contains(many_lock, "WITH locked AS (\n SELECT name\n FROM app.category")
+  string.contains(
+    many_lock,
+    "WITH locked AS (\n SELECT name\n FROM app.category",
+  )
   |> should.be_true
   string.contains(
     many_lock,
@@ -1560,4 +1568,339 @@ pub fn escalating_notes_win_over_generator_notes_test() {
   |> should.equal(6)
   stop.worst([stop.Note(class: stop.NotImplemented, text: "x")])
   |> should.equal(1)
+}
+
+// ── 段A: 面の発見と front model ─────────────────────────────────────────────
+
+pub fn face_selection_requires_package_and_layout_and_is_shallow_test() {
+  let selected =
+    face.select([face.HttpEntry(name: "public", pages: face.UndeclaredPages)], [
+      face.Candidate(
+        name: "public",
+        path: "public",
+        has_package: True,
+        has_layout: True,
+      ),
+      face.Candidate(
+        name: "no_package",
+        path: "no_package",
+        has_package: False,
+        has_layout: True,
+      ),
+      face.Candidate(
+        name: "no_layout",
+        path: "no_layout",
+        has_package: True,
+        has_layout: False,
+      ),
+    ])
+  list.length(selected.packages) |> should.equal(1)
+  let assert [candidate] = selected.packages
+  candidate.name |> should.equal("public")
+  selected.notes |> should.equal([])
+}
+
+pub fn http_api_does_not_create_a_face_test() {
+  let unit =
+    source_unit(
+      "entry",
+      "pub const entries = [HttpApi(name: \"api\", pages: AllPages)]",
+    )
+  face.http_entries([unit]) |> should.equal([])
+}
+
+pub fn missing_all_pages_folder_and_orphan_folder_are_missing_test() {
+  let selected =
+    face.select([face.HttpEntry(name: "public", pages: face.AllPages)], [
+      face.Candidate(
+        name: "ghost",
+        path: "ghost",
+        has_package: True,
+        has_layout: True,
+      ),
+    ])
+  stop.worst(selected.notes) |> should.equal(3)
+  selected.notes
+  |> list.map(fn(note) { note.text })
+  |> should.equal([
+    "entry.public: フォルダの無い Http 入口",
+    "face.ghost: 入口の無いフォルダ",
+  ])
+}
+
+pub fn undeclared_pages_and_no_pages_do_not_make_missing_notes_test() {
+  let candidates = [
+    face.Candidate(
+      name: "public",
+      path: "public",
+      has_package: True,
+      has_layout: True,
+    ),
+  ]
+  face.select(
+    [face.HttpEntry(name: "public", pages: face.UndeclaredPages)],
+    candidates,
+  ).notes
+  |> should.equal([])
+  face.select([face.HttpEntry(name: "public", pages: face.NoPages)], []).notes
+  |> should.equal([])
+}
+
+pub fn front_model_reads_url_blocks_widgets_components_and_style_test() {
+  let value = article_front()
+  let assert [page] = value.pages
+  page.url |> should.equal("/article/{id}")
+  page.of |> should.equal(Some("ArticleRead"))
+  list.map(value.blocks, fn(block) { block.name })
+  |> should.equal(["Article", "Summary"])
+  value.widget_keys |> should.equal(["ArticleFeed", "ArticleKinds"])
+  value.services |> should.equal(["ArticleList", "ArticleRead"])
+  value.style.tokens
+  |> should.equal([
+    "ink",
+    "paper",
+    "accent",
+    "muted",
+    "body",
+    "heading",
+    "s0",
+    "s1",
+    "s2",
+    "s3",
+    "sp",
+    "pc",
+    "tablet",
+    "bar",
+    "page",
+  ])
+  let assert [media] = value.style.media_variants
+  media.0 |> should.equal("MediaVariant")
+  media.1 |> should.equal(["Thumb", "W800", "W1600", "Cast"])
+  value.blocks
+  |> list.map(fn(block) { block.has_sample })
+  |> should.equal([True, True])
+  value.components
+  |> list.map(fn(component) { component.after_send })
+  |> should.equal([Some("Stay"), Some("ReloadPage")])
+}
+
+pub fn page_path_uses_folder_rules_and_reserved_suffix_test() {
+  let units = [
+    layout_unit("Layout(sp: Frame(areas: [], placements: []))"),
+    source_unit(
+      "pages/_/type_/arg_id/page",
+      "pub const page: Page(service.Service, blocks.Block) = Page(of: None, layout: layout.demo, sp: Frame(areas: [], placements: []))",
+    ),
+  ]
+  let value = front_from_units(units, [])
+  let assert [page] = value.pages
+  page.url |> should.equal("/-/type/{id}")
+}
+
+pub fn sample_presence_is_optional_and_block_variant_is_pascal_test() {
+  let value =
+    front_from_units(
+      [
+        layout_unit("Layout(sp: Frame(areas: [], placements: []))"),
+        source_unit(
+          "blocks/news_card",
+          "pub type In = Nil\npub fn view(it: In) -> el.Element(Nil) { it }\npub const sample: In = Nil",
+        ),
+        source_unit(
+          "blocks/empty_card",
+          "pub type In = Nil\npub fn view(it: In) -> el.Element(Nil) { it }",
+        ),
+      ],
+      [],
+    )
+  value.blocks
+  |> list.map(fn(block) { #(block.name, block.has_sample) })
+  |> should.equal([#("NewsCard", True), #("EmptyCard", False)])
+}
+
+pub fn service_variant_references_are_collected_from_page_widget_and_component_test() {
+  let value =
+    front_from_units(
+      [
+        layout_unit(
+          "Layout(sp: Frame(areas: [], placements: [Widget(area: \"main\", name: \"slot\", of: service.ArticleList, render: One(blocks.Article))]))",
+        ),
+        source_unit(
+          "pages/article/page",
+          "pub const page: Page(service.Service, blocks.Block) = Page(of: Some(service.ArticleRead), layout: layout.demo, sp: Frame(areas: [], placements: []))",
+        ),
+        source_unit(
+          "components/search",
+          "pub const calls: List(service.Service) = [service.ArticleCreate]\npub const reloads: List(service.Service) = [service.ArticleRead]\npub fn view(it: State) -> el.Element(Event) { it }",
+        ),
+      ],
+      [],
+    )
+  value.services
+  |> should.equal(["ArticleList", "ArticleRead", "ArticleCreate"])
+}
+
+pub fn direct_attribute_class_is_exit_four_test() {
+  let notes =
+    front_notes(
+      [
+        layout_unit("Layout(sp: Frame(areas: [], placements: []))"),
+        source_unit(
+          "components/bad",
+          "import lustre/attribute\npub fn view(it: State) -> el.Element(Event) { attribute.class(\"x\") }",
+        ),
+      ],
+      [],
+    )
+  assert_one_note(notes, stop.Conflict, "attribute.class")
+  stop.worst(notes) |> should.equal(4)
+}
+
+pub fn lustre_internal_import_is_exit_four_test() {
+  let notes =
+    front_notes(
+      [
+        layout_unit("Layout(sp: Frame(areas: [], placements: []))"),
+        source_unit("components/bad", "import lustre/internals/constants"),
+      ],
+      [],
+    )
+  assert_one_note(notes, stop.Conflict, "lustre 内部 module")
+  stop.worst(notes) |> should.equal(4)
+}
+
+pub fn nested_island_is_exit_four_test() {
+  let notes =
+    front_notes(
+      [
+        layout_unit("Layout(sp: Frame(areas: [], placements: []))"),
+        source_unit(
+          "components/bad",
+          "import framework/front/el\npub fn view(it: State) -> el.Element(Event) { el.island(\"outer\", [el.island(\"inner\", [])]) }",
+        ),
+      ],
+      [],
+    )
+  assert_one_note(notes, stop.Conflict, "島の中に島")
+  stop.worst(notes) |> should.equal(4)
+}
+
+pub fn duplicate_top_area_is_exit_four_test() {
+  let notes =
+    front_notes(
+      [
+        layout_unit(
+          "Layout(sp: Frame(areas: [Area(name: \"a\", flow: css.Stack(gap: style.s0), pin: css.Top, style: []), Area(name: \"b\", flow: css.Stack(gap: style.s0), pin: css.Top, style: [])], placements: []))",
+        ),
+      ],
+      [],
+    )
+  assert_one_note(notes, stop.Conflict, "pin: Top")
+  stop.worst(notes) |> should.equal(4)
+}
+
+pub fn missing_page_arg_is_exit_three_test() {
+  let notes =
+    front_notes(
+      [
+        layout_unit("Layout(sp: Frame(areas: [], placements: []))"),
+        source_unit(
+          "pages/article/arg_missing/page",
+          "pub const page: Page(service.Service, blocks.Block) = Page(of: Some(service.ArticleRead), layout: layout.demo, sp: Frame(areas: [], placements: []))",
+        ),
+      ],
+      app().services,
+    )
+  assert_one_note(notes, stop.Missing, "パス変数 missing")
+  stop.worst(notes) |> should.equal(3)
+}
+
+pub fn widget_without_frame_arg_is_exit_four_test() {
+  let notes =
+    front_notes(
+      [
+        layout_unit(
+          "Layout(sp: Frame(areas: [], placements: [Widget(area: \"main\", name: \"slot\", of: service.ArticleRead, render: One(blocks.Article))]))",
+        ),
+      ],
+      app().services,
+    )
+  assert_one_note(notes, stop.Conflict, "枠の名前を Args に持たない")
+  stop.worst(notes) |> should.equal(4)
+}
+
+pub fn missing_sp_frame_is_exit_three_test() {
+  let notes =
+    front_notes(
+      [
+        layout_unit("Layout(pc: Some(Frame(areas: [], placements: [])))"),
+      ],
+      [],
+    )
+  assert_one_note(notes, stop.Missing, "sp: が無い")
+  stop.worst(notes) |> should.equal(3)
+}
+
+pub fn nested_layout_is_exit_four_test() {
+  let notes =
+    front_notes(
+      [
+        layout_unit(
+          "Layout(sp: Frame(areas: [], placements: []), pc: Some(Layout(sp: Frame(areas: [], placements: []))))",
+        ),
+      ],
+      [],
+    )
+  assert_one_note(notes, stop.Conflict, "Layout の中に Layout")
+  stop.worst(notes) |> should.equal(4)
+}
+
+fn article_front() -> front.Front {
+  let assert Ok(units) = source.load("fixtures/article/public")
+  front_from_units_named("public", units, app().services)
+}
+
+fn front_from_units(
+  units: List(source.Unit),
+  services: List(model.Service),
+) -> front.Front {
+  front_from_units_named("demo", units, services)
+}
+
+fn front_from_units_named(
+  face: String,
+  units: List(source.Unit),
+  services: List(model.Service),
+) -> front.Front {
+  let assert Ok(value) = front.read(face, units, services)
+  value
+}
+
+fn front_notes(
+  units: List(source.Unit),
+  services: List(model.Service),
+) -> List(stop.Note) {
+  front.notes(front_from_units(units, services), services)
+}
+
+fn layout_unit(body: String) -> source.Unit {
+  source_unit(
+    "layout",
+    "pub const demo: Layout(service.Service, blocks.Block) = " <> body,
+  )
+}
+
+fn source_unit(path: String, text: String) -> source.Unit {
+  let assert Ok(module) = glance.module(text)
+  source.Unit(path: path, text: text, module: module)
+}
+
+fn assert_one_note(
+  notes: List(stop.Note),
+  class: stop.Class,
+  text: String,
+) -> Nil {
+  let assert [note] = notes
+  note.class |> should.equal(class)
+  string.contains(note.text, text) |> should.be_true
 }

@@ -33,7 +33,7 @@ export function prepareFrontScratch(label) {
   fs.mkdirSync(work, { recursive: true });
   copyDirectoryContents(templateDir, work);
   copyDirectoryContents(
-    path.join(genDir, "fixtures/article/www/src"),
+    path.join(genDir, "fixtures/article/public/src"),
     path.join(work, "src"),
   );
   fs.mkdirSync(path.join(work, "public"), { recursive: true });
