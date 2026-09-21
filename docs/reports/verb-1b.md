@@ -2,12 +2,16 @@
 
 ## 状態
 
-`ordered_create_sql` と `ordered_create_many_sql` を、親版を別文で進めてから create 本体を実行する形へ直した。`sql_files` には、親 Entity を解決できる ordered_by に限って次の2本を出す。
+`ordered_create_sql` と `ordered_create_many_sql` を、親版を別文で進めてから create 本体を実行する形へ直した。`sql_files` は、親 Entity を解決できる ordered_by について、単体と一括を別々の条件で lock file にする。
 
-- `create_<module>_lock.sql`: 親1行の no-op `UPDATE`。引数は親鍵の `$1` だけ。
-- `create_<collection>_lock.sql`: Draft jsonb 配列に現れる親鍵を distinct・鍵順に no-op `UPDATE`。引数は配列の `$1` だけ。
+- `create_<module>_lock.sql`: `emits(app, entity, "create_" <> entity.module)` が真のときだけ出す。親1行の no-op `UPDATE` で、引数は親鍵の `$1` だけ。
+- `create_<collection>_lock.sql`: `entity.verbs` に `CreateManyRule` があり、かつ `emits(app, entity, "create_" <> entity.collection)` が真のときだけ出す。Draft jsonb 配列に現れる親鍵を distinct にして、親鍵順の `FOR UPDATE` 後に no-op `UPDATE` する。引数は配列の `$1` だけ。
 
-create 本体の親 CTE は `FOR UPDATE NOWAIT` にし、単体は `parent_gate` の `count(*)`、一括は scope ごとの二重 `NOT EXISTS` を `framework.require_rows(...,'conflict')` へ渡す。開始値は `order_span` の `first` (`int.max(lo, 0)`) を使う。DDL、`src/framework/`、musearch 本体、staging、production は変更していない。
+単体と一括の条件は同じ `case` でまとめず、各 create 本体の出力条件をそのまま lock の門に使う。CreateMany を宣言していない `ordered_by` Entity では単体 lock だけが出て、手書き札で create 本体を消した Entity では単体 lock も出ない。
+
+一括 lock は `WITH locked AS (...)` の中で親表を `ORDER BY <親鍵> FOR UPDATE` で先に行ロックし、その結果を後段の `UPDATE <親表> SET <鍵>=<鍵> WHERE <鍵> IN (SELECT <鍵> FROM locked)` に渡す2段構成にした。no-op `UPDATE` は親行の版を進めるため残している。
+
+create 本体の親 CTE は `FOR UPDATE NOWAIT` にし、単体は `parent_gate` の `count(*)`、一括は scope ごとの二重 `NOT EXISTS` を `framework.require_rows(...,'conflict')` へ渡す。開始値は `order_span` の `first` (`int.max(lo, 0)`) を使う。`verify-gate2-sql.mjs` は第5引数に負の下端 fixture 出力を必須で受け、無いと usage を出して exit 2 で止める。DDL、`src/framework/`、musearch 本体、staging、production は変更していない。
 
 ## P0-9 ── 採番の競合
 
@@ -67,13 +71,19 @@ UPDATE app.album SET id=id WHERE id=$1::uuid;
 ```
 
 ```sql
--- GENERATED from entity.photo [sha256:5a39571d3975] — 手で編集しない
--- 呼び手は create_photos と同じ transaction でこれを先に 1 回打つ。$1 は Draft の jsonb 配列。親行の版を進める。
-UPDATE app.album SET id=id WHERE id IN (
- SELECT DISTINCT (item->>'album')::uuid
+-- GENERATED from entity.article [sha256:cbd1f2e465d8] — 手で編集しない
+-- 呼び手は create_articles と同じ transaction でこれを先に 1 回打つ。$1 は Draft の jsonb 配列。親行の版を進める。
+WITH locked AS (
+ SELECT name
+ FROM app.category
+ WHERE name IN (
+ SELECT DISTINCT (item->>'category')
  FROM jsonb_array_elements($1::jsonb) AS items(item)
- ORDER BY 1
-);
+ )
+ ORDER BY name
+ FOR UPDATE
+)
+UPDATE app.category SET name=name WHERE name IN (SELECT name FROM locked);
 ```
 
 単体 create 本体は `parent_gate` を常に1行の CTE として置き、親 lock の後に末尾を読む。
@@ -237,7 +247,7 @@ parent_gate AS MATERIALIZED (
 | astra order-range | `P0-10 ... no reproduction = PASS` |
 | `git diff --check` | 出力なし |
 
-`verify-gate2-sql.mjs` は第 5 引数に**負の下端 fixture の出力**を取る(省略すると `relation-out` の隣を推測する)。T1 / T2 / T3 を回すときの呼び方は次のとおり。
+`verify-gate2-sql.mjs` は第 5 引数に**負の下端 fixture の出力**を必須で取る(省略すると usage + exit 2)。T1 / T2 / T3 を回すときの呼び方は次のとおり。
 
 ```
 PGHOST=127.0.0.1 PGPORT=55432 PGUSER=yumemism PGDATABASE=postgres \
@@ -249,6 +259,40 @@ PGHOST=127.0.0.1 PGPORT=55432 PGUSER=yumemism PGDATABASE=postgres \
 ## F3 への申し送り
 
 呼び手は `create_<name>_lock.sql` を create 本体と同じ transaction で先に1回打つ。READ COMMITTED では後続が先行+1になる。REPEATABLE READ 以上では①が `40001` を返すので、呼び手は transaction 単位で再試行する。①を飛ばす呼び手は、②だけでは RR 以上の安全を得られず、競合が重なる場合だけ `55P03` で止まる。
+
+## B2 ── lock 出力条件・一括行ロック順・第5引数
+
+巡2では lock の出力条件を create 本体と一致させた。単体は `emits(app, entity, "create_" <> entity.module)` の門を通し、一括は `CreateManyRule` の宣言と `emits(app, entity, "create_" <> entity.collection)` の両方を要求する。したがって、`CreateMany` 無しの `ordered_by` Entity は単体 lock のみ、手書き札で create が消える Entity は対応する lock も無しになる。
+
+一括 lock の実物は次の順序である。
+
+```sql
+WITH locked AS (
+ SELECT <親鍵>
+ FROM <親表>
+ WHERE <親鍵> IN (SELECT DISTINCT ... FROM jsonb_array_elements($1::jsonb) ...)
+ ORDER BY <親鍵>
+ FOR UPDATE
+)
+UPDATE <親表> SET <親鍵>=<親鍵>
+WHERE <親鍵> IN (SELECT <親鍵> FROM locked);
+```
+
+`FOR UPDATE` は鍵順の行ロック取得用、後段の no-op `UPDATE` は親行の版を進める用で、後者は残している。`verify-gate2-sql.mjs` は第5引数を省略すると path 推測せず usage + exit 2 になる。
+
+巡2の実測は次のとおり。
+
+| 検査 | 実測 |
+|---|---|
+| `gleam test` | 86 passed, no failures |
+| `verify-gate2-sql.mjs` | 19 PASS、status 0。T1 は37行、`no duplicate scope/order`。 |
+| main / decl 差分 | main 差0。decl は `create_free_space` / `create_link` / `create_widget` と各 lock の6行だけ。 |
+| `verify-verb-sql` | self-test 4 PASS。decl は stage2=11、missing-cast-ty=1。 |
+| route / root | route 7 rows、root FFI 8 checks PASS。 |
+| main generator | exit 4、exit 3=0、exit4=34行/9 service、警告21行。 |
+| 第5引数無し | usage のみ、exit 2、stack trace なし。 |
+
+証拠は `/home/yumemism/.codex-agents/runs/niekawa-20260921-131116-1974475-16200/a1/evidence/` にある。
 
 ## 残差
 

@@ -134,6 +134,15 @@ fn emits(app: model.App, entity: model.Entity, name: String) -> Bool {
   && !list.any(app.handwritten_verbs, fn(entry) { list.contains(entry.1, name) })
 }
 
+fn has_create_many(entity: model.Entity) -> Bool {
+  list.any(entity.verbs, fn(rule) {
+    case rule {
+      model.CreateManyRule -> True
+      _ -> False
+    }
+  })
+}
+
 fn emits_reorder(app: model.App, entity: model.Entity, name: String) -> Bool {
   emits(app, entity, name)
   && !list.contains(entity.handwritten_verbs, name <> "_stage")
@@ -818,27 +827,45 @@ fn sql_files(
     ]
     False -> []
   }
-  let ordered_locks = case entity.ordered_by {
+  let single_lock = case entity.ordered_by {
     Some(ordered) ->
       case ordered_parent(entity, app, ordered) {
-        Some(parent) -> [
-          sql_file(
-            entity,
-            hashes,
-            "create_" <> entity.module <> "_lock",
-            ordered_create_lock_sql(entity, app, ordered, parent),
-          ),
-          sql_file(
-            entity,
-            hashes,
-            "create_" <> entity.collection <> "_lock",
-            ordered_create_many_lock_sql(entity, app, ordered, parent),
-          ),
-        ]
+        Some(parent) ->
+          case emits(app, entity, "create_" <> entity.module) {
+            True -> [
+              sql_file(
+                entity,
+                hashes,
+                "create_" <> entity.module <> "_lock",
+                ordered_create_lock_sql(entity, app, ordered, parent),
+              ),
+            ]
+            False -> []
+          }
         None -> []
       }
     None -> []
   }
+  let many_lock = case entity.ordered_by {
+    Some(ordered) ->
+      case ordered_parent(entity, app, ordered) {
+        Some(parent) ->
+          case has_create_many(entity), emits(app, entity, "create_" <> entity.collection) {
+            True, True -> [
+              sql_file(
+                entity,
+                hashes,
+                "create_" <> entity.collection <> "_lock",
+                ordered_create_many_lock_sql(entity, app, ordered, parent),
+              ),
+            ]
+            _, _ -> []
+          }
+        None -> []
+      }
+    None -> []
+  }
+  let ordered_locks = list.append(single_lock, many_lock)
   list.append(
     create_files,
     list.append(
@@ -952,7 +979,19 @@ fn ordered_create_many_lock_sql(
   "-- 呼び手は create_"
   <> entity.collection
   <> " と同じ transaction でこれを先に 1 回打つ。$1 は Draft の jsonb 配列。親行の版を進める。\n"
-  <> "UPDATE "
+  <> "WITH locked AS (\n SELECT "
+  <> key
+  <> "\n FROM "
+  <> table(parent)
+  <> "\n WHERE "
+  <> key
+  <> " IN (\n SELECT DISTINCT "
+  <> first_value
+  <> "\n FROM jsonb_array_elements($1::jsonb) AS items(item)"
+  <> nullable_filter
+  <> "\n )\n ORDER BY "
+  <> key
+  <> "\n FOR UPDATE\n)\nUPDATE "
   <> table(parent)
   <> " SET "
   <> key
@@ -960,11 +999,9 @@ fn ordered_create_many_lock_sql(
   <> key
   <> " WHERE "
   <> key
-  <> " IN (\n SELECT DISTINCT "
-  <> first_value
-  <> "\n FROM jsonb_array_elements($1::jsonb) AS items(item)"
-  <> nullable_filter
-  <> "\n ORDER BY 1\n);\n"
+  <> " IN (SELECT "
+  <> key
+  <> " FROM locked);\n"
 }
 
 /// `ordered_by` のある Entity は、親を同じ文でロックしてから scope の末尾へ入れる。

@@ -874,20 +874,22 @@ pub fn ordered_create_lock_files_have_one_update_argument_test() {
   let relation_paths = list.map(relation_paths, fn(entry) { entry.0 })
   list.contains(relation_paths, "db/queries/verb/create_photo_lock.sql")
   |> should.be_true
-  list.contains(relation_paths, "db/queries/verb/create_photos_lock.sql")
+  let article_paths = files_of(fixture)
+  let article_paths = list.map(article_paths, fn(entry) { entry.0 })
+  list.contains(article_paths, "db/queries/verb/create_articles_lock.sql")
   |> should.be_true
 
   let single_lock =
     text_of(relation_fixture, "db/queries/verb/create_photo_lock.sql")
   let many_lock =
-    text_of(relation_fixture, "db/queries/verb/create_photos_lock.sql")
+    text_of(fixture, "db/queries/verb/create_articles_lock.sql")
   string.contains(single_lock, "UPDATE app.album SET id=id WHERE id=$1::uuid;")
   |> should.be_true
-  string.contains(many_lock, "UPDATE app.album SET id=id WHERE id IN (")
+  string.contains(many_lock, "UPDATE app.category SET name=name WHERE name IN (")
   |> should.be_true
-  string.contains(many_lock, "SELECT DISTINCT (item->>'album')::uuid")
+  string.contains(many_lock, "SELECT DISTINCT (item->>'category')")
   |> should.be_true
-  string.contains(many_lock, "ORDER BY 1") |> should.be_true
+  string.contains(many_lock, "ORDER BY name\n FOR UPDATE") |> should.be_true
   string.contains(single_lock, "SELECT") |> should.be_false
   string.contains(single_lock, "FOR UPDATE") |> should.be_false
   string.contains(single_lock, "$2") |> should.be_false
@@ -899,6 +901,38 @@ pub fn ordered_create_lock_files_have_one_update_argument_test() {
   |> should.be_false
   list.contains(flag_paths, "db/queries/verb/create_widgets_lock.sql")
   |> should.be_false
+}
+
+pub fn ordered_create_many_lock_requires_create_many_rule_test() {
+  let relation_paths = files_of(relation_fixture)
+  let relation_paths = list.map(relation_paths, fn(entry) { entry.0 })
+  list.contains(relation_paths, "db/queries/verb/create_photo_lock.sql")
+  |> should.be_true
+  list.contains(relation_paths, "db/queries/verb/create_photos.sql")
+  |> should.be_false
+  list.contains(relation_paths, "db/queries/verb/create_photos_lock.sql")
+  |> should.be_false
+}
+
+pub fn handwritten_create_suppresses_ordered_lock_test() {
+  let paths = files_of(verb_fixture)
+  let paths = list.map(paths, fn(entry) { entry.0 })
+  list.contains(paths, "db/queries/verb/create_ordered_handwritten.sql")
+  |> should.be_false
+  list.contains(paths, "db/queries/verb/create_ordered_handwritten_lock.sql")
+  |> should.be_false
+}
+
+pub fn ordered_create_many_lock_orders_parent_rows_before_update_test() {
+  let many_lock = text("db/queries/verb/create_articles_lock.sql")
+  string.contains(many_lock, "WITH locked AS (\n SELECT name\n FROM app.category")
+  |> should.be_true
+  string.contains(
+    many_lock,
+    "ORDER BY name\n FOR UPDATE\n)\nUPDATE app.category SET name=name WHERE name IN (SELECT name FROM locked);",
+  )
+  |> should.be_true
+  string.contains(many_lock, "ORDER BY 1") |> should.be_false
 }
 
 pub fn ordered_create_many_uses_gate_and_keeps_return_order_test() {

@@ -10,22 +10,31 @@
 //// (`db/queries/<service>/to_<prop>.sql`)を PG で流す ── Context 契約を通した復号は verify-root-ffi.mjs。
 
 import fs from "node:fs";
-import path from "node:path";
 import { spawnSync } from "node:child_process";
 import pg from "/home/yumemism/yumemism_repo/musearch/app/node_modules/pg/lib/index.js";
 
-const [, , musearchOut, articleOut, flagOut, relationOut] = process.argv;
+const [
+  ,
+  ,
+  musearchOut,
+  articleOut,
+  flagOut,
+  relationOut,
+  negativeOut,
+] = process.argv;
 
-if (!musearchOut || !articleOut || !flagOut || !relationOut) {
+if (
+  !musearchOut ||
+  !articleOut ||
+  !flagOut ||
+  !relationOut ||
+  !negativeOut
+) {
   console.error(
     "usage: verify-gate2-sql.mjs <musearch-out> <article-out> <flag-out> <relation-out> [negative-out]",
   );
   process.exit(2);
 }
-
-const negativeOut =
-  process.argv[6] ||
-  `${path.dirname(relationOut)}/fx-ordered_create_negative`;
 
 function readSql(out, relative) {
   return fs.readFileSync(`${out}/${relative}`, "utf8");

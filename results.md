@@ -229,3 +229,35 @@
 - 親欠落の失敗コードは汎用の `'conflict'`。専用名は語彙が要る。
 - 負の下端は BRIEF の括弧書き(`lo`)とは異なる。reader の起点 `int.max(lo, 0)` を正典とした。
 - `within` 先頭が optional の形では NULL scope を親検査・親 lock から外す実装にしたが、専用 fixture と独立した実 PG 箱は未実行。
+
+# 指示 B2 ── lock SQL の出力条件・一括行ロック順・第5引数
+
+## 状態
+
+- branch `verb-1b`、開始点 `3d7a9ba`。checkpoint `be8ffb1` で P0-1b-1 / P1-1b-1 / P2 の実装を入れた。
+- `create_<module>_lock.sql` は `emits(app, entity, "create_" <> entity.module)` の真偽に従う。`create_<collection>_lock.sql` は `CreateManyRule` の宣言があり、かつ `emits(app, entity, "create_" <> entity.collection)` が真のときだけ出す。単体と一括は別条件で出力する。
+- 一括 lock は `WITH locked AS (...)` の `ORDER BY <親鍵> FOR UPDATE` で親行を鍵順に取り、その後の no-op `UPDATE` で親行の版を進める2段構成にした。単体 lock の SQL 形は変えていない。
+- `verify-gate2-sql.mjs` の第5引数(負の下端 fixture 出力)を必須化した。省略時は usage + exit 2、stack trace なし。
+- DDL、`src/framework/`、musearch 3コピー、staging、production、push は変更していない。
+
+## DDL
+
+無し。生成・PG検証で一時 schema を使ったが、検証後に削除した。migration / schema は書いていない。
+
+## 検証証拠
+
+- `/home/yumemism/.codex-agents/runs/niekawa-20260921-131116-1974475-16200/a1/evidence/gleam-test-b2.txt`: **86 passed, no failures**。
+- `gate2-b2.txt` / `gate2-counts-b2.txt`: 19 PASS、status 0。T1は37行で `no duplicate scope/order`、T2は4行、T3は4行。
+- `diff-main-b2.txt` / `diff-main-b2-status.txt`: `base-main-out` との差0、diff status 0。
+- `diff-decl-b2.txt` / `diff-decl-b2-status.txt`: `create_free_space` / `create_link` / `create_widget` と対応する `*_lock.sql` の6行だけ、diff status 1(差分ありの通常値)。
+- `verify-verb-self-test-b2.txt`: 4 checks PASS。`verify-verb-decl-b2.txt`: stage2=11、missing-cast-ty=1。
+- `route-table-b2.txt`: `PASS (7 rows, face/http scratch build)`。`root-ffi-b2.txt`: `verify-root-ffi: 8 checks PASS`。
+- `main-counts-b2.txt`: generator status 4、`書いた: 635 ファイル`、exit4=34行/9 service、exit3=0、警告21行。
+- `gate2-missing-negative-b2.txt` / status: 第5引数無しは usage のみ、exit 2。stack trace は出ていない。
+- `fx-relation-b2` の lock file は `create_photo_lock.sql` の1本。`fx-article-b2/create_articles_lock.sql` は親鍵 `name` の `ORDER BY name FOR UPDATE` と後段 no-op `UPDATE` を持つ。
+
+## 残差
+
+- `hi` 超過時の飽和の綴りは語彙に無い。
+- lock 呼び出しを省略した REPEATABLE READ 以上の呼び手は、create 本体だけでは安全にならず、従来どおり transaction 単位の再試行が必要。
+- 親 Entity が解決できない `ordered_by` には lock 文が出ない。optional scope の専用 fixture と独立した実 PG 箱は未実行。
