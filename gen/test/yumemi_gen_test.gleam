@@ -39,6 +39,8 @@ const relation_text_order_fixture = "fixtures/relation_text_order"
 
 const relation_option_order_fixture = "fixtures/relation_option_order"
 
+const ordered_fixture = "fixtures/ordered_create"
+
 const entry_prefix_fixture = "fixtures/entry_prefix_validation"
 
 const faces_missing_entry_fixture = "fixtures/faces_missing_entry"
@@ -58,6 +60,8 @@ const route_ambiguous_fixture = "fixtures/route_ambiguous"
 const route_external_fixture = "fixtures/route_external"
 
 const route_nested_fixture = "fixtures/route_nested"
+
+const verb_fixture = "fixtures/verb_features"
 
 pub fn main() {
   gleeunit.main()
@@ -536,8 +540,7 @@ pub fn one_statement_per_named_query_test() {
 }
 
 pub fn relation_presence_and_with_become_sql_test() {
-  let related =
-    text_of(relation_fixture, "db/queries/photo_filter/related.sql")
+  let related = text_of(relation_fixture, "db/queries/photo_filter/related.sql")
   string.contains(
     related,
     "WHERE EXISTS(\n"
@@ -603,8 +606,7 @@ pub fn multi_has_stops_as_unimplemented_test() {
 pub fn one_statement_per_root_arrow_test() {
   let paths = list.map(files(), fn(entry) { entry.0 })
   list.filter(paths, fn(path) {
-    string.starts_with(path, "db/queries/")
-    && string.contains(path, "/to_")
+    string.starts_with(path, "db/queries/") && string.contains(path, "/to_")
   })
   |> list.sort(string.compare)
   |> should.equal([
@@ -632,8 +634,7 @@ pub fn one_statement_per_root_arrow_test() {
   |> should.be_true
   string.contains(found, "ORDER BY keys.ord;") |> should.be_true
   // uuid の鍵は uuid に寄せる
-  let album =
-    text_of(relation_fixture, "db/queries/photo_read/to_album.sql")
+  let album = text_of(relation_fixture, "db/queries/photo_read/to_album.sql")
   string.contains(album, "JOIN app.album t ON t.id=keys.value::uuid")
   |> should.be_true
 }
@@ -731,6 +732,92 @@ pub fn verb_bundle_covers_declared_actions_test() {
   string.contains(found, "pub fn advance_article(") |> should.be_true
 }
 
+pub fn verb_fixture_reads_handwritten_sealed_and_external_declarations_test() {
+  let assert Ok(units) = source.load(verb_fixture)
+  let assert Ok(loaded) = reader.read(units)
+  let assert Ok(external) =
+    list.find(loaded.collections, fn(item) { item.module == "ledger" })
+  external.collection |> should.equal("ledger_rows")
+  let assert Ok(handwritten) =
+    list.find(loaded.entities, fn(item) { item.module == "handwritten" })
+  handwritten.handwritten_verbs
+  |> should.equal([
+    "create_handwritten",
+    "create_feature",
+    "unknown_handwritten",
+  ])
+}
+
+pub fn handwritten_verbs_suppress_matching_output_and_warn_once_per_miss_test() {
+  let paths = list.map(files_of(verb_fixture), fn(entry) { entry.0 })
+  list.contains(paths, "db/queries/verb/create_handwritten.sql")
+  |> should.be_false
+  let found = text_of(verb_fixture, "src/gen/verb.gleam")
+  string.contains(found, "//// handwritten: ") |> should.be_true
+  string.contains(found, "create_handwritten") |> should.be_true
+  string.contains(found, "external_handwritten") |> should.be_true
+  let notes = notes_of(verb_fixture)
+  stop.worst(notes) |> should.equal(0)
+  notes
+  |> list.filter(fn(note) { string.contains(note.text, "unknown_handwritten") })
+  |> list.length
+  |> should.equal(1)
+  notes
+  |> list.filter(fn(note) { string.contains(note.text, "external_handwritten") })
+  |> list.length
+  |> should.equal(1)
+}
+
+pub fn entity_handwritten_foreign_name_warns_without_suppressing_test() {
+  let paths = list.map(files_of(verb_fixture), fn(entry) { entry.0 })
+  list.contains(paths, "db/queries/verb/create_feature.sql")
+  |> should.be_true
+  let found = text_of(verb_fixture, "src/gen/verb.gleam")
+  string.contains(found, "pub fn create_feature(") |> should.be_true
+  notes_of(verb_fixture)
+  |> list.filter(fn(note) {
+    string.contains(
+      note.text,
+      "handwritten: handwritten_verbs に生成名が無い: create_feature",
+    )
+  })
+  |> list.length
+  |> should.equal(1)
+}
+
+pub fn entity_handwritten_own_name_suppresses_function_and_sql_test() {
+  let paths = list.map(files_of(verb_fixture), fn(entry) { entry.0 })
+  list.contains(paths, "db/queries/verb/create_handwritten.sql")
+  |> should.be_false
+  let found = text_of(verb_fixture, "src/gen/verb.gleam")
+  string.contains(found, "pub fn create_handwritten(") |> should.be_false
+  notes_of(verb_fixture)
+  |> list.filter(fn(note) { string.contains(note.text, "create_handwritten") })
+  |> list.length
+  |> should.equal(0)
+}
+
+pub fn verb_fixture_emits_phase_gate_casts_sealed_and_multi_scope_test() {
+  let create = text_of(verb_fixture, "db/queries/verb/create_feature.sql")
+  string.contains(create, "phase,entered_draft") |> should.be_true
+  string.contains(create, "'draft'") |> should.be_true
+  string.contains(create, "::timestamptz") |> should.be_true
+
+  let update = text_of(verb_fixture, "db/queries/verb/rename_feature.sql")
+  string.contains(update, "SET title=$2") |> should.be_true
+  string.contains(update, "phase='draft'") |> should.be_true
+
+  let reorder = text_of(verb_fixture, "db/queries/verb/reorder_features.sql")
+  string.contains(reorder, "$3::jsonb") |> should.be_true
+  string.contains(reorder, "owner_id=$1::uuid") |> should.be_true
+  string.contains(reorder, "space_id IS NOT DISTINCT FROM $2::uuid")
+  |> should.be_true
+
+  let sealed = text_of(verb_fixture, "db/queries/verb/create_sealed_record.sql")
+  string.contains(sealed, "body_key_id") |> should.be_true
+  string.contains(sealed, "decode($2,'hex')") |> should.be_true
+}
+
 pub fn put_does_not_update_keys_versions_or_phase_gated_fields_test() {
   let found = text("db/queries/verb/put_article.sql")
   string.contains(found, "body=EXCLUDED.body") |> should.be_true
@@ -757,6 +844,59 @@ pub fn reorder_uses_declared_order_column_and_returning_alias_test() {
   let verb = text("src/gen/verb.gleam")
   string.contains(verb, "verb.compound(") |> should.be_true
   string.contains(verb, "reorder_articles_stage") |> should.be_true
+}
+
+pub fn ordered_create_locks_parent_and_assigns_next_order_test() {
+  let found = text_of(relation_fixture, "db/queries/verb/create_photo.sql")
+  string.contains(found, "FROM app.album") |> should.be_true
+  string.contains(found, "WHERE id=$2::uuid FOR UPDATE") |> should.be_true
+  string.contains(found, "COALESCE(max(existing.\"order\")+1,0)")
+  |> should.be_true
+  string.contains(found, "existing.album_id IS NOT DISTINCT FROM $2::uuid")
+  |> should.be_true
+  string.contains(
+    found,
+    "SELECT $1::uuid,$2::uuid,$3::uuid,$4,next_order.next_order",
+  )
+  |> should.be_true
+}
+
+/// Draft の欄は呼び手の入力、create SQL の呼び手入力 placeholder はその数で揃える。
+/// ordered_by の採番欄を Draft に残す、または SQL 側だけ入力を増やすとこの比較が落ちる。
+pub fn draft_fields_match_create_sql_placeholders_test() {
+  [
+    #(relation_fixture, "photo", "PhotoDraft"),
+    #(fixture, "article", "ArticleDraft"),
+    #(verb_fixture, "feature", "FeatureDraft"),
+    #(ordered_fixture, "child", "ChildDraft"),
+    #(flag_fixture, "widget", "WidgetDraft"),
+  ]
+  |> list.each(fn(entry) {
+    let #(app_dir, module, draft_name) = entry
+    let draft = text_of(app_dir, "src/gen/draft/" <> module <> ".gleam")
+    let create = text_of(app_dir, "db/queries/verb/create_" <> module <> ".sql")
+    draft_field_count(draft, draft_name)
+    |> should.equal(create_sql_input_placeholder_count(create))
+  })
+}
+
+/// CreateMany の JSON 入力は Draft の Property 名だけを読む。
+/// DB 採番の order や system 入力の phase / entered_* が混ざると落ちる。
+pub fn create_many_json_fields_match_draft_fields_test() {
+  let draft = text("src/gen/draft/article.gleam")
+  let create_many = text("db/queries/verb/create_articles.sql")
+  draft_field_names(draft, "ArticleDraft")
+  |> list.sort(string.compare)
+  |> should.equal(
+    create_many_json_field_names(create_many)
+    |> list.sort(string.compare),
+  )
+  string.contains(create_many, "item->>'order'") |> should.be_false
+  string.contains(create_many, "'draft',$2::timestamptz") |> should.be_true
+  let verb = text("src/gen/verb.gleam")
+  string.contains(verb, "  at: Datetime,") |> should.be_true
+  string.contains(verb, "stage(ctx, \"create_articles\", #(input, at))")
+  |> should.be_true
 }
 
 /// gen-3b(P0-3)── 退避の一時値は負値でなく、**宣言の値域の上端から下へ、範囲に無い値**を選ぶ。
@@ -805,10 +945,12 @@ pub fn reorder_uses_range_bounds_of_the_order_type_test() {
     "AND candidate NOT BETWEEN 1::bigint AND 1::bigint+c.expected-1",
   )
   |> should.be_true
-  string.contains(stage, "FROM app.photo e WHERE e.album_id=$1 FOR UPDATE")
+  string.contains(
+    stage,
+    "FROM app.photo e WHERE e.album_id=$1::uuid FOR UPDATE",
+  )
   |> should.be_true
-  let apply =
-    text_of(relation_fixture, "db/queries/verb/reorder_photos.sql")
+  let apply = text_of(relation_fixture, "db/queries/verb/reorder_photos.sql")
   string.contains(apply, "(1+ord-1)::integer AS new_order") |> should.be_true
   string.contains(apply, "SELECT value::uuid AS id") |> should.be_true
 }
@@ -895,9 +1037,7 @@ pub fn advance_sql_has_no_service_argument_test() {
 
 pub fn verb_sql_uses_entity_only_headers_test() {
   files()
-  |> list.filter(fn(entry) {
-    string.starts_with(entry.0, "db/queries/verb/")
-  })
+  |> list.filter(fn(entry) { string.starts_with(entry.0, "db/queries/verb/") })
   |> list.each(fn(entry) {
     string.starts_with(entry.1, "-- GENERATED from entity.")
     |> should.be_true
@@ -907,15 +1047,14 @@ pub fn verb_sql_uses_entity_only_headers_test() {
 }
 
 pub fn composite_key_is_present_in_signature_where_and_returning_test() {
-  let update =
-    text_of(flag_fixture, "db/queries/verb/update_chunk_text.sql")
+  let update = text_of(flag_fixture, "db/queries/verb/update_chunk_text.sql")
   let delete = text_of(flag_fixture, "db/queries/verb/delete_chunk.sql")
   string.contains(update, "WHERE a=$1 AND b=$2 AND c=$3")
   |> should.be_true
   string.contains(update, "RETURNING a,b,c") |> should.be_true
   string.contains(delete, "WHERE a=$1 AND b=$2 AND c=$3")
   |> should.be_true
-  string.contains(delete, "RETURNING a,b,c") |> should.be_true
+  string.contains(delete, "RETURNING") |> should.be_false
   let verb = text_of(flag_fixture, "src/gen/verb.gleam")
   string.contains(
     verb,
@@ -940,7 +1079,7 @@ pub fn draft_keeps_input_keys_and_create_sql_arguments_test() {
   let article_create = text("db/queries/verb/create_article.sql")
   string.contains(
     article_create,
-    "INSERT INTO app.article(slug,title,body,version,\"order\",category_id)",
+    "INSERT INTO app.article(slug,title,body,version,\"order\",category_id,phase,entered_draft)",
   )
   |> should.be_true
 }
@@ -962,6 +1101,107 @@ fn reader_error(app_dir: String) -> reader.Error {
   let assert Ok(units) = source.load(app_dir)
   let assert Error(error) = reader.read(units)
   error
+}
+
+fn draft_field_count(source: String, draft_name: String) -> Int {
+  count_draft_fields(
+    string.split(source, "\n"),
+    "  " <> draft_name <> "(",
+    False,
+    0,
+  )
+}
+
+fn draft_field_names(source: String, draft_name: String) -> List(String) {
+  collect_draft_field_names(
+    string.split(source, "\n"),
+    "  " <> draft_name <> "(",
+    False,
+    [],
+  )
+}
+
+fn collect_draft_field_names(
+  lines: List(String),
+  marker: String,
+  inside: Bool,
+  found: List(String),
+) -> List(String) {
+  case lines {
+    [] -> list.reverse(found)
+    [line, ..rest] ->
+      case inside {
+        False ->
+          case line == marker {
+            True -> collect_draft_field_names(rest, marker, True, [])
+            False -> collect_draft_field_names(rest, marker, False, found)
+          }
+        True ->
+          case line == "  )" {
+            True -> list.reverse(found)
+            False ->
+              case string.split(string.trim(line), ":") {
+                [name, ..] ->
+                  collect_draft_field_names(rest, marker, True, [name, ..found])
+                _ -> collect_draft_field_names(rest, marker, True, found)
+              }
+          }
+      }
+  }
+}
+
+fn create_many_json_field_names(sql: String) -> List(String) {
+  case string.split(sql, "item->>'") {
+    [_prefix, ..pieces] ->
+      pieces
+      |> list.filter_map(fn(piece) {
+        case string.split(piece, "'") {
+          [name, ..] -> Ok(name)
+          _ -> Error(Nil)
+        }
+      })
+      |> list.unique
+    _ -> []
+  }
+}
+
+fn count_draft_fields(
+  lines: List(String),
+  marker: String,
+  inside: Bool,
+  count: Int,
+) -> Int {
+  case lines {
+    [] -> count
+    [line, ..rest] ->
+      case inside {
+        False ->
+          case line == marker {
+            True -> count_draft_fields(rest, marker, True, 0)
+            False -> count_draft_fields(rest, marker, False, count)
+          }
+        True ->
+          case line == "  )" {
+            True -> count
+            False -> count_draft_fields(rest, marker, True, count + 1)
+          }
+      }
+  }
+}
+
+fn create_sql_input_placeholder_count(sql: String) -> Int {
+  let assert Ok(values) =
+    sql
+    |> string.split("\n")
+    |> list.find(fn(line) {
+      string.contains(line, "SELECT $1") || string.contains(line, "VALUES($1")
+    })
+  let input_values = case string.split(values, ",'draft'") {
+    [before, ..] -> before
+    [] -> values
+  }
+  let pieces = string.split(input_values, "$")
+  list.length(pieces) - 1
 }
 
 pub fn advance_all_is_exit_five_with_reason_test() {
@@ -1131,8 +1371,7 @@ pub fn empty_order_falls_back_to_the_key_test() {
 }
 
 pub fn optional_column_asc_gets_nulls_last_test() {
-  let found =
-    text_of(flag_fixture, "db/queries/widget_list/first_place.sql")
+  let found = text_of(flag_fixture, "db/queries/widget_list/first_place.sql")
   string.contains(found, "ORDER BY w.place ASC NULLS LAST,w.id ASC")
   |> should.be_true
   string.contains(found, "LIMIT 1") |> should.be_true

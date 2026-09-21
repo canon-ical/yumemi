@@ -210,14 +210,40 @@ fn collection_of(unit: Unit) -> Result(Option(model.Collection), Error) {
       case constant.annotation, g.string_value(constant.value) {
         Some(annotation), Some(collection) ->
           case g.type_name(annotation) {
-            Some("String") ->
-              Ok(
-                Some(model.Collection(module: unit.path, collection: collection)),
-              )
+            Some("String") -> {
+              use handwritten_verbs <- result.try(handwritten_verbs_of(
+                module,
+                unit.path,
+              ))
+              Ok(Some(model.Collection(
+                module: unit.path,
+                collection: collection,
+                handwritten_verbs: handwritten_verbs,
+              )))
+            }
             _ -> Error(Unsupported(unit.path, "collection が String でない"))
           }
         _, _ -> Error(Unsupported(unit.path, "collection が String でない"))
       }
+  }
+}
+
+fn handwritten_verbs_of(
+  module: glance.Module,
+  where: String,
+) -> Result(List(String), Error) {
+  case public_constant(module, "handwritten_verbs") {
+    None -> Ok([])
+    Some(constant) -> {
+      use expressions <- result.try(expression_list(
+        constant.value,
+        where,
+        "handwritten_verbs",
+      ))
+      list.try_map(expressions, fn(expression) {
+        string_expression(expression, where, "handwritten_verbs の verb 名")
+      })
+    }
   }
 }
 
@@ -273,6 +299,7 @@ fn entity_of(unit: Unit, table: Registry) -> Result(Option(Entity), Error) {
       use key_props <- result.try(raw_key_props)
       let entity_name = naming.pascal(name)
       let fields = fields_of(entity_name, name, props, phases)
+      let verb_fields = verb_fields_of(entity_name, props)
       use key_columns <- result.try(
         list.try_map(key_props, fn(key_prop) {
           case list.find(props, fn(prop) { prop.name == key_prop }) {
@@ -313,6 +340,10 @@ fn entity_of(unit: Unit, table: Registry) -> Result(Option(Entity), Error) {
         Some(constant) -> option.unwrap(g.string_value(constant.value), name)
         None -> name
       }
+      use handwritten_verbs <- result.try(handwritten_verbs_of(
+        module,
+        unit.path,
+      ))
       use #(verbs, ordered_by, upsert_key) <- result.try(declarations(
         module,
         phases,
@@ -336,6 +367,7 @@ fn entity_of(unit: Unit, table: Registry) -> Result(Option(Entity), Error) {
           table: name,
           props: props,
           fields: fields,
+          verb_fields: verb_fields,
           phases: phases,
           key_prop: key_prop,
           key_column: key_column,
@@ -347,6 +379,7 @@ fn entity_of(unit: Unit, table: Registry) -> Result(Option(Entity), Error) {
           subject: g.find_constant(module, "subject") != None,
           edges: edges,
           verbs: verbs,
+          handwritten_verbs: handwritten_verbs,
           ordered_by: ordered_by,
           upsert_key: upsert_key,
           auto_key: auto_key,
@@ -731,12 +764,18 @@ fn parse_order(
         g.labelled(expression, "within")
         |> option.to_result(Unsupported(where, "ordered_by.within が無い")),
       )
-      use within <- result.try(string_expression(
+      use within_expressions <- result.try(expression_list(
         within_expression,
         where,
         "ordered_by.within",
       ))
-      use _ <- result.try(validate_order(field, within, props, where))
+      use within <- result.try(list.try_map(within_expressions, fn(item) {
+        string_expression(item, where, "ordered_by.within の Property")
+      }))
+      use _ <- result.try(case within {
+        [] -> Error(Unsupported(where, "ordered_by.within が空"))
+        _ -> validate_order(field, within, props, where)
+      })
       use _ <- result.try(case list.length(key_props) > 1 {
         True ->
           Error(Internal(where, entity_name <> " の複合 key に対する reorder は未実装"))
@@ -809,7 +848,7 @@ fn validate_delete_where(
 
 fn validate_order(
   field: String,
-  within: String,
+  within: List(String),
   props: List(Prop),
   where: String,
 ) -> Result(Nil, Error) {
@@ -819,17 +858,30 @@ fn validate_order(
       Unsupported(where, "ordered_by.field の Property が無い: " <> field)
     }),
   )
-  use within_prop <- result.try(
-    list.find(props, fn(prop) { prop.name == within })
-    |> result.map_error(fn(_) {
-      Unsupported(where, "ordered_by.within の Property が無い: " <> within)
-    }),
-  )
-  case is_relation(order_prop), is_relation(within_prop) {
-    False, True -> Ok(Nil)
-    True, _ -> Error(Unsupported(where, "ordered_by.field が親の関係列: " <> field))
-    _, False ->
-      Error(Unsupported(where, "ordered_by.within が範囲の関係列でない: " <> within))
+  case is_relation(order_prop) {
+    True -> Error(Unsupported(where, "ordered_by.field が親の関係列: " <> field))
+    False -> {
+      use _ <- result.try(list.try_each(within, fn(name) {
+        use prop <- result.try(
+          list.find(props, fn(prop) { prop.name == name })
+          |> result.map_error(fn(_) {
+            Unsupported(where, "ordered_by.within の Property が無い: " <> name)
+          }),
+        )
+        case is_relation(prop), prop.repeated {
+          True, False -> Ok(Nil)
+          True, True -> Error(Unsupported(
+            where,
+            "ordered_by.within が複数の関係列: " <> name,
+          ))
+          False, _ -> Error(Unsupported(
+            where,
+            "ordered_by.within が範囲の関係列でない: " <> name,
+          ))
+        }
+      }))
+      Ok(Nil)
+    }
   }
 }
 
@@ -1057,7 +1109,7 @@ fn fields_of(
           model.FieldDef(
             name: base,
             entity_name: entity_name,
-            column: prop.name,
+            column: property_column(prop),
             optional: prop.optional,
             repeated: prop.repeated,
             value: model.TypeValue(reference),
@@ -1113,8 +1165,57 @@ fn fields_of(
 
 fn column_of(props: List(Prop), name: String) -> String {
   case list.find(props, fn(prop) { prop.name == name }) {
-    Ok(model.Prop(kind: model.RelProp(..), ..)) -> name <> "_id"
-    _ -> name
+    Ok(prop) -> property_column(prop)
+    Error(_) -> name
+  }
+}
+
+fn verb_fields_of(
+  entity_name: String,
+  props: List(Prop),
+) -> List(model.FieldDef) {
+  props
+  |> list.filter_map(fn(prop) {
+    case prop.kind {
+      model.ValueProp(reference) ->
+        case reference.name, reference.parameters {
+          "Sealed", [_, key] -> Ok(model.FieldDef(
+            name: entity_name <> naming.pascal(prop.name) <> "KeyId",
+            entity_name: entity_name,
+            column: prop.name <> "_key_id",
+            optional: prop.optional,
+            repeated: False,
+            value: model.TypeValue(type_ref_of_shape(key)),
+          ))
+          _, _ -> Error(Nil)
+        }
+      _ -> Error(Nil)
+    }
+  })
+}
+
+fn type_ref_of_shape(shape: model.TypeShape) -> model.TypeRef {
+  case shape {
+    model.NamedShape(module: module, name: name, parameters: parameters) ->
+      model.TypeRef(
+        module: module,
+        name: name,
+        parameters: parameters,
+      )
+    model.TupleShape(items) ->
+      model.TypeRef(
+        module: None,
+        name: "Tuple",
+        parameters: items,
+      )
+  }
+}
+
+fn property_column(prop: Prop) -> String {
+  case prop.kind {
+    model.RelProp(..) -> prop.name <> "_id"
+    model.ValueProp(_) -> prop.name
+    model.SumProp(..) -> prop.name
   }
 }
 
@@ -1951,6 +2052,10 @@ pub fn read(units: List(Unit)) -> Result(App, Error) {
   use _ <- result.try(validate_relation_shapes(entity_list))
   use service_list <- result.try(services(units))
   use entry_list <- result.try(entry_declarations(units))
+  use external_handwritten <- result.try(external_handwritten_verbs(
+    units,
+    entity_list,
+  ))
   Ok(model.App(
     value_types: types,
     entities: entity_list,
@@ -1958,7 +2063,29 @@ pub fn read(units: List(Unit)) -> Result(App, Error) {
     services: service_list,
     arrows: arrows(entity_list),
     entries: entry_list,
+    handwritten_verbs: external_handwritten,
   ))
+}
+
+fn external_handwritten_verbs(
+  units: List(Unit),
+  entities: List(Entity),
+) -> Result(List(#(String, List(String))), Error) {
+  let entity_names = list.map(entities, fn(entity) { entity.module })
+  units
+  |> list.filter(fn(unit) {
+    !string.contains(unit.path, "/")
+    && !list.contains(entity_names, unit.path)
+  })
+  |> list.try_map(fn(unit) {
+    let module = g.in_order(unit.module)
+    use verbs <- result.try(handwritten_verbs_of(module, unit.path))
+    Ok(#(unit.path, verbs))
+  })
+  |> result.map(fn(entries) {
+    entries
+    |> list.filter(fn(entry) { entry.1 != [] })
+  })
 }
 
 /// `ordered_by.field` は整数の列に限る(`Int` か `Range` の値型、Option / List でない)。

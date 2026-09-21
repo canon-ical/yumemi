@@ -94,7 +94,7 @@ pub type VerbBump {
 }
 
 pub type OrderedBy {
-  OrderedBy(field: String, within: String)
+  OrderedBy(field: String, within: List(String))
 }
 
 /// 列 1本。Field の variant 1つと SQL の 1列が同じものを指す。
@@ -131,6 +131,8 @@ pub type Entity {
     table: String,
     props: List(Prop),
     fields: List(FieldDef),
+    /// verb SQL だけが使う補助列(例: Sealed の `<prop>_key_id`)。
+    verb_fields: List(FieldDef),
     /// Lifecycle の相。無ければ空
     phases: List(String),
     /// key 関数が返す Property の名。組なら先頭
@@ -152,6 +154,8 @@ pub type Entity {
     edges: List(#(String, String)),
     /// Entity に宣言された追加の verb 規則。
     verbs: List(VerbRule),
+    /// 生成せず、手書きの実体へ委ねる verb 名。
+    handwritten_verbs: List(String),
     /// reorder の宣言。無ければ None。
     ordered_by: Option(OrderedBy),
     /// put の鍵。無ければ空。
@@ -168,6 +172,8 @@ pub type Collection {
     module: String,
     /// 入口での集合名。`ledger_stores` / `metrics`。
     collection: String,
+    /// 生成せず、手書きの実体へ委ねる verb 名。
+    handwritten_verbs: List(String),
   )
 }
 
@@ -405,6 +411,8 @@ pub type App {
     services: List(Service),
     arrows: List(Arrow),
     entries: List(Entry),
+    /// Entity / ER 外 module の手書き verb 名。header と警告に使う。
+    handwritten_verbs: List(#(String, List(String))),
   )
 }
 

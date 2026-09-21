@@ -79,24 +79,27 @@ pub fn generate(
   let entry_output = entry.emit(app, hashes)
   let notes =
     list.append(
-      reader.missing_key_notes(units),
+      verb.notes(app),
       list.append(
-        reader.entry_notes(app),
+        reader.missing_key_notes(units),
         list.append(
-          list.map(query.collisions(app), fn(entry) {
-            let #(module, name) = entry
-            Note(
-              class: stop.Conflict,
-              text: "名前の衝突 "
-                <> module
-                <> ": "
-                <> name
-                <> "(構成子は module ごとに1つの名前空間)",
-            )
-          }),
+          reader.entry_notes(app),
           list.append(
-            list.append(root.notes(app), sql.notes(app, hashes)),
-            entry_output.notes,
+            list.map(query.collisions(app), fn(entry) {
+              let #(module, name) = entry
+              Note(
+                class: stop.Conflict,
+                text: "名前の衝突 "
+                  <> module
+                  <> ": "
+                  <> name
+                  <> "(構成子は module ごとに1つの名前空間)",
+              )
+            }),
+            list.append(
+              list.append(root.notes(app), sql.notes(app, hashes)),
+              entry_output.notes,
+            ),
           ),
         ),
       ),
