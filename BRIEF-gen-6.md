@@ -96,3 +96,12 @@
 7. **生成物 14 種目(裁定 4)は本便で吐かず、musearch 追随便へ送る。**P4 が置く ▲(`www/src/gen/external.gleam` / `src/gen/doc/api_v1.gleam`)がまだ無く、源(`api/src/external_hosts.mjs` は `.mjs`、API v1 本文は `docs/api-v1.md` で `api/priv/` は無い)も生成器の口に載っていない ── 真壁に道と名前を発明させて P4 を合わせる側に回すのは「手書きが先、生成器が後」の逆転。plan §3 #14 を落とし 13 種で段 B〜D を回す。`results.md` の `## musearch 追随便への申し送り` に「14 種目は P4 の ▲ が置かれた後の便で、源は `.mjs` を読む口か `api/priv/` の置き直しかを鷹野が P4 の results を見て裁く」と書く。裁定 4 は本行で上書き。
 8. **裁定 3 の「out_dir の下に package の段」は面だけに効く。**back は out_dir の根(`db/queries/**` / `src/gen/**`)のまま、面は `<out>/<面>/…`。検収「back の 57 file が 1 本も動かない(file 名と本文の diff 0)」が正 ── fixture の basename が `article` で段の名すら立たず、`compare.py` / `verify-verb-sql.mjs` / F 便の突合が全部根の形に載っている。裁定 3 の文面を「面の生成物だけ `<out>/<面>/` の段、back は根」に読み替える。
 - 基線の訂正(`gleam test` 89、musearch の生成 604 file)はそのとおり。段 A の真壁はこのまま起こしてよい。
+
+## 鷹野の裁定 9(2026-09-22 06:15、巡 2 のエスカレーション ── 検査 8 本の gate と fixture の面)
+
+**(a) を採る ── 検査 8 本は常時走らせる(`pages` 欄の有無で gate しない)。fixture `public/` の面を 51 v5 に合わせる。**検査の実装が正しく、ずれているのは Y1c が置いた fixture の側(パス変数 `arg_id` ↔ `Args(slug)`、`of` の Args に `widget` 欄が無い ── どちらも 51 v5 §80 / §177 / §430 の真の違反)。(b) は検査が test でだけ通って現物で死ぬ形で #79 に当たる、(c) は正典を緩める側なので不採用。
+
+- fixture の直し:`arg_id` → `arg_slug` の rename、`widget` 欄は **fixture の back に枠の読みを 1 本足す**(既存 `article_list` の Args に欄を足す方は 51 の「枠の読みは枠の名前を Args に持つ 1 本」の形から外れる)。
+- **検収の読み替え:**「back の 57 file が 1 本も動かない」→「**fixture は足した読み 1 本に連動する生成物(`gen/service.gleam` / `entry/http.gleam` / root / types)だけ動いてよく、動いた file と理由を results に列挙する。musearch の 604 file は 1 本も動かない(exit 3 = 0 / exit 4 = 18 / 警告 29 / 本文 diff 0 のまま)**」。
+- musearch の現物で検査を効かせるには `api/src/entry.gleam` に `pages: AllPages` と `api/gleam.toml` の依存窓の引き上げが要る ── **本便の射程外、`## musearch 追随便への申し送り` に 1 行**(F4 の「どこまで A」に足す候補、鷹野が F4 の BRIEF に書く)。
+- 段 A に戻る巡が 1 つ増えるのは承知。段 B は巡 4 から。
