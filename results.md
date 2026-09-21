@@ -234,7 +234,7 @@
 
 ## 状態
 
-- branch `verb-1b`、開始点 `3d7a9ba`。checkpoint `be8ffb1` で P0-1b-1 / P1-1b-1 / P2 の実装を入れた。
+- branch `verb-1b`、開始点 `3d7a9ba`。commit `c71d0a2` で P0-1b-1 / P1-1b-1 / P2 の実装を入れた。
 - `create_<module>_lock.sql` は `emits(app, entity, "create_" <> entity.module)` の真偽に従う。`create_<collection>_lock.sql` は `CreateManyRule` の宣言があり、かつ `emits(app, entity, "create_" <> entity.collection)` が真のときだけ出す。単体と一括は別条件で出力する。
 - 一括 lock は `WITH locked AS (...)` の `ORDER BY <親鍵> FOR UPDATE` で親行を鍵順に取り、その後の no-op `UPDATE` で親行の版を進める2段構成にした。単体 lock の SQL 形は変えていない。
 - `verify-gate2-sql.mjs` の第5引数(負の下端 fixture 出力)を必須化した。省略時は usage + exit 2、stack trace なし。

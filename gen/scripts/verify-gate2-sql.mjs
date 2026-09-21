@@ -3,7 +3,7 @@
 //// 生成 SQL を実 PG に流す検算(柏木ゲート 2 の P0-1 / 2 / 3 / 4 / 5 / 7)。
 ////
 ////   PGHOST=127.0.0.1 PGPORT=55432 PGUSER=yumemism PGDATABASE=postgres \
-////   node gen/scripts/verify-gate2-sql.mjs <musearch-out> <article-out> <flag-out> <relation-out> [negative-out]
+////   node gen/scripts/verify-gate2-sql.mjs <musearch-out> <article-out> <flag-out> <relation-out> <negative-out>
 ////
 //// gen-3b:P0-3 は負値・両端値(int4 の上限 / 下限)・実 CHECK / UNIQUE・同一 scope の同時実行・失敗時 rollback、
 //// それに `Range(min: 1, max: 10)` の順序列(fixtures/relation)を足した。P0-5 はここでは矢印の生成 SQL
@@ -31,7 +31,7 @@ if (
   !negativeOut
 ) {
   console.error(
-    "usage: verify-gate2-sql.mjs <musearch-out> <article-out> <flag-out> <relation-out> [negative-out]",
+    "usage: verify-gate2-sql.mjs <musearch-out> <article-out> <flag-out> <relation-out> <negative-out>",
   );
   process.exit(2);
 }
