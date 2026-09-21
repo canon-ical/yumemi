@@ -1,3 +1,32 @@
+# 指示 段B 差し戻し ── 写し `out/<service>.gleam` の import を正す
+
+## 状態
+
+- `gen/src/yumemi_gen/emit/front.gleam` の型解決を、許可された `gleam/*`・`framework/*`・`gen/service` 以外は back package の型宣言を再帰的に写す規則へ修正した。`gen/draft/*` は生成 draft を読み取り単位にして同じ規則で写し、トップレベル module も source unit から写す。
+- `framework/blob` / `framework/time` は import に戻し、`framework/er` の `Has` / `Held` / `Multi` の透明再定義は維持した。型名衝突の候補は同一 file の予約名全体で `Row` へ綴り替える。
+- `api.gleam` の path を `{x}` から `:x` へ変換した。fixture の checked-in front 生成物も追随させた。
+- import allowlist の全 `out/*.gleam` 走査、`gen/draft`・トップレベル module・`framework/blob` の source-string 入力テストを追加した。既存テストは削除していない。
+
+## DDL
+
+無し。migration / schema / staging / production への適用はしていない。
+
+## 検証
+
+- root `gleam build`: **exit 0**。既存の `src/framework/secret.gleam` unused private constructor warning 1件。`build/gen6-b2-root-build.txt`
+- `cd gen && gleam test`: **112 passed, no failures**。`gen/build/gen6-b2-test-code.txt`
+- fixture generator: **exit 0 / 71 file**。back **60 file diff 0**、面 `src/gen` **11 file**。`gen/build/gen6-b2-fixture-generate.txt`、`gen/build/gen6-b2-fixture-back-diff-final.txt`、`gen/build/gen6-b2-counts-final.txt`
+- fixture の ▲ 4本(`blocks.gleam`、`widgets.gleam`、`service.gleam`、`out/article_read.gleam`)は本文 diff **0**。`gen/build/gen6-b2-blocks-body-final.diff` ほか同名3本、`gen/build/gen6-b2-out-article-read-body-final.diff`
+- `cd gen/fixtures/article/public && gleam build`: **exit 0**。`build/gen6-b2-public-build.txt`
+- 指定 snapshot のみを入力に生成: **exit 4**、診断 **exit 0 = 29 / exit 3 = 0 / exit 4 = 18**、back **604 file diff 0**。`gen/build/gen6-b2-musearch-generate.txt`、`gen/build/gen6-b2-musearch-back-diff-final.txt`
+- snapshot の `www/src/gen/**` の許可表外 import: **0件**。一時コピーした www package の build も **exit 0**。`gen/build/gen6-b2-face-import-violations-final.txt`、`gen/build/gen6-b2-musearch-www-build.txt`
+- snapshot の `route.gleam` / `api.gleam`: `{x}` path **0件**、変数 path は colon 記法。`gen/build/gen6-b2-counts-final.txt`
+
+## 鷹野宛
+
+- 入力は `/home/yumemism/.codex-agents/runs/niekawa-20260922-061417-3399503-22265/ms-96fb8cc/api` の固定 snapshot のみ。live `musearch` へは読み書きしていない。
+- back 側の emit・生成物、DDL、migration、Hex、push、`main` は触っていない。
+
 # 指示 gen-6 段B ── 面の生成物6種
 
 ## 状態

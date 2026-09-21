@@ -8,6 +8,7 @@ import gleam/option.{type Option, None, Some}
 import gleam/order
 import gleam/string
 import yumemi_gen/digest
+import yumemi_gen/emit/draft
 import yumemi_gen/emit/entry
 import yumemi_gen/emit/hash
 import yumemi_gen/emit/types.{type File, File}
@@ -16,7 +17,7 @@ import yumemi_gen/glance_util as g
 import yumemi_gen/model
 import yumemi_gen/naming
 import yumemi_gen/reader/front as reader_front
-import yumemi_gen/source.{type Unit}
+import yumemi_gen/source.{type Unit, Unit}
 
 type ApiRoute {
   ApiRoute(service: String, method: String, path: String)
@@ -47,6 +48,7 @@ pub fn emit(
     source_hash(back_units, fn(unit) {
       string.starts_with(unit.path, "service/")
     })
+  let type_units = back_type_units(app, back_units, hashes)
   let files = [
     File(
       path: face_name <> "/src/gen/route.gleam",
@@ -73,7 +75,7 @@ pub fn emit(
     app.services
     |> list.sort(fn(left, right) { string.compare(left.module, right.module) })
     |> list.map(fn(service) {
-      out_file(app, back_units, service, hashes, face_name)
+      out_file(app, type_units, service, hashes, face_name)
     })
   list.append(files, out_files)
 }
@@ -241,7 +243,12 @@ fn api_route_from_row(row: String, face_name: String) -> Result(ApiRoute, Nil) {
       {
         Some(face), Some(method), Some(path), Some(service) ->
           case face == face_name {
-            True -> Ok(ApiRoute(service: service, method: method, path: path))
+            True ->
+              Ok(ApiRoute(
+                service: service,
+                method: method,
+                path: colon_path(path),
+              ))
             False -> Error(Nil)
           }
         _, _, _, _ -> Error(Nil)
@@ -259,6 +266,43 @@ fn quoted_field(row: String, label: String) -> Option(String) {
       }
     _ -> None
   }
+}
+
+fn colon_path(path: String) -> String {
+  path |> string.replace("{", ":") |> string.replace("}", "")
+}
+
+fn back_type_units(
+  app: model.App,
+  units: List(Unit),
+  hashes: hash.Hashes,
+) -> List(Unit) {
+  list.append(units, generated_draft_units(app, hashes))
+}
+
+fn generated_draft_units(
+  app: model.App,
+  hashes: hash.Hashes,
+) -> List(Unit) {
+  draft.emit(app, hashes)
+  |> list.filter_map(fn(file) {
+    case
+      string.starts_with(file.path, "src/")
+        && string.ends_with(file.path, ".gleam")
+    {
+      False -> Error(Nil)
+      True ->
+        case glance.module(file.text) {
+          Ok(module) ->
+            Ok(Unit(
+              path: file.path |> string.drop_start(4) |> string.drop_end(6),
+              text: file.text,
+              module: module,
+            ))
+          Error(_) -> Error(Nil)
+        }
+    }
+  })
 }
 
 // ── Out の写し ──────────────────────────────────────────────────────────────
@@ -488,33 +532,31 @@ fn collect_named(
             }
           }
         "framework/time" ->
-          case is_time_type(name) {
-            True -> add_opaque(state, name)
-            False -> add_import(state, path, name)
-          }
+          add_import(state, path, name)
         "framework/blob" ->
-          case name == "Blob" {
-            True -> add_opaque(state, name)
-            False -> add_import(state, path, name)
-          }
-        _ ->
-          case string.starts_with(path, "gen/types/") {
-            True -> ensure_value_alias(state, app, path, name)
-            False ->
-              case string.starts_with(path, "entity/") {
-                True ->
-                  collect_entity_or_custom(state, app, units, scope, path, name)
-                False ->
-                  case string.starts_with(path, "service/") {
-                    True -> ensure_named(state, app, units, path, name)
-                    False -> {
-                      let state = add_import(state, path, name)
-                      list.fold(parameters, state, fn(acc, parameter) {
-                        collect_gl_type(acc, app, units, scope, parameter)
-                      })
-                    }
-                  }
-              }
+          add_import(state, path, name)
+        _ -> collect_back_named(state, app, units, scope, path, name)
+      }
+  }
+}
+
+fn collect_back_named(
+  state: State,
+  app: model.App,
+  units: List(Unit),
+  scope: Scope,
+  path: String,
+  name: String,
+) -> State {
+  case string.starts_with(path, "gen/types/") {
+    True -> ensure_value_alias(state, app, path, name)
+    False ->
+      case string.starts_with(path, "entity/") {
+        True -> collect_entity_or_custom(state, app, units, scope, path, name)
+        False ->
+          case allowed_import(path) {
+            True -> add_import(state, path, name)
+            False -> ensure_named(state, app, units, path, name)
           }
       }
   }
@@ -667,15 +709,9 @@ fn collect_model_named(
         False -> add_import(state, path, name)
       }
     "framework/time" ->
-      case is_time_type(name) {
-        True -> add_opaque(state, name)
-        False -> add_import(state, path, name)
-      }
+      add_import(state, path, name)
     "framework/blob" ->
-      case name == "Blob" {
-        True -> add_opaque(state, name)
-        False -> add_import(state, path, name)
-      }
+      add_import(state, path, name)
     _ ->
       case string.starts_with(path, "gen/types/") {
         True -> ensure_value_alias(state, app, path, name)
@@ -690,7 +726,11 @@ fn collect_model_named(
                 path,
                 name,
               )
-            False -> add_import(state, path, name)
+            False ->
+              case allowed_import(path) {
+                True -> add_import(state, path, name)
+                False -> ensure_named(state, app, units, path, name)
+              }
           }
       }
   }
@@ -923,13 +963,9 @@ fn declarations_text(state: State, app: model.App) -> String {
     list.map(state.entities, fn(entity) { entity_text(state, entity, app) })
   let phantoms =
     list.map(state.phantoms, fn(name) { "pub type " <> name <> "\n" })
-  let entity_names =
-    list.map(state.entities, fn(entity) {
-      mapped_name(state, "entity/" <> entity.module, entity.type_name)
-    })
   let custom =
     list.map(state.custom, fn(declaration) {
-      custom_text(state, declaration, entity_names)
+      custom_text(state, declaration, type_names(state))
     })
   string.join(
     list.append(
@@ -1276,15 +1312,15 @@ fn is_relation_type(name: String) -> Bool {
   list.contains(["Key", "Has", "Held", "Link", "Multi"], name)
 }
 
-fn is_time_type(name: String) -> Bool {
-  list.contains(["Date", "Datetime", "Time"], name)
-}
-
 fn type_name(type_: glance.Type) -> String {
   case type_ {
     glance.NamedType(name: name, ..) -> name
     _ -> ""
   }
+}
+
+fn type_names(state: State) -> List(String) {
+  list.map(state.names, fn(item) { item.1 })
 }
 
 fn resolved_path(scope: Scope, type_: glance.Type) -> Option(String) {
@@ -1439,6 +1475,12 @@ fn opaque_path(name: String) -> String {
     "Blob" -> "framework/blob"
     _ -> "framework"
   }
+}
+
+fn allowed_import(path: String) -> Bool {
+  string.starts_with(path, "gleam/")
+  || string.starts_with(path, "framework/")
+  || path == "gen/service"
 }
 
 fn add_opaque(state: State, name: String) -> State {

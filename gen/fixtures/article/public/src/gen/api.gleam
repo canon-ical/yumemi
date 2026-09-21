@@ -12,6 +12,6 @@ pub type Route {
 
 pub const routes: List(Route) = [
   Route(service: service.ArticleList, method: Get, path: "/api/articles"),
-  Route(service: service.ArticleRead, method: Get, path: "/api/articles/{slug}"),
+  Route(service: service.ArticleRead, method: Get, path: "/api/articles/:slug"),
   Route(service: service.WidgetList, method: Get, path: "/api/widgets"),
 ]

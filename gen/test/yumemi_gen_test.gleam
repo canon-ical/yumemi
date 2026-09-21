@@ -10,6 +10,7 @@ import gleeunit
 import gleeunit/should
 import yumemi_gen
 import yumemi_gen/digest
+import yumemi_gen/emit/front as front_emit
 import yumemi_gen/emit/hash
 import yumemi_gen/emit/query
 import yumemi_gen/face
@@ -110,6 +111,43 @@ fn text_of(app_dir: String, path: String) -> String {
   let assert Ok(#(_, found)) =
     list.find(files_of(app_dir), fn(entry) { entry.0 == path })
   found
+}
+
+fn synthetic_out(
+  module: String,
+  service_source: String,
+  extra_units: List(source.Unit),
+) -> String {
+  let assert Ok(back_units) = source.load(fixture)
+  let assert Ok(face_units) = source.load("fixtures/article/public")
+  let service_unit = source_unit("service/" <> module, service_source)
+  let units = list.append(back_units, [service_unit, ..extra_units])
+  let base = app()
+  let service = model.Service(
+    module: module,
+    params: [],
+    queries: [],
+    args: [],
+    allow_module: None,
+    subjects: [],
+    effect: model.ReadEffect,
+    faces: [],
+    faces_declared: True,
+  )
+  let test_app = model.App(..base, services: [service])
+  let model_ = front_from_units_named("public", face_units, [service])
+  let package = face.Package(
+    name: "public",
+    path: "fixtures/article/public",
+    pages: face.UndeclaredPages,
+    units: face_units,
+  )
+  let generated =
+    front_emit.emit(test_app, units, package, model_, hash.of(units))
+  let assert Ok(file) = list.find(generated, fn(file) {
+    file.path == "public/src/gen/out/" <> module <> ".gleam"
+  })
+  file.text
 }
 
 // ── 入力 ────────────────────────────────────────────────────────────────────
@@ -1706,7 +1744,7 @@ pub fn front_emit_api_is_filtered_by_face_services_test() {
     "service.ArticleList",
     "service.ArticleRead",
     "service.WidgetList",
-    "path: \"/api/articles/{slug}\"",
+    "path: \"/api/articles/:slug\"",
   ]
   |> list.each(fn(row) { string.contains(api, row) |> should.be_true })
   ["service.ArticleCreate", "service.ArticlePublish", "service.ArticleRetract"]
@@ -1720,6 +1758,62 @@ pub fn front_emit_out_redefines_opaque_relations_test() {
   string.contains(out, "pub type Multi(entity) {") |> should.be_true
   string.contains(out, "Multi(values: List(String))") |> should.be_true
   string.contains(out, "import framework/er") |> should.be_false
+}
+
+pub fn front_emit_out_imports_are_limited_to_face_allowlist_test() {
+  files()
+  |> list.filter(fn(entry) {
+    string.starts_with(entry.0, "public/src/gen/out/")
+  })
+  |> list.flat_map(fn(entry) {
+    entry.1
+    |> string.split("\n")
+    |> list.filter(string.starts_with(_, "import "))
+  })
+  |> list.each(fn(row) {
+    let imported = string.drop_start(row, 7)
+    let path = case string.split(imported, ".") {
+      [value, ..] -> value
+      [] -> imported
+    }
+    let allowed =
+      string.starts_with(path, "gleam/")
+      || string.starts_with(path, "framework/")
+      || path == "gen/service"
+    allowed |> should.be_true
+  })
+}
+
+pub fn front_emit_copies_back_module_types_and_imports_blob_test() {
+  let draft = synthetic_out(
+    "draft_result",
+    "import gen/draft/article.{type ArticleCreated}\n\npub const service: Service(Args, ArticleCreated, Error) = Nil",
+    [],
+  )
+  string.contains(draft, "import gen/draft/article") |> should.be_false
+  string.contains(draft, "pub type ArticleCreated {") |> should.be_true
+
+  let ledger = synthetic_out(
+    "ledger_result",
+    "import ledger_store.{type LedgerStore}\n\npub const service: Service(Args, LedgerStore, Error) = Nil",
+    [source_unit(
+      "ledger_store",
+      "pub type LedgerStoreId = String\n\npub type StoreType {\n  Soap\n  Delihel\n}\n\npub type LedgerStore {\n  LedgerStore(id: LedgerStoreId, kind: StoreType)\n}",
+    )],
+  )
+  string.contains(ledger, "import ledger_store") |> should.be_false
+  string.contains(ledger, "pub type LedgerStoreId = String")
+  |> should.be_true
+  string.contains(ledger, "pub type StoreType {") |> should.be_true
+  string.contains(ledger, "pub type LedgerStore {") |> should.be_true
+
+  let blob = synthetic_out(
+    "blob_result",
+    "import framework/blob.{type Blob}\n\npub type Result {\n  Result(blob: Blob)\n}\n\npub const service: Service(Args, Result, Error) = Nil",
+    [],
+  )
+  string.contains(blob, "import framework/blob.{type Blob}") |> should.be_true
+  string.contains(blob, "pub type Blob {") |> should.be_false
 }
 
 pub fn front_emit_writes_one_out_file_per_service_test() {
