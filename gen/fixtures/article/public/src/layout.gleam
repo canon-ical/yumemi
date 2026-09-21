@@ -32,7 +32,7 @@ pub const public: Layout(service.Service, blocks.Block) = Layout(
       Widget(
         area: "page",
         name: "article_feed",
-        of: service.ArticleList,
+        of: service.WidgetList,
         render: One(blocks.Article),
       ),
     ],

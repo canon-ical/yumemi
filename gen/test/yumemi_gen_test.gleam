@@ -126,16 +126,16 @@ pub fn gen_types_value_prop_keeps_property_column_test() {
   value_prop_column("title") |> should.equal("title")
 }
 
-pub fn all_eleven_star_files_parse_test() {
+pub fn all_fourteen_star_files_parse_test() {
   let assert Ok(units) = source.load(fixture)
-  list.length(units) |> should.equal(11)
+  list.length(units) |> should.equal(14)
 }
 
 pub fn types_entities_services_counted_test() {
   let loaded = app()
   list.length(loaded.value_types) |> should.equal(5)
   list.length(loaded.entities) |> should.equal(4)
-  list.length(loaded.services) |> should.equal(5)
+  list.length(loaded.services) |> should.equal(6)
 }
 
 pub fn lifecycle_read_from_edges_test() {
@@ -146,7 +146,7 @@ pub fn lifecycle_read_from_edges_test() {
   article.collection |> should.equal("articles")
 }
 
-pub fn article_http_route_table_has_seven_rows_test() {
+pub fn article_http_route_table_has_nine_rows_test() {
   let face = text("src/gen/face.gleam")
   string.contains(face, "pub type Face {\n  Public\n  Admin\n}")
   |> should.be_true
@@ -159,6 +159,8 @@ pub fn article_http_route_table_has_seven_rows_test() {
     "Route(face: \"admin\", method: \"GET\", path: \"/api/admin/articles/{slug}\", service: \"article_read\", path_keys: [\"slug\"], credential: Session),",
     "Route(face: \"admin\", method: \"POST\", path: \"/api/admin/articles/{slug}/publish\", service: \"article_publish\", path_keys: [\"slug\"], credential: Session),",
     "Route(face: \"admin\", method: \"POST\", path: \"/api/admin/articles/{slug}/retract\", service: \"article_retract\", path_keys: [\"slug\"], credential: Session),",
+    "Route(face: \"public\", method: \"GET\", path: \"/api/widgets\", service: \"widget_list\", path_keys: [], credential: Session),",
+    "Route(face: \"admin\", method: \"GET\", path: \"/api/admin/widgets\", service: \"widget_list\", path_keys: [], credential: Session),",
   ]
   |> list.each(fn(row) { string.contains(http, row) |> should.be_true })
   http
@@ -168,7 +170,7 @@ pub fn article_http_route_table_has_seven_rows_test() {
     && string.contains(line, "path: \"")
   })
   |> list.length
-  |> should.equal(7)
+  |> should.equal(9)
 }
 
 pub fn entry_prefix_is_required_named_and_one_word_test() {
@@ -419,7 +421,7 @@ pub fn phase_and_arrival_columns_are_generated_test() {
 
 pub fn reads_are_emitted_for_queries_and_root_arrows_test() {
   let paths = list.map(files(), fn(entry) { entry.0 })
-  // article_list は名前付きクエリ、他の4本は root Article の矢印。
+  // article_list / widget_list は名前付きクエリ、他の4本は root Article の矢印。
   list.filter(paths, string.starts_with(_, "src/gen/reads/"))
   |> should.equal([
     "src/gen/reads/article_create.gleam",
@@ -427,6 +429,7 @@ pub fn reads_are_emitted_for_queries_and_root_arrows_test() {
     "src/gen/reads/article_publish.gleam",
     "src/gen/reads/article_read.gleam",
     "src/gen/reads/article_retract.gleam",
+    "src/gen/reads/widget_list.gleam",
   ])
 }
 
@@ -563,6 +566,7 @@ pub fn one_statement_per_named_query_test() {
   |> should.equal([
     "db/queries/article_list/counts.sql",
     "db/queries/article_list/items.sql",
+    "db/queries/widget_list/items.sql",
   ])
 }
 
@@ -1649,12 +1653,12 @@ pub fn undeclared_pages_and_no_pages_do_not_make_missing_notes_test() {
 pub fn front_model_reads_url_blocks_widgets_components_and_style_test() {
   let value = article_front()
   let assert [page] = value.pages
-  page.url |> should.equal("/article/{id}")
+  page.url |> should.equal("/article/{slug}")
   page.of |> should.equal(Some("ArticleRead"))
   list.map(value.blocks, fn(block) { block.name })
   |> should.equal(["Article", "Summary"])
   value.widget_keys |> should.equal(["ArticleFeed", "ArticleKinds"])
-  value.services |> should.equal(["ArticleList", "ArticleRead"])
+  value.services |> should.equal(["WidgetList", "ArticleRead"])
   value.style.tokens
   |> should.equal([
     "ink",

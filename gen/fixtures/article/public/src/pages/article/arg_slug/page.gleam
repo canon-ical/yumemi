@@ -30,7 +30,7 @@ pub const page: Page(service.Service, blocks.Block) = Page(
       Widget(
         area: "rail",
         name: "article_kinds",
-        of: service.ArticleRead,
+        of: service.WidgetList,
         render: ByKind(
           by: "kind",
           table: [

@@ -6,4 +6,5 @@ pub type Service {
   ArticlePublish
   ArticleRead
   ArticleRetract
+  WidgetList
 }

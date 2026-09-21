@@ -94,11 +94,8 @@ pub fn generate(
     list.append(
       discovered.notes,
       list.flat_map(front_models, fn(item) {
-        let #(pages, model) = item
-        case pages {
-          face.AllPages -> front.notes(model, app.services)
-          face.UndeclaredPages | face.NoPages -> []
-        }
+        let #(_, model) = item
+        front.notes(model, app.services)
       }),
     )
   let notes =

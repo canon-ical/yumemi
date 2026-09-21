@@ -1,3 +1,42 @@
+# 指示 A2 ── 検査 gate を外し、fixture の面を 51 v5 に合わせる
+
+## 状態
+
+- branch `gen-6`、開始 `819cdc8`。checkpoint `f0d6584`。push / `main` / live musearch の書込みは無し。
+- 面が見つかった後の `front.notes` は `pages` 欄の有無によらず常時実行。面の発見条件と、入口/面不足の診断 gate は変更していない。
+- fixture の Page path を `arg_id` から `arg_slug` へ変更し、layout/page の2つの Widget を `WidgetList` へ向けた。`WidgetKey`、rootless `widget_list` read、front の `WidgetList` variant を追加した。
+- `src/widget.gleam` は `widget_list` の HTTP collection 名だけを与える非Entity宣言。query は `Article` だけを読むため、Widget Entity の追加・絞り込みはしていない。
+- front/back の emit 種追加と back 生成器の変更は無し。front の手書き ▲ は `public/src/gen/service.gleam` の `WidgetList` 1 variant だけを変更した。
+
+## DDL
+
+無し。migration、schema、staging、production への適用はしていない。
+
+## 検証
+
+- root `gleam build`: compile 完了、既存 `src/framework/secret.gleam` の unused private constructor warning 1件。証拠: `build/a2-root-build.txt`
+- `cd gen && gleam test`: **105 passed, no failures**。証拠: `gen/build/a2-test-final.txt`
+- fixture generator: **exit 0 / 60 files**、診断ファイル無し。証拠: `gen/build/a2-fixture-generate.txt`
+- fixture diff: `diff -r` は `gen/build/a2-fixture-diff.txt`。動いたのは次の5系統だけ。
+  - `src/gen/entry/http.gleam`: 追加 read の Public/Admin route 2行と入力 hash。
+  - `src/gen/face.gleam`: entry/service 入力 hash のみ。Face variant 本文は不変。
+  - `src/gen/reads/widget_list.gleam`: `widget_list.items` の read。
+  - `src/gen/root/widget_list.gleam`: rootless Service の器。
+  - `db/queries/widget_list/items.sql`: Article を Published allow と公開時刻降順で読む SQL。
+- musearch snapshot `/home/yumemism/.codex-agents/runs/niekawa-20260922-061417-3399503-22265/ms-96fb8cc/api` のみを入力: **exit 4 / exit 0 = 29 / exit 3 = 0 / exit 4 = 18 / 604 files**。基線との差は **0行**。証拠: `gen/build/a2-musearch-generate.txt`、`gen/build/a2-musearch-counts.txt`、`gen/build/a2-musearch-diff.txt`
+- live `/home/yumemism/yumemism_repo/musearch` の `git status --short`: **0行**。証拠: `gen/build/a2-live-musearch-status.txt`
+- `cd gen/fixtures/article/public && gleam build`: compile 完了。既存の transitive dependency warning のみ。証拠: `gen/build/a2-public-build.txt`
+
+## 鷹野宛
+
+- gate 無しで fixture の検査 8本は 0件。負例の符号・文言を含む既存 105 test は全て通過した。
+- musearch の現物で front 検査を有効にする作業は本便の外。`api/src/entry.gleam` の `pages: AllPages` と `api/gleam.toml` の依存窓変更が別追随便に要る。
+
+## musearch 追随便への申し送り
+
+- 入力は引き続き固定 snapshot `ms-96fb8cc`。live の `musearch` は入力にも出力にも使っていない。
+- fixture の WidgetList は route 用の非Entity collection を持つが、Article の query と rootless read だけで成立している。既存 5 Service の Args と Entity は変更していない。
+
 # 指示 gen-6 段A ── 面の発見と front model / 検査
 
 ## 状態
