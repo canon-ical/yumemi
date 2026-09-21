@@ -2221,14 +2221,7 @@ fn verb_prop_column(
 
 fn verb_field_column(app: model.App, field: model.FieldDef) -> String {
   let _ = app
-  case field.value {
-    model.TypeValue(reference) ->
-      case reference.module, reference.name {
-        Some("ledger"), "LedgerStoreId" -> field.column <> "_id"
-        _, _ -> field.column
-      }
-    _ -> field.column
-  }
+  field.column
 }
 
 fn first_key_column(entity: model.Entity) -> String {

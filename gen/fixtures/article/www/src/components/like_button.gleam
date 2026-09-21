@@ -12,14 +12,21 @@ import lustre/effect.{type Effect}
 import lustre/event
 import sketch/lustre/element/html
 
-pub type State = live.State(Nil, Int, Nil)
+pub type State =
+  live.State(Nil, Nil, Int, Nil)
 
-pub type Event = live.Event(Nil, Int, Nil)
+pub type Event =
+  live.Event(Nil, Nil, Int, Nil)
 
 pub const calls: List(service.Service) = []
 
+pub const after_send: live.After = live.Stay
+
 fn init(_args: Nil) -> #(State, Effect(Event)) {
-  #(live.State(args: Nil, last: None, waiting: False), effect.none())
+  #(
+    live.State(args: Nil, given: Nil, last: None, waiting: False),
+    effect.none(),
+  )
 }
 
 fn update(model: State, msg: Event) -> #(State, Effect(Event)) {
@@ -30,6 +37,7 @@ fn update(model: State, msg: Event) -> #(State, Effect(Event)) {
         True -> #(model, effect.none())
         False -> #(live.State(..model, waiting: True), fetch_count())
       }
+    live.Given(_) -> #(model, effect.none())
     live.Done(result) -> #(
       live.State(..model, last: Some(result), waiting: False),
       effect.none(),

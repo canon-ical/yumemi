@@ -1,9 +1,9 @@
 //// Verification worker. The fixture front remains the view source; this file
 //// only supplies the HTTP and SSR adapter needed by workerd.
 
-import conversation.{type JsRequest, type JsResponse, type ResponseBody, Text}
 import blocks/article
 import blocks/summary
+import conversation.{type JsRequest, type JsResponse, type ResponseBody, Text}
 import gleam/http
 import gleam/http/request
 import gleam/http/response.{type Response}
@@ -46,6 +46,7 @@ fn route(
       page(fn() { summary.view(summary.sample) })
     http.Get, ["article", _id] -> page(fn() { article.view(article.sample) })
     http.Post, ["api", "article", "like"] -> like()
+    http.Post, ["api", "article", "tag"] -> tag()
     _, _ -> text(404, "not found")
   }
 }
@@ -91,6 +92,10 @@ fn like() -> Response(ResponseBody) {
   |> response.set_body(
     Text(json.to_string(json.object([#("count", json.int(count))]))),
   )
+}
+
+fn tag() -> Response(ResponseBody) {
+  text(200, "ok")
 }
 
 fn text(status: Int, body: String) -> Response(ResponseBody) {

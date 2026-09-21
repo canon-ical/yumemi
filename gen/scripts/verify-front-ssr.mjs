@@ -42,15 +42,44 @@ try {
   );
 
   const browser = await chromium.launch();
+  const initialPage = await browser.newPage();
+  await initialPage.goto(`${worker.baseUrl}/article/42`);
+  await initialPage.waitForFunction(
+    () => customElements.get("pick-tag") !== undefined,
+    { timeout: 5000 },
+  );
+  const initialPostRequest = initialPage.waitForRequest(
+    (request) =>
+      request.method() === "POST" &&
+      request.url() === `${worker.baseUrl}/api/article/tag`,
+    { timeout: 5000 },
+  );
+  await initialPage.locator("pick-tag button").click();
+  const initialPostBody = (await initialPostRequest).postData();
+  assert(
+    initialPostBody === "fixture",
+    `initial tag POST body: ${JSON.stringify(initialPostBody)}, expected "fixture"`,
+  );
+  console.log(`SSR INITIAL: PASS (posted ${JSON.stringify(initialPostBody)})`);
+  await initialPage.close();
+
   const page = await browser.newPage();
   const errors = [];
+  const documentRequests = [];
   page.on("pageerror", (error) => errors.push(String(error)));
   page.on("console", (message) => {
     if (message.type() === "error") errors.push(message.text());
   });
+  page.on("request", (request) => {
+    if (request.resourceType() === "document") documentRequests.push(request.url());
+  });
   await page.goto(`${worker.baseUrl}/article/42`);
   await page.waitForFunction(
     () => customElements.get("like-button") !== undefined,
+    { timeout: 5000 },
+  );
+  await page.waitForFunction(
+    () => customElements.get("pick-tag") !== undefined,
     { timeout: 5000 },
   );
   const before = await page.locator("like-button button").textContent();
@@ -65,11 +94,42 @@ try {
     { timeout: 5000 },
   );
   const after = await page.locator("like-button button").textContent();
-  await browser.close();
 
   assert(after?.includes("13"), `island did not change after click: ${after}`);
   assert(errors.length === 0, `browser errors: ${errors.join("; ")}`);
   console.log(`SSR ISLAND: PASS (${before} -> ${after})`);
+
+  const articleUrl = `${worker.baseUrl}/article/42`;
+  const reloadRequest = page.waitForRequest(
+    (request) =>
+      request.resourceType() === "document" && request.url() === articleUrl,
+    { timeout: 5000 },
+  );
+  const selectedPostRequest = page.waitForRequest(
+    (request) =>
+      request.method() === "POST" &&
+      request.url() === `${worker.baseUrl}/api/article/tag`,
+    { timeout: 5000 },
+  );
+  await page.locator("pick-tag select").selectOption("gleam");
+  await page.locator("pick-tag button").click();
+  const selectedPostBody = (await selectedPostRequest).postData();
+  assert(
+    selectedPostBody === "gleam",
+    `selected tag POST body: ${JSON.stringify(selectedPostBody)}, expected "gleam"`,
+  );
+  console.log(`SSR SELECTED: PASS (posted ${JSON.stringify(selectedPostBody)})`);
+  await reloadRequest;
+  await page.waitForLoadState("load");
+
+  const articleRequests = documentRequests.filter((url) => url === articleUrl);
+  assert(
+    articleRequests.length === 2,
+    `document request loop: ${JSON.stringify(documentRequests)}`,
+  );
+  console.log(`SSR RELOAD REQUESTS: ${JSON.stringify(documentRequests)}`);
+  console.log("SSR RELOAD: PASS (one same-URL re-request, no loop)");
+  await browser.close();
   console.log("ALL PASS");
 } finally {
   if (worker) await worker.stop();

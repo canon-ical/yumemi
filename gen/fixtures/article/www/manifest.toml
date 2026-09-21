@@ -17,8 +17,9 @@ packages = [
   { name = "murmur3a", version = "1.0.3", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "murmur3a", source = "hex", outer_checksum = "FBEDD381EE1C924FD30A41FD6DE8B941CAEF4912E9C71F7B9281723649DE8B97" },
   { name = "sketch", version = "4.2.1", build_tools = ["gleam"], requirements = ["gleam_erlang", "gleam_otp", "gleam_stdlib", "murmur3a"], otp_app = "sketch", source = "hex", outer_checksum = "873D02A453424D655058A41B11441D4FD67668A7CA06B5E36FEF027D53859538" },
   { name = "sketch_lustre", version = "3.1.2", build_tools = ["gleam"], requirements = ["gleam_stdlib", "lustre", "sketch"], otp_app = "sketch_lustre", source = "hex", outer_checksum = "71E872ACA02B09B5E9BE77CBCE9983864E1A3B7AC45669270F7A49C248AF1D16" },
-  { name = "yumemi", version = "0.6.0", build_tools = ["gleam"], requirements = ["gleam_stdlib", "lustre", "sketch", "sketch_lustre"], source = "local", path = "../../../.." },
+  { name = "yumemi", version = "0.7.0", build_tools = ["gleam"], requirements = ["gleam_stdlib", "lustre", "sketch", "sketch_lustre"], source = "local", path = "../../../.." },
 ]
 
 [requirements]
+gleam_json = { version = ">= 3.1.0 and < 4.0.0" }
 yumemi = { path = "../../../.." }

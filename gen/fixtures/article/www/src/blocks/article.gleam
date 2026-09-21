@@ -8,7 +8,8 @@ import gleam/int
 import lustre/attribute
 import sketch/lustre/element/html
 
-pub type In = article_read.Out
+pub type In =
+  article_read.Out
 
 pub const sample: In = article_read.Out(
   article: article_read.Article(
@@ -57,6 +58,10 @@ pub fn view(it: In) -> el.Element(Nil) {
     html.div_([], [
       el.island("like-button", [
         attribute.attribute("count", int.to_string(it.article.version)),
+      ]),
+      el.island("pick-tag", [
+        attribute.attribute("tags", "fixture,gleam,cloudflare"),
+        attribute.attribute("selected", "fixture"),
       ]),
     ]),
   ])

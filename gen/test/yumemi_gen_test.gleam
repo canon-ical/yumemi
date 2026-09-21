@@ -65,6 +65,8 @@ const route_nested_fixture = "fixtures/route_nested"
 
 const verb_fixture = "fixtures/verb_features"
 
+const value_prop_column_fixture = "fixtures/value_prop_column"
+
 pub fn main() {
   gleeunit.main()
 }
@@ -73,6 +75,14 @@ fn app() -> model.App {
   let assert Ok(units) = source.load(fixture)
   let assert Ok(loaded) = reader.read(units)
   loaded
+}
+
+fn value_prop_column(prop: String) -> String {
+  let assert Ok(units) = source.load(value_prop_column_fixture)
+  let assert Ok(loaded) = reader.read(units)
+  let assert Some(example) = model.entity_by_name(loaded.entities, "Example")
+  let assert Some(field) = model.field_for_prop(example, prop)
+  field.column
 }
 
 fn files_of(app_dir: String) -> List(#(String, String)) {
@@ -100,6 +110,18 @@ fn text_of(app_dir: String, path: String) -> String {
 }
 
 // ── 入力 ────────────────────────────────────────────────────────────────────
+
+pub fn collection_id_value_prop_uses_id_column_test() {
+  value_prop_column("ledger_store") |> should.equal("ledger_store_id")
+}
+
+pub fn framework_party_id_value_prop_keeps_property_column_test() {
+  value_prop_column("party") |> should.equal("party")
+}
+
+pub fn gen_types_value_prop_keeps_property_column_test() {
+  value_prop_column("title") |> should.equal("title")
+}
 
 pub fn all_eleven_star_files_parse_test() {
   let assert Ok(units) = source.load(fixture)
