@@ -8,7 +8,8 @@
   `src/` へコピーする形にした。`www/src/gen/**` も同時にコピーする。
 - `docs/reports/front-1c.md` に 14 型表、v4 → v5、56 差分、数字、P1 / Y2 の申し送りを
   記録した。
-- root、gen、musearch の本体・staging・production・push は変更していない。
+- `gen/src/**` / `gen/test/**`、musearch の本体、staging、production は変更していない。
+  push も無い。
 
 ## DDL
 

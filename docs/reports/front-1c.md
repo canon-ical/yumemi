@@ -7,8 +7,8 @@ scratch の `src/` に変更した。面の `www/src/gen/**` も同じ一括コ�
 scratch に入る。scratch の import は `front/blocks` / `front/components` から
 `blocks` / `components` へ 1 段浅くした。
 
-面の実物を使った SSR / isolate verify は両方 PASS した。面 package、framework、
-back の `gen/fixtures/article/src/**`、生成器の source / test はこの便では変更していない。
+面の実物を使った SSR / isolate verify は両方 PASS した。back の
+`gen/fixtures/article/src/**` と生成器の source / test はこの便では変更していない。
 
 ## 51 v5 §32 の 14 型対応表
 
@@ -169,4 +169,3 @@ verify の Playwright import は
 `Frame`（tablet は `None`）を const に載せる形は閉じた。`www/src/gen/widgets.gleam`
 には `ArticleFeed` / `ArticleKinds` が載り、Page は `ByKind`、Layout は `One` を
 実物で持つ。
-
