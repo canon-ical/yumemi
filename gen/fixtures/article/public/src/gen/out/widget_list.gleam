@@ -1,14 +1,10 @@
-//// GENERATED from src/service/article_read.gleam [sha256:916e9f08ec9d] — 手で編集しない
+//// GENERATED from src/service/widget_list.gleam [sha256:b13b798cb2c9] — 手で編集しない
 
 pub type Slug = String
 
 pub type Title = String
 
 pub type Body = String
-
-pub type CategoryName = String
-
-pub type TagName = String
 
 pub type Has(entity) {
   Has(value: String)
@@ -30,18 +26,21 @@ pub type Article {
   )
 }
 
-pub type Category {
-  Category(name: CategoryName)
-}
+pub type Category
 
-pub type Tag {
-  Tag(name: TagName)
+pub type Tag
+
+pub type Row {
+  ArticleRow(
+    kind: String,
+    article: Article,
+  )
+  Summary(
+    kind: String,
+    article: Article,
+  )
 }
 
 pub type Out {
-  Out(
-    article: Article,
-    category: Category,
-    tags: List(Tag),
-  )
+  Out(rows: List(Row))
 }

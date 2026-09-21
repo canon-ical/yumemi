@@ -1,3 +1,47 @@
+# 指示 gen-6 段B ── 面の生成物6種
+
+## 状態
+
+- branch `gen-6`。front emit を追加し、面 `public` の出力先を
+  `public/src/gen/` に固定した。back の出力先・生成束は変更していない。
+- 面側に route / blocks / widgets / service / api と、back の全6 Service 分の
+  `out/{article_create,article_list,article_publish,article_read,article_retract,widget_list}.gleam`
+  を追加した。
+- `out/` は再輸出をせず、Service の出力型・参照 Entity・gen/types の別名を写し、
+  `framework/er` の `Has/Held/Multi`、`framework/time` の `Date/Datetime/Time`、
+  `framework/blob` の `Blob` は面側で透明に再定義した。
+- `widget_list` の `Row.Article` は同一 module の Entity `Article` 構成子と衝突するため、
+  面側の写しだけ `ArticleRow` とした。面 package の build は通過している。
+
+## DDL
+
+無し。migration / schema / staging / production への適用はしていない。
+
+## 検証
+
+- root `gleam build`: **exit 0**。既存 `src/framework/secret.gleam` の unused private
+  constructor warning 1件。証拠: `build/stage-b-root-build-final-3.txt`
+- `cd gen && gleam test`: **110 passed, no failures**。証拠: `gen/build/stage-b-test-final-3.txt`
+- fixture generator `gleam run -m yumemi_gen -- fixtures/article fixtures/article`:
+  **exit 0 / 71 file**。証拠: `gen/build/stage-b-fixture-generate-final-2.txt`
+- fixture `public` build: **exit 0**。既存 transitive dependency warning のみ。証拠:
+  `gen/build/stage-b-public-build-final-2.txt`
+- back は基線の **60 file** と file / 本文 / header sha の diff 0。証拠:
+  `gen/build/stage-b-back-diff-final-3.txt`
+- fixture の手書き ▲ 4本(`blocks.gleam`, `widgets.gleam`, `service.gleam`,
+  `out/article_read.gleam`)は header 以外の本文 diff 0。証拠:
+  `gen/build/stage-b-blocks-body-final-4.diff`、`stage-b-widgets-body-final-4.diff`、
+  `stage-b-service-body-final-4.diff`、`stage-b-out-body-final-4.diff`
+- musearch 固定 snapshot は **exit 4 / exit 0 警告 29 / exit 3 = 0 / exit 4 = 18 /
+  back 604 file**。同一 snapshot の再生成で back 本文 diff 0。証拠:
+  `gen/build/stage-b-musearch-final-2-run.txt`、`stage-b-musearch-final-2-counts.txt`、
+  `stage-b-musearch-final-2-body-diff.txt`
+
+## 鷹野宛
+
+- musearch には書き込んでいない。入力は指定 snapshot のみ、出力は `gen/build/`。
+- 段C以降の生成物はまだ出していない。
+
 # 指示 A2 ── 検査 gate を外し、fixture の面を 51 v5 に合わせる
 
 ## 状態

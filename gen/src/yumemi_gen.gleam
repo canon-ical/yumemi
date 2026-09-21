@@ -17,6 +17,7 @@ import gleam/string
 import simplifile
 import yumemi_gen/emit/draft
 import yumemi_gen/emit/entry
+import yumemi_gen/emit/front as front_emit
 import yumemi_gen/emit/hash
 import yumemi_gen/emit/phase
 import yumemi_gen/emit/query
@@ -84,7 +85,7 @@ pub fn generate(
   use front_models <- result.try(
     list.try_map(discovered.packages, fn(package) {
       front.read(package.name, package.units, app.services)
-      |> result.map(fn(model) { #(package.pages, model) })
+      |> result.map(fn(model) { #(package, model) })
       |> result.map_error(front_note)
     }),
   )
@@ -146,6 +147,10 @@ pub fn generate(
       draft.emit(app, hashes),
       query.emit(app, hashes.entities),
       entry_output.files,
+      list.flat_map(front_models, fn(item) {
+        let #(package, model) = item
+        front_emit.emit(app, units, package, model, hashes)
+      }),
       reads.emit(app, hashes),
       sql.emit(app, hashes),
       phase.emit(app, hashes.entities),

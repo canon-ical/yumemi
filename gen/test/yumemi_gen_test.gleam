@@ -1688,6 +1688,48 @@ pub fn front_model_reads_url_blocks_widgets_components_and_style_test() {
   |> should.equal([Some("Stay"), Some("ReloadPage")])
 }
 
+pub fn front_emit_route_uses_page_only_and_colon_arguments_test() {
+  let route = text("public/src/gen/route.gleam")
+  string.contains(route, "PageRoute(path: \"/article/:slug\")")
+  |> should.be_true
+  string.contains(route, "Route(service:") |> should.be_false
+}
+
+pub fn front_route_path_keeps_arg_dash_and_reserved_rules_test() {
+  front.route_path(["arg_case_", "_", "type_"])
+  |> should.equal("/:case/-/type")
+}
+
+pub fn front_emit_api_is_filtered_by_face_services_test() {
+  let api = text("public/src/gen/api.gleam")
+  [
+    "service.ArticleList",
+    "service.ArticleRead",
+    "service.WidgetList",
+    "path: \"/api/articles/{slug}\"",
+  ]
+  |> list.each(fn(row) { string.contains(api, row) |> should.be_true })
+  ["service.ArticleCreate", "service.ArticlePublish", "service.ArticleRetract"]
+  |> list.each(fn(row) { string.contains(api, row) |> should.be_false })
+}
+
+pub fn front_emit_out_redefines_opaque_relations_test() {
+  let out = text("public/src/gen/out/article_read.gleam")
+  string.contains(out, "pub type Has(entity) {") |> should.be_true
+  string.contains(out, "Has(value: String)") |> should.be_true
+  string.contains(out, "pub type Multi(entity) {") |> should.be_true
+  string.contains(out, "Multi(values: List(String))") |> should.be_true
+  string.contains(out, "import framework/er") |> should.be_false
+}
+
+pub fn front_emit_writes_one_out_file_per_service_test() {
+  files()
+  |> list.map(fn(entry) { entry.0 })
+  |> list.filter(string.starts_with(_, "public/src/gen/out/"))
+  |> list.length
+  |> should.equal(6)
+}
+
 pub fn page_path_uses_folder_rules_and_reserved_suffix_test() {
   let units = [
     layout_unit("Layout(sp: Frame(areas: [], placements: []))"),

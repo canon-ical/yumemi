@@ -983,6 +983,26 @@ fn page_url(path: String) -> String {
   }
 }
 
+/// Page の route 表だけが使う URL。back の HTTP route は `{name}`、面の
+/// browser route は `:name` と表記が違うため、同じ page path からここで分ける。
+pub fn route_path(path: List(String)) -> String {
+  case path {
+    [] -> "/"
+    _ -> "/" <> string.join(list.map(path, route_segment), "/")
+  }
+}
+
+fn route_segment(segment: String) -> String {
+  case string.starts_with(segment, "arg_") {
+    True -> ":" <> argument_name(segment)
+    False ->
+      case segment {
+        "_" -> "-"
+        _ -> trim_reserved(segment)
+      }
+  }
+}
+
 fn url_segment(segment: String) -> String {
   case string.starts_with(segment, "arg_") {
     True -> "{" <> argument_name(segment) <> "}"
