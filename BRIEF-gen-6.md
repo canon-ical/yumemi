@@ -2,7 +2,7 @@
 
 便: yumemi-gen-6
 
-> **草案の穴は 2 つだけ。**(a) 読む対象の musearch の基点 `<段 4 merge sha>`(= B3 → P1 を merge した後の main)、(b) 下の「現在地」の ★P1 申し送り(`docs/front-1/results.md` の `## Y2(gen-6)への申し送り` = **本便が再現すべき ▲ の道と名前の一覧**)。**P1 が閉じたら鷹野が埋める。**
+> **草案の穴は 2 つだけ。**(a) 読む対象の musearch の基点 `96fb8cc`(段 4 の merge 後、2026-09-22 05:00)(= B3 → P1 を merge した後の main)、(b) 下の「現在地」の ★P1 申し送り(`docs/front-1/results.md` の `## Y2(gen-6)への申し送り` = **本便が再現すべき ▲ の道と名前の一覧**)。**P1 が閉じたら鷹野が埋める。**
 
 **前提は 1 つ。**P1(`musearch-front-1`)の承認と merge(58 §3 の `P1 → Y2`)── **生成器が再現すべき手書き ▲ の現物が要る**。yumemi の基点は main **`c694180`(0.6.0、Y1c 後)**(**`yumemi-front-1d`(P5b の前提、Hex 0.7.0 ── 島の型の穴 2 つ)が先に閉じたら、鷹野がその merge 後の sha に差し替える。下の「並走」を見よ**)。作業木は `~/yumemism_repo/yumemi-gen-6`(branch `gen-6`、贄川が作る)。**musearch は読むだけ。DDL は書かない。**記録は `docs/reports/gen-6.md`、`results.md` に `## DDL`(無し)。経路は Y1c の型:贄川 = Claude opus(`claude-niekawa`)、柏木 = Codex sol(ゲート 1 / 2 は便に各 1 回)、真壁 = luna(ゲート 2 の P0 を直す巡だけ sol)。1 巡 = 1 session、真壁名義で commit、**push しない**。**merge と Hex publish は鷹野**(便の中で publish も版の変更もしない)。
 
@@ -37,7 +37,7 @@
 3. **emit の front 段 ── 51 §308 の 13 種のうち面に出るもの**:`src/gen/route.gleam`(Page 行だけ)、`src/gen/load/layout.gleam` と `load/<Page と同じ道>/page.gleam`(Layout の `Fixed` の source と各 `Widget` の `of` も含めて `APP` binding へ 1 つずつ **1 回だけ**投げ、Block ごとに射影。`Data` 型も)、`src/gen/blocks.gleam`、`src/gen/widgets.gleam`、**写し 3 束**(`out/<service>.gleam` / `service.gleam` / `api.gleam` ── **再輸出でなく型の写し**)、`src/gen/live/<service>.gleam`、`src/gen/shell.mjs`、`priv/static/_yumemi/client.mjs` + bundle、`priv/static/_yumemi/style.css` と SSR の `<style>`(**断点ごとの `grid-template-areas`、`pin` の貼り付けと重なり順と safe-area、その断点に居ない Block の非表示**)、`src/gen/skeleton/<block>.gleam`(初回だけ)、`build/blocks.html`
 4. **Y1c の P1 2 件を閉じる** ──(a) `src/gen/live/<service>.gleam` に `Field` enum(Args の欄から)・`State` / `Event` の具体化・**`update`**・送信前検査(Args の各 Type の `Spec` から)を吐き、**fixture の `like_button.gleam` から手書きの `update` を消す**、(b) `like_button` の `pub const calls` が Service を指し、**`like_button_ffi.mjs` の FFI 直呼びを消す**(通信は生成された client が `api.gleam` の path で行う)
 5. **検査**(型で止まらない分)── `attribute.class` / `attribute.style` / `element.element` の直呼び、lustre 内部 module の import、**島の中の島**、同じ断点に `Top` が 2 つ、Args に無いパス変数、**枠の名前を受けない読みを `Widget` に置く**(検査 2)、`sp:` を欠く Frame、Layout の入れ子。**落ちる符号は 20 の exit code 表のまま**(`stop`)
-6. **手書き ▲ との突き合わせ** ── (a) **fixture の面**(`gen/fixtures/article/www/src/gen/` の手書き ▲ 4 本)を生成物で置き換え、**本文 diff 0**(ヘッダの sha 行だけ差が出る ── 手書き ▲ は sha を持たない、§340-2)、(b) **musearch の面**(P1 の ▲、`<段 4 merge sha>` の `www/src/gen/**`)に当てて**差の一覧**を出す(**musearch に書き込まない**、出力は `_out/` へ)。**差はゼロを目標にし、残ったら 1 本ずつ理由を報告に**
+6. **手書き ▲ との突き合わせ** ── (a) **fixture の面**(`gen/fixtures/article/www/src/gen/` の手書き ▲ 4 本)を生成物で置き換え、**本文 diff 0**(ヘッダの sha 行だけ差が出る ── 手書き ▲ は sha を持たない、§340-2)、(b) **musearch の面**(P1 の ▲、`96fb8cc`(段 4 の merge 後、2026-09-22 05:00) の `www/src/gen/**`)に当てて**差の一覧**を出す(**musearch に書き込まない**、出力は `_out/` へ)。**差はゼロを目標にし、残ったら 1 本ずつ理由を報告に**
 7. **報告** ── `docs/reports/gen-6.md`(51 §32 の型 14 対応表の「生成器 (gen-6) の置き場」列が現物になったこと、13 種のどれを出しどれを出していないか、musearch の面との差の一覧、front-1 / Y1c の未検証 5 件のうち閉じたもの)、`results.md` の `## DDL`(無し)と `## 鷹野宛`、**`## musearch 追随便への申し送り`**(P1〜P4 の手書き ▲ を生成物に差し替える手順と、差し替えで動く file の一覧)
 
 ## しないこと
@@ -61,7 +61,7 @@
 - root `gleam build` **0**、`cd gen && gleam test` **86 以上**、`cd gen/fixtures/article/www && gleam build` **0**
 - `gleam run -m yumemi_gen -- fixtures/article <out>` が **exit 0**、**back の 57 file が 1 本も動かない**(file 名と本文の diff 0)、front の生成物が **N file** 増える(内訳を種ごとに)
 - **fixture の手書き ▲ 4 本と生成物の本文 diff 0**(差はヘッダの sha 行だけ)
-- musearch `api/` + `www/`(`<段 4 merge sha>`、読むだけ)に当てて **exit 4 = 5 本 / 警告 29 / 597 file** が動かず、**面の生成物と P1 の手書き ▲ の差の一覧**が報告に在る
+- musearch `api/` + `www/`(`96fb8cc`(段 4 の merge 後、2026-09-22 05:00)、読むだけ)に当てて **exit 4 = 5 本 / 警告 29 / 597 file** が動かず、**面の生成物と P1 の手書き ▲ の差の一覧**が報告に在る
 - `node gen/scripts/verify-front-ssr.mjs` と `verify-front-isolate.mjs` が **ALL PASS**、かつ **`update` と `calls` が生成物になった後も**島が Chromium で押せて表示が変わる(`❤ 1 → ❤ 13` 相当、ページ error 0)
 - **`build/blocks.html`** が fixture の面で 1 枚出て、Block が全部並び `sample` の無い Block も既定値で描ける
 - 検査の負例が 1 本ずつ落ちる(`attribute.class` 直呼び / 島の中の島 / 同断点の `Top` 2 つ / Args に無いパス変数 / 枠の名前を受けない読み)── **符号と 1 行の文言**を証跡に
@@ -83,3 +83,10 @@
 4. **生成物 14 種目(back の静的資料の写し ── 外部送信 6 件 / API v1 本文)を足す**(P4 裁定 2)
 5. **警告 29 はこのまま基線。**札 8 本の診断は Y1d で根因が消えれば減る
 6. **前提に Y1d(0.7.0)を足す** ── `gen/live/<service>.gleam` は 4 欄の `State` と `after_send` を具体化する。順序辺 Y1d → Y2、P1 → Y2 は据え置き。実 PG は要らない見込みなので port は割り当てない(要れば 55476 の空きを確かめて使う)
+
+## P1(`musearch-front-1`)の申し送り ── 鷹野が 2026-09-22 05:10 に埋めた穴(正本は musearch main `96fb8cc` の `docs/front-1/results.md`)
+
+- **`## Y2(gen-6)への申し送り` が本便の仕様書。**手書き ▲ 15 file の道と名前の表(`www/src/gen/route.gleam` `PageRoute` / `routes`、`load/layout.gleam` `Data` / `load`、`load/muse/arg_handle/page.gleam` `Data` / `load` / `render` / `view` / `widget_views` / `by_kind_table` ほか、`blocks.gleam` `Block` 11 variant、`widgets.gleam` `WidgetKey`(`MuseTopMain`)、`media.gleam` `Variant`(`Thumb` / `W800` / `W1600`)/ `url` / `encode_segment`、`shell.mjs` `pageRoutes` / `pages` / `matchPage` / `readFromApp` / `pageTheme` ほか、写し 3 束 `api.gleam` `Method` / `Route` / `routes`、`service.gleam` `Service` 7 variant、`out/` 7 本の `Out` / `Row`)。**shell の fallback(route 表外を `env.SVELTE` へ元の Request のまま流す)も生成器が吐くべき形**(移行中だけ、SvelteKit を消す便で外す)
+- `Frame` が断点の値を持たないので `@media 900px` と grid は P1 の手書き ▲ が定数で持つ ── gen-6 はここを 51 v5 の `sp:` / `pc:` から引く(P1 の残 P1 ③ / ⑥ `ByKind` を読む側が yumemi に無い、を本便で閉じる)
+- 突き合わせの相手は musearch main **`96fb8cc`** の `www/src/gen/**`(段 5 で P2 / P3 が追記するので、突合の時点の sha を報告に書く)
+- Y1d は閉じた(Hex 0.7.0、yumemi main 7fb52b2)── `gen/live/<service>.gleam` は 4 欄の `State` と `after_send`。柏木は実行経路 C(`claude-kashiwagi`、Opus xhigh)
