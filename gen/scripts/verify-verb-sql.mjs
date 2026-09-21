@@ -5,8 +5,8 @@
 ////   node gen/scripts/verify-verb-sql.mjs <app dir> <out dir>
 ////
 //// 段 1 は引用リテラルの内側を保ったまま空白と記号まわりを正規化し、段 2 は
-//// それに PostgreSQL の型 cast の除去を加える。段 1 を合格線として残し、段 2 は
-//// cast の差を切り分ける参考値にする。
+//// それに PostgreSQL の型 cast の除去を加える。裁定 2・3 の合格線は段 2 と
+//// 欠落 cast の型の多重集合。段 1 と placeholder 番号による欠落は参考値にする。
 
 import fs from "node:fs";
 import path from "node:path";
