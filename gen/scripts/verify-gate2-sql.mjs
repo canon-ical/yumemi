@@ -127,6 +127,10 @@ const createArticleSql = readSql(
   articleOut,
   "db/queries/verb/create_article.sql",
 );
+const createArticlesSql = readSql(
+  articleOut,
+  "db/queries/verb/create_articles.sql",
+);
 const draftClient = gateDb();
 await draftClient.connect();
 try {
@@ -182,6 +186,95 @@ try {
 } finally {
   await dropSchema(draftClient, "gate2_r7_draft");
   await draftClient.end();
+}
+
+function requireCreateManyRows(rows, expected, label) {
+  const actual = rows
+    .map((row) => `${row.slug}:${row.category_id}:${row.order}`)
+    .join(",");
+  if (actual !== expected) {
+    throw new Error(`${label}: expected ${expected}, got ${actual}`);
+  }
+}
+
+const createManyClient = gateDb();
+await createManyClient.connect();
+try {
+  await dropSchema(createManyClient, "gate2_a5_create_many");
+  await createManyClient.query("CREATE SCHEMA gate2_a5_create_many");
+  await createManyClient.query(`
+    CREATE TABLE gate2_a5_create_many.category(name text PRIMARY KEY);
+    INSERT INTO gate2_a5_create_many.category(name) VALUES ('a'),('b'),('c');
+    CREATE TABLE gate2_a5_create_many.article(
+      slug text PRIMARY KEY,title text NOT NULL,body text NOT NULL,
+      version integer NOT NULL,"order" integer NOT NULL,
+      category_id text NOT NULL REFERENCES gate2_a5_create_many.category(name),
+      phase text NOT NULL,entered_draft timestamptz NOT NULL,
+      UNIQUE(category_id,"order"));
+  `);
+  const createMany = scopedSql(
+    createArticlesSql,
+    "gate2_a5_create_many",
+  );
+  const at = "2026-09-21T00:00:00Z";
+  await createManyClient.query(createMany, [
+    JSON.stringify([
+      { slug: "a-0", title: "A0", body: "body", version: 1, category: "a" },
+      { slug: "a-1", title: "A1", body: "body", version: 1, category: "a" },
+      { slug: "a-2", title: "A2", body: "body", version: 1, category: "a" },
+    ]),
+    at,
+  ]);
+  const sameScope = (
+    await createManyClient.query(`
+      SELECT slug,category_id,"order",phase,entered_draft=$1::timestamptz AS entered
+      FROM gate2_a5_create_many.article WHERE category_id='a'
+      ORDER BY "order"`, [at])
+  ).rows;
+  requireCreateManyRows(sameScope, "a-0:a:0,a-1:a:1,a-2:a:2", "P0-7 same scope");
+  if (sameScope.some((row) => row.phase !== "draft" || row.entered !== true)) {
+    throw new Error(`P0-7 initial phase values: ${JSON.stringify(sameScope)}`);
+  }
+  console.log("P0-7 CreateMany same-scope ordinality and initial phase: PASS");
+
+  await createManyClient.query(createMany, [
+    JSON.stringify([
+      { slug: "b-0", title: "B0", body: "body", version: 1, category: "b" },
+      { slug: "c-0", title: "C0", body: "body", version: 1, category: "c" },
+      { slug: "b-1", title: "B1", body: "body", version: 1, category: "b" },
+      { slug: "c-1", title: "C1", body: "body", version: 1, category: "c" },
+    ]),
+    at,
+  ]);
+  const mixedScopes = (
+    await createManyClient.query(`
+      SELECT slug,category_id,"order" FROM gate2_a5_create_many.article
+      WHERE category_id IN ('b','c') ORDER BY category_id,"order"`)
+  ).rows;
+  requireCreateManyRows(
+    mixedScopes,
+    "b-0:b:0,b-1:b:1,c-0:c:0,c-1:c:1",
+    "P0-7 mixed scopes",
+  );
+  console.log("P0-7 CreateMany mixed scopes restart at zero: PASS");
+
+  await createManyClient.query(createMany, [
+    JSON.stringify([
+      { slug: "a-3", title: "A3", body: "body", version: 1, category: "a" },
+      { slug: "a-4", title: "A4", body: "body", version: 1, category: "a" },
+    ]),
+    at,
+  ]);
+  const continued = (
+    await createManyClient.query(`
+      SELECT slug,category_id,"order" FROM gate2_a5_create_many.article
+      WHERE slug IN ('a-3','a-4') ORDER BY "order"`)
+  ).rows;
+  requireCreateManyRows(continued, "a-3:a:3,a-4:a:4", "P0-7 existing scope");
+  console.log("P0-7 CreateMany existing scope continues: PASS");
+} finally {
+  await dropSchema(createManyClient, "gate2_a5_create_many");
+  await createManyClient.end();
 }
 
 const putSql = readSql(

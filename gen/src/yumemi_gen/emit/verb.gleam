@@ -78,31 +78,43 @@ pub fn emit(app: model.App, hashes: hash.Hashes) -> List(File) {
 
 /// 手書き札の照合。未一致は止めず、指定された名前ごとに1行の警告を返す。
 pub fn notes(app: model.App) -> List(stop.Note) {
-  let generated =
+  let global_candidates =
     app.entities
     |> list.flat_map(candidate_names)
     |> list.unique
-  let declarations =
-    list.append(
-      app.entities
-        |> list.map(fn(entity) { #(entity.module, entity.handwritten_verbs) }),
-      app.handwritten_verbs,
-    )
-  declarations
-  |> list.flat_map(fn(entry) {
-    let #(module, names) = entry
-    names
-    |> list.unique
-    |> list.filter_map(fn(name) {
-      case list.contains(generated, name) {
-        True -> Error(Nil)
-        False ->
-          Ok(stop.Note(
-            class: stop.Warning,
-            text: module <> ": handwritten_verbs に生成名が無い: " <> name,
-          ))
-      }
+  let entity_notes =
+    app.entities
+    |> list.flat_map(fn(entity) {
+      handwritten_notes(
+        entity.module,
+        entity.handwritten_verbs,
+        candidate_names(entity),
+      )
     })
+  let external_notes =
+    app.handwritten_verbs
+    |> list.flat_map(fn(entry) {
+      handwritten_notes(entry.0, entry.1, global_candidates)
+    })
+  list.append(entity_notes, external_notes)
+}
+
+fn handwritten_notes(
+  module: String,
+  names: List(String),
+  candidates: List(String),
+) -> List(stop.Note) {
+  names
+  |> list.unique
+  |> list.filter_map(fn(name) {
+    case list.contains(candidates, name) {
+      True -> Error(Nil)
+      False ->
+        Ok(stop.Note(
+          class: stop.Warning,
+          text: module <> ": handwritten_verbs に生成名が無い: " <> name,
+        ))
+    }
   })
 }
 
@@ -384,11 +396,18 @@ fn create_many(entity: model.Entity) -> Fn {
     typing.TyRef(Some("gen/draft/" <> entity.module), entity.name <> "Draft")
   let created =
     typing.TyRef(Some("gen/draft/" <> entity.module), entity.name <> "Created")
+  let params = case create_many_has_entered(entity) {
+    True -> [
+      Param(label: "input", ty: typing.list_of(draft)),
+      Param(label: "at", ty: typing.datetime()),
+    ]
+    False -> [Param(label: "input", ty: typing.list_of(draft))]
+  }
   Fn(
     name: "create_" <> entity.collection,
-    params: [Param(label: "input", ty: typing.list_of(draft))],
+    params: params,
     result: verb(typing.list_of(created)),
-    input: "input",
+    input: input_of(params),
   )
 }
 
@@ -1070,13 +1089,20 @@ fn ordered_create_values(
 }
 
 fn create_many_sql(entity: model.Entity, app: model.App) -> String {
-  let fields = base_create_fields(entity)
+  case entity.ordered_by {
+    Some(ordered) -> ordered_create_many_sql(entity, app, ordered)
+    None -> plain_create_many_sql(entity, app)
+  }
+}
+
+fn plain_create_many_sql(entity: model.Entity, app: model.App) -> String {
+  let fields = create_fields(entity)
   case fields {
     [] -> create_sql(entity, app)
     _ -> {
       let selected =
         fields
-        |> list.map(fn(field) { json_value(app, field) })
+        |> list.map(fn(field) { create_many_value(app, entity, field) })
         |> string.join(",")
       "INSERT INTO "
       <> table(entity)
@@ -1091,6 +1117,209 @@ fn create_many_sql(entity: model.Entity, app: model.App) -> String {
       <> returning_created(app, entity)
       <> ";\n"
     }
+  }
+}
+
+/// CreateMany の ordered create。入力 JSON は Draft の欄だけを読み、配列の
+/// ordinality を scope ごとの row_number にして既存末尾へ足す。
+fn ordered_create_many_sql(
+  entity: model.Entity,
+  app: model.App,
+  ordered: model.OrderedBy,
+) -> String {
+  let fields = create_fields(entity)
+  let input_fields =
+    fields
+    |> list.filter(fn(field) {
+      !ordered_field(entity, ordered, field)
+      && field.column != "phase"
+      && !initial_entered_field(entity, field)
+    })
+  let input_rows =
+    input_fields
+    |> list.map(fn(field) {
+      "  "
+      <> json_value(app, entity, field)
+      <> " AS "
+      <> quoted(verb_field_column(app, field))
+    })
+    |> list.append(["  ord"])
+    |> string.join(",\n")
+  let within_columns =
+    list.map(ordered.within, fn(name) { verb_prop_column(app, entity, name) })
+  let scope_projection = case within_columns {
+    [] -> "1 AS batch_scope"
+    _ ->
+      within_columns
+      |> list.map(fn(column) { quoted(column) })
+      |> string.join(",")
+  }
+  let order_column = quoted(verb_prop_column(app, entity, ordered.field))
+  let existing_scope = scope_join("existing", "scope", within_columns)
+  let input_scope = scope_join("next_order", "input_rows", within_columns)
+  let parent_cte = case ordered_parent(entity, app, ordered), ordered.within {
+    Some(parent), [first, ..] -> {
+      let local_column = verb_prop_column(app, entity, first)
+      let parent_column = first_key_column(parent)
+      "parent_lock AS MATERIALIZED (\n"
+      <> " SELECT parent."
+      <> quoted(parent_column)
+      <> " AS "
+      <> quoted(local_column)
+      <> "\n FROM "
+      <> table(parent)
+      <> " AS parent\n"
+      <> " WHERE EXISTS (\n"
+      <> "  SELECT 1 FROM scopes AS scope\n"
+      <> "  WHERE parent."
+      <> quoted(parent_column)
+      <> " IS NOT DISTINCT FROM scope."
+      <> quoted(local_column)
+      <> "\n )\n ORDER BY parent."
+      <> quoted(parent_column)
+      <> "\n FOR UPDATE\n),\n"
+    }
+    _, _ -> ""
+  }
+  let parent_join = case ordered_parent(entity, app, ordered), ordered.within {
+    Some(_), [first, ..] -> {
+      let local_column = quoted(verb_prop_column(app, entity, first))
+      " JOIN parent_lock AS parent\n"
+      <> "  ON parent."
+      <> local_column
+      <> " IS NOT DISTINCT FROM scope."
+      <> local_column
+      <> "\n"
+    }
+    _, _ -> ""
+  }
+  let next_scope_columns = case within_columns {
+    [] -> ""
+    _ ->
+      within_columns
+      |> list.map(fn(column) { "scope." <> quoted(column) })
+      |> string.join(",")
+      |> fn(columns) { columns <> ",\n        " }
+  }
+  let group_by = case within_columns {
+    [] -> ""
+    _ -> "\n GROUP BY " <> qualified_columns("scope", within_columns)
+  }
+  let partition_by = case within_columns {
+    [] -> ""
+    _ ->
+      "PARTITION BY " <> qualified_columns("input_rows", within_columns) <> " "
+  }
+  let order_cast = case model.field_for_prop(entity, ordered.field) {
+    Some(field) -> explicit_cast_of(sql_type_field(app, field))
+    None -> ""
+  }
+  let selected =
+    fields
+    |> list.map(fn(field) {
+      case ordered_field(entity, ordered, field) {
+        True -> "numbered.generated_order"
+        False ->
+          case field.column, initial_entered_field(entity, field) {
+            "phase", _ -> initial_phase_literal(entity)
+            _, True -> "$2::timestamptz"
+            _, False -> "numbered." <> quoted(verb_field_column(app, field))
+          }
+      }
+    })
+    |> string.join(",")
+  "WITH input_rows AS MATERIALIZED (\n"
+  <> " SELECT\n"
+  <> input_rows
+  <> "\n FROM jsonb_array_elements($1::jsonb) WITH ORDINALITY AS items(item,ord)\n"
+  <> "),\nscopes AS MATERIALIZED (\n"
+  <> " SELECT DISTINCT "
+  <> scope_projection
+  <> "\n FROM input_rows\n),\n"
+  <> parent_cte
+  <> "next_order AS MATERIALIZED (\n"
+  <> " SELECT "
+  <> next_scope_columns
+  <> "COALESCE(max(existing."
+  <> order_column
+  <> ")+1,0) AS next_order\n"
+  <> " FROM scopes AS scope\n"
+  <> parent_join
+  <> " LEFT JOIN "
+  <> table(entity)
+  <> " AS existing\n"
+  <> "  ON "
+  <> existing_scope
+  <> group_by
+  <> "\n),\nnumbered AS MATERIALIZED (\n"
+  <> " SELECT input_rows.*,\n"
+  <> "  (next_order.next_order + row_number() OVER ("
+  <> partition_by
+  <> "ORDER BY input_rows.ord) - 1)"
+  <> order_cast
+  <> " AS generated_order\n"
+  <> " FROM input_rows\n"
+  <> " JOIN next_order ON "
+  <> input_scope
+  <> "\n)\nINSERT INTO "
+  <> table(entity)
+  <> "("
+  <> field_columns(app, fields)
+  <> ")\nSELECT "
+  <> selected
+  <> "\nFROM numbered\nORDER BY numbered.ord\nRETURNING "
+  <> returning_created(app, entity)
+  <> ";\n"
+}
+
+fn qualified_columns(alias: String, columns: List(String)) -> String {
+  columns
+  |> list.map(fn(column) { alias <> "." <> quoted(column) })
+  |> string.join(",")
+}
+
+fn field_columns(app: model.App, fields: List(model.FieldDef)) -> String {
+  fields
+  |> list.map(fn(field) { quoted(verb_field_column(app, field)) })
+  |> string.join(",")
+}
+
+fn scope_join(left: String, right: String, columns: List(String)) -> String {
+  case columns {
+    [] -> "TRUE"
+    _ ->
+      columns
+      |> list.map(fn(column) {
+        left
+        <> "."
+        <> quoted(column)
+        <> " IS NOT DISTINCT FROM "
+        <> right
+        <> "."
+        <> quoted(column)
+      })
+      |> string.join("\n AND ")
+  }
+}
+
+fn ordered_field(
+  entity: model.Entity,
+  ordered: model.OrderedBy,
+  field: model.FieldDef,
+) -> Bool {
+  field.column == ordered.field
+  || prop_for_field(entity, field.name) == ordered.field
+}
+
+fn create_many_value(
+  app: model.App,
+  entity: model.Entity,
+  field: model.FieldDef,
+) -> String {
+  case field.column, initial_entered_field(entity, field) {
+    "phase", _ -> initial_phase_literal(entity)
+    _, True -> "$2::timestamptz"
+    _, False -> json_value(app, entity, field)
   }
 }
 
@@ -1129,15 +1358,31 @@ fn parameter_value(
   }
 }
 
-fn json_value(app: model.App, field: model.FieldDef) -> String {
+fn json_value(
+  app: model.App,
+  entity: model.Entity,
+  field: model.FieldDef,
+) -> String {
+  let input_name = prop_for_field(entity, field.name)
   case field.value {
     model.TypeValue(reference) if reference.name == "Sealed" ->
-      "decode(item->>'" <> verb_field_column(app, field) <> "','hex')"
+      "decode(item->>'" <> input_name <> "','hex')"
     _ ->
       "(item->>'"
-      <> verb_field_column(app, field)
+      <> input_name
       <> "')"
-      <> cast_of(sql_type_field(app, field))
+      <> explicit_cast_of(sql_type_field(app, field))
+  }
+}
+
+fn create_many_has_entered(entity: model.Entity) -> Bool {
+  list.any(initial_phase_fields(entity), initial_entered_field(entity, _))
+}
+
+fn initial_entered_field(entity: model.Entity, field: model.FieldDef) -> Bool {
+  case initial_phase(entity) {
+    Some(phase) -> field.column == "entered_" <> naming.snake(phase)
+    None -> False
   }
 }
 
@@ -1942,6 +2187,16 @@ fn cast_of(kind: String) -> String {
   case kind {
     "jsonb" | "uuid" | "date" | "timestamptz" | "boolean" -> "::" <> kind
     _ -> ""
+  }
+}
+
+/// JSON text has to be converted explicitly for every non-text SQL type.
+/// Keep this separate from cast_of: positional parameters intentionally rely
+/// on PostgreSQL's target-type inference for integer and floating values.
+fn explicit_cast_of(kind: String) -> String {
+  case kind {
+    "text" -> ""
+    _ -> "::" <> kind
   }
 }
 

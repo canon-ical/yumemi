@@ -160,3 +160,31 @@
 - 型の多重集合で残る唯一の欠落は `advance_roster[$2::integer]`。`advance_muse_heaven` は型の多重集合で欠落0。
 - I(`create_roster`)は裁定3で本便から外しF3へ移した。`auto_key`相当の語彙追加、仮宣言の実演はしていない。指示書の対象本数は27→26へ更新した。
 - Hの意味突合は `create_free_space` / `create_link` / `create_widget`。`create_links` は語彙に無い名指し残差。上限の推測実装はしていない。
+
+---
+
+# 指示 A5 ── ゲート2 P0-7 / P0-8(2026-09-21)
+
+## 状態
+
+- branch `verb-1`、開始 `dc2993a`。P0-7 と P0-8 の2件だけを実装した。
+- `CreateMany` を単体 create と同じ欄・初期 phase 規則へ揃え、ordered Entity は親の鍵順 lock、full scope 単位の既存末尾、配列 ordinality の `row_number` で採番する。Draft JSON から `order` / phase / entered timestamp は読まない。
+- Entity-local の `handwritten_verbs` は自身の候補名だけと照合し、ER 外 module の札は global 候補名と照合する。抑止側は変更していない。
+- 固定の `musearch-main/app` / `musearch-decl/app` は読み取りだけ。framework の語彙、他の残差、musearch 本体、staging、production、push は未変更。A5 で新たに `exit 4` 停止へ回した形は無い。
+
+## DDL
+
+無し。migration / schema変更は無い。`verify-gate2-sql.mjs` が一時 schema `gate2_a5_create_many` に検証用の `category` / `article` 表を作成して削除しただけで、staging / production へは適用していない。
+
+## 検証証拠
+
+- `/home/yumemism/.codex-agents/runs/niekawa-20260921-054627-1324991-3859/evidence/a5-gleam-test.txt`: `80 passed, no failures`。
+- `/home/yumemism/.codex-agents/runs/niekawa-20260921-054627-1324991-3859/evidence/a5-route-table.txt`: `verify-route-table: PASS (7 rows, face/http scratch build)`。
+- `/home/yumemism/.codex-agents/runs/niekawa-20260921-054627-1324991-3859/evidence/a5-gate2.txt`: 既存7行を維持し、CreateMany の同一 scope / 混在 scope / 既存末尾の3行を加えた計10行 PASS。
+- `/home/yumemism/.codex-agents/runs/niekawa-20260921-054627-1324991-3859/evidence/a5-root-ffi.txt`: `MUSEARCH_APP=/home/yumemism/.codex-agents/runs/niekawa-20260921-054627-1324991-3859/musearch-ffi/app` で `8 checks PASS`。
+- `/home/yumemism/.codex-agents/runs/niekawa-20260921-054627-1324991-3859/evidence/a5-verb-self-test.txt`: 4 checks PASS。
+- `/home/yumemism/.codex-agents/runs/niekawa-20260921-054627-1324991-3859/evidence/a5-main-generate.txt` と `a5-main-counts.txt`: 固定写し clean run は635 files / exit 4 / exit 4診断34行(全診断56行)。
+- `/home/yumemism/.codex-agents/runs/niekawa-20260921-054627-1324991-3859/evidence/a5-main-vs-n4.txt`: `diff -r out-n4 out-a5-main` は出力0行・差0。
+- `/home/yumemism/.codex-agents/runs/niekawa-20260921-054627-1324991-3859/evidence/a5-decl-vs-n4.txt`: `diff -rq out-decl-n4 out-a5-decl` は出力0行・差0。
+- `/home/yumemism/.codex-agents/runs/niekawa-20260921-054627-1324991-3859/evidence/a5-verify-main.txt`: 段2一致10、missing-cast(by-type) 4本 / 5 cast。
+- `/home/yumemism/.codex-agents/runs/niekawa-20260921-054627-1324991-3859/evidence/a5-verify-decl.txt`: 段2一致11、missing-cast(by-type) 1本 / 1 cast。

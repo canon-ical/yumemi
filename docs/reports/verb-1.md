@@ -148,3 +148,37 @@ musearch `src/gen/sql.mjs` は verb 69 entry、`gen/sql/queries/verb/` は 61 �
 ## DDL
 
 無し。migration / schema 変更は無く、staging / production へ適用していない。
+
+## A5 P0-7 CreateMany
+
+`CreateMany` は単体 create と同じ `create_fields` を使い、Draft の JSON からは Draft にある Property 名だけを読む。`ordered_by.field` は入力から除外し、初期 phase は literal、`entered_<phase>` は JSON と分けた `$2::timestamptz` にした。生成 Gleam も lifecycle のある CreateMany では `create_<collection>(input, at)` として `#(input, at)` を stage へ渡す。`jsonb_array_elements ... WITH ORDINALITY` で配列順を保持し、入力に現れる親を鍵順に `FOR UPDATE`、within 全列の distinct scope ごとに既存の末尾を求め、`row_number() OVER (PARTITION BY <within 全列> ORDER BY ord) - 1` を足して採番する。
+
+SQL の要点は次のとおり。
+
+- `input_rows`: `item->>'order'` は読まず、Draft の `slug,title,body,version,category` と `ord` を取る。
+- `parent_lock`: 配列に現れる全親を `ORDER BY` してから `FOR UPDATE` する。
+- `next_order`: scope の各列を `IS NOT DISTINCT FROM` で既存行と突合し、scope ごとに `COALESCE(max(existing."order")+1,0)` を出す。
+- `numbered`: full scope で partition し、ordinality 順の連番を `next_order` へ足す。
+- INSERT は `phase='draft'` と `$2::timestamptz` を入れ、Draft 外の system 欄を JSON から読まない。
+
+実 PostgreSQL では、同一 scope の一括3行が `0,1,2`、親 B/C を交互に並べた一括4行が B=`0,1` / C=`0,1`、既に `0,1,2` のある親へ足した2行が `3,4` になった。初期 phase と entered timestamp も同じ検査で確認した。安全に生成できたため、A5 で新たに `exit 4` 停止へ回した形は無い。
+
+## A5 P0-8 handwritten_verbs
+
+Entity-local の `handwritten_verbs` は、その Entity 自身の `candidate_names(entity)` だけと照合するようにした。ER 外 module の札だけは従来どおり全 Entity の候補名へ照合する。抑止側の `emits` / `emits_reorder` は変えていないため、Entity A に Entity B の `create_feature` を書くと `handwritten: handwritten_verbs に生成名が無い: create_feature` が1行出る一方、B の function と SQL は残る。A 自身の `create_handwritten` は function と SQL の両方が消える。
+
+## A5 検証
+
+| 検査 | 実測 |
+|---|---|
+| `cd gen && gleam test` | 80 passed, no failures |
+| route table | 7 rows PASS |
+| gate 2 SQL | 既存7 + CreateMany 3 = 10 PASS |
+| root FFI | 8 checks PASS (`MUSEARCH_APP` は指定の `musearch-ffi/app`) |
+| verb SQL self-test | 4 PASS |
+| 固定写し clean run | 635 files / exit 4 / exit 4 診断34行 |
+| 巡4との差 | `out-n4` と `diff -r` 差0、`out-decl-n4` と `diff -rq` 差0 |
+| 固定写し突合 | 段2一致10 / missing-cast by-type 4本・5 cast |
+| 仮宣言突合 | 段2一致11 / missing-cast by-type 1本・1 cast |
+
+証拠は `/home/yumemism/.codex-agents/runs/niekawa-20260921-054627-1324991-3859/evidence/a5-*.txt`、生成物は同 run の `out-a5-*` に置いた。固定の `musearch-main/app` と `musearch-decl/app` は読み取りだけで、framework の語彙、musearch 本体、staging、production は変更していない。

@@ -12,6 +12,6 @@ pub const collection: String = "handwrittens"
 
 pub const handwritten_verbs: List(String) = [
   "create_handwritten",
+  "create_feature",
   "unknown_handwritten",
 ]
-

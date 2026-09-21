@@ -741,7 +741,11 @@ pub fn verb_fixture_reads_handwritten_sealed_and_external_declarations_test() {
   let assert Ok(handwritten) =
     list.find(loaded.entities, fn(item) { item.module == "handwritten" })
   handwritten.handwritten_verbs
-  |> should.equal(["create_handwritten", "unknown_handwritten"])
+  |> should.equal([
+    "create_handwritten",
+    "create_feature",
+    "unknown_handwritten",
+  ])
 }
 
 pub fn handwritten_verbs_suppress_matching_output_and_warn_once_per_miss_test() {
@@ -762,6 +766,35 @@ pub fn handwritten_verbs_suppress_matching_output_and_warn_once_per_miss_test() 
   |> list.filter(fn(note) { string.contains(note.text, "external_handwritten") })
   |> list.length
   |> should.equal(1)
+}
+
+pub fn entity_handwritten_foreign_name_warns_without_suppressing_test() {
+  let paths = list.map(files_of(verb_fixture), fn(entry) { entry.0 })
+  list.contains(paths, "db/queries/verb/create_feature.sql")
+  |> should.be_true
+  let found = text_of(verb_fixture, "src/gen/verb.gleam")
+  string.contains(found, "pub fn create_feature(") |> should.be_true
+  notes_of(verb_fixture)
+  |> list.filter(fn(note) {
+    string.contains(
+      note.text,
+      "handwritten: handwritten_verbs に生成名が無い: create_feature",
+    )
+  })
+  |> list.length
+  |> should.equal(1)
+}
+
+pub fn entity_handwritten_own_name_suppresses_function_and_sql_test() {
+  let paths = list.map(files_of(verb_fixture), fn(entry) { entry.0 })
+  list.contains(paths, "db/queries/verb/create_handwritten.sql")
+  |> should.be_false
+  let found = text_of(verb_fixture, "src/gen/verb.gleam")
+  string.contains(found, "pub fn create_handwritten(") |> should.be_false
+  notes_of(verb_fixture)
+  |> list.filter(fn(note) { string.contains(note.text, "create_handwritten") })
+  |> list.length
+  |> should.equal(0)
 }
 
 pub fn verb_fixture_emits_phase_gate_casts_sealed_and_multi_scope_test() {
@@ -845,6 +878,25 @@ pub fn draft_fields_match_create_sql_placeholders_test() {
     draft_field_count(draft, draft_name)
     |> should.equal(create_sql_input_placeholder_count(create))
   })
+}
+
+/// CreateMany の JSON 入力は Draft の Property 名だけを読む。
+/// DB 採番の order や system 入力の phase / entered_* が混ざると落ちる。
+pub fn create_many_json_fields_match_draft_fields_test() {
+  let draft = text("src/gen/draft/article.gleam")
+  let create_many = text("db/queries/verb/create_articles.sql")
+  draft_field_names(draft, "ArticleDraft")
+  |> list.sort(string.compare)
+  |> should.equal(
+    create_many_json_field_names(create_many)
+    |> list.sort(string.compare),
+  )
+  string.contains(create_many, "item->>'order'") |> should.be_false
+  string.contains(create_many, "'draft',$2::timestamptz") |> should.be_true
+  let verb = text("src/gen/verb.gleam")
+  string.contains(verb, "  at: Datetime,") |> should.be_true
+  string.contains(verb, "stage(ctx, \"create_articles\", #(input, at))")
+  |> should.be_true
 }
 
 /// gen-3b(P0-3)── 退避の一時値は負値でなく、**宣言の値域の上端から下へ、範囲に無い値**を選ぶ。
@@ -1058,6 +1110,59 @@ fn draft_field_count(source: String, draft_name: String) -> Int {
     False,
     0,
   )
+}
+
+fn draft_field_names(source: String, draft_name: String) -> List(String) {
+  collect_draft_field_names(
+    string.split(source, "\n"),
+    "  " <> draft_name <> "(",
+    False,
+    [],
+  )
+}
+
+fn collect_draft_field_names(
+  lines: List(String),
+  marker: String,
+  inside: Bool,
+  found: List(String),
+) -> List(String) {
+  case lines {
+    [] -> list.reverse(found)
+    [line, ..rest] ->
+      case inside {
+        False ->
+          case line == marker {
+            True -> collect_draft_field_names(rest, marker, True, [])
+            False -> collect_draft_field_names(rest, marker, False, found)
+          }
+        True ->
+          case line == "  )" {
+            True -> list.reverse(found)
+            False ->
+              case string.split(string.trim(line), ":") {
+                [name, ..] ->
+                  collect_draft_field_names(rest, marker, True, [name, ..found])
+                _ -> collect_draft_field_names(rest, marker, True, found)
+              }
+          }
+      }
+  }
+}
+
+fn create_many_json_field_names(sql: String) -> List(String) {
+  case string.split(sql, "item->>'") {
+    [_prefix, ..pieces] ->
+      pieces
+      |> list.filter_map(fn(piece) {
+        case string.split(piece, "'") {
+          [name, ..] -> Ok(name)
+          _ -> Error(Nil)
+        }
+      })
+      |> list.unique
+    _ -> []
+  }
 }
 
 fn count_draft_fields(
