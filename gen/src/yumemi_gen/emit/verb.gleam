@@ -818,10 +818,31 @@ fn sql_files(
     ]
     False -> []
   }
+  let ordered_locks = case entity.ordered_by {
+    Some(ordered) ->
+      case ordered_parent(entity, app, ordered) {
+        Some(parent) -> [
+          sql_file(
+            entity,
+            hashes,
+            "create_" <> entity.module <> "_lock",
+            ordered_create_lock_sql(entity, app, ordered, parent),
+          ),
+          sql_file(
+            entity,
+            hashes,
+            "create_" <> entity.collection <> "_lock",
+            ordered_create_many_lock_sql(entity, app, ordered, parent),
+          ),
+        ]
+        None -> []
+      }
+    None -> []
+  }
   list.append(
     create_files,
     list.append(
-      list.append(generic_updates, named_updates),
+      list.append(ordered_locks, list.append(generic_updates, named_updates)),
       list.append(
         list.append(advance, delete),
         list.append(list.append(extras, reorder), put),
@@ -879,6 +900,73 @@ fn plain_create_sql(entity: model.Entity, app: model.App) -> String {
   }
 }
 
+fn ordered_create_lock_sql(
+  entity: model.Entity,
+  app: model.App,
+  ordered: model.OrderedBy,
+  parent: model.Entity,
+) -> String {
+  let _ = ordered
+  let key = quoted(first_key_column(parent))
+  "-- 呼び手は create_"
+  <> entity.module
+  <> " と同じ transaction でこれを先に 1 回打つ。$1 は "
+  <> parent.module
+  <> " の鍵ひとつ。親行の版を進める。\n"
+  <> "UPDATE "
+  <> table(parent)
+  <> " SET "
+  <> key
+  <> "="
+  <> key
+  <> " WHERE "
+  <> key
+  <> "=$1"
+  <> key_cast(app, parent)
+  <> ";\n"
+}
+
+fn ordered_create_many_lock_sql(
+  entity: model.Entity,
+  app: model.App,
+  ordered: model.OrderedBy,
+  parent: model.Entity,
+) -> String {
+  let key = quoted(first_key_column(parent))
+  let first = case ordered.within {
+    [name, ..] -> name
+    [] -> ""
+  }
+  let first_value = case model.field_for_prop(entity, first) {
+    Some(field) ->
+      "(item->>'"
+      <> first
+      <> "')"
+      <> explicit_cast_of(sql_type(app, field.value))
+    None -> "(item->>'" <> first <> "')"
+  }
+  let nullable_filter = case ordered_parent_is_optional(entity, ordered) {
+    True -> "\n WHERE item->>'" <> first <> "' IS NOT NULL"
+    False -> ""
+  }
+  "-- 呼び手は create_"
+  <> entity.collection
+  <> " と同じ transaction でこれを先に 1 回打つ。$1 は Draft の jsonb 配列。親行の版を進める。\n"
+  <> "UPDATE "
+  <> table(parent)
+  <> " SET "
+  <> key
+  <> "="
+  <> key
+  <> " WHERE "
+  <> key
+  <> " IN (\n SELECT DISTINCT "
+  <> first_value
+  <> "\n FROM jsonb_array_elements($1::jsonb) AS items(item)"
+  <> nullable_filter
+  <> "\n ORDER BY 1\n);\n"
+}
+
 /// `ordered_by` のある Entity は、親を同じ文でロックしてから scope の末尾へ入れる。
 /// `order` は入力 Draft から外し、親ロックに依存する LATERAL の集計で決める。
 fn ordered_create_sql(
@@ -887,6 +975,8 @@ fn ordered_create_sql(
   ordered: model.OrderedBy,
 ) -> String {
   let fields = create_fields(entity)
+  let #(first_order, _lo, _hi) = order_span(entity, app, ordered)
+  let first_order_text = int.to_string(first_order)
   let columns =
     fields
     |> list.map(fn(field) { quoted(verb_field_column(app, field)) })
@@ -900,36 +990,47 @@ fn ordered_create_sql(
     [] -> "TRUE"
     _ -> string.join(conditions, "\n AND ")
   }
-  let parent_cte = case ordered_parent(entity, app, ordered) {
-    Some(parent) -> {
-      case ordered.within {
-        [first, ..] -> {
-          let place = ordered_create_place(entity, ordered, first)
-          "parent_lock AS MATERIALIZED (\n"
-          <> " SELECT 1 AS locked\n"
-          <> " FROM "
-          <> table(parent)
-          <> "\n WHERE "
-          <> quoted(first_key_column(parent))
-          <> "="
-          <> parameter_for_prop_field(app, entity, first, place)
-          <> " FOR UPDATE\n"
+  let parent_cte = case ordered_parent(entity, app, ordered), ordered.within {
+    Some(parent), [first, ..] -> {
+      let place = ordered_create_place(entity, ordered, first)
+      let parameter = parameter_for_prop_field(app, entity, first, place)
+      let gate = case ordered_parent_is_optional(entity, ordered) {
+        True ->
+          "parent_gate AS MATERIALIZED (\n"
+          <> " SELECT framework.require_rows(CASE WHEN "
+          <> parameter
+          <> " IS NULL THEN 1 ELSE (SELECT count(*) FROM parent_lock) END,'conflict') AS ok\n"
           <> "),\n"
-        }
-        [] -> ""
+        False ->
+          "parent_gate AS MATERIALIZED (\n"
+          <> " SELECT framework.require_rows((SELECT count(*) FROM parent_lock),'conflict') AS ok\n"
+          <> "),\n"
       }
+      "parent_lock AS MATERIALIZED (\n"
+      <> " SELECT 1 AS locked\n"
+      <> " FROM "
+      <> table(parent)
+      <> "\n WHERE "
+      <> quoted(first_key_column(parent))
+      <> "="
+      <> parameter
+      <> " FOR UPDATE NOWAIT\n"
+      <> "),\n"
+      <> gate
     }
-    None -> ""
+    _, _ -> ""
   }
   let next_order_cte = case ordered_parent(entity, app, ordered) {
     Some(_) ->
       "next_order AS MATERIALIZED (\n"
       <> " SELECT next_value.next_order\n"
-      <> " FROM parent_lock\n"
+      <> " FROM parent_gate\n"
       <> " CROSS JOIN LATERAL (\n"
       <> "  SELECT COALESCE(max(existing."
       <> order_column
-      <> ")+1,0) AS next_order\n"
+      <> ")+1,"
+      <> first_order_text
+      <> ") AS next_order\n"
       <> "  FROM "
       <> table(entity)
       <> " AS existing\n"
@@ -942,7 +1043,9 @@ fn ordered_create_sql(
       "next_order AS MATERIALIZED (\n"
       <> " SELECT COALESCE(max(existing."
       <> order_column
-      <> ")+1,0) AS next_order\n"
+      <> ")+1,"
+      <> first_order_text
+      <> ") AS next_order\n"
       <> " FROM "
       <> table(entity)
       <> " AS existing\n"
@@ -987,6 +1090,20 @@ fn ordered_parent(
         None -> None
       }
     [] -> None
+  }
+}
+
+fn ordered_parent_is_optional(
+  entity: model.Entity,
+  ordered: model.OrderedBy,
+) -> Bool {
+  case ordered.within {
+    [first, ..] ->
+      case model.field_for_prop(entity, first) {
+        Some(field) -> field.optional
+        None -> False
+      }
+    [] -> False
   }
 }
 
@@ -1128,6 +1245,8 @@ fn ordered_create_many_sql(
   ordered: model.OrderedBy,
 ) -> String {
   let fields = create_fields(entity)
+  let #(first_order, _lo, _hi) = order_span(entity, app, ordered)
+  let first_order_text = int.to_string(first_order)
   let input_fields =
     fields
     |> list.filter(fn(field) {
@@ -1161,6 +1280,21 @@ fn ordered_create_many_sql(
     Some(parent), [first, ..] -> {
       let local_column = verb_prop_column(app, entity, first)
       let parent_column = first_key_column(parent)
+      let scope_filter = case ordered_parent_is_optional(entity, ordered) {
+        True ->
+          "  WHERE scope."
+          <> quoted(local_column)
+          <> " IS NOT NULL\n"
+          <> "    AND parent."
+          <> quoted(parent_column)
+          <> " IS NOT DISTINCT FROM scope."
+          <> quoted(local_column)
+        False ->
+          "  WHERE parent."
+          <> quoted(parent_column)
+          <> " IS NOT DISTINCT FROM scope."
+          <> quoted(local_column)
+      }
       "parent_lock AS MATERIALIZED (\n"
       <> " SELECT parent."
       <> quoted(parent_column)
@@ -1171,27 +1305,42 @@ fn ordered_create_many_sql(
       <> " AS parent\n"
       <> " WHERE EXISTS (\n"
       <> "  SELECT 1 FROM scopes AS scope\n"
-      <> "  WHERE parent."
-      <> quoted(parent_column)
-      <> " IS NOT DISTINCT FROM scope."
-      <> quoted(local_column)
+      <> scope_filter
       <> "\n )\n ORDER BY parent."
       <> quoted(parent_column)
-      <> "\n FOR UPDATE\n),\n"
+      <> "\n FOR UPDATE NOWAIT\n),\n"
     }
     _, _ -> ""
   }
-  let parent_join = case ordered_parent(entity, app, ordered), ordered.within {
+  let parent_gate = case ordered_parent(entity, app, ordered), ordered.within {
     Some(_), [first, ..] -> {
       let local_column = quoted(verb_prop_column(app, entity, first))
-      " JOIN parent_lock AS parent\n"
-      <> "  ON parent."
+      let scope_filter = case ordered_parent_is_optional(entity, ordered) {
+        True ->
+          "  WHERE scope."
+          <> local_column
+          <> " IS NOT NULL\n"
+          <> "    AND NOT EXISTS (\n"
+        False -> "  WHERE NOT EXISTS (\n"
+      }
+      "parent_gate AS MATERIALIZED (\n"
+      <> " SELECT framework.require_rows(CASE WHEN NOT EXISTS (\n"
+      <> "  SELECT 1 FROM scopes AS scope\n"
+      <> scope_filter
+      <> "   SELECT 1 FROM parent_lock AS p\n"
+      <> "   WHERE p."
       <> local_column
       <> " IS NOT DISTINCT FROM scope."
       <> local_column
-      <> "\n"
+      <> "  )\n"
+      <> " ) THEN 1 ELSE 0 END,'conflict') AS ok\n"
+      <> "),\n"
     }
     _, _ -> ""
+  }
+  let parent_gate_join = case ordered_parent(entity, app, ordered) {
+    Some(_) -> " CROSS JOIN parent_gate\n"
+    None -> ""
   }
   let next_scope_columns = case within_columns {
     [] -> ""
@@ -1237,14 +1386,17 @@ fn ordered_create_many_sql(
   <> scope_projection
   <> "\n FROM input_rows\n),\n"
   <> parent_cte
+  <> parent_gate
   <> "next_order AS MATERIALIZED (\n"
   <> " SELECT "
   <> next_scope_columns
   <> "COALESCE(max(existing."
   <> order_column
-  <> ")+1,0) AS next_order\n"
+  <> ")+1,"
+  <> first_order_text
+  <> ") AS next_order\n"
   <> " FROM scopes AS scope\n"
-  <> parent_join
+  <> parent_gate_join
   <> " LEFT JOIN "
   <> table(entity)
   <> " AS existing\n"

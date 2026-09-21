@@ -96,7 +96,7 @@ missing-cast(by-placeholder, 参考): 2本/3 (advance_muse_heaven[$5::timestampt
 
 ## H 類の意味突合
 
-仮宣言の生成 SQLには、`create_free_space`、`create_link`、`create_widget` の3本について、親の `FOR UPDATE`、within 全列の `IS NOT DISTINCT FROM`、`COALESCE(max(existing."order")+1,0)` が同じ文の CTE と INSERT に出る。これは手書きの `framework.insert_X_guarded(...)` と文字一致しないが、親 lock と ordered_by 採番の意味で合格とする。
+仮宣言の生成 SQLには、`create_free_space`、`create_link`、`create_widget` の3本について、親行を先に進める no-op UPDATE、create 本体の `FOR UPDATE NOWAIT`、within 全列の `IS NOT DISTINCT FROM`、宣言起点からの採番が出る。これは手書きの `framework.insert_X_guarded(...)` と文字一致しないが、親 lock と ordered_by 採番の意味で合格とする。
 
 語彙に無い上限は推測で埋めていない。名指しする上限は `free_space` 5件、`widget` 30件、`widget` の image 10件、`link` の url 重複。`create_links` の jsonb 一括 guarded 挿入も語彙に無い残差である。
 
@@ -133,6 +133,7 @@ Draft は呼び手が作成時に与える Property だけを持つ。`auto_key`
 
 ## F3へ移した残差
 
+- ordered create の採番・開始値・親欠落は `verb-1b` で閉じた(`docs/reports/verb-1b.md`)。
 - 裁定3が裁定7の I を上書きした。`create_roster` は本便で塞がず F3へ移し、`auto_key` 相当の新語彙を追加しない。仮宣言コピーにも新しい宣言を足していない。
 - `create_article` の `posted_on` / `publish_at` も、作成時に呼び手が与えない欄を Draft から外す語彙が無いという I 類と同じ穴。RETURNING の生成型への整合は正しいが、Draft 入力の残差は F3 で閉じる。
 - 指示書上の対象本数は `27 → 26` に直した。`create_roster` を本便の対象から外したためである。突合器の全両側一覧29本では、I類として類別を残し、未分類0を維持する。
@@ -151,13 +152,14 @@ musearch `src/gen/sql.mjs` は verb 69 entry、`gen/sql/queries/verb/` は 61 �
 
 ## A5 P0-7 CreateMany
 
-`CreateMany` は単体 create と同じ `create_fields` を使い、Draft の JSON からは Draft にある Property 名だけを読む。`ordered_by.field` は入力から除外し、初期 phase は literal、`entered_<phase>` は JSON と分けた `$2::timestamptz` にした。生成 Gleam も lifecycle のある CreateMany では `create_<collection>(input, at)` として `#(input, at)` を stage へ渡す。`jsonb_array_elements ... WITH ORDINALITY` で配列順を保持し、入力に現れる親を鍵順に `FOR UPDATE`、within 全列の distinct scope ごとに既存の末尾を求め、`row_number() OVER (PARTITION BY <within 全列> ORDER BY ord) - 1` を足して採番する。
+`CreateMany` は単体 create と同じ `create_fields` を使い、Draft の JSON からは Draft にある Property 名だけを読む。`ordered_by.field` は入力から除外し、初期 phase は literal、`entered_<phase>` は JSON と分けた `$2::timestamptz` にした。生成 Gleam も lifecycle のある CreateMany では `create_<collection>(input, at)` として `#(input, at)` を stage へ渡す。呼び手は `create_<collection>_lock.sql` を先に実行し、create 本体は `FOR UPDATE NOWAIT` と `parent_gate` を使う。`jsonb_array_elements ... WITH ORDINALITY` で配列順を保持し、within 全列の distinct scope ごとに既存の末尾を求め、`row_number() OVER (PARTITION BY <within 全列> ORDER BY ord) - 1` を足して採番する。
 
 SQL の要点は次のとおり。
 
 - `input_rows`: `item->>'order'` は読まず、Draft の `slug,title,body,version,category` と `ord` を取る。
-- `parent_lock`: 配列に現れる全親を `ORDER BY` してから `FOR UPDATE` する。
-- `next_order`: scope の各列を `IS NOT DISTINCT FROM` で既存行と突合し、scope ごとに `COALESCE(max(existing."order")+1,0)` を出す。
+- `create_<collection>_lock.sql`: 配列に現れる全親を `ORDER BY` して no-op UPDATE する。
+- `parent_gate`: scope ごとに親の存在を二重 `NOT EXISTS` で検査し、欠落を `'conflict'` へ落とす。
+- `next_order`: scope の各列を `IS NOT DISTINCT FROM` で既存行と突合し、`order_span` の起点から末尾を出す。
 - `numbered`: full scope で partition し、ordinality 順の連番を `next_order` へ足す。
 - INSERT は `phase='draft'` と `$2::timestamptz` を入れ、Draft 外の system 欄を JSON から読まない。
 

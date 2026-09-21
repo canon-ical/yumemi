@@ -188,3 +188,44 @@
 - `/home/yumemism/.codex-agents/runs/niekawa-20260921-054627-1324991-3859/evidence/a5-decl-vs-n4.txt`: `diff -rq out-decl-n4 out-a5-decl` は出力0行・差0。
 - `/home/yumemism/.codex-agents/runs/niekawa-20260921-054627-1324991-3859/evidence/a5-verify-main.txt`: 段2一致10、missing-cast(by-type) 4本 / 5 cast。
 - `/home/yumemism/.codex-agents/runs/niekawa-20260921-054627-1324991-3859/evidence/a5-verify-decl.txt`: 段2一致11、missing-cast(by-type) 1本 / 1 cast。
+
+# 指示 B1 ── ordered create の P0-9 / P0-10 / P0-11
+
+## 状態
+
+- branch `verb-1b`、開始HEAD `784ecd9`。`gen/src/yumemi_gen/emit/verb.gleam` の単体・一括 ordered create に、親 no-op UPDATE lock file、`FOR UPDATE NOWAIT`、`parent_gate`、`order_span` 起点を実装した。
+- `gen/fixtures/ordered_create_negative` を追加し、`Range(min: -5, max: 10)` が reader を通り、開始値0になることを fixture test と実 PG で確認した。
+- `gen/scripts/gate2c/ordered-create-repro.mjs` / `order-range-repro.mjs` は astra 原本の写し。判定文字列を「no reproduction = P0 が消えた」と明示し、lock SQL を先行実行する形にした。
+- musearch の3つの写しは読取のみ。DDL、`src/framework/`、staging、production、push、main への commit は無い。
+
+## DDL
+
+無し。検証スクリプトの一時 schema は実行後に `DROP SCHEMA ... CASCADE` で削除した。migration / schema変更を作っていない。
+
+## 検証証拠
+
+証拠の基点は `/home/yumemism/.codex-agents/runs/niekawa-20260921-131116-1974475-16200/a1`。
+
+- `(cd gen && gleam test)` ── `83 passed, no failures`。`a1/evidence/gleam-test.txt`。
+- `bash gen/scripts/verify-route-table.sh` ── `PASS (7 rows, face/http scratch build)`。`a1/evidence/route-table.txt`。
+- `verify-gate2-sql.mjs` ── 既存10行を維持。T1は37箱(①あり/なし、3組、3 isolation、UNIQUEあり/なし + rollback)で、全箱重複0。T2は4行、T3は4行、status 0。stdout は `a1/evidence/gate2-final.txt`。
+- T1: ①ありの READ COMMITTED は全3組・UNIQUE両方で `0,1`、REPEATABLE READ / SERIALIZABLE はB① `40001`。①無しは競合中のB② `55P03`。rollback 箱はBが0を取得。
+- T2: `Range(1,10)` の単体1、宣言無しの単体0、宣言無し CreateMany `0,1,2`、負の下端0。
+- T3: 正常入力は通過。valid+missing、全件missing、単体missing はすべて `P0001/conflict` かつ表0行。FKは張っていない。
+- `node gen/scripts/verify-verb-sql.mjs --self-test ...` ── 4 checks PASS。`a1/evidence/verify-verb-self-test.txt`。
+- 仮宣言の `verify-verb-sql` ── `stage2=11`、`missing-cast(by-type)=1本/1`。`a1/evidence/verify-verb-decl.txt`。
+- `verify-root-ffi.mjs` ── `8 checks PASS`。`MUSEARCH_APP` は指定の `musearch-ffi/app`。`a1/evidence/root-ffi.txt`。
+- main clean run ── exit 4、exit 4診断34行、警告21行。`diff -rq base-main-out a1/main-out` は差0。`a1/evidence/main-generate.txt` / `diff-main.txt`。
+- decl clean run ── exit 4。`diff -rq base-decl-out a1/decl-out` の差は ordered create の既存3本と lock SQL 6本だけ。`a1/evidence/decl-generate.txt` / `diff-decl.txt`。
+- astra ordered create ── `P0-9 ordered-create astra direction: no reproduction = PASS`。`a1/evidence/repro-ordered-create.txt`。
+- astra Range ── `P0-10 order-range astra direction: no reproduction = PASS`。`a1/evidence/repro-order-range.txt`。
+- `git diff --check` ── 出力なし。
+
+## 残差
+
+- `hi` 超過時の飽和の綴りは語彙に無い。
+- ①を飛ばした RR 以上の呼び手は、②だけでは救えない。`55P03` は競合が重なったときだけである。
+- 親 Entity が引けない `ordered_by`（`within` 先頭が関係でない形）には lock 文が出ない。
+- 親欠落の失敗コードは汎用の `'conflict'`。専用名は語彙が要る。
+- 負の下端は BRIEF の括弧書き(`lo`)とは異なる。reader の起点 `int.max(lo, 0)` を正典とした。
+- `within` 先頭が optional の形では NULL scope を親検査・親 lock から外す実装にしたが、専用 fixture と独立した実 PG 箱は未実行。

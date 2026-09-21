@@ -3,13 +3,14 @@
 //// 生成 SQL を実 PG に流す検算(柏木ゲート 2 の P0-1 / 2 / 3 / 4 / 5 / 7)。
 ////
 ////   PGHOST=127.0.0.1 PGPORT=55432 PGUSER=yumemism PGDATABASE=postgres \
-////   node gen/scripts/verify-gate2-sql.mjs <musearch-out> <article-out> <flag-out> <relation-out>
+////   node gen/scripts/verify-gate2-sql.mjs <musearch-out> <article-out> <flag-out> <relation-out> [negative-out]
 ////
 //// gen-3b:P0-3 は負値・両端値(int4 の上限 / 下限)・実 CHECK / UNIQUE・同一 scope の同時実行・失敗時 rollback、
 //// それに `Range(min: 1, max: 10)` の順序列(fixtures/relation)を足した。P0-5 はここでは矢印の生成 SQL
 //// (`db/queries/<service>/to_<prop>.sql`)を PG で流す ── Context 契約を通した復号は verify-root-ffi.mjs。
 
 import fs from "node:fs";
+import path from "node:path";
 import { spawnSync } from "node:child_process";
 import pg from "/home/yumemism/yumemism_repo/musearch/app/node_modules/pg/lib/index.js";
 
@@ -17,10 +18,14 @@ const [, , musearchOut, articleOut, flagOut, relationOut] = process.argv;
 
 if (!musearchOut || !articleOut || !flagOut || !relationOut) {
   console.error(
-    "usage: verify-gate2-sql.mjs <musearch-out> <article-out> <flag-out> <relation-out>",
+    "usage: verify-gate2-sql.mjs <musearch-out> <article-out> <flag-out> <relation-out> [negative-out]",
   );
   process.exit(2);
 }
+
+const negativeOut =
+  process.argv[6] ||
+  `${path.dirname(relationOut)}/fx-ordered_create_negative`;
 
 function readSql(out, relative) {
   return fs.readFileSync(`${out}/${relative}`, "utf8");
@@ -137,6 +142,13 @@ try {
   await dropSchema(draftClient, "gate2_r7_draft");
   await draftClient.query("CREATE SCHEMA gate2_r7_draft");
   await draftClient.query(`
+    CREATE FUNCTION gate2_r7_draft.require_rows(affected bigint, code text)
+      RETURNS bigint LANGUAGE plpgsql AS $$
+      BEGIN
+        IF affected=0 THEN RAISE EXCEPTION USING ERRCODE='P0001',MESSAGE=code;
+        END IF;
+        RETURN affected;
+      END $$;
     CREATE TABLE gate2_r7_draft.chunk(a integer,b integer,c integer,text text,
       PRIMARY KEY(a,b,c));
     CREATE TABLE gate2_r7_draft.category(name text PRIMARY KEY);
@@ -203,6 +215,13 @@ try {
   await dropSchema(createManyClient, "gate2_a5_create_many");
   await createManyClient.query("CREATE SCHEMA gate2_a5_create_many");
   await createManyClient.query(`
+    CREATE FUNCTION gate2_a5_create_many.require_rows(affected bigint, code text)
+      RETURNS bigint LANGUAGE plpgsql AS $$
+      BEGIN
+        IF affected=0 THEN RAISE EXCEPTION USING ERRCODE='P0001',MESSAGE=code;
+        END IF;
+        RETURN affected;
+      END $$;
     CREATE TABLE gate2_a5_create_many.category(name text PRIMARY KEY);
     INSERT INTO gate2_a5_create_many.category(name) VALUES ('a'),('b'),('c');
     CREATE TABLE gate2_a5_create_many.article(
@@ -667,3 +686,567 @@ requireText(
   "P0-4 NULL boundary continuation",
 );
 console.log("P0-4 mixed keyset NULL boundary: PASS");
+
+// B1 ── ordered create の親版ロック、値域の起点、親欠落を実 PG で検算する。
+const orderedArticleSql = readSql(
+  articleOut,
+  "db/queries/verb/create_article.sql",
+);
+const orderedArticlesSql = readSql(
+  articleOut,
+  "db/queries/verb/create_articles.sql",
+);
+const orderedArticleLockSql = readSql(
+  articleOut,
+  "db/queries/verb/create_article_lock.sql",
+);
+const orderedArticlesLockSql = readSql(
+  articleOut,
+  "db/queries/verb/create_articles_lock.sql",
+);
+const rangePhotoSql = readSql(
+  relationOut,
+  "db/queries/verb/create_photo.sql",
+);
+const rangePhotoLockSql = readSql(
+  relationOut,
+  "db/queries/verb/create_photo_lock.sql",
+);
+const negativeChildSql = readSql(
+  negativeOut,
+  "db/queries/verb/create_child.sql",
+);
+const negativeChildLockSql = readSql(
+  negativeOut,
+  "db/queries/verb/create_child_lock.sql",
+);
+
+const orderedAt = "2026-09-21T00:00:00Z";
+
+async function createArticleHarness(client, schema, { unique = true, parents = [] } = {}) {
+  await dropSchema(client, schema);
+  await client.query(`CREATE SCHEMA ${schema}`);
+  await client.query(`
+    CREATE FUNCTION ${schema}.require_rows(affected bigint, code text)
+      RETURNS bigint LANGUAGE plpgsql AS $$
+      BEGIN
+        IF affected=0 THEN RAISE EXCEPTION USING ERRCODE='P0001',MESSAGE=code;
+        END IF;
+        RETURN affected;
+      END $$;
+    CREATE TABLE ${schema}.category(name text PRIMARY KEY);
+    CREATE TABLE ${schema}.article(
+      slug text PRIMARY KEY,
+      title text NOT NULL,
+      body text NOT NULL,
+      version integer NOT NULL,
+      "order" integer NOT NULL,
+      category_id text NOT NULL,
+      phase text NOT NULL,
+      entered_draft timestamptz NOT NULL
+      ${unique ? ', UNIQUE(category_id,"order")' : ''}
+    );
+  `);
+  for (const parent of parents) {
+    await client.query(`INSERT INTO ${schema}.category(name) VALUES ($1)`, [parent]);
+  }
+}
+
+async function createRangeHarness(client, schema) {
+  await dropSchema(client, schema);
+  await client.query(`CREATE SCHEMA ${schema}`);
+  await client.query(`
+    CREATE FUNCTION ${schema}.require_rows(affected bigint, code text)
+      RETURNS bigint LANGUAGE plpgsql AS $$
+      BEGIN
+        IF affected=0 THEN RAISE EXCEPTION USING ERRCODE='P0001',MESSAGE=code;
+        END IF;
+        RETURN affected;
+      END $$;
+    CREATE TABLE ${schema}.album(id uuid PRIMARY KEY);
+    CREATE TABLE ${schema}.photo(
+      id uuid PRIMARY KEY,
+      album_id uuid NOT NULL,
+      shelf_id uuid,
+      caption text,
+      "order" integer NOT NULL CHECK ("order" BETWEEN 1 AND 10)
+    );
+  `);
+  await client.query(
+    `INSERT INTO ${schema}.album(id) VALUES ('00000000-0000-0000-0000-000000000001')`,
+  );
+}
+
+async function createChildHarness(client, schema) {
+  await dropSchema(client, schema);
+  await client.query(`CREATE SCHEMA ${schema}`);
+  await client.query(`
+    CREATE FUNCTION ${schema}.require_rows(affected bigint, code text)
+      RETURNS bigint LANGUAGE plpgsql AS $$
+      BEGIN
+        IF affected=0 THEN RAISE EXCEPTION USING ERRCODE='P0001',MESSAGE=code;
+        END IF;
+        RETURN affected;
+      END $$;
+    CREATE TABLE ${schema}.parent(id uuid PRIMARY KEY);
+    CREATE TABLE ${schema}.child(
+      id uuid PRIMARY KEY,
+      parent_id uuid NOT NULL,
+      name text NOT NULL,
+      "order" integer NOT NULL
+    );
+  `);
+}
+
+function articleDraft(slug, scope) {
+  return [slug, slug, "body", 1, scope, orderedAt];
+}
+
+function articlesDraft(slug, scope) {
+  return [
+    JSON.stringify([
+      { slug, title: slug, body: "body", version: 1, category: scope },
+    ]),
+    orderedAt,
+  ];
+}
+
+function sideSql(kind) {
+  return kind === "single"
+    ? {
+        create: orderedArticleSql,
+        lock: orderedArticleLockSql,
+        lockParams: (scope) => [scope],
+        createParams: (slug, scope) => articleDraft(slug, scope),
+      }
+    : {
+        create: orderedArticlesSql,
+        lock: orderedArticlesLockSql,
+        lockParams: (scope, slug) => [JSON.stringify([
+          { slug, title: slug, body: "body", version: 1, category: scope },
+        ])],
+        createParams: (slug, scope) => articlesDraft(slug, scope),
+      };
+}
+
+async function waitForLock(monitor, pid) {
+  for (let attempt = 0; attempt < 250; attempt += 1) {
+    const state = await monitor.query(
+      "SELECT wait_event_type FROM pg_stat_activity WHERE pid=$1",
+      [pid],
+    );
+    if (state.rows[0]?.wait_event_type === "Lock") return true;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  return false;
+}
+
+async function rollbackQuietly(client) {
+  if (!client) return;
+  try {
+    await client.query("ROLLBACK");
+  } catch (_) {
+    // The transaction may already have been rolled back by PostgreSQL.
+  }
+}
+
+async function runOrderedRace({
+  schema,
+  pair,
+  isolation,
+  useLock,
+  unique,
+  rollbackA = false,
+}) {
+  const setup = gateDb();
+  const first = gateDb();
+  const second = gateDb();
+  const monitor = gateDb();
+  await setup.connect();
+  await first.connect();
+  await second.connect();
+  await monitor.connect();
+  let secondFirstPromise;
+  let secondFirstError;
+  let secondCreateError;
+  let secondCreateSucceeded = false;
+  let waited = true;
+  const firstKind = pair.split("/")[0];
+  const secondKind = pair.split("/")[1];
+  const firstSide = sideSql(firstKind);
+  const secondSide = sideSql(secondKind);
+  const firstSlug = `a-${schema}`;
+  const secondSlug = `b-${schema}`;
+  try {
+    await createArticleHarness(setup, schema, { unique, parents: ["scope"] });
+    await first.query(`BEGIN ISOLATION LEVEL ${isolation}`);
+    await second.query(`BEGIN ISOLATION LEVEL ${isolation}`);
+    if (useLock) {
+      await first.query(
+        scopedSql(firstSide.lock, schema),
+        firstSide.lockParams("scope", firstSlug),
+      );
+      secondFirstPromise = second
+        .query(
+          scopedSql(secondSide.lock, schema),
+          secondSide.lockParams("scope", secondSlug),
+        )
+        .catch((error) => {
+          secondFirstError = error;
+          return null;
+        });
+      waited = await waitForLock(monitor, second.processID);
+    }
+
+    await first.query(
+      scopedSql(firstSide.create, schema),
+      firstSide.createParams(firstSlug, "scope"),
+    );
+    if (useLock) {
+      if (rollbackA) {
+        await first.query("ROLLBACK");
+      } else {
+        await first.query("COMMIT");
+      }
+      if (secondFirstPromise) await secondFirstPromise;
+    } else {
+      try {
+        await second.query(
+          scopedSql(secondSide.create, schema),
+          secondSide.createParams(secondSlug, "scope"),
+        );
+      } catch (error) {
+        secondCreateError = error;
+      }
+      await first.query("COMMIT");
+    }
+    if (useLock && !secondFirstError) {
+      try {
+        await second.query(
+          scopedSql(secondSide.create, schema),
+          secondSide.createParams(secondSlug, "scope"),
+        );
+        secondCreateSucceeded = true;
+      } catch (error) {
+        secondCreateError = error;
+      }
+    }
+    if (secondCreateSucceeded) {
+      await second.query("COMMIT");
+    } else {
+      await rollbackQuietly(second);
+    }
+  } catch (error) {
+    await rollbackQuietly(first);
+    await rollbackQuietly(second);
+    throw error;
+  } finally {
+    await monitor.end();
+    await second.end();
+    await first.end();
+  }
+
+  const rows = (
+    await setup.query(
+      `SELECT slug,"order" FROM ${schema}.article ORDER BY "order",slug`,
+    )
+  ).rows;
+  const duplicateRows = (
+    await setup.query(`
+      SELECT category_id,"order",count(*)::integer AS count
+      FROM ${schema}.article
+      GROUP BY category_id,"order"
+      HAVING count(*) > 1
+    `)
+  ).rows;
+  if (duplicateRows.length !== 0) {
+    throw new Error(`${schema}: duplicate ordered rows ${JSON.stringify(duplicateRows)}`);
+  }
+
+  const secondCode = secondFirstError?.code || secondCreateError?.code || "ok";
+  if (!waited) {
+    throw new Error(`${schema}: B ① did not wait on the parent row`);
+  }
+  if (rollbackA) {
+    if (secondCode !== "ok" || rows.length !== 1 || rows[0].order !== 0) {
+      throw new Error(`${schema}: rollback result ${JSON.stringify({ secondCode, rows })}`);
+    }
+  } else if (useLock && isolation === "READ COMMITTED") {
+    if (secondCode !== "ok" || rows.length !== 2 || rows[0].order !== 0 || rows[1].order !== 1) {
+      throw new Error(`${schema}: READ COMMITTED result ${JSON.stringify({ secondCode, rows })}`);
+    }
+  } else if (useLock) {
+    if (secondCode !== "40001" || rows.length !== 1 || rows[0].order !== 0) {
+      throw new Error(`${schema}: ${isolation} result ${JSON.stringify({ secondCode, rows })}`);
+    }
+  } else {
+    if (secondCode !== "55P03" || rows.length !== 1 || rows[0].order !== 0) {
+      throw new Error(`${schema}: no-lock result ${JSON.stringify({ secondCode, rows })}`);
+    }
+  }
+  await dropSchema(setup, schema);
+  await setup.end();
+  return {
+    pair,
+    isolation,
+    lock: useLock ? "①あり" : "①無し",
+    unique: unique ? "UNIQUEあり" : "UNIQUE無し",
+    outcome: `${secondCode}:${rows.map((row) => row.order).join(",")}`,
+  };
+}
+
+const t1Rows = [];
+const racePairs = ["single/single", "many/many", "single/many"];
+const raceIsolations = ["READ COMMITTED", "REPEATABLE READ", "SERIALIZABLE"];
+let raceNumber = 0;
+for (const useLock of [true, false]) {
+  for (const pair of racePairs) {
+    for (const isolation of raceIsolations) {
+      for (const unique of [true, false]) {
+        raceNumber += 1;
+        t1Rows.push(
+          await runOrderedRace({
+            schema: `gate2_t1_${String(raceNumber).padStart(2, "0")}`,
+            pair,
+            isolation,
+            useLock,
+            unique,
+          }),
+        );
+      }
+    }
+  }
+}
+const rollbackRow = await runOrderedRace({
+  schema: "gate2_t1_rollback",
+  pair: "single/single",
+  isolation: "READ COMMITTED",
+  useLock: true,
+  unique: true,
+  rollbackA: true,
+});
+t1Rows.push({ ...rollbackRow, outcome: `rollback:${rollbackRow.outcome}` });
+console.log("T1 ordered-create matrix: PASS (37 rows; no duplicate scope/order)");
+console.log("pair\tlock\tisolation\tunique\tresult");
+for (const row of t1Rows) {
+  console.log(
+    `${row.pair}\t${row.lock}\t${row.isolation}\t${row.unique}\t${row.outcome}`,
+  );
+}
+
+async function applyInTransaction(client, schema, lockSql, lockParams, createSql, createParams) {
+  await client.query("BEGIN");
+  try {
+    await client.query(scopedSql(lockSql, schema), lockParams);
+    const result = await client.query(scopedSql(createSql, schema), createParams);
+    await client.query("COMMIT");
+    return result;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  }
+}
+
+async function expectP0001(action, label) {
+  try {
+    await action();
+  } catch (error) {
+    if (error.code === "P0001" && error.message === "conflict") return;
+    throw new Error(`${label}: expected P0001 conflict, got ${error.code} ${error.message}`);
+  }
+  throw new Error(`${label}: expected P0001 conflict, but it succeeded`);
+}
+
+const t2Client = gateDb();
+await t2Client.connect();
+try {
+  await createRangeHarness(t2Client, "gate2_t2_range");
+  const rangeRow = await applyInTransaction(
+    t2Client,
+    "gate2_t2_range",
+    rangePhotoLockSql,
+    ["00000000-0000-0000-0000-000000000001"],
+    rangePhotoSql,
+    [
+      "00000000-0000-0000-0000-000000000011",
+      "00000000-0000-0000-0000-000000000001",
+      "00000000-0000-0000-0000-000000000021",
+      "caption",
+    ],
+  );
+  if (rangeRow.rows.length !== 1 || rangeRow.rows[0].order !== 1) {
+    throw new Error(`T2 Range(1,10) expected order 1: ${JSON.stringify(rangeRow.rows)}`);
+  }
+  console.log("T2 Range(1,10) single starts at 1 and satisfies CHECK: PASS");
+
+  await createArticleHarness(t2Client, "gate2_t2_article_single", { parents: ["scope"] });
+  const articleSingle = await applyInTransaction(
+    t2Client,
+    "gate2_t2_article_single",
+    orderedArticleLockSql,
+    ["scope"],
+    orderedArticleSql,
+    articleDraft("single", "scope"),
+  );
+  if (articleSingle.rows.length !== 1 || articleSingle.rows[0].order !== 0) {
+    throw new Error(`T2 declaration-free single expected order 0: ${JSON.stringify(articleSingle.rows)}`);
+  }
+  console.log("T2 declaration-free single starts at 0: PASS");
+
+  await createArticleHarness(t2Client, "gate2_t2_article_many", { parents: ["scope"] });
+  const articleMany = await applyInTransaction(
+    t2Client,
+    "gate2_t2_article_many",
+    orderedArticlesLockSql,
+    [JSON.stringify([
+      { slug: "many-0", title: "many-0", body: "body", version: 1, category: "scope" },
+      { slug: "many-1", title: "many-1", body: "body", version: 1, category: "scope" },
+      { slug: "many-2", title: "many-2", body: "body", version: 1, category: "scope" },
+    ])],
+    orderedArticlesSql,
+    [JSON.stringify([
+      { slug: "many-0", title: "many-0", body: "body", version: 1, category: "scope" },
+      { slug: "many-1", title: "many-1", body: "body", version: 1, category: "scope" },
+      { slug: "many-2", title: "many-2", body: "body", version: 1, category: "scope" },
+    ]), orderedAt],
+  );
+  if (articleMany.rows.map((row) => row.order).join(",") !== "0,1,2") {
+    throw new Error(`T2 declaration-free many expected 0,1,2: ${JSON.stringify(articleMany.rows)}`);
+  }
+  console.log("T2 declaration-free CreateMany starts at 0,1,2: PASS");
+
+  await createChildHarness(t2Client, "gate2_t2_negative");
+  await t2Client.query(
+    `INSERT INTO gate2_t2_negative.parent(id) VALUES ('00000000-0000-0000-0000-000000000031')`,
+  );
+  const negativeRow = await applyInTransaction(
+    t2Client,
+    "gate2_t2_negative",
+    negativeChildLockSql,
+    ["00000000-0000-0000-0000-000000000031"],
+    negativeChildSql,
+    [
+      "00000000-0000-0000-0000-000000000041",
+      "00000000-0000-0000-0000-000000000031",
+      "negative",
+    ],
+  );
+  if (negativeRow.rows.length !== 1 || negativeRow.rows[0].order !== 0) {
+    throw new Error(`T2 negative Range expected order 0: ${JSON.stringify(negativeRow.rows)}`);
+  }
+  console.log("T2 negative lower bound starts at 0: PASS");
+} finally {
+  await dropSchema(t2Client, "gate2_t2_range");
+  await dropSchema(t2Client, "gate2_t2_article_single");
+  await dropSchema(t2Client, "gate2_t2_article_many");
+  await dropSchema(t2Client, "gate2_t2_negative");
+  await t2Client.end();
+}
+
+const t3Client = gateDb();
+await t3Client.connect();
+try {
+  await createArticleHarness(t3Client, "gate2_t3_valid", {
+    unique: false,
+    parents: ["a", "b"],
+  });
+  const validRows = await applyInTransaction(
+    t3Client,
+    "gate2_t3_valid",
+    orderedArticlesLockSql,
+    [JSON.stringify([
+      { slug: "valid-a", title: "valid-a", body: "body", version: 1, category: "a" },
+      { slug: "valid-b", title: "valid-b", body: "body", version: 1, category: "b" },
+    ])],
+    orderedArticlesSql,
+    [JSON.stringify([
+      { slug: "valid-a", title: "valid-a", body: "body", version: 1, category: "a" },
+      { slug: "valid-b", title: "valid-b", body: "body", version: 1, category: "b" },
+    ]), orderedAt],
+  );
+  if (validRows.rows.length !== 2) {
+    throw new Error(`T3 valid parents did not pass: ${JSON.stringify(validRows.rows)}`);
+  }
+  console.log("T3 all parents present passes without FK: PASS");
+
+  await createArticleHarness(t3Client, "gate2_t3_mixed", {
+    unique: false,
+    parents: ["a"],
+  });
+  await expectP0001(
+    () => applyInTransaction(
+      t3Client,
+      "gate2_t3_mixed",
+      orderedArticlesLockSql,
+      [JSON.stringify([
+        { slug: "mixed-a", title: "mixed-a", body: "body", version: 1, category: "a" },
+        { slug: "mixed-b", title: "mixed-b", body: "body", version: 1, category: "missing" },
+      ])],
+      orderedArticlesSql,
+      [JSON.stringify([
+        { slug: "mixed-a", title: "mixed-a", body: "body", version: 1, category: "a" },
+        { slug: "mixed-b", title: "mixed-b", body: "body", version: 1, category: "missing" },
+      ]), orderedAt],
+    ),
+    "T3 mixed parent",
+  );
+  const mixedCount = (
+    await t3Client.query("SELECT count(*)::integer AS count FROM gate2_t3_mixed.article")
+  ).rows[0].count;
+  if (mixedCount !== 0) throw new Error(`T3 mixed parent left ${mixedCount} rows`);
+  console.log("T3 mixed valid/missing parents returns P0001 and 0 rows: PASS");
+
+  await createArticleHarness(t3Client, "gate2_t3_all_missing", {
+    unique: false,
+    parents: [],
+  });
+  await expectP0001(
+    () => applyInTransaction(
+      t3Client,
+      "gate2_t3_all_missing",
+      orderedArticlesLockSql,
+      [JSON.stringify([
+        { slug: "none-a", title: "none-a", body: "body", version: 1, category: "a" },
+        { slug: "none-b", title: "none-b", body: "body", version: 1, category: "b" },
+      ])],
+      orderedArticlesSql,
+      [JSON.stringify([
+        { slug: "none-a", title: "none-a", body: "body", version: 1, category: "a" },
+        { slug: "none-b", title: "none-b", body: "body", version: 1, category: "b" },
+      ]), orderedAt],
+    ),
+    "T3 all missing parents",
+  );
+  const allMissingCount = (
+    await t3Client.query("SELECT count(*)::integer AS count FROM gate2_t3_all_missing.article")
+  ).rows[0].count;
+  if (allMissingCount !== 0) throw new Error(`T3 all-missing parent left ${allMissingCount} rows`);
+  console.log("T3 all parents missing returns P0001 and 0 rows: PASS");
+
+  await createArticleHarness(t3Client, "gate2_t3_single_missing", {
+    unique: false,
+    parents: [],
+  });
+  await expectP0001(
+    () => applyInTransaction(
+      t3Client,
+      "gate2_t3_single_missing",
+      orderedArticleLockSql,
+      ["missing"],
+      orderedArticleSql,
+      articleDraft("single-missing", "missing"),
+    ),
+    "T3 single missing parent",
+  );
+  const singleMissingCount = (
+    await t3Client.query("SELECT count(*)::integer AS count FROM gate2_t3_single_missing.article")
+  ).rows[0].count;
+  if (singleMissingCount !== 0) throw new Error(`T3 single-missing parent left ${singleMissingCount} rows`);
+  console.log("T3 single missing parent returns P0001 and 0 rows: PASS");
+} finally {
+  await dropSchema(t3Client, "gate2_t3_valid");
+  await dropSchema(t3Client, "gate2_t3_mixed");
+  await dropSchema(t3Client, "gate2_t3_all_missing");
+  await dropSchema(t3Client, "gate2_t3_single_missing");
+  await t3Client.end();
+}
