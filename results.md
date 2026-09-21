@@ -2,8 +2,8 @@
 
 ## 状態
 
-- branch: `front-1c`。道具の checkpoint は `3f22760`、verify 判定の checkpoint は
-  `ed62079`。完了時にこの便の checkpoint を 1 本へ squash する。
+- branch: `front-1c`。道具と verify の checkpoint は 1 本(`0a5cb99`)へ squash 済み。
+  便全体は 真壁 3 本(framework / 面 package / 道具と報告)と 贄川 の P2 2 本。
 - `gen/scripts/` の front 4 本だけを backup 枝から写し、面の `www/src` を scratch の
   `src/` へコピーする形にした。`www/src/gen/**` も同時にコピーする。
 - `docs/reports/front-1c.md` に 14 型表、v4 → v5、56 差分、数字、P1 / Y2 の申し送りを
