@@ -38,3 +38,8 @@
 ## 検収
 
 3 件の実 PG test の名と結果、`gleam test` の数、`verify-gate2-sql.mjs` の PASS 数(10 以上)、musearch main への clean run の数字(exit 4 = 9 / 警告 21 / verb 外の差 0)、`results.md` の `## DDL`(無し)、report の path。astra の再現スクリプト 2 本を本便の木で再実行して P0 が消えていること。
+
+## 鷹野の裁定 C(2026-09-21 14:45、巡 2 のエスカレーション「負の下端の開始値」への答え)
+
+**create の開始値は `int.max(lo, 0)`。**`Range(-5, 10)` は 0 から始まる。理由:`reader.gleam:2124` の受理条件 `hi >= int.max(lo, 0)` と診断文「値域に確定値の起点が無い」が、確定値の起点を `max(lo, 0)` と既に定めている(gen-3 / gen-5 で承認済みの正典側の定義)。reorder の確定値も同じ `order_span` から出るので、create だけ `lo` に寄せると負の下端で create と reorder が食い違い、新しい穴になる。**「どこまで 2」の括弧書き「`Range(lo, hi)` なら `lo`」はこの裁定で更正**(`lo >= 0` のときは同じ値、P0-10 の「開始値 0 固定が `Range(1,10)` を破る」はこの形でも閉じる)。試験 `T2 negative lower bound starts at 0` はそのまま。現物の宣言は全部 `lo >= 1` なので musearch 側(F3)への影響は 0。負の値域を「手で置く領域」として使う設計は本便の外、要るなら 20 の改訂として鷹野宛。
+
