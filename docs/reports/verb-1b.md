@@ -237,6 +237,13 @@ parent_gate AS MATERIALIZED (
 | astra order-range | `P0-10 ... no reproduction = PASS` |
 | `git diff --check` | 出力なし |
 
+`verify-gate2-sql.mjs` は第 5 引数に**負の下端 fixture の出力**を取る(省略すると `relation-out` の隣を推測する)。T1 / T2 / T3 を回すときの呼び方は次のとおり。
+
+```
+PGHOST=127.0.0.1 PGPORT=55432 PGUSER=yumemism PGDATABASE=postgres \
+  node gen/scripts/verify-gate2-sql.mjs <main-out> <article-out> <flag-out> <relation-out> <ordered_create_negative-out>
+```
+
 証拠は `/home/yumemism/.codex-agents/runs/niekawa-20260921-131116-1974475-16200/a1/evidence/`、生成物は同 run の `a1/fx-*` / `a1/main-out` / `a1/decl-out` にある。
 
 ## F3 への申し送り
