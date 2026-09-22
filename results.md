@@ -724,3 +724,27 @@ musearch 本体には触れていない。入力は指定 snapshot、出力と�
 
 1. **`build/blocks.html` の header / nav / footer の区画に Layout の Block が入らない** ── 現物は `header` / `aside` / `footer` の literal が置かれるだけ。51 v5 §333 の「header / nav / footer の Block を Layout どおりに置き」の半分。`page` の区画に全 Block を縦に並べる方は成立している。dev の道具なので本便では直さない
 2. **生成された decoder が `let assert Ok(default_value) = parse("placeholder")` の形を持つ**(4 本、`decode.failure` の既定値)。literal は 4 つとも今の framework の検査を通るので落ちないが、opaque の検査が後の便で厳しくなると生成コードが panic する。`decode.new_primitive_decoder` なら既定値が要らない
+
+# 指示 段E ── 突合と報告
+
+## DDL
+
+無し。`git diff --stat 6cbc9dd..HEAD -- db/ gen/fixtures/article/db/` は空。migration / schema / staging / production には触れていない。
+
+## 鷹野宛
+
+- 巡6: 面の `route / load / blocks / widgets / service / api / out` は back と別の `www/src/gen/**` に置き、Page の Data/load/view と型写しだけを生成する。musearch は snapshot を読むだけにする。
+- 巡8: 島の transport は Service 分岐を持たない汎用送信、route/method/path は `api.gleam` から literal 化し、`given` と `reloads` は client runtime が扱う。FFI の業務分岐は残さない。
+- 巡9: shell は Page/decoder/theme/grid CSS を生成し、route 表外は `SVELTE` へ元 Request のまま fallback する。`www/src/shell.gleam` 不在時は既定値と warning 1 本を使う。
+- 巡10: skeleton は `src/gen/skeleton/**` へ毎回生成し、Block の ★ は `src/blocks/**` に残す。Block list は生成 Gleam を面 runtime で実行して `build/blocks.html` に落とす。生成 decoder の placeholder assert は P1 のまま。
+- 本巡: ▲ の header だけは無視し、意図差 2 系統は生成物を正、▲ の古さは追随便で置換、生成側の route/Row decoder/preview 欠落は P1 とした。`gen/src/**`・`src/**`・`gen/fixtures/**` は変更していない。
+
+## musearch 追随便への申し送り
+
+- 入力は `ms-96fb8cc`、出力は `out-ms10` を保存したままにする。まず E-1/E-2 の P1 を解消した生成結果を別 output で作り、face build と back 604 file 本文 diff 0 を確認する。
+- 追随便では `www/src/gen/` の ▲ 15 fileをバックアップし、生成物の同名 15 fileを同じ path へ差し替える。動く file は `route.gleam`、`widgets.gleam`、`load/layout.gleam`、`blocks.gleam`、`service.gleam`、`api.gleam`、`load/muse/arg_handle/page.gleam`、`shell.mjs`、`out/article_list.gleam`、`out/link_list.gleam`、`out/space_list.gleam`、`out/muse_heaven_list.gleam`、`out/subscription_read.gleam`、`out/muse_read.gleam`、`out/widget_list.gleam`。
+- 差し替え後に `www` package を build し、Page/SSR/isolate と registry の route/method/path を検査する。`www/src/media.gleam` は ★ なので置き換えない。musearch の main へは鷹野の承認後まで書かない。
+- 生成物 **14 種目**(back の静的資料の写し ── 外部送信 6 件 / API v1 本文)は P4 の ▲ が置かれた後の便で、源は `.mjs` を読む口か `api/priv/` の置き直しかを鷹野が P4 の results を見て裁く(裁定 7)。
+- musearch の現物で検査 8 本を効かせるには `api/src/entry.gleam` に `pages: AllPages` と `api/gleam.toml` の依存窓の引き上げが要る(裁定 9)。
+- **`www/src/shell.gleam` 6 行を置く**(`muses/` も同型)── 置くまで警告 1 本が出続ける(裁定 10)。
+- `www/gleam.toml` に `sketch` / `sketch_lustre` の直接依存が無く、生成 `page.gleam` の build が notice を出す(本便の面 build で 56〜57 件)。
