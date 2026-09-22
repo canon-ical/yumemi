@@ -787,3 +787,12 @@ musearch 本体には触れていない。入力は指定 snapshot、出力と�
 - `results.md`: 本節を追加。
 
 P1、back 側、musearch、DDL、Hex publish、push、main、push は触っていない。
+
+## 贄川の P2(検収で見つけた回帰、贄川が直して commit)
+
+真壁の `addGivenAttributes` は `searchFrom` を **givens をまたいで共有**していた(`let searchFrom = 0;` が `for` の外)。このため **spec の given の順が文書順と逆**だと、先に在る島に属性が付かない ── 旧コードでは付いていたので**この巡で入った回帰**。
+
+- 再現(修正前の生成物 `out-fx12/public/src/gen/shell.mjs`):文書順 `<like-button>` → `<pick-tag>`、givens は `[pick-tag, like-button]` → **`like-button` に `data-yumemi-given` が付かない**(`pick-tag` だけ付く)
+- 直し:`let searchFrom = 0;` を `for (const given of givens) {` の**中**へ移す(`emit/front.gleam:3449`、1 行)。同 tag 2 本は既存 `data-yumemi-given` を飛ばす分岐が拾うので壊れない
+- 検査:`gen/scripts/verify-front-given.mjs` に **`GIVEN CROSS TAG ORDER`** を足した。修正前の生成物で **FAIL**、修正後で **PASS**(4 本とも PASS)
+

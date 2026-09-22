@@ -132,6 +132,24 @@ run("GIVEN EXISTING ATTRIBUTE", () => {
   );
 });
 
+run("GIVEN CROSS TAG ORDER", () => {
+  const output = addGivenAttributes(
+    '<like-button id="one"></like-button><pick-tag id="two"></pick-tag>',
+    [
+      { tag: "pick-tag", raw: { id: 2 } },
+      { tag: "like-button", raw: { id: 1 } },
+    ],
+  );
+  const likes = openingTags(output, "like-button");
+  const picks = openingTags(output, "pick-tag");
+  assert(likes.length === 1 && picks.length === 1, "island count changed");
+  assert(
+    givenValue(likes[0]) === encoded({ id: 1 }),
+    "an island earlier in the document than a preceding given lost its attribute",
+  );
+  assert(givenValue(picks[0]) === encoded({ id: 2 }), "given crossed tags");
+});
+
 if (failures > 0) {
   console.error(`GIVEN TESTS: FAIL (${failures} failed)`);
   process.exitCode = 1;

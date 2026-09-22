@@ -236,8 +236,8 @@ async function renderPage(request, env, matched) {
 
 function addGivenAttributes(html, givens) {
   let output = html;
-  let searchFrom = 0;
   for (const given of givens) {
+    let searchFrom = 0;
     const marker = `<${given.tag} `;
     let markerOffset = output.indexOf(marker, searchFrom);
     while (markerOffset >= 0) {
