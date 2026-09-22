@@ -30,13 +30,29 @@ function copyDirectoryContents(source, destination) {
 
 export function prepareFrontScratch(label) {
   const work = path.join(genDir, "_out", label);
+  fs.rmSync(work, { recursive: true, force: true });
   fs.mkdirSync(work, { recursive: true });
   copyDirectoryContents(templateDir, work);
   copyDirectoryContents(
-    path.join(genDir, "fixtures/article/www/src"),
+    path.join(genDir, "fixtures/article/public/src"),
     path.join(work, "src"),
   );
   fs.mkdirSync(path.join(work, "public"), { recursive: true });
+  fs.mkdirSync(path.join(work, "public/_yumemi"), { recursive: true });
+  fs.copyFileSync(
+    path.join(
+      genDir,
+      "fixtures/article/public/priv/static/_yumemi/client.mjs",
+    ),
+    path.join(work, "public/_yumemi/client.mjs"),
+  );
+  fs.copyFileSync(
+    path.join(
+      genDir,
+      "fixtures/article/public/priv/static/_yumemi/style.css",
+    ),
+    path.join(work, "public/_yumemi/style.css"),
+  );
 
   const tomlPath = path.join(work, "gleam.toml");
   fs.writeFileSync(
@@ -49,12 +65,6 @@ export function prepareFrontScratch(label) {
     ["build", "--target", "javascript"],
     work,
     path.join(work, "gleam-build.txt"),
-  );
-  run(
-    "npx",
-    ["--yes", "esbuild", "web/browser_entry.mjs", "--bundle", "--format=esm", "--outfile=public/client.mjs"],
-    work,
-    path.join(work, "esbuild.txt"),
   );
   return work;
 }

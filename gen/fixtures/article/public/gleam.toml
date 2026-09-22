@@ -1,0 +1,7 @@
+name = "public"
+version = "0.1.0"
+target = "javascript"
+
+[dependencies]
+yumemi = { path = "../../../.." }
+gleam_json = ">= 3.1.0 and < 4.0.0"

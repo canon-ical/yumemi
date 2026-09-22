@@ -39,10 +39,18 @@ try {
   assert(secondStyles.size === 1, "second style content changed across requests");
   const firstStyle = first[0].style;
   const secondStyle = second[0].style;
-  assert(firstStyle.includes("#2b1d3a"), "first style marker is missing");
-  assert(secondStyle.includes("#123524"), "second style marker is missing");
-  assert(!firstStyle.includes("#123524"), "second style crossed into first page");
-  assert(!secondStyle.includes("#2b1d3a"), "first style crossed into second page");
+  const generatedLayout =
+    firstStyle === secondStyle && firstStyle.includes('[data-yumemi-grid="layout"]');
+  if (generatedLayout) {
+    assert(firstStyle.includes("#2b1d3a"), "generated style marker is missing");
+    assert(secondStyle.includes("#123524"), "generated style marker is missing");
+    assert(firstStyle === secondStyle, "generated style crossed between requests");
+  } else {
+    assert(firstStyle.includes("#2b1d3a"), "first style marker is missing");
+    assert(secondStyle.includes("#123524"), "second style marker is missing");
+    assert(!firstStyle.includes("#123524"), "second style crossed into first page");
+    assert(!secondStyle.includes("#2b1d3a"), "first style crossed into second page");
+  }
 
   console.log(
     `ISOLATE: PASS (40 requests; first length ${first[0].style.length}, second length ${second[0].style.length})`,

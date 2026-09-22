@@ -15,6 +15,15 @@ let worker;
 try {
   worker = await startFrontWorker(work, 8792);
 
+  const fallbackResponse = await fetch(`${worker.baseUrl}/not-a-generated-route`);
+  const fallbackBody = await fallbackResponse.text();
+  assert(fallbackResponse.status === 200, `SVELTE fallback status: ${fallbackResponse.status}`);
+  assert(
+    fallbackBody.includes("SVELTE fallback: /not-a-generated-route"),
+    `SVELTE fallback body: ${fallbackBody}`,
+  );
+  console.log("SVELTE FALLBACK: PASS");
+
   const noJsBrowser = await chromium.launch();
   const noJsContext = await noJsBrowser.newContext({ javaScriptEnabled: false });
   const noJsPage = await noJsContext.newPage();
@@ -51,14 +60,14 @@ try {
   const initialPostRequest = initialPage.waitForRequest(
     (request) =>
       request.method() === "POST" &&
-      request.url() === `${worker.baseUrl}/api/article/tag`,
+      request.url() === `${worker.baseUrl}/api/articles`,
     { timeout: 5000 },
   );
   await initialPage.locator("pick-tag button").click();
-  const initialPostBody = (await initialPostRequest).postData();
+  const initialPostBody = JSON.parse((await initialPostRequest).postData());
   assert(
-    initialPostBody === "fixture",
-    `initial tag POST body: ${JSON.stringify(initialPostBody)}, expected "fixture"`,
+    initialPostBody.tags === "fixture",
+    `initial tag POST body: ${JSON.stringify(initialPostBody)}, expected tags "fixture"`,
   );
   console.log(`SSR INITIAL: PASS (posted ${JSON.stringify(initialPostBody)})`);
   await initialPage.close();
@@ -108,15 +117,15 @@ try {
   const selectedPostRequest = page.waitForRequest(
     (request) =>
       request.method() === "POST" &&
-      request.url() === `${worker.baseUrl}/api/article/tag`,
+      request.url() === `${worker.baseUrl}/api/articles`,
     { timeout: 5000 },
   );
   await page.locator("pick-tag select").selectOption("gleam");
   await page.locator("pick-tag button").click();
-  const selectedPostBody = (await selectedPostRequest).postData();
+  const selectedPostBody = JSON.parse((await selectedPostRequest).postData());
   assert(
-    selectedPostBody === "gleam",
-    `selected tag POST body: ${JSON.stringify(selectedPostBody)}, expected "gleam"`,
+    selectedPostBody.tags === "gleam",
+    `selected tag POST body: ${JSON.stringify(selectedPostBody)}, expected tags "gleam"`,
   );
   console.log(`SSR SELECTED: PASS (posted ${JSON.stringify(selectedPostBody)})`);
   await reloadRequest;

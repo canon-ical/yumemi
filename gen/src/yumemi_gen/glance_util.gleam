@@ -145,6 +145,20 @@ pub fn find_custom_type(
   }
 }
 
+pub fn find_type_alias(
+  module: glance.Module,
+  name: String,
+) -> Option(glance.TypeAlias) {
+  case
+    list.find(module.type_aliases, fn(definition) {
+      definition.definition.name == name
+    })
+  {
+    Ok(definition) -> Some(definition.definition)
+    Error(_) -> None
+  }
+}
+
 pub fn find_constant(
   module: glance.Module,
   name: String,

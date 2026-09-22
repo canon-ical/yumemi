@@ -20,7 +20,7 @@ pub const entries: List(Entry(Subject, Host)) = [
     prefix: "/api",
     admit: Anonymous,
     subject: AnySubject,
-    services: ReadOnly,
+    services: All,
   ),
   Http(
     name: "admin",

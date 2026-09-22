@@ -17,6 +17,7 @@ import gleam/string
 import simplifile
 import yumemi_gen/emit/draft
 import yumemi_gen/emit/entry
+import yumemi_gen/emit/front as front_emit
 import yumemi_gen/emit/hash
 import yumemi_gen/emit/phase
 import yumemi_gen/emit/query
@@ -25,7 +26,9 @@ import yumemi_gen/emit/root
 import yumemi_gen/emit/sql
 import yumemi_gen/emit/types
 import yumemi_gen/emit/verb
+import yumemi_gen/face
 import yumemi_gen/reader
+import yumemi_gen/reader/front
 import yumemi_gen/source
 import yumemi_gen/stop.{type Note, Note}
 
@@ -59,6 +62,13 @@ pub fn main() {
 @external(javascript, "./yumemi_gen_ffi.mjs", "halt")
 fn halt(code: Int) -> Nil
 
+@external(javascript, "./yumemi_gen_ffi.mjs", "bundle_front")
+fn bundle_front(
+  out_dir: String,
+  app_dir: String,
+  faces: List(String),
+) -> List(String)
+
 /// 生成束と、止まる理由。理由が1つでもあれば呼び手は非 0 で終わる。
 pub fn generate(
   app_dir: String,
@@ -75,30 +85,60 @@ pub fn generate(
     }),
   )
   use app <- result.try(reader.read(units) |> result.map_error(read_note))
+  use discovered <- result.try(
+    face.discover(app_dir, units)
+    |> result.map_error(source_note),
+  )
+  use front_models <- result.try(
+    list.try_map(discovered.packages, fn(package) {
+      front.read_with_package(
+        package.name,
+        face.package_name(package.path),
+        package.units,
+        app.services,
+      )
+      |> result.map(fn(model) { #(package, model) })
+      |> result.map_error(front_note)
+    }),
+  )
   let hashes = hash.of(units)
   let entry_output = entry.emit(app, hashes)
+  let front_notes =
+    list.append(
+      discovered.notes,
+      list.flat_map(front_models, fn(item) {
+        let #(package, model) = item
+        list.append(
+          front.notes(model, app.services),
+          front_emit.route_notes(app, package.name, model, hashes),
+        )
+      }),
+    )
   let notes =
     list.append(
-      verb.notes(app),
+      front_notes,
       list.append(
-        reader.missing_key_notes(units),
+        verb.notes(app),
         list.append(
-          reader.entry_notes(app),
+          reader.missing_key_notes(units),
           list.append(
-            list.map(query.collisions(app), fn(entry) {
-              let #(module, name) = entry
-              Note(
-                class: stop.Conflict,
-                text: "名前の衝突 "
-                  <> module
-                  <> ": "
-                  <> name
-                  <> "(構成子は module ごとに1つの名前空間)",
-              )
-            }),
+            reader.entry_notes(app),
             list.append(
-              list.append(root.notes(app), sql.notes(app, hashes)),
-              entry_output.notes,
+              list.map(query.collisions(app), fn(entry) {
+                let #(module, name) = entry
+                Note(
+                  class: stop.Conflict,
+                  text: "名前の衝突 "
+                    <> module
+                    <> ": "
+                    <> name
+                    <> "(構成子は module ごとに1つの名前空間)",
+                )
+              }),
+              list.append(
+                list.append(root.notes(app), sql.notes(app, hashes)),
+                entry_output.notes,
+              ),
             ),
           ),
         ),
@@ -122,6 +162,10 @@ pub fn generate(
       draft.emit(app, hashes),
       query.emit(app, hashes.entities),
       entry_output.files,
+      list.flat_map(front_models, fn(item) {
+        let #(package, model) = item
+        front_emit.emit(app, units, package, model, hashes)
+      }),
       reads.emit(app, hashes),
       sql.emit(app, hashes),
       phase.emit(app, hashes.entities),
@@ -155,6 +199,22 @@ fn read_note(error: reader.Error) -> Note {
   }
 }
 
+fn source_note(error: source.Error) -> Note {
+  case error {
+    source.ParseFailed(path: path, detail: detail) ->
+      Note(class: stop.Syntax, text: path <> ": " <> detail)
+    source.ReadFailed(path: path) ->
+      Note(class: stop.Missing, text: "読めない: " <> path)
+  }
+}
+
+fn front_note(error: front.Error) -> Note {
+  case error {
+    front.Unsupported(where: where, detail: detail) ->
+      Note(class: stop.Conflict, text: where <> ": " <> detail)
+  }
+}
+
 fn run(app_dir: String, out_dir: String) -> Result(#(Int, List(Note)), Note) {
   use #(files, notes) <- result.try(generate(app_dir))
   use _ <- result.try(
@@ -170,7 +230,42 @@ fn run(app_dir: String, out_dir: String) -> Result(#(Int, List(Note)), Note) {
     })
     |> result.map_error(io_note),
   )
+  let faces =
+    files
+    |> list.filter_map(fn(file) {
+      case string.ends_with(file.path, "/priv/static/_yumemi/client.mjs") {
+        True -> first_segment(file.path)
+        False -> Error(Nil)
+      }
+    })
+    |> list.unique
+  let bundle_warnings = bundle_front(out_dir, app_dir, faces)
+  use _ <- result.try(
+    write_bundle_warnings(out_dir, bundle_warnings)
+    |> result.map_error(io_note),
+  )
   Ok(#(list.length(files), notes))
+}
+
+fn first_segment(path: String) -> Result(String, Nil) {
+  case string.split(path, "/") {
+    [first, ..] -> Ok(first)
+    [] -> Error(Nil)
+  }
+}
+
+fn write_bundle_warnings(
+  out_dir: String,
+  warnings: List(String),
+) -> Result(Nil, simplifile.FileError) {
+  case warnings {
+    [] -> Ok(Nil)
+    _ ->
+      simplifile.write(
+        out_dir <> "/_diagnostics.txt",
+        string.join(warnings, "\n") <> "\n",
+      )
+  }
 }
 
 fn io_note(error: simplifile.FileError) -> Note {
