@@ -105,3 +105,9 @@
 - **検収の読み替え:**「back の 57 file が 1 本も動かない」→「**fixture は足した読み 1 本に連動する生成物(`gen/service.gleam` / `entry/http.gleam` / root / types)だけ動いてよく、動いた file と理由を results に列挙する。musearch の 604 file は 1 本も動かない(exit 3 = 0 / exit 4 = 18 / 警告 29 / 本文 diff 0 のまま)**」。
 - musearch の現物で検査を効かせるには `api/src/entry.gleam` に `pages: AllPages` と `api/gleam.toml` の依存窓の引き上げが要る ── **本便の射程外、`## musearch 追随便への申し送り` に 1 行**(F4 の「どこまで A」に足す候補、鷹野が F4 の BRIEF に書く)。
 - 段 A に戻る巡が 1 つ増えるのは承知。段 B は巡 4 から。
+
+## 鷹野の裁定 10 / 追認(2026-09-22 11:40、段 D2 前のエスカレーション ── SSR の殻の源)
+
+**裁定 10 = (a):面の ★ に `src/shell.gleam` を 1 本置く**(`pub const lang: String` / `pub const title: String` / `pub const theme: ThemeDefaults`(背景 / 文字 / 差し色 / 背景画像)、生成器は読むだけ)。framework も Hex も動かさない、html の殻は面ごとの意匠なので ★ の持ち分。fixture の `www/src/shell.gleam` は贄川が裁いて真壁に書かせる。**51 v5 に 1 節足すのは鷹野**(手書き ▲ の表に `shell.gleam` を足す、値は P1 の現物 `#FAF7F0` / `#3D2419` / `#A93632` / `none` / `ja` / `MuseArch`)、musearch の追随(`www/src/shell.gleam` 6 行、`muses/` も同型)は追随便 ── `## musearch 追随便への申し送り` に 1 行。(b) は Hex 0.8.0 が要るので本便の禁止、(c) は綴り替えが musearch に乗り lang / title の置き場が無い、(d) は突合の差が増える。
+**追認:**fixture の back の変更(`public` 入口を `services: All`、`article_create` / `article_publish` の `faces` に `Public`、`admit` / `subject` / `prefix` は不変、本文が動いたのは `entry/http.gleam` 1 本 + ヘッダ 9 本、musearch の 604 file は不変)は **可**。musearch の現物と同じ形で、島の `calls` が指せる Service が面に出ないと段 D の完了条件が原理的に満たせない ── 裁定 9 の「連動分」の読み替えに含める。results に「fixture の back が動いた file と理由」の表。
+**P0-3(`validate` が呼ばれない → `Error` を `Invalid | Failed` で吐き `Send` を `validate` 経由に)は贄川の裁きどおり進めてよい**(framework の型変数の中、Hex は動かない)。
