@@ -1,7 +1,7 @@
 //// GENERATED from public/src/layout.gleam [sha256:1ac14380d265] — 手で編集しない
 
 import gen/out/widget_list
-import gleam/option.{type Option, None, Some}
+import gleam/option.{type Option}
 
 pub type Data {
   Data(

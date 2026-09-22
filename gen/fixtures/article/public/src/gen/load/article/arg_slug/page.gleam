@@ -48,7 +48,8 @@ pub fn view(it: Data) -> element.Element(Nil) {
 
 fn page_children(it: Data) -> List(element.Element(Nil)) {
   list.flatten([
-    list.flatten([page_placement_0(it), page_placement_1(it)]),
+    page_placement_0(it),
+    page_placement_1(it),
     [plain_area("rail", page_placement_2(it))],
   ])
 }
@@ -72,7 +73,7 @@ fn plain_area(
   html.div_([attribute.attribute("data-yumemi-area", name)], children)
 }
 
-fn layout_placement_0(it: Data) -> List(element.Element(Nil)) {
+fn layout_placement_0(_it: Data) -> List(element.Element(Nil)) {
   [site_header.view(Nil)]
 }
 
@@ -110,7 +111,6 @@ fn render_page_placement_2(rows: List(widget_list.Row)) -> List(element.Element(
           row_summary.view(row),
           ..render_page_placement_2(rest),
         ]
-        _ -> render_page_placement_2(rest)
       }
   }
 }

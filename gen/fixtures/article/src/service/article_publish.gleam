@@ -7,7 +7,7 @@ import entity/staff
 import framework/effect.{type Effect, Write}
 import framework/step.{type Start, type Step}
 import gen/allow/article as allow
-import gen/face.{type Face, Admin}
+import gen/face.{type Face, Admin, Public}
 import gen/phase
 import gen/root/article_publish.{type Root, type Service, Service}
 import gen/types/slug.{type Slug}
@@ -15,7 +15,7 @@ import gen/verb
 
 pub const effect: Effect = Write
 
-pub const faces: List(Face) = [Admin]
+pub const faces: List(Face) = [Public, Admin]
 
 /// 引数。root Entity の識別子と同じ Type のフィールドが URL に乗る。
 pub type Args {

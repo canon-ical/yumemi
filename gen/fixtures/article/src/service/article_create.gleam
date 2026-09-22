@@ -10,7 +10,7 @@ import framework/er.{type Key}
 import framework/step.{type Start, type Step}
 import gen/allow/article as allow
 import gen/draft/article.{type ArticleDraft, ArticleDraft}
-import gen/face.{type Face, Admin}
+import gen/face.{type Face, Admin, Public}
 import gen/root/article_create.{type Root, type Service, Service}
 import gen/types/body.{type Body}
 import gen/types/slug.{type Slug}
@@ -19,7 +19,7 @@ import gen/verb
 
 pub const effect: Effect = Write
 
-pub const faces: List(Face) = [Admin]
+pub const faces: List(Face) = [Public, Admin]
 
 /// root の識別子と同じ Type のフィールドが無い ── パス変数0個 = 集合レベル。
 /// 関係は `Key(_)`(相手の識別子)で受ける。Entity の値そのものは引数に取れない。

@@ -4,7 +4,6 @@ import framework/front/css
 import framework/front/el
 import framework/front/sketch_css
 import gen/out/article_read
-import gleam/int
 import lustre/attribute
 import sketch/lustre/element/html
 
@@ -57,7 +56,7 @@ pub fn view(it: In) -> el.Element(Nil) {
     html.p(sketch_css.class(body), [], [el.text(it.article.body)]),
     html.div_([], [
       el.island("like-button", [
-        attribute.attribute("count", int.to_string(it.article.version)),
+        attribute.attribute("slug", it.article.slug),
       ]),
       el.island("pick-tag", [
         attribute.attribute("tags", "fixture,gleam,cloudflare"),

@@ -131,30 +131,56 @@ fn synthetic_out_for(
   let assert Ok(face_units) = source.load("fixtures/article/public")
   let service_unit = source_unit("service/" <> module, service_source)
   let units = list.append(back_units, [service_unit, ..extra_units])
-  let service = model.Service(
-    module: module,
-    params: [],
-    queries: [],
-    args: [],
-    allow_module: None,
-    subjects: [],
-    effect: model.ReadEffect,
-    faces: [],
-    faces_declared: True,
-  )
+  let service =
+    model.Service(
+      module: module,
+      params: [],
+      queries: [],
+      args: [],
+      allow_module: None,
+      subjects: [],
+      effect: model.ReadEffect,
+      faces: [],
+      faces_declared: True,
+    )
   let test_app = model.App(..base, services: [service])
   let model_ = front_from_units_named("public", face_units, [service])
-  let package = face.Package(
-    name: "public",
-    path: "fixtures/article/public",
-    pages: face.UndeclaredPages,
-    units: face_units,
-  )
+  let package =
+    face.Package(
+      name: "public",
+      path: "fixtures/article/public",
+      pages: face.UndeclaredPages,
+      units: face_units,
+    )
   let generated =
     front_emit.emit(test_app, units, package, model_, hash.of(units))
-  let assert Ok(file) = list.find(generated, fn(file) {
-    file.path == "public/src/gen/out/" <> module <> ".gleam"
-  })
+  let assert Ok(file) =
+    list.find(generated, fn(file) {
+      file.path == "public/src/gen/out/" <> module <> ".gleam"
+    })
+  file.text
+}
+
+fn api_for_entry(entry_text: String) -> String {
+  let assert Ok(loaded_units) = source.load(fixture)
+  let back_units =
+    loaded_units
+    |> list.filter(fn(unit) { unit.path != "entry" })
+    |> list.append([source_unit("entry", entry_text)])
+  let assert Ok(test_app) = reader.read(back_units)
+  let assert Ok(face_units) = source.load("fixtures/article/public")
+  let model_ = front_from_units_named("public", face_units, test_app.services)
+  let package =
+    face.Package(
+      name: "public",
+      path: "fixtures/article/public",
+      pages: face.UndeclaredPages,
+      units: face_units,
+    )
+  let generated =
+    front_emit.emit(test_app, back_units, package, model_, hash.of(back_units))
+  let assert Ok(file) =
+    list.find(generated, fn(file) { file.path == "public/src/gen/api.gleam" })
   file.text
 }
 
@@ -168,17 +194,19 @@ fn synthetic_empty_layout_load() -> String {
   ]
   let base = app()
   let model_ = front_from_units_named("public", face_units, base.services)
-  let package = face.Package(
-    name: "public",
-    path: "fixtures/article/public",
-    pages: face.UndeclaredPages,
-    units: face_units,
-  )
+  let package =
+    face.Package(
+      name: "public",
+      path: "fixtures/article/public",
+      pages: face.UndeclaredPages,
+      units: face_units,
+    )
   let generated =
     front_emit.emit(base, back_units, package, model_, hash.of(back_units))
-  let assert Ok(file) = list.find(generated, fn(file) {
-    file.path == "public/src/gen/load/layout.gleam"
-  })
+  let assert Ok(file) =
+    list.find(generated, fn(file) {
+      file.path == "public/src/gen/load/layout.gleam"
+    })
   file.text
 }
 
@@ -222,11 +250,13 @@ pub fn article_http_route_table_has_nine_rows_test() {
   |> should.be_true
   let http = text("src/gen/entry/http.gleam")
   [
+    "Route(face: \"public\", method: \"POST\", path: \"/api/articles\", service: \"article_create\", path_keys: [], credential: Session),",
     "Route(face: \"admin\", method: \"POST\", path: \"/api/admin/articles\", service: \"article_create\", path_keys: [], credential: Session),",
     "Route(face: \"public\", method: \"GET\", path: \"/api/articles\", service: \"article_list\", path_keys: [], credential: Session),",
     "Route(face: \"admin\", method: \"GET\", path: \"/api/admin/articles\", service: \"article_list\", path_keys: [], credential: Session),",
     "Route(face: \"public\", method: \"GET\", path: \"/api/articles/{slug}\", service: \"article_read\", path_keys: [\"slug\"], credential: Session),",
     "Route(face: \"admin\", method: \"GET\", path: \"/api/admin/articles/{slug}\", service: \"article_read\", path_keys: [\"slug\"], credential: Session),",
+    "Route(face: \"public\", method: \"POST\", path: \"/api/articles/{slug}/publish\", service: \"article_publish\", path_keys: [\"slug\"], credential: Session),",
     "Route(face: \"admin\", method: \"POST\", path: \"/api/admin/articles/{slug}/publish\", service: \"article_publish\", path_keys: [\"slug\"], credential: Session),",
     "Route(face: \"admin\", method: \"POST\", path: \"/api/admin/articles/{slug}/retract\", service: \"article_retract\", path_keys: [\"slug\"], credential: Session),",
     "Route(face: \"public\", method: \"GET\", path: \"/api/widgets\", service: \"widget_list\", path_keys: [], credential: Session),",
@@ -240,7 +270,7 @@ pub fn article_http_route_table_has_nine_rows_test() {
     && string.contains(line, "path: \"")
   })
   |> list.length
-  |> should.equal(9)
+  |> should.equal(11)
 }
 
 pub fn entry_prefix_is_required_named_and_one_word_test() {
@@ -1735,7 +1765,14 @@ pub fn front_model_reads_url_blocks_widgets_components_and_style_test() {
     "Summary",
   ])
   value.widget_keys |> should.equal(["ArticleFeed", "ArticleKinds"])
-  value.services |> should.equal(["WidgetList", "ArticleRead"])
+  value.services
+  |> should.equal([
+    "WidgetList",
+    "ArticleRead",
+    "ArticlePublish",
+    "ArticleCreate",
+    "ArticleList",
+  ])
   value.style.tokens
   |> should.equal([
     "ink",
@@ -1778,7 +1815,10 @@ pub fn front_route_path_keeps_arg_dash_and_reserved_rules_test() {
 }
 
 pub fn front_emit_api_is_filtered_by_face_services_test() {
-  let api = text("public/src/gen/api.gleam")
+  let api =
+    api_for_entry(
+      "import framework/entry.{type Entry, Anonymous, AnySubject, Http, ReadOnly}\n\npub type Subject {\n  Staff\n}\n\npub type Host {\n  PublicHost\n}\n\npub const entries: List(Entry(Subject, Host)) = [\n  Http(name: \"public\", hosts: [PublicHost], prefix: \"/api\", admit: Anonymous, subject: AnySubject, services: ReadOnly),\n]",
+    )
   [
     "service.ArticleList",
     "service.ArticleRead",
@@ -1788,6 +1828,34 @@ pub fn front_emit_api_is_filtered_by_face_services_test() {
   |> list.each(fn(row) { string.contains(api, row) |> should.be_true })
   ["service.ArticleCreate", "service.ArticlePublish", "service.ArticleRetract"]
   |> list.each(fn(row) { string.contains(api, row) |> should.be_false })
+}
+
+pub fn front_emit_live_follows_island_calls_and_reload_out_test() {
+  let paths = files() |> list.map(fn(entry) { entry.0 })
+  [
+    "public/src/gen/live/article_create.gleam",
+    "public/src/gen/live/article_publish.gleam",
+  ]
+  |> list.each(fn(path) { list.contains(paths, path) |> should.be_true })
+  list.contains(paths, "public/src/gen/live/article_list.gleam")
+  |> should.be_false
+
+  let create = text("public/src/gen/live/article_create.gleam")
+  string.contains(
+    create,
+    "pub type State = live.State(Args, article_list.Out, article_create.Out, Error)",
+  )
+  |> should.be_true
+  string.contains(create, "live.Set(Tags, value)") |> should.be_true
+  string.contains(create, "spec.Pattern(min: 1, max: 64") |> should.be_true
+  string.contains(create, "spec.Text(min: 1, max: 120)") |> should.be_true
+  string.contains(create, "spec.Markdown") |> should.be_true
+  string.contains(create, "#(next, reload_page())") |> should.be_true
+
+  let publish = text("public/src/gen/live/article_publish.gleam")
+  string.contains(publish, "pub type Field {\n  Slug\n}")
+  |> should.be_true
+  string.contains(publish, "pub fn validate(model: State)") |> should.be_true
 }
 
 pub fn front_emit_out_redefines_opaque_relations_test() {
@@ -1824,61 +1892,67 @@ pub fn front_emit_out_imports_are_limited_to_face_allowlist_test() {
 }
 
 pub fn front_emit_copies_back_module_types_and_imports_blob_test() {
-  let draft = synthetic_out(
-    "draft_result",
-    "import gen/draft/article.{type ArticleCreated}\n\npub const service: Service(Args, ArticleCreated, Error) = Nil",
-    [],
-  )
+  let draft =
+    synthetic_out(
+      "draft_result",
+      "import gen/draft/article.{type ArticleCreated}\n\npub const service: Service(Args, ArticleCreated, Error) = Nil",
+      [],
+    )
   string.contains(draft, "import gen/draft/article") |> should.be_false
   string.contains(draft, "pub type ArticleCreated {") |> should.be_true
 
-  let ledger = synthetic_out(
-    "ledger_result",
-    "import ledger_store.{type LedgerStore}\n\npub const service: Service(Args, LedgerStore, Error) = Nil",
-    [source_unit(
-      "ledger_store",
-      "pub type LedgerStoreId = String\n\npub type StoreType {\n  Soap\n  Delihel\n}\n\npub type LedgerStore {\n  LedgerStore(id: LedgerStoreId, kind: StoreType)\n}",
-    )],
-  )
+  let ledger =
+    synthetic_out(
+      "ledger_result",
+      "import ledger_store.{type LedgerStore}\n\npub const service: Service(Args, LedgerStore, Error) = Nil",
+      [
+        source_unit(
+          "ledger_store",
+          "pub type LedgerStoreId = String\n\npub type StoreType {\n  Soap\n  Delihel\n}\n\npub type LedgerStore {\n  LedgerStore(id: LedgerStoreId, kind: StoreType)\n}",
+        ),
+      ],
+    )
   string.contains(ledger, "import ledger_store") |> should.be_false
   string.contains(ledger, "pub type LedgerStoreId = String")
   |> should.be_true
   string.contains(ledger, "pub type StoreType {") |> should.be_true
   string.contains(ledger, "pub type LedgerStore {") |> should.be_true
 
-  let blob = synthetic_out(
-    "blob_result",
-    "import framework/blob.{type Blob}\n\npub type Result {\n  Result(blob: Blob)\n}\n\npub const service: Service(Args, Result, Error) = Nil",
-    [],
-  )
+  let blob =
+    synthetic_out(
+      "blob_result",
+      "import framework/blob.{type Blob}\n\npub type Result {\n  Result(blob: Blob)\n}\n\npub const service: Service(Args, Result, Error) = Nil",
+      [],
+    )
   string.contains(blob, "import framework/blob.{type Blob}") |> should.be_true
   string.contains(blob, "pub type Blob {") |> should.be_false
 }
 
 pub fn front_emit_reserves_entity_constructor_over_row_variant_test() {
-  let out = synthetic_out(
-    "row_collision",
-    "import entity/article\n\npub type Row {\n  Article(kind: String, article: article.Article)\n}\n\npub type Out {\n  Out(rows: List(Row))\n}\n\npub const service: Service(Args, Out, Error) = Nil",
-    [],
-  )
+  let out =
+    synthetic_out(
+      "row_collision",
+      "import entity/article\n\npub type Row {\n  Article(kind: String, article: article.Article)\n}\n\npub type Out {\n  Out(rows: List(Row))\n}\n\npub const service: Service(Args, Out, Error) = Nil",
+      [],
+    )
   string.contains(out, "pub type Row {\n  ArticleRow(") |> should.be_true
 }
 
 pub fn front_emit_drops_enum_constructors_that_collide_with_row_test() {
-  let out = synthetic_out(
-    "enum_collision",
-    "import entity/widget.{type Kind}\n\npub type Row {\n  Text(kind: Kind)\n}\n\npub type Out {\n  Out(rows: List(Row))\n}\n\npub const service: Service(Args, Out, Error) = Nil",
-    [source_unit("entity/widget", "pub type Kind {\n  Text\n}")],
-  )
+  let out =
+    synthetic_out(
+      "enum_collision",
+      "import entity/widget.{type Kind}\n\npub type Row {\n  Text(kind: Kind)\n}\n\npub type Out {\n  Out(rows: List(Row))\n}\n\npub const service: Service(Args, Out, Error) = Nil",
+      [source_unit("entity/widget", "pub type Kind {\n  Text\n}")],
+    )
   string.contains(out, "pub type Kind = String") |> should.be_true
   string.contains(out, "pub type Kind {") |> should.be_false
   string.contains(out, "pub type Row {\n  Text(") |> should.be_true
 }
 
 pub fn front_emit_flattens_value_alias_chain_test() {
-  let base = model.App(
-    ..app(),
-    value_types: [
+  let base =
+    model.App(..app(), value_types: [
       model.ValueType(
         name: "ledger_store_id",
         type_name: "LedgerStoreId",
@@ -1886,17 +1960,19 @@ pub fn front_emit_flattens_value_alias_chain_test() {
         backing: model.StringValue,
         range: None,
       ),
-    ],
-  )
-  let out = synthetic_out_for(
-    base,
-    "alias_chain",
-    "import ledger_store.{type LedgerStoreId}\n\npub type Out {\n  Out(id: LedgerStoreId)\n}\n\npub const service: Service(Args, Out, Error) = Nil",
-    [source_unit(
-      "ledger_store",
-      "import gen/types/ledger_store_id\n\npub type LedgerStoreId = ledger_store_id.LedgerStoreId",
-    )],
-  )
+    ])
+  let out =
+    synthetic_out_for(
+      base,
+      "alias_chain",
+      "import ledger_store.{type LedgerStoreId}\n\npub type Out {\n  Out(id: LedgerStoreId)\n}\n\npub const service: Service(Args, Out, Error) = Nil",
+      [
+        source_unit(
+          "ledger_store",
+          "import gen/types/ledger_store_id\n\npub type LedgerStoreId = ledger_store_id.LedgerStoreId",
+        ),
+      ],
+    )
   string.contains(out, "pub type LedgerStoreId = String") |> should.be_true
   string.contains(out, "LedgerStoreIdLedgerStoreId") |> should.be_false
   string.contains(out, "LedgerStoreLedgerStoreId") |> should.be_false
@@ -1994,7 +2070,7 @@ pub fn service_variant_references_are_collected_from_page_widget_and_component_t
         ),
         source_unit(
           "components/search",
-          "pub const calls: List(service.Service) = [service.ArticleCreate]\npub const reloads: List(service.Service) = [service.ArticleRead]\npub fn view(it: State) -> el.Element(Event) { it }",
+          "pub const calls: List(service.Service) = [service.ArticleCreate]\npub const reloads: List(#(Slug, service.ArticleRead)) = [#(Slug, service.ArticleRead)]\npub fn view(it: State) -> el.Element(Event) { it }",
         ),
       ],
       [],

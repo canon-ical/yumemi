@@ -90,7 +90,7 @@ pub type Component {
     name: String,
     module: String,
     calls: List(String),
-    reloads: List(String),
+    reloads: List(#(String, String)),
     has_view: Bool,
     after_send: Option(String),
     nested_island: Bool,
@@ -244,7 +244,7 @@ fn parse_component(unit: Unit) -> Result(Component, Nil) {
   let module = g.in_order(unit.module)
   let name = last_segment(unit.path) |> naming.pascal
   let calls = service_list(module, "calls")
-  let reloads = service_list(module, "reloads")
+  let reloads = reload_list(module, "reloads")
   let view = public_function(module, "view")
   Ok(
     Component(
@@ -481,7 +481,10 @@ fn service_references(
     })
   let from_components =
     list.flat_map(components, fn(component) {
-      list.append(component.calls, component.reloads)
+      list.append(
+        component.calls,
+        list.map(component.reloads, fn(reload) { reload.1 }),
+      )
     })
   list.unique(list.flatten([from_layout, from_pages, from_components]))
 }
@@ -859,6 +862,32 @@ fn service_list(module: glance.Module, name: String) -> List(String) {
   }
 }
 
+fn reload_list(module: glance.Module, name: String) -> List(#(String, String)) {
+  case public_named_constant(module, name) {
+    Some(constant) ->
+      case constant.value {
+        glance.List(elements: elements, ..) ->
+          list.filter_map(elements, fn(expression) {
+            case expression {
+              glance.Tuple(elements: [field, service], ..) ->
+                case
+                  g.ctor_name(field),
+                  g.ctor_name(service),
+                  g.ctor_module(service)
+                {
+                  Some(field), Some(service), Some("service") ->
+                    Ok(#(field, service))
+                  _, _, _ -> Error(Nil)
+                }
+              _ -> Error(Nil)
+            }
+          })
+        _ -> []
+      }
+    None -> []
+  }
+}
+
 fn after_send_of(module: glance.Module) -> Option(String) {
   case public_named_constant(module, "after_send") {
     Some(constant) ->
@@ -933,8 +962,10 @@ fn resolved_input(
   annotation: glance.Type,
 ) -> #(Option(String), Option(String)) {
   case annotation {
-    glance.NamedType(name: name, module: Some(path), ..) ->
-      #(Some(name), Some(path))
+    glance.NamedType(name: name, module: Some(path), ..) -> #(
+      Some(name),
+      Some(path),
+    )
     glance.NamedType(name: name, module: None, ..) ->
       case g.find_type_alias(module, name) {
         Some(alias) -> resolved_input(module, alias.aliased)

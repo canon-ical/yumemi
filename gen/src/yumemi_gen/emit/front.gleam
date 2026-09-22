@@ -77,6 +77,12 @@ pub fn emit(
     |> list.map(fn(service) {
       out_file(app, type_units, service, hashes, face_name)
     })
+  let live_files =
+    live_targets(model_.components, app.services)
+    |> list.map(fn(target) {
+      let #(service, component) = target
+      live_file(app, back_units, package, service, component, hashes, face_name)
+    })
   let load_files =
     list.append(
       [load_layout_file(app, package, model_)],
@@ -84,7 +90,10 @@ pub fn emit(
         load_page_file(app, type_units, package, model_, page)
       }),
     )
-  list.append(list.append(files, out_files), load_files)
+  list.append(
+    list.append(files, list.append(out_files, live_files)),
+    load_files,
+  )
 }
 
 fn source_hash(units: List(Unit), keep: fn(Unit) -> Bool) -> String {
@@ -94,6 +103,445 @@ fn source_hash(units: List(Unit), keep: fn(Unit) -> Bool) -> String {
   |> list.map(fn(unit) { unit.path <> "\n" <> unit.text })
   |> string.join("\n")
   |> digest.short
+}
+
+fn live_targets(
+  components: List(reader_front.Component),
+  services: List(model.Service),
+) -> List(#(model.Service, reader_front.Component)) {
+  let empty: List(#(model.Service, reader_front.Component)) = []
+  components
+  |> list.fold(empty, fn(targets, component) {
+    component.calls
+    |> list.fold(targets, fn(acc, variant) {
+      case service_for(services, variant) {
+        Some(service) ->
+          case list.any(acc, fn(target) { target.0.module == service.module }) {
+            True -> acc
+            False -> list.append(acc, [#(service, component)])
+          }
+        None -> acc
+      }
+    })
+  })
+  |> list.sort(fn(left, right) { string.compare(left.0.module, right.0.module) })
+}
+
+fn service_for(
+  services: List(model.Service),
+  variant: String,
+) -> Option(model.Service) {
+  case
+    list.find(services, fn(service) {
+      naming.pascal(service.module) == variant || service.module == variant
+    })
+  {
+    Ok(service) -> Some(service)
+    Error(_) -> None
+  }
+}
+
+fn live_file(
+  app: model.App,
+  units: List(Unit),
+  package: face.Package,
+  service: model.Service,
+  component: reader_front.Component,
+  hashes: hash.Hashes,
+  face_name: String,
+) -> File {
+  let given_service =
+    component.reloads
+    |> list.first
+    |> option.from_result
+    |> option.then(fn(reload) { service_for(app.services, reload.1) })
+  let component_hash =
+    source_hash(package.units, fn(unit) { unit.path == component.module })
+  let input_hash =
+    digest.short(hash.service(hashes, service.module) <> component_hash)
+  File(
+    path: face_name <> "/src/gen/live/" <> service.module <> ".gleam",
+    text: live_text(
+      app,
+      units,
+      service,
+      component,
+      given_service,
+      header("src/" <> component.module <> ".gleam", input_hash),
+    ),
+  )
+}
+
+fn live_text(
+  app: model.App,
+  units: List(Unit),
+  service: model.Service,
+  component: reader_front.Component,
+  given_service: Option(model.Service),
+  generated_header: String,
+) -> String {
+  let validations = validation_specs(app, units, service.args)
+  generated_header
+  <> "\n"
+  <> live_imports(
+    service,
+    given_service,
+    validations != [],
+    component.after_send == Some("ReloadPage"),
+  )
+  <> "\n\n"
+  <> args_type_text(service.args)
+  <> "\n"
+  <> field_type_text(service.args)
+  <> "\n"
+  <> "pub type Error = Nil\n\n"
+  <> state_type_text(service, given_service)
+  <> "\n"
+  <> init_text(service, given_service)
+  <> "\n"
+  <> update_text(service, component)
+  <> "\n"
+  <> validate_text(validations)
+  <> send_text(component.after_send)
+}
+
+fn live_imports(
+  service: model.Service,
+  given_service: Option(model.Service),
+  has_validation: Bool,
+  reloads_page: Bool,
+) -> String {
+  let validation = case has_validation {
+    True -> ["framework/spec", "gleam/list"]
+    False -> []
+  }
+  let given = case given_service {
+    Some(value) -> ["gen/out/" <> value.module]
+    None -> []
+  }
+  let reload = case reloads_page {
+    True -> ["gleam/json", "lustre/event"]
+    False -> []
+  }
+  let base = [
+    "framework/front/live",
+    "gen/out/" <> service.module,
+    "gleam/option.{None, Some}",
+    "lustre/effect.{type Effect}",
+  ]
+  base
+  |> list.append(validation)
+  |> list.append(reload)
+  |> list.append(given)
+  |> list.unique
+  |> list.sort(string.compare)
+  |> list.map(fn(path) { "import " <> path })
+  |> string.join("\n")
+}
+
+fn args_type_text(args: List(model.Arg)) -> String {
+  case args {
+    [] -> "pub type Args {\n  Args\n}\n"
+    _ ->
+      "pub type Args {\n  Args(\n"
+      <> string.concat(
+        list.map(args, fn(arg) { "    " <> arg.name <> ": String,\n" }),
+      )
+      <> "  )\n}\n"
+  }
+}
+
+fn field_type_text(args: List(model.Arg)) -> String {
+  let variants =
+    args
+    |> list.map(fn(arg) { "  " <> naming.pascal(arg.name) })
+    |> string.join("\n")
+  case variants {
+    "" -> "pub type Field\n"
+    _ -> "pub type Field {\n" <> variants <> "\n}\n"
+  }
+}
+
+fn state_type_text(
+  service: model.Service,
+  given_service: Option(model.Service),
+) -> String {
+  let given = given_type(given_service)
+  "pub type State = live.State(Args, "
+  <> given
+  <> ", "
+  <> service.module
+  <> ".Out, Error)\n\n"
+  <> "pub type Event = live.Event(Field, "
+  <> given
+  <> ", "
+  <> service.module
+  <> ".Out, Error)\n"
+}
+
+fn given_type(given_service: Option(model.Service)) -> String {
+  case given_service {
+    Some(service) -> service.module <> ".Out"
+    None -> "Nil"
+  }
+}
+
+fn init_text(
+  service: model.Service,
+  given_service: Option(model.Service),
+) -> String {
+  "pub fn init(given: "
+  <> given_type(given_service)
+  <> ") -> #(State, Effect(Event)) {\n"
+  <> "  #(\n"
+  <> "    live.State(\n"
+  <> "      args: "
+  <> args_constructor(service.args)
+  <> ",\n"
+  <> "      given: given,\n"
+  <> "      last: None,\n"
+  <> "      waiting: False,\n"
+  <> "    ),\n"
+  <> "    effect.none(),\n"
+  <> "  )\n}\n"
+}
+
+fn args_constructor(args: List(model.Arg)) -> String {
+  case args {
+    [] -> "Args"
+    _ ->
+      "Args(\n"
+      <> string.concat(
+        list.map(args, fn(arg) { "        " <> arg.name <> ": \"\",\n" }),
+      )
+      <> "      )"
+  }
+}
+
+fn update_text(
+  service: model.Service,
+  component: reader_front.Component,
+) -> String {
+  "pub fn update(model: State, msg: Event) -> #(State, Effect(Event)) {\n"
+  <> "  case msg {\n"
+  <> set_branches(service.args)
+  <> "    live.Send ->\n"
+  <> "      case model.waiting {\n"
+  <> "        True -> #(model, effect.none())\n"
+  <> "        False -> #(\n"
+  <> "          live.State(..model, waiting: True),\n"
+  <> "          send(model.args),\n"
+  <> "        )\n"
+  <> "      }\n"
+  <> "    live.Given(given) -> #(\n"
+  <> "      live.State(..model, given: given),\n"
+  <> "      effect.none(),\n"
+  <> "    )\n"
+  <> "    live.Done(result) -> {\n"
+  <> "      let next = live.State(..model, last: Some(result), waiting: False)\n"
+  <> "      case result {\n"
+  <> "        Ok(_) -> "
+  <> done_success(component)
+  <> "        Error(_) -> #(next, effect.none())\n"
+  <> "      }\n    }\n"
+  <> "  }\n}\n"
+}
+
+fn set_branches(args: List(model.Arg)) -> String {
+  args
+  |> list.map(fn(arg) {
+    let updated = case list.length(args) {
+      1 -> "Args(" <> arg.name <> ": value)"
+      _ -> "Args(..model.args, " <> arg.name <> ": value)"
+    }
+    "    live.Set("
+    <> naming.pascal(arg.name)
+    <> ", value) -> #(\n"
+    <> "      live.State(..model, args: "
+    <> updated
+    <> "),\n"
+    <> "      effect.none(),\n"
+    <> "    )\n"
+  })
+  |> string.concat
+}
+
+fn done_success(component: reader_front.Component) -> String {
+  case component.after_send {
+    Some("ReloadPage") -> "#(next, reload_page())\n"
+    _ -> "#(next, effect.none())\n"
+  }
+}
+
+fn validate_text(validations: List(#(String, String))) -> String {
+  case validations {
+    [] ->
+      "pub fn validate(model: State) -> Result(Args, List(#(Field, String))) {\n"
+      <> "  Ok(model.args)\n}\n\n"
+    _ ->
+      "pub fn validate(model: State) -> Result(Args, List(#(Field, String))) {\n"
+      <> "  let errors = list.flatten([\n"
+      <> string.concat(
+        list.map(validations, fn(validation) {
+          let #(field, spec) = validation
+          "    validate_field("
+          <> field
+          <> ", model.args."
+          <> field_name(field)
+          <> ", "
+          <> spec
+          <> "),\n"
+        }),
+      )
+      <> "  ])\n"
+      <> "  case errors {\n"
+      <> "    [] -> Ok(model.args)\n"
+      <> "    _ -> Error(errors)\n"
+      <> "  }\n}\n\n"
+      <> "fn validate_field(\n"
+      <> "  field: Field,\n"
+      <> "  raw: String,\n"
+      <> "  constraint: spec.Spec,\n"
+      <> ") -> List(#(Field, String)) {\n"
+      <> "  case spec.validate(raw, constraint) {\n"
+      <> "    Ok(_) -> []\n"
+      <> "    Error(_) -> [#(field, \"invalid\")]\n"
+      <> "  }\n}\n\n"
+  }
+}
+
+fn field_name(field: String) -> String {
+  naming.snake(field)
+}
+
+fn send_text(after_send: Option(String)) -> String {
+  let reload = case after_send {
+    Some("ReloadPage") ->
+      "\nfn reload_page() -> Effect(Event) {\n  event.emit(\"yumemi-done\", json.null())\n}\n"
+    _ -> ""
+  }
+  "fn send(_args: Args) -> Effect(Event) {\n  effect.none()\n}\n\n" <> reload
+}
+
+fn validation_specs(
+  app: model.App,
+  units: List(Unit),
+  args: List(model.Arg),
+) -> List(#(String, String)) {
+  args
+  |> list.filter_map(fn(arg) {
+    case value_type_for_arg(app.value_types, arg.type_) {
+      Some(value) ->
+        Ok(#(naming.pascal(arg.name), spec_expression(units, value)))
+      None -> Error(Nil)
+    }
+  })
+}
+
+fn value_type_for_arg(
+  value_types: List(model.ValueType),
+  shape: model.TypeShape,
+) -> Option(model.ValueType) {
+  case shape {
+    model.NamedShape(module: Some(path), name: name, parameters: []) ->
+      case string.starts_with(path, "gen/types/") {
+        True ->
+          list.find(value_types, fn(value) { value.type_name == name })
+          |> option.from_result
+        False -> None
+      }
+    _ -> None
+  }
+}
+
+fn spec_expression(units: List(Unit), value: model.ValueType) -> String {
+  case list.find(units, fn(unit) { unit.path == "types" }) {
+    Ok(unit) -> {
+      let module = g.in_order(unit.module)
+      case g.find_constant(module, value.name) {
+        Some(constant) -> spec_constructor_text(constant.value, value)
+        None -> fallback_spec(value)
+      }
+    }
+    Error(_) -> fallback_spec(value)
+  }
+}
+
+fn spec_constructor_text(
+  expression: glance.Expression,
+  value: model.ValueType,
+) -> String {
+  case g.ctor_name(expression) {
+    Some("Pattern") ->
+      case spec_bounds(expression), g.labelled(expression, "regex") {
+        Some(#(min, max)), Some(regex) ->
+          case g.string_value(regex) {
+            Some(raw) ->
+              "spec.Pattern(min: "
+              <> min
+              <> ", max: "
+              <> max
+              <> ", regex: "
+              <> quoted(raw)
+              <> ")"
+            None -> fallback_spec(value)
+          }
+        _, _ -> fallback_spec(value)
+      }
+    Some("Text") -> bounded_spec("spec.Text", expression, value)
+    Some("MarkdownText") -> bounded_spec("spec.MarkdownText", expression, value)
+    Some("Range") -> bounded_spec("spec.Range", expression, value)
+    Some("Uuid") -> "spec.Uuid"
+    Some("Markdown") -> "spec.Markdown"
+    Some("Url") -> "spec.Url"
+    Some(_) -> fallback_spec(value)
+    None -> fallback_spec(value)
+  }
+}
+
+fn spec_bounds(expression: glance.Expression) -> Option(#(String, String)) {
+  case
+    g.labelled(expression, "min") |> option.then(g.int_value),
+    g.labelled(expression, "max") |> option.then(g.int_value)
+  {
+    Some(min), Some(max) -> Some(#(min, max))
+    _, _ -> None
+  }
+}
+
+fn bounded_spec(
+  name: String,
+  expression: glance.Expression,
+  value: model.ValueType,
+) -> String {
+  case spec_bounds(expression) {
+    Some(#(min, max)) -> name <> "(min: " <> min <> ", max: " <> max <> ")"
+    None -> fallback_spec(value)
+  }
+}
+
+fn fallback_spec(value: model.ValueType) -> String {
+  case value.spec, value.range {
+    "Range", Some(#(min, max)) ->
+      "spec.Range(min: "
+      <> int.to_string(min)
+      <> ", max: "
+      <> int.to_string(max)
+      <> ")"
+    "Uuid", _ -> "spec.Uuid"
+    "Markdown", _ -> "spec.Markdown"
+    "Url", _ -> "spec.Url"
+    _, _ -> "spec.Markdown"
+  }
+}
+
+fn quoted(value: String) -> String {
+  "\""
+  <> value
+  |> string.replace("\\", "\\\\")
+  |> string.replace("\"", "\\\"")
+  |> string.replace("\n", "\\n")
+  <> "\""
 }
 
 type LoadSource {
@@ -106,14 +554,11 @@ fn load_layout_file(
   front: reader_front.Front,
 ) -> File {
   let sources = layout_sources(front.layout, front.blocks, app.services)
-  let source_hash = source_hash(package.units, fn(unit) { unit.path == "layout" })
+  let source_hash =
+    source_hash(package.units, fn(unit) { unit.path == "layout" })
   File(
     path: package.name <> "/src/gen/load/layout.gleam",
-    text: load_layout_text(
-      package.name,
-      sources,
-      source_hash,
-    ),
+    text: load_layout_text(package.name, sources, source_hash),
   )
 }
 
@@ -126,7 +571,8 @@ fn load_page_file(
 ) -> File {
   let layout_sources = layout_sources(front.layout, front.blocks, app.services)
   let page_sources = page_sources(page, front.blocks, app.services)
-  let source_hash = source_hash(package.units, fn(unit) { unit.path == page.module })
+  let source_hash =
+    source_hash(package.units, fn(unit) { unit.path == page.module })
   File(
     path: package.name
       <> "/src/gen/load/"
@@ -171,13 +617,14 @@ fn page_sources(
   let root = case page.of {
     Some(service) ->
       case service_module(services, service) {
-        Some(module) ->
-          [LoadSource(
+        Some(module) -> [
+          LoadSource(
             key: "service:" <> module,
             name: module,
             service: module,
             optional: False,
-          )]
+          ),
+        ]
         None -> []
       }
     None -> []
@@ -253,10 +700,15 @@ fn add_load_source(
   }
 }
 
-fn service_module(services: List(model.Service), variant: String) -> Option(String) {
-  case list.find(services, fn(service) {
-    naming.pascal(service.module) == variant || service.module == variant
-  }) {
+fn service_module(
+  services: List(model.Service),
+  variant: String,
+) -> Option(String) {
+  case
+    list.find(services, fn(service) {
+      naming.pascal(service.module) == variant || service.module == variant
+    })
+  {
     Ok(service) -> Some(service.module)
     Error(_) -> None
   }
@@ -271,8 +723,7 @@ fn block_source(
     Ok(block) ->
       case block.input, block.input_module {
         Some("Nil"), _ -> None
-        Some(_), Some(module) ->
-          service_module(services, last_segment(module))
+        Some(_), Some(module) -> service_module(services, last_segment(module))
         _, _ -> None
       }
     Error(_) -> None
@@ -317,10 +768,7 @@ fn load_constructor_text(fields: List(LoadSource)) -> String {
   }
 }
 
-fn load_function_text(
-  fields: List(LoadSource),
-  constructor: String,
-) -> String {
+fn load_function_text(fields: List(LoadSource), constructor: String) -> String {
   case fields {
     [] -> "pub fn load() -> Data {\n  " <> constructor <> "\n}\n"
     _ ->
@@ -347,10 +795,7 @@ fn load_layout_text(
     <> "\n"
     <> imports
     <> import_gap(imports)
-    <> load_data_text(
-      "Data",
-      list.map(sources, load_data_field_text),
-    )
+    <> load_data_text("Data", list.map(sources, load_data_field_text))
     <> "\n"
     <> load_function_text(sources, load_constructor_text(sources))
   body
@@ -366,7 +811,8 @@ fn load_page_text(
   page_sources: List(LoadSource),
   input_hash: String,
 ) -> String {
-  let imports = load_imports(front, list.append(layout_sources, page_sources), True)
+  let imports =
+    load_imports(front, list.append(layout_sources, page_sources), True)
   let data_fields =
     ["    layout: layout.Data,\n"]
     |> list.append(list.map(page_sources, load_data_field_text))
@@ -380,14 +826,7 @@ fn load_page_text(
     <> "\n"
     <> page_load_function_text(layout_sources, page_sources)
     <> "\n"
-    <> page_view_text(
-      app,
-      units,
-      front,
-      page,
-      layout_sources,
-      page_sources,
-    )
+    <> page_view_text(app, units, front, page, layout_sources, page_sources)
   source_body
 }
 
@@ -436,9 +875,10 @@ fn load_imports(
 fn layout_imports(sources: List(LoadSource)) -> String {
   let option_import = case sources {
     [] -> []
-    _ -> ["gleam/option.{type Option, None, Some}"]
+    _ -> ["gleam/option.{type Option}"]
   }
-  let out_imports = list.map(sources, fn(source) { "gen/out/" <> source.service })
+  let out_imports =
+    list.map(sources, fn(source) { "gen/out/" <> source.service })
   list.unique(list.append(option_import, out_imports))
   |> list.sort(string.compare)
   |> list.map(fn(path) { "import " <> path })
@@ -451,8 +891,7 @@ fn page_load_function_text(
 ) -> String {
   let fields = list.append(layout_sources, page_sources)
   case fields {
-    [] ->
-      "pub fn load() -> Data {\n  Data(layout: layout.load())\n}\n"
+    [] -> "pub fn load() -> Data {\n  Data(layout: layout.load())\n}\n"
     _ ->
       "pub fn load(\n"
       <> string.concat(
@@ -461,10 +900,7 @@ fn page_load_function_text(
         }),
       )
       <> ") -> Data {\n  Data(\n    layout: layout.load("
-      <> string.join(
-        list.map(layout_sources, fn(source) { source.name }),
-        ", ",
-      )
+      <> string.join(list.map(layout_sources, fn(source) { source.name }), ", ")
       <> "),\n"
       <> string.concat(
         list.map(page_sources, fn(source) {
@@ -506,15 +942,16 @@ fn page_view_text(
       }),
     )
   let page_children = page_children_text(page_areas, page_placements)
-  let page_helpers = placement_helpers_text(
-    app,
-    units,
-    front,
-    "layout_placement",
-    layout_placements,
-    layout_sources,
-    "it.layout",
-  )
+  let page_helpers =
+    placement_helpers_text(
+      app,
+      units,
+      front,
+      "layout_placement",
+      layout_placements,
+      layout_sources,
+      "it.layout",
+    )
   let page_helpers =
     page_helpers
     <> placement_helpers_text(
@@ -534,8 +971,15 @@ fn page_view_text(
   <> page_children
   <> "}\n\n"
   <> styled_area_text()
-  <> plain_area_text()
+  <> case has_plain_page_area(page_areas) {
+    True -> plain_area_text()
+    False -> ""
+  }
   <> page_helpers
+}
+
+fn has_plain_page_area(areas: List(reader_front.Area)) -> Bool {
+  list.any(areas, fn(area) { area.name != "page" && area.style == [] })
 }
 
 fn layout_area_text(
@@ -565,20 +1009,25 @@ fn page_children_text(
   areas: List(reader_front.Area),
   placements: List(reader_front.Placement),
 ) -> String {
-  case areas {
+  let expressions =
+    list.flat_map(areas, fn(area) {
+      let children =
+        placement_children_expressions("page_placement", placements, area.name)
+      case area.name {
+        "page" -> children
+        _ -> [
+          "["
+          <> page_area_text(area, children_expression(children, None))
+          <> "]",
+        ]
+      }
+    })
+  case expressions {
     [] -> "  []\n"
     _ ->
       "  list.flatten([\n"
       <> string.concat(
-        list.map(areas, fn(area) {
-          let children =
-            area_children_expression("page_placement", placements, area.name, None)
-          let expression = case area.name {
-            "page" -> children
-            _ -> "[" <> page_area_text(area, children) <> "]"
-          }
-          "    " <> expression <> ",\n"
-        }),
+        list.map(expressions, fn(expression) { "    " <> expression <> ",\n" }),
       )
       <> "  ])\n"
   }
@@ -604,14 +1053,29 @@ fn area_children_expression(
   extra: Option(String),
 ) -> String {
   let placement_children =
-    indexed_placements(placements, 0)
-    |> list.filter_map(fn(item) {
-      let #(index, placement) = item
-      case placement_area(placement) == area {
-        True -> Ok(prefix <> "_" <> int.to_string(index) <> "(it)")
-        False -> Error(Nil)
-      }
-    })
+    placement_children_expressions(prefix, placements, area)
+  children_expression(placement_children, extra)
+}
+
+fn placement_children_expressions(
+  prefix: String,
+  placements: List(reader_front.Placement),
+  area: String,
+) -> List(String) {
+  indexed_placements(placements, 0)
+  |> list.filter_map(fn(item) {
+    let #(index, placement) = item
+    case placement_area(placement) == area {
+      True -> Ok(prefix <> "_" <> int.to_string(index) <> "(it)")
+      False -> Error(Nil)
+    }
+  })
+}
+
+fn children_expression(
+  placement_children: List(String),
+  extra: Option(String),
+) -> String {
   let children = case extra {
     Some(value) -> list.append(placement_children, [value])
     None -> placement_children
@@ -629,7 +1093,10 @@ fn indexed_placements(
 ) -> List(#(Int, reader_front.Placement)) {
   case placements {
     [] -> []
-    [placement, ..rest] -> [#(index, placement), ..indexed_placements(rest, index + 1)]
+    [placement, ..rest] -> [
+      #(index, placement),
+      ..indexed_placements(rest, index + 1)
+    ]
   }
 }
 
@@ -644,7 +1111,10 @@ fn style_expression(styles: List(String)) -> String {
   case styles {
     [] -> "[]"
     [style] -> "style." <> style
-    _ -> "[" <> string.join(list.map(styles, fn(name) { "style." <> name }), ", ") <> "]"
+    _ ->
+      "["
+      <> string.join(list.map(styles, fn(name) { "style." <> name }), ", ")
+      <> "]"
   }
 }
 
@@ -710,19 +1180,8 @@ fn placement_helper_text(
   let helper = prefix <> "_" <> int.to_string(index)
   let body = case placement {
     reader_front.Fixed(block: block_name, ..) ->
-      fixed_placement_body(
-        front,
-        block_name,
-        app.services,
-        sources,
-        access,
-      )
-    reader_front.Widget(
-      name: name,
-      service: service_name,
-      render: render,
-      ..
-    ) ->
+      fixed_placement_body(front, block_name, app.services, sources, access)
+    reader_front.Widget(name: name, service: service_name, render: render, ..) ->
       widget_placement_body(
         app,
         units,
@@ -735,13 +1194,42 @@ fn placement_helper_text(
         access,
       )
   }
+  let argument = case
+    placement_uses_data(front, app.services, placement, sources)
+  {
+    True -> "it"
+    False -> "_it"
+  }
   let extra = placement_extra_text(app, units, front, prefix, index, placement)
   "fn "
   <> helper
-  <> "(it: Data) -> List(element.Element(Nil)) {\n"
+  <> "("
+  <> argument
+  <> ": Data) -> List(element.Element(Nil)) {\n"
   <> body
   <> "\n}\n"
   <> extra
+}
+
+fn placement_uses_data(
+  front: reader_front.Front,
+  services: List(model.Service),
+  placement: reader_front.Placement,
+  sources: List(LoadSource),
+) -> Bool {
+  case placement {
+    reader_front.Fixed(block: block_name, ..) ->
+      case block_source(front.blocks, block_name, services) {
+        Some(service) -> load_source(sources, "service:" <> service) != None
+        None -> False
+      }
+    reader_front.Widget(name: name, service: service_name, ..) ->
+      case service_module(services, service_name) {
+        Some(service) ->
+          load_source(sources, "widget:" <> service <> ":" <> name) != None
+        None -> False
+      }
+  }
 }
 
 fn fixed_placement_body(
@@ -790,12 +1278,7 @@ fn widget_placement_body(
             reader_front.ByKind(table: _table, ..) -> {
               let rows_helper = "render_" <> helper
               let row_field = row_field_name(units, service)
-              source_rows_list(
-                source,
-                access,
-                rows_helper,
-                row_field,
-              )
+              source_rows_list(source, access, rows_helper, row_field)
             }
             reader_front.UnknownRender -> "  []"
           }
@@ -815,7 +1298,7 @@ fn placement_extra_text(
     reader_front.Widget(
       service: service_name,
       render: reader_front.ByKind(table: table, ..),
-      ..
+      ..,
     ) ->
       case service_module(app.services, service_name) {
         Some(service) -> {
@@ -835,10 +1318,7 @@ fn placement_extra_text(
   }
 }
 
-fn load_source(
-  sources: List(LoadSource),
-  key: String,
-) -> Option(LoadSource) {
+fn load_source(sources: List(LoadSource), key: String) -> Option(LoadSource) {
   case list.find(sources, fn(source) { source.key == key }) {
     Ok(source) -> Some(source)
     Error(_) -> None
@@ -903,6 +1383,10 @@ fn rows_helper_text(
       <> "(rest),\n        ]\n"
     })
     |> string.concat
+  let fallback = case exhaustive_row_table(state, service, table) {
+    True -> ""
+    False -> "        _ -> " <> helper <> "(rest)\n"
+  }
   "fn "
   <> helper
   <> "(rows: List("
@@ -910,12 +1394,43 @@ fn rows_helper_text(
   <> ".Row)) -> List(element.Element(Nil)) {\n"
   <> "  case rows {\n    [] -> []\n    [row, ..rest] ->\n      case row {\n"
   <> rows
-  <> "        _ -> "
-  <> helper
-  <> "(rest)\n      }\n  }\n}"
+  <> fallback
+  <> "      }\n  }\n}"
 }
 
-fn row_constructor_name(state: State, service: String, variant: String) -> String {
+fn exhaustive_row_table(
+  state: State,
+  service: String,
+  table: List(#(String, String)),
+) -> Bool {
+  let variants = row_variant_names(state, service)
+  let covered =
+    list.map(table, fn(entry) { row_constructor_name(state, service, entry.0) })
+  variants != []
+  && list.length(variants) == list.length(covered)
+  && list.all(variants, fn(variant) { list.contains(covered, variant) })
+}
+
+fn row_variant_names(state: State, service: String) -> List(String) {
+  case
+    list.find(state.custom, fn(declaration) {
+      let CustomDecl(scope: scope, definition: definition) = declaration
+      scope.module == "service/" <> service && definition.name == "Row"
+    })
+  {
+    Ok(CustomDecl(definition: definition, ..)) ->
+      list.map(definition.variants, fn(variant) {
+        row_constructor_name(state, service, variant.name)
+      })
+    Error(_) -> []
+  }
+}
+
+fn row_constructor_name(
+  state: State,
+  service: String,
+  variant: String,
+) -> String {
   case entity_type_name(state, variant) {
     Some(_) -> variant <> "Row"
     None -> mapped_constructor(state, "service/" <> service, "Row", variant)
@@ -931,9 +1446,11 @@ fn row_field_name(units: List(Unit), service: String) -> String {
         Some(output_path), name ->
           case custom_for(units, output_path, name) {
             Some(definition) ->
-              case list.find(definition.variants, fn(variant) {
-                variant.name == name
-              }) {
+              case
+                list.find(definition.variants, fn(variant) {
+                  variant.name == name
+                })
+              {
                 Ok(variant) ->
                   case
                     list.first(
@@ -961,8 +1478,11 @@ fn row_field_name(units: List(Unit), service: String) -> String {
 
 fn list_row_field(field: glance.VariantField) -> Option(String) {
   case g.variant_field_type(field) {
-    glance.NamedType(name: "List", parameters: [glance.NamedType(name: "Row", ..)], ..) ->
-      g.variant_field_label(field)
+    glance.NamedType(
+      name: "List",
+      parameters: [glance.NamedType(name: "Row", ..)],
+      ..,
+    ) -> g.variant_field_label(field)
     _ -> None
   }
 }
@@ -1169,15 +1689,12 @@ fn back_type_units(
   list.append(units, generated_draft_units(app, hashes))
 }
 
-fn generated_draft_units(
-  app: model.App,
-  hashes: hash.Hashes,
-) -> List(Unit) {
+fn generated_draft_units(app: model.App, hashes: hash.Hashes) -> List(Unit) {
   draft.emit(app, hashes)
   |> list.filter_map(fn(file) {
     case
       string.starts_with(file.path, "src/")
-        && string.ends_with(file.path, ".gleam")
+      && string.ends_with(file.path, ".gleam")
     {
       False -> Error(Nil)
       True ->
@@ -1435,10 +1952,8 @@ fn collect_named(
               })
             }
           }
-        "framework/time" ->
-          add_import(state, path, name)
-        "framework/blob" ->
-          add_import(state, path, name)
+        "framework/time" -> add_import(state, path, name)
+        "framework/blob" -> add_import(state, path, name)
         _ -> collect_back_named(state, app, units, scope, path, name)
       }
   }
@@ -1612,10 +2127,8 @@ fn collect_model_named(
         }
         False -> add_import(state, path, name)
       }
-    "framework/time" ->
-      add_import(state, path, name)
-    "framework/blob" ->
-      add_import(state, path, name)
+    "framework/time" -> add_import(state, path, name)
+    "framework/blob" -> add_import(state, path, name)
     _ ->
       case string.starts_with(path, "gen/types/") {
         True -> ensure_value_alias(state, app, path, name)
@@ -1777,7 +2290,8 @@ fn ensure_alias(
                 True -> {
                   let state =
                     ensure_value_alias(state, app, target_path, target_name)
-                  let emitted_name = mapped_name(state, target_path, target_name)
+                  let emitted_name =
+                    mapped_name(state, target_path, target_name)
                   State(
                     ..state,
                     names: list.append(state.names, [#(key, emitted_name)]),
@@ -1788,9 +2302,16 @@ fn ensure_alias(
                 }
                 False -> {
                   let state = reserve_type(state, path, name).0
-                  let state = State(..state, alias_work: [key, ..state.alias_work])
                   let state =
-                    collect_gl_type(state, app, units, scope, definition.aliased)
+                    State(..state, alias_work: [key, ..state.alias_work])
+                  let state =
+                    collect_gl_type(
+                      state,
+                      app,
+                      units,
+                      scope,
+                      definition.aliased,
+                    )
                   State(
                     ..state,
                     aliases: list.append(state.aliases, [
@@ -1920,7 +2441,8 @@ fn row_enum_aliases(declarations: List(CustomDecl)) -> List(String) {
     |> list.filter_map(fn(declaration) {
       let CustomDecl(definition: definition, ..) = declaration
       case definition.name {
-        "Row" -> Ok(definition.variants |> list.map(fn(variant) { variant.name }))
+        "Row" ->
+          Ok(definition.variants |> list.map(fn(variant) { variant.name }))
         _ -> Error(Nil)
       }
     })
@@ -1954,7 +2476,9 @@ fn constructor_names(state: State) -> List(#(String, String)) {
     })
   list.fold(state.custom, entity_constructors, fn(acc, declaration) {
     let CustomDecl(scope: scope, definition: definition) = declaration
-    case list.contains(state.enum_aliases, scope.module <> ":" <> definition.name) {
+    case
+      list.contains(state.enum_aliases, scope.module <> ":" <> definition.name)
+    {
       True -> acc
       False ->
         list.fold(definition.variants, acc, fn(_inner, variant) {
@@ -1971,13 +2495,12 @@ fn constructor_names(state: State) -> List(#(String, String)) {
                 _ -> fresh_constructor_name(acc, variant.name)
               }
           }
-          list.append(
-            acc,
-            [#(
+          list.append(acc, [
+            #(
               constructor_key(scope.module, definition.name, variant.name),
               candidate,
-            )],
-          )
+            ),
+          ])
         })
     }
   })
@@ -2050,9 +2573,7 @@ fn declarations_text(state: State, app: model.App) -> String {
   let phantoms =
     list.map(state.phantoms, fn(name) { "pub type " <> name <> "\n" })
   let custom =
-    list.map(state.custom, fn(declaration) {
-      custom_text(state, declaration)
-    })
+    list.map(state.custom, fn(declaration) { custom_text(state, declaration) })
   string.join(
     list.append(
       aliases,
@@ -2205,7 +2726,9 @@ fn entity_prop_type(state: State, prop: model.Prop, _app: model.App) -> String {
 fn custom_text(state: State, declaration: CustomDecl) -> String {
   let CustomDecl(scope: scope, definition: definition) = declaration
   let name = mapped_name(state, scope.module, definition.name)
-  case list.contains(state.enum_aliases, scope.module <> ":" <> definition.name) {
+  case
+    list.contains(state.enum_aliases, scope.module <> ":" <> definition.name)
+  {
     True -> "pub type " <> name <> " = String\n"
     False -> custom_definition_text(state, scope, definition, name)
   }

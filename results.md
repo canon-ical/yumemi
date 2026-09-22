@@ -557,3 +557,52 @@
 - 入力は固定 snapshot `ms-96fb8cc` のみ。生成出力は `/tmp/gen6-r6-ms` と `/tmp/gen6-r6-face` に置いた。
 - `www/src/gen/load/muse/arg_handle/page.gleam` を含む面の source が実際に compile され、`Compiling www` 1 / `error:` 0 を確認した。
 - 段Dの `render` / `render_view` / `theme_global` / `style.css` / SSR `<style>`、生成物8の live service、島の update / calls は未着手。
+# 指示 段C後半 ── 生成 live と島の仕上げ
+
+## 状態
+
+- 束1: `emit/front.gleam` の未使用引数、未使用 `plain_area`、網羅済み `ByKind` の末尾分岐、二重 `list.flatten`、不要な Option 構成子 import を修正した。
+- 束2: fixture の `public` 入口を `All`、`article_create` / `article_publish` の faces を `[Public, Admin]` にした。`article_retract` は `[Admin]` のまま。
+- 束3-4: `src/gen/live/article_publish.gleam` と `article_create.gleam` を追加。島の手書き `State` / `Event` / `init` / `update` と FFI 2本を削除した。`reloads` は `#(Slug, service.ArticleList)` を読む形。
+
+## DDL
+
+無し。migration、staging、production、Hex、push、main は触っていない。
+
+## 束2で動いた back の file
+
+base `/home/yumemism/.codex-agents/runs/niekawa-20260922-061417-3399503-22265/base-fixture-out-a2` との差分は10 file。生成物の行数と理由は次のとおり。SQL / reads / root は本文でなく Service hash header の更新。
+
+- `db/queries/article_create/to_category.sql` 5行 ── create の faces 変更に連動。
+- `db/queries/article_create/to_tags.sql` 5行 ── 同上。
+- `db/queries/article_publish/to_category.sql` 5行 ── publish の faces 変更に連動。
+- `db/queries/article_publish/to_tags.sql` 5行 ── 同上。
+- `src/gen/entry/http.gleam` 25行 ── public の create / publish route を追加。
+- `src/gen/face.gleam` 6行 ── entry hash の更新。
+- `src/gen/reads/article_create.gleam` 63行 ── Service hash header の更新。
+- `src/gen/reads/article_publish.gleam` 63行 ── 同上。
+- `src/gen/root/article_create.gleam` 23行 ── 同上。
+- `src/gen/root/article_publish.gleam` 23行 ── 同上。
+
+証拠: `gen/build/gen6-final-fixture-back-diff.txt`。それ以外の back は diff 0。
+
+## 生成物8の形と島から消したもの
+
+- `route / load / blocks / widgets / service / api / out` は既存の front 写し。checked-in `public/src/gen/**` と最終生成物の diff は0、15 file 全てに sha256 header がある。
+- `live/article_publish.gleam` は `Field = Slug`、`State(Args, Nil, article_publish.Out, Error)`、Pattern 検査、Stay 分岐。
+- `live/article_create.gleam` は `Field = Slug | Title | Body | Category | Tags`、`State(Args, article_list.Out, article_create.Out, Error)`、Slug/Title/Body の Spec 検査、ReloadPage の `yumemi-done` 合図。
+- 島に残るのは `view`、`calls`、`reloads`、`after_send`、`app`。`fn update` は0本、`*_ffi.mjs` は0本、非空 `calls` は2本。
+
+## 検証
+
+- root `gleam build`: exit 0。既存 `src/framework/secret.gleam` warning 1件。`gen/build/gen6-final-root-build.txt`
+- `cd gen && gleam test`: **120 passed, no failures**。`gen/build/gen6-final-gen-test.txt`
+- fixture generator: exit 0 / **75 file**。back 60 file、face 15 file、live 2 file。`gen/build/gen6-final-fixture-generate.txt`
+- fixture public build: exit 0、`error:` 0、生成コードの Unused / Unreachable / Redundant warning 0。`gen/build/gen6-final-public-build.txt`
+- musearch snapshot のみを入力: exit 4、exit0 warning **29** / exit3 **0** / exit4 **18**、back **604 file**、back diff **0**、face **105 file**、live **0 file**、total **709 file**。`gen/build/gen6-final-musearch-generate.txt`、`gen/build/gen6-final-musearch-counts.txt`、`gen/build/gen6-final-musearch-back-diff.txt`
+- 一時 `/tmp/gen6-final-face.0wPoZB/www` に生成面を差し替えて build: exit 0、`error:` 0、`Compiling musearch_www` あり。`gen/build/gen6-final-musearch-www-build.txt`
+
+## 鷹野宛
+
+- musearch は指定 snapshot `ms-96fb8cc` の `api/` と、同 snapshot の `www/` を読むだけ。`~/yumemism_repo/musearch` には触っていない。
+- 入口の admit / subject / prefix は束2で変更していない。`article_retract` を面に出さない形も維持した。
