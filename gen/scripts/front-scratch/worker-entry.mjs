@@ -72,6 +72,10 @@ export default {
   fetch(request, env, context) {
     const pathname = new URL(request.url).pathname;
     if (pathname.startsWith("/api/")) return app.fetch(request);
-    return shell.fetch(request, { ...env, APP: app, SVELTE: svelte }, context);
+    return shell.fetch(
+      request,
+      { ...env, APP: app, SVELTE: svelte, YUMEMI_DEV: "1" },
+      context,
+    );
   },
 };

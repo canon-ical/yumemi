@@ -84,6 +84,11 @@ pub fn emit(
   let decoder_services =
     list.append(live_decoder_services, page_decoder_services)
     |> list.unique
+  let preview_blocks = referenced_blocks(model_)
+  let skeleton_files =
+    list.map(preview_blocks, fn(block) {
+      skeleton_file(app, type_units, package, block)
+    })
   let files = [
     File(
       path: face_name <> "/src/gen/route.gleam",
@@ -108,6 +113,17 @@ pub fn emit(
     File(
       path: face_name <> "/src/gen/shell.mjs",
       text: shell_text(app, package, model_, hashes),
+    ),
+    File(
+      path: face_name <> "/src/gen/blocks_preview.gleam",
+      text: blocks_preview_text(
+        app,
+        type_units,
+        package,
+        model_,
+        hashes,
+        preview_blocks,
+      ),
     ),
     File(
       path: face_name <> "/priv/static/_yumemi/style.css",
@@ -160,6 +176,7 @@ pub fn emit(
     ),
     load_files,
   )
+  |> list.append(skeleton_files)
 }
 
 fn source_hash(units: List(Unit), keep: fn(Unit) -> Bool) -> String {
@@ -169,6 +186,628 @@ fn source_hash(units: List(Unit), keep: fn(Unit) -> Bool) -> String {
   |> list.map(fn(unit) { unit.path <> "\n" <> unit.text })
   |> string.join("\n")
   |> digest.short
+}
+
+fn referenced_blocks(front: reader_front.Front) -> List(reader_front.Block) {
+  let layout_names =
+    list.append(
+      frame_block_names(front.layout.sp),
+      list.append(
+        frame_block_names(front.layout.pc),
+        frame_block_names(front.layout.tablet),
+      ),
+    )
+  let page_names =
+    front.pages
+    |> list.flat_map(fn(page) {
+      list.append(
+        frame_block_names(page.sp),
+        list.append(frame_block_names(page.pc), frame_block_names(page.tablet)),
+      )
+    })
+  let names =
+    list.append(layout_names, page_names)
+    |> list.unique
+    |> list.sort(string.compare)
+  front.blocks
+  |> list.filter(fn(block) { list.contains(names, block.name) })
+  |> list.sort(fn(left, right) { string.compare(left.name, right.name) })
+}
+
+fn frame_block_names(frame: Option(reader_front.Frame)) -> List(String) {
+  case frame {
+    Some(value) ->
+      value.placements
+      |> list.flat_map(fn(placement) {
+        case placement {
+          reader_front.Fixed(block: block, ..) -> [block]
+          reader_front.Widget(render: render, ..) -> render_block_names(render)
+        }
+      })
+    None -> []
+  }
+}
+
+fn render_block_names(render: reader_front.Render) -> List(String) {
+  case render {
+    reader_front.One(block) -> [block]
+    reader_front.ByKind(table: table, ..) -> list.map(table, fn(row) { row.1 })
+    reader_front.UnknownRender -> []
+  }
+}
+
+fn skeleton_file(
+  _app: model.App,
+  units: List(Unit),
+  package: face.Package,
+  block: reader_front.Block,
+) -> File {
+  let service = block_service_module(block)
+  let fields = case service {
+    Some(name) -> output_fields(units, name)
+    None -> []
+  }
+  let imports =
+    list.append(
+      [
+        "import framework/front/el",
+        "import sketch/lustre/element/html",
+      ],
+      case service {
+        Some(name) -> ["import gen/out/" <> name]
+        None -> []
+      },
+    )
+  let imports = case fields {
+    [] -> imports
+    _ -> list.append(imports, ["import gleam/string"])
+  }
+  let in_type = case service {
+    Some(name) -> name <> ".Out"
+    None -> "Nil"
+  }
+  let view_argument = case service {
+    Some(_) -> "it"
+    None -> "_it"
+  }
+  let children = case fields {
+    [] ->
+      case service {
+        Some(_) -> [
+          "el.text(\"value: \" <> string.inspect(" <> view_argument <> "))",
+        ]
+        None -> ["el.text(\"\")"]
+      }
+    _ ->
+      list.map(fields, fn(field) {
+        "el.text("
+        <> quoted(field.0)
+        <> " <> \": \" <> string.inspect("
+        <> view_argument
+        <> "."
+        <> field.0
+        <> "))"
+      })
+  }
+  let body =
+    header(
+      package.name <> "/src/" <> block.module <> ".gleam",
+      source_hash(package.units, fn(unit) { unit.path == block.module }),
+    )
+    <> "\n"
+    <> string.join(list.sort(imports, string.compare), "\n")
+    <> "\n\npub type In = "
+    <> in_type
+    <> "\n\npub fn view("
+    <> view_argument
+    <> ": In) -> el.Element(Nil) {\n  html.div_([], [\n"
+    <> string.concat(list.map(children, fn(child) { "    " <> child <> ",\n" }))
+    <> "  ])\n}\n"
+  File(
+    path: package.name
+      <> "/src/gen/skeleton/"
+      <> last_segment(block.module)
+      <> ".gleam",
+    text: body,
+  )
+}
+
+fn block_service_module(block: reader_front.Block) -> Option(String) {
+  case block.input_module {
+    Some(path) ->
+      case path == "Nil" {
+        True -> None
+        False -> Some(last_segment(path))
+      }
+    None -> None
+  }
+}
+
+fn output_fields(
+  units: List(Unit),
+  service: String,
+) -> List(#(String, glance.Type)) {
+  let path = "service/" <> service
+  let scope = scope_for(units, path)
+  case output_type(units, path) {
+    Some(type_) -> fields_for_type(units, scope, type_)
+    None -> []
+  }
+}
+
+fn fields_for_type(
+  units: List(Unit),
+  scope: Scope,
+  type_: glance.Type,
+) -> List(#(String, glance.Type)) {
+  case type_ {
+    glance.NamedType(..) ->
+      case resolved_path(scope, type_) {
+        Some(path) ->
+          case unit_for(units, path) {
+            Some(unit) ->
+              case
+                g.find_custom_type(g.in_order(unit.module), type_name(type_))
+              {
+                Some(definition) ->
+                  case definition.variants {
+                    [variant, ..] ->
+                      variant.fields
+                      |> list.filter_map(fn(field) {
+                        case g.variant_field_label(field) {
+                          Some(label) ->
+                            Ok(#(label, g.variant_field_type(field)))
+                          None -> Error(Nil)
+                        }
+                      })
+                    [] -> []
+                  }
+                None -> []
+              }
+            None -> []
+          }
+        None -> []
+      }
+    _ -> []
+  }
+}
+
+fn blocks_preview_text(
+  app: model.App,
+  units: List(Unit),
+  package: face.Package,
+  front: reader_front.Front,
+  hashes: hash.Hashes,
+  blocks: List(reader_front.Block),
+) -> String {
+  let frame = case front.layout.pc {
+    Some(value) -> value
+    None ->
+      case front.layout.sp {
+        Some(value) -> value
+        None -> reader_front.Frame(media: "pc", areas: [], placements: [])
+      }
+  }
+  let block_imports = list.map(blocks, fn(block) { "import " <> block.module })
+  let area_children =
+    frame.areas
+    |> list.map(fn(area) { preview_area_text(area.name, app, units, blocks) })
+    |> string.join(",\n    ")
+  let out_imports =
+    blocks
+    |> list.filter_map(fn(block) {
+      case block.has_sample, block_service_module(block) {
+        False, Some(service) -> Ok("import gen/out/" <> service)
+        _, _ -> Error(Nil)
+      }
+    })
+    |> list.unique
+  let needs_defaults =
+    list.any(blocks, fn(block) {
+      !block.has_sample && block_service_module(block) != None
+    })
+  let option_imports = case needs_defaults {
+    True -> ["import gleam/option.{None}"]
+    False -> []
+  }
+  let opaque_imports =
+    list.append(
+      case string.contains(area_children, "default_blob()") {
+        True -> ["import framework/blob.{type Blob, parse}"]
+        False -> []
+      },
+      case string.contains(area_children, "default_time()") {
+        True -> ["import framework/time.{type Time, time}"]
+        False -> []
+      },
+    )
+  let body_imports =
+    list.append(
+      [
+        "import framework/front/el",
+        "import lustre/attribute",
+        "import lustre/element/html as raw_html",
+        "import sketch/lustre as sketch_lustre",
+        "import sketch/lustre/element",
+        "import sketch/lustre/element/html",
+      ],
+      list.append(
+        block_imports,
+        list.append(out_imports, list.append(option_imports, opaque_imports)),
+      ),
+    )
+  let input_hash =
+    digest.short(
+      hash.entry(hashes)
+      <> source_hash(package.units, fn(unit) {
+        unit.path == "layout"
+        || string.starts_with(unit.path, "pages/")
+        || string.starts_with(unit.path, "blocks/")
+      }),
+    )
+  let default_helpers =
+    case string.contains(area_children, "default_blob()") {
+      True ->
+        "\nfn default_blob() -> Blob {\n"
+        <> "  let assert Ok(value) = parse(\"placeholder\")\n"
+        <> "  value\n}\n"
+      False -> ""
+    }
+    <> case string.contains(area_children, "default_time()") {
+      True ->
+        "\nfn default_time() -> Time {\n"
+        <> "  let assert Ok(value) = time(\"00:00\")\n"
+        <> "  value\n}\n"
+      False -> ""
+    }
+  header(
+    package.name <> "/src/{layout.gleam,pages/**/page.gleam,blocks/*.gleam}",
+    input_hash,
+  )
+  <> "\n"
+  <> string.join(list.sort(body_imports, string.compare), "\n")
+  <> default_helpers
+  <> "\npub fn view() -> element.Element(Nil) {\n"
+  <> "  html.div_([attribute.attribute(\"data-yumemi-blocks-preview\", \"pc\")], [\n"
+  <> "    "
+  <> area_children
+  <> "\n  ])\n}\n\n"
+  <> "pub fn render() -> element.Element(Nil) {\n"
+  <> "  let assert Ok(stylesheet) =\n"
+  <> "    sketch_lustre.construct(fn(stylesheet) { stylesheet })\n"
+  <> "  let output =\n"
+  <> "    sketch_lustre.render(stylesheet, in: [sketch_lustre.node()], after: fn() { view() })\n"
+  <> "  let assert Ok(_) = sketch_lustre.teardown(stylesheet)\n"
+  <> "  raw_html.html([], [\n"
+  <> "    raw_html.head([], []),\n"
+  <> "    raw_html.body([], [output]),\n"
+  <> "  ])\n}\n"
+}
+
+fn preview_area_text(
+  name: String,
+  app: model.App,
+  units: List(Unit),
+  blocks: List(reader_front.Block),
+) -> String {
+  let children = case name {
+    "page" ->
+      list.map(blocks, fn(block) { preview_block_text(app, units, block) })
+    _ -> ["el.text(" <> quoted(name) <> ")"]
+  }
+  let children_text =
+    "[\n"
+    <> string.concat(
+      list.map(children, fn(child) { "      " <> child <> ",\n" }),
+    )
+    <> "    ]"
+  let attributes =
+    "[attribute.attribute(\"data-yumemi-area\", " <> quoted(name) <> ")]"
+  case name {
+    "header" -> "html.header_(" <> attributes <> ", " <> children_text <> ")"
+    "nav" -> "html.nav_(" <> attributes <> ", " <> children_text <> ")"
+    "footer" -> "html.footer_(" <> attributes <> ", " <> children_text <> ")"
+    _ -> "html.div_(" <> attributes <> ", " <> children_text <> ")"
+  }
+}
+
+fn preview_block_text(
+  app: model.App,
+  units: List(Unit),
+  block: reader_front.Block,
+) -> String {
+  let module = module_ref(block.module)
+  let service = block_service_module(block)
+  let service_label = case service {
+    Some(name) -> naming.pascal(name)
+    None -> "Nil"
+  }
+  let out_label = case service {
+    Some(name) -> name <> ".Out"
+    None -> "Nil"
+  }
+  let value = case block.has_sample {
+    True -> module <> ".sample"
+    False ->
+      case service {
+        Some(name) -> default_block_expression(app, units, name, block)
+        None -> "Nil"
+      }
+  }
+  "html.div_([], [\n"
+  <> "        el.text("
+  <> quoted(block.module <> " | of " <> service_label <> " | " <> out_label)
+  <> "),\n"
+  <> "        "
+  <> module
+  <> ".view("
+  <> value
+  <> "),\n"
+  <> "      ])"
+}
+
+fn default_block_expression(
+  app: model.App,
+  units: List(Unit),
+  service: String,
+  block: reader_front.Block,
+) -> String {
+  let path = "service/" <> service
+  let scope = scope_for(units, path)
+  let state = out_state(app, units, path).0
+  case block.input {
+    Some("Nil") -> "Nil"
+    Some(name) ->
+      case unit_for(units, path) {
+        Some(unit) ->
+          case g.find_custom_type(g.in_order(unit.module), name) {
+            Some(definition) ->
+              case definition.variants {
+                [variant, ..] ->
+                  service
+                  <> "."
+                  <> mapped_constructor(state, path, name, variant.name)
+                  <> default_variant_arguments(
+                    app,
+                    units,
+                    state,
+                    scope,
+                    service,
+                    variant.fields,
+                    "value",
+                  )
+                [] -> "Nil"
+              }
+            None -> default_output_expression(app, units, service)
+          }
+        None -> default_output_expression(app, units, service)
+      }
+    None -> default_output_expression(app, units, service)
+  }
+}
+
+fn default_output_expression(
+  app: model.App,
+  units: List(Unit),
+  service: String,
+) -> String {
+  let path = "service/" <> service
+  let scope = scope_for(units, path)
+  let state = out_state(app, units, path).0
+  case output_type(units, path) {
+    Some(type_) ->
+      default_type_expression(app, units, state, scope, service, type_, "value")
+    None -> "Nil"
+  }
+}
+
+fn default_type_expression(
+  app: model.App,
+  units: List(Unit),
+  state: State,
+  scope: Scope,
+  output_module: String,
+  type_: glance.Type,
+  field_name: String,
+) -> String {
+  case type_ {
+    glance.NamedType(name: name, parameters: parameters, ..) ->
+      case name, parameters {
+        "String", [] -> quoted(field_name)
+        "Int", [] -> "0"
+        "Bool", [] -> "False"
+        "Float", [] -> "0.0"
+        "Option", [_] -> "None"
+        "List", [inner] ->
+          "["
+          <> string.join(
+            list.map([1, 2, 3], fn(_) {
+              default_type_expression(
+                app,
+                units,
+                state,
+                scope,
+                output_module,
+                inner,
+                field_name,
+              )
+            }),
+            ", ",
+          )
+          <> "]"
+        _, _ ->
+          default_custom_expression(
+            app,
+            units,
+            state,
+            scope,
+            output_module,
+            type_,
+            field_name,
+          )
+      }
+    glance.TupleType(elements: elements, ..) ->
+      "#("
+      <> string.join(
+        list.map(elements, fn(element) {
+          default_type_expression(
+            app,
+            units,
+            state,
+            scope,
+            output_module,
+            element,
+            field_name,
+          )
+        }),
+        ", ",
+      )
+      <> ")"
+    _ -> "Nil"
+  }
+}
+
+fn default_custom_expression(
+  app: model.App,
+  units: List(Unit),
+  state: State,
+  scope: Scope,
+  output_module: String,
+  type_: glance.Type,
+  field_name: String,
+) -> String {
+  case resolved_path(scope, type_) {
+    Some(path) ->
+      case list.contains(state.enum_aliases, path <> ":" <> type_name(type_)) {
+        True -> quoted(field_name)
+        False ->
+          case path {
+            "framework/er" ->
+              relation_default(output_module, type_name(type_), field_name)
+            "framework/blob" -> "default_blob()"
+            "framework/time" -> "default_time()"
+            _ ->
+              case unit_for(units, path) {
+                Some(unit) ->
+                  case
+                    g.find_custom_type(
+                      g.in_order(unit.module),
+                      type_name(type_),
+                    )
+                  {
+                    Some(definition) ->
+                      case definition.variants {
+                        [variant, ..] ->
+                          output_module
+                          <> "."
+                          <> mapped_constructor(
+                            state,
+                            path,
+                            type_name(type_),
+                            variant.name,
+                          )
+                          <> default_variant_arguments(
+                            app,
+                            units,
+                            state,
+                            scope_for(units, path),
+                            output_module,
+                            variant.fields,
+                            field_name,
+                          )
+                        [] -> "Nil"
+                      }
+                    None ->
+                      default_named_value(app, type_name(type_), field_name)
+                  }
+                None -> default_named_value(app, type_name(type_), field_name)
+              }
+          }
+      }
+    None -> default_named_value(app, type_name(type_), field_name)
+  }
+}
+
+fn relation_default(
+  output_module: String,
+  name: String,
+  field_name: String,
+) -> String {
+  case name {
+    "Has" | "Held" ->
+      output_module <> "." <> name <> "(value: " <> quoted(field_name) <> ")"
+    "Multi" ->
+      output_module
+      <> ".Multi(values: ["
+      <> quoted(field_name)
+      <> ", "
+      <> quoted(field_name)
+      <> ", "
+      <> quoted(field_name)
+      <> "])"
+    _ -> quoted(field_name)
+  }
+}
+
+fn default_variant_arguments(
+  app: model.App,
+  units: List(Unit),
+  state: State,
+  scope: Scope,
+  output_module: String,
+  fields: List(glance.VariantField),
+  field_name: String,
+) -> String {
+  case fields {
+    [] -> ""
+    _ ->
+      "("
+      <> string.join(
+        list.map(fields, fn(field) {
+          case field {
+            glance.LabelledVariantField(label: label, item: item) ->
+              label
+              <> ": "
+              <> default_type_expression(
+                app,
+                units,
+                state,
+                scope,
+                output_module,
+                item,
+                label,
+              )
+            glance.UnlabelledVariantField(item) ->
+              default_type_expression(
+                app,
+                units,
+                state,
+                scope,
+                output_module,
+                item,
+                field_name,
+              )
+          }
+        }),
+        ", ",
+      )
+      <> ")"
+  }
+}
+
+fn default_named_value(
+  app: model.App,
+  name: String,
+  field_name: String,
+) -> String {
+  case model.value_type_by_name(app.value_types, name) {
+    Some(value) ->
+      case value.backing {
+        model.IntValue -> "0"
+        model.StringValue -> quoted(field_name)
+      }
+    None -> quoted(field_name)
+  }
 }
 
 fn live_targets(
@@ -949,15 +1588,16 @@ fn page_sources(
   }
   let sources = placement_sources(placements, blocks, services, root)
   case page.theme, root_service {
-    Some(name), Some(module) -> list.append(sources, [
-      LoadSource(
-        key: "theme:" <> module <> ":" <> name,
-        name: name,
-        service: module,
-        type_name: "PageTheme",
-        optional: True,
-      ),
-    ])
+    Some(name), Some(module) ->
+      list.append(sources, [
+        LoadSource(
+          key: "theme:" <> module <> ":" <> name,
+          name: name,
+          service: module,
+          type_name: "PageTheme",
+          optional: True,
+        ),
+      ])
     _, _ -> sources
   }
 }
@@ -1149,8 +1789,15 @@ fn load_page_text(
   page_sources: List(LoadSource),
   input_hash: String,
 ) -> String {
+  let theme = theme_source(page_sources)
+  let theme_background_blob = theme_background_is_blob(units, theme)
   let imports =
-    load_imports(front, list.append(layout_sources, page_sources), True)
+    load_imports(
+      front,
+      list.append(layout_sources, page_sources),
+      True,
+      theme_background_blob,
+    )
   let data_fields =
     ["    layout: layout.Data,\n"]
     |> list.append(list.map(page_sources, load_data_field_text))
@@ -1164,7 +1811,7 @@ fn load_page_text(
     <> "\n"
     <> page_load_function_text(layout_sources, page_sources)
     <> "\n"
-    <> page_render_text(front, page_sources)
+    <> page_render_text(front, page_sources, theme_background_blob)
     <> "\n"
     <> page_view_text(app, units, front, page, layout_sources, page_sources)
   source_body
@@ -1173,6 +1820,7 @@ fn load_page_text(
 fn page_render_text(
   front: reader_front.Front,
   page_sources: List(LoadSource),
+  theme_background_blob: Bool,
 ) -> String {
   let theme = theme_source(page_sources)
   let theme_call = case theme {
@@ -1209,7 +1857,7 @@ fn page_render_text(
   <> "    raw_html.body([], [styled_body]),\n"
   <> "  ])\n"
   <> "}\n\n"
-  <> theme_global_text(front, theme)
+  <> theme_global_text(front, theme, theme_background_blob)
 }
 
 fn theme_source(sources: List(LoadSource)) -> Option(LoadSource) {
@@ -1217,9 +1865,84 @@ fn theme_source(sources: List(LoadSource)) -> Option(LoadSource) {
   |> option.from_result
 }
 
+fn theme_background_is_blob(
+  units: List(Unit),
+  theme: Option(LoadSource),
+) -> Bool {
+  case theme {
+    Some(source) -> {
+      let service_path = "service/" <> source.service
+      let service_scope = scope_for(units, service_path)
+      let theme_path = case
+        unqualified_module(service_scope.imports, source.type_name)
+      {
+        Some(path) -> path
+        None -> service_path
+      }
+      case unit_for(units, theme_path) {
+        Some(unit) -> {
+          let module = g.in_order(unit.module)
+          case g.find_custom_type(module, source.type_name) {
+            Some(definition) -> theme_definition_background_is_blob(definition)
+            None -> theme_background_from_any_unit(units, source.type_name)
+          }
+        }
+        None -> False
+      }
+    }
+    None -> False
+  }
+}
+
+fn theme_background_from_any_unit(
+  units: List(Unit),
+  type_name: String,
+) -> Bool {
+  case
+    list.find_map(units, fn(unit) {
+      let module = g.in_order(unit.module)
+      case g.find_custom_type(module, type_name) {
+        Some(definition) -> Ok(definition)
+        None -> Error(Nil)
+      }
+    })
+  {
+    Ok(definition) -> theme_definition_background_is_blob(definition)
+    Error(_) -> False
+  }
+}
+
+fn theme_definition_background_is_blob(definition: glance.CustomType) -> Bool {
+  case definition.variants {
+    [variant, ..] ->
+      case
+        list.find_map(variant.fields, fn(field) {
+          case g.variant_field_label(field) {
+            Some("background_image") -> Ok(g.variant_field_type(field))
+            _ -> Error(Nil)
+          }
+        })
+      {
+        Ok(type_) -> theme_field_is_blob(type_)
+        Error(_) -> False
+      }
+    [] -> False
+  }
+}
+
+fn theme_field_is_blob(type_: glance.Type) -> Bool {
+  case type_ {
+    glance.NamedType(name: "Option", parameters: [inner], ..) ->
+      theme_field_is_blob(inner)
+    glance.NamedType(name: "Blob", ..) -> True
+    _ -> False
+  }
+}
+
 fn theme_global_text(
   front: reader_front.Front,
   theme: Option(LoadSource),
+  theme_background_blob: Bool,
 ) -> String {
   let defaults =
     quoted(front.shell.background)
@@ -1261,7 +1984,7 @@ fn theme_global_text(
       <> "}\n\n"
       <> option_string_text()
       <> "\n"
-      <> option_background_text()
+      <> option_background_text(theme_background_blob)
     None ->
       "fn theme_global() -> raw_css.Global {\n"
       <> "  let #(background, background_image, text, accent) = #("
@@ -1289,12 +2012,21 @@ fn option_string_text() -> String {
   <> "  }\n}\n"
 }
 
-fn option_background_text() -> String {
-  "fn option_background(value: Option(String)) -> String {\n"
-  <> "  case value {\n"
-  <> "    Some(value) -> value\n"
-  <> "    None -> \"none\"\n"
-  <> "  }\n}\n"
+fn option_background_text(blob: Bool) -> String {
+  case blob {
+    True ->
+      "fn option_background(value: Option(Blob)) -> String {\n"
+      <> "  case value {\n"
+      <> "    Some(value) -> to_string(value)\n"
+      <> "    None -> \"none\"\n"
+      <> "  }\n}\n"
+    False ->
+      "fn option_background(value: Option(String)) -> String {\n"
+      <> "  case value {\n"
+      <> "    Some(value) -> value\n"
+      <> "    None -> \"none\"\n"
+      <> "  }\n}\n"
+  }
 }
 
 fn import_gap(imports: String) -> String {
@@ -1308,6 +2040,7 @@ fn load_imports(
   front: reader_front.Front,
   sources: List(LoadSource),
   include_layout: Bool,
+  theme_background_blob: Bool,
 ) -> String {
   let base = [
     "framework/front/css",
@@ -1323,6 +2056,10 @@ fn load_imports(
     "sketch/lustre/element/html",
     "style",
   ]
+  let blob = case theme_background_blob {
+    True -> ["framework/blob.{type Blob, to_string}"]
+    False -> []
+  }
   let layout = case include_layout {
     True -> ["gen/load/layout"]
     False -> []
@@ -1332,7 +2069,10 @@ fn load_imports(
     False -> []
   }
   let outs = list.map(sources, fn(source) { "gen/out/" <> source.service })
-  list.unique(list.append(base, list.append(layout, list.append(blocks, outs))))
+  list.unique(list.append(
+    base,
+    list.append(blob, list.append(layout, list.append(blocks, outs))),
+  ))
   |> list.sort(string.compare)
   |> list.map(fn(path) {
     case string.starts_with(path, "gleam/option.{") {
@@ -2094,11 +2834,12 @@ fn shell_text(
   let source_hash =
     source_hash(package.units, fn(unit) {
       unit.path == "layout"
-        || unit.path == "shell"
-        || string.starts_with(unit.path, "pages/")
+      || unit.path == "shell"
+      || string.starts_with(unit.path, "pages/")
     })
   js_header(
-    package.name <> "/src/{gen/route.gleam,gen/load/**,pages/**,layout.gleam,shell.gleam}",
+    package.name
+      <> "/src/{gen/route.gleam,gen/load/**,pages/**,layout.gleam,shell.gleam}",
     digest.short(hash.entry(hashes) <> source_hash),
   )
   <> "\n\n"
@@ -2122,6 +2863,7 @@ fn shell_imports(
     "import {to_document_string} from \"../../lustre/lustre/element.mjs\";",
     "import * as frontCss from \"../../yumemi/framework/front/css.mjs\";",
     "import * as api from \"./api.mjs\";",
+    "import * as blocksPreview from \"./blocks_preview.mjs\";",
     "import * as layoutDefinition from \"../layout.mjs\";",
     "import * as route from \"./route.mjs\";",
     "import * as service from \"./service.mjs\";",
@@ -2190,10 +2932,7 @@ fn shell_services(
   |> list.filter(fn(service) { list.contains(names, service.module) })
 }
 
-fn shell_page_tables(
-  app: model.App,
-  front: reader_front.Front,
-) -> String {
+fn shell_page_tables(app: model.App, front: reader_front.Front) -> String {
   let page_rows =
     front.pages
     |> list.index_map(fn(page, index) {
@@ -2207,10 +2946,11 @@ fn shell_page_tables(
   let spec_rows =
     front.pages
     |> list.index_map(fn(page, index) {
-      let sources = list.append(
-        layout_sources(front.layout, front.blocks, app.services),
-        page_sources(page, front.blocks, app.services),
-      )
+      let sources =
+        list.append(
+          layout_sources(front.layout, front.blocks, app.services),
+          page_sources(page, front.blocks, app.services),
+        )
       "  ["
       <> quoted(reader_front.route_path(page.path))
       <> ", {\n"
@@ -2238,24 +2978,22 @@ fn shell_page_tables(
   <> "\n]);\n"
 }
 
-fn shell_given_rows(
-  app: model.App,
-  front: reader_front.Front,
-) -> String {
+fn shell_given_rows(app: model.App, front: reader_front.Front) -> String {
   front.components
   |> list.filter_map(fn(component) {
     case component.reloads |> list.first |> option.from_result {
       Some(reload) ->
         case service_for(app.services, reload.1) {
-          Some(service) -> Ok(
-            "      { tag: "
-            <> quoted(component_tag(component))
-            <> ", service: service.Service$"
-            <> naming.pascal(service.module)
-            <> "$const, decoder: decode"
-            <> naming.pascal(service.module)
-            <> " },\n",
-          )
+          Some(service) ->
+            Ok(
+              "      { tag: "
+              <> quoted(component_tag(component))
+              <> ", service: service.Service$"
+              <> naming.pascal(service.module)
+              <> "$const, decoder: decode"
+              <> naming.pascal(service.module)
+              <> " },\n",
+            )
           None -> Error(Nil)
         }
       None -> Error(Nil)
@@ -2306,10 +3044,7 @@ fn bool_text(value: Bool) -> String {
   }
 }
 
-fn style_text(
-  package: face.Package,
-  front: reader_front.Front,
-) -> String {
+fn style_text(package: face.Package, front: reader_front.Front) -> String {
   let input_hash =
     source_hash(package.units, fn(unit) { unit.path == "layout" })
   "/* GENERATED from "
@@ -2330,7 +3065,9 @@ fn static_grid_css(layout: reader_front.Layout) -> String {
       list.map(tablet_areas, fn(area) { area.name }),
     )
     |> list.unique
-    |> list.filter(fn(name) { !list.any(sp_areas, fn(area) { area.name == name }) })
+    |> list.filter(fn(name) {
+      !list.any(sp_areas, fn(area) { area.name == name })
+    })
   let base_rules =
     list.append(
       list.map(sp_areas, fn(area) { static_area_rule(area, "normal") }),
@@ -2360,7 +3097,11 @@ fn static_grid_css(layout: reader_front.Layout) -> String {
     Some(_) ->
       static_media_block(
         "tablet",
-        static_frame_body(tablet_areas, sp_areas, static_grid_template_areas(tablet_areas)),
+        static_frame_body(
+          tablet_areas,
+          sp_areas,
+          static_grid_template_areas(tablet_areas),
+        ),
       )
     None -> ""
   }
@@ -2451,7 +3192,11 @@ fn static_pc_following(
   }
 }
 
-fn static_pad_names(names: List(String), wanted: Int, fill: String) -> List(String) {
+fn static_pad_names(
+  names: List(String),
+  wanted: Int,
+  fill: String,
+) -> List(String) {
   case list.length(names) >= wanted {
     True -> names
     False -> static_pad_names(list.append(names, [fill]), wanted, fill)
@@ -2466,11 +3211,12 @@ fn static_frame_body(
   let rules =
     areas
     |> list.map(fn(area) {
-      let visibility =
-        case list.any(base_areas, fn(candidate) { candidate.name == area.name }) {
-          True -> "normal"
-          False -> "visible"
-        }
+      let visibility = case
+        list.any(base_areas, fn(candidate) { candidate.name == area.name })
+      {
+        True -> "normal"
+        False -> "visible"
+      }
       static_area_rule(area, visibility)
     })
     |> string.join("\n")
@@ -2491,10 +3237,7 @@ fn static_media_block(media: String, body: String) -> String {
   query <> " {\n" <> body <> "\n}\n"
 }
 
-fn static_area_rule(
-  area: reader_front.Area,
-  visibility: String,
-) -> String {
+fn static_area_rule(area: reader_front.Area, visibility: String) -> String {
   let base = [
     "[data-yumemi-grid=\"layout\"] > [data-yumemi-area=\""
       <> area.name
@@ -2519,7 +3262,10 @@ fn static_area_rule(
     ]
     _ -> []
   }
-  string.join(list.append(base, list.append(visible, list.append(pin, ["}"]))), "\n")
+  string.join(
+    list.append(base, list.append(visible, list.append(pin, ["}"]))),
+    "\n",
+  )
 }
 
 fn shell_decoder_text(services: List(model.Service)) -> String {
@@ -2719,8 +3465,16 @@ fn shell_runtime_text(include_client: Bool) -> String {
     False -> "  return rendered;\n"
   }
   <> "}\n\n"
+  <> "\n\nfunction renderBlocksPreview() {\n"
+  <> "  const html = to_document_string(blocksPreview.render());\n"
+  <> "  const withStyle = html.includes(\"<style>\")\n"
+  <> "    ? html\n"
+  <> "    : html.replace(\"<head>\", \"<head><style></style>\");\n"
+  <> "  return new Response(withStyle.replace(\"</head>\", '<script type=\"module\" src=\"/_yumemi/client.mjs\"></script></head>'), {status: 200, headers: {\"content-type\": \"text/html; charset=utf-8\"}});\n"
+  <> "}\n\n"
   <> "export default {\n"
   <> "  async fetch(request, env) {\n"
+  <> "    if (new URL(request.url).pathname === \"/_blocks\" && env.YUMEMI_DEV === \"1\") return renderBlocksPreview();\n"
   <> "    const matched = matchPage(new URL(request.url).pathname);\n"
   <> "    if (!matched) {\n"
   <> "      if (env.SVELTE) return env.SVELTE.fetch(request);\n"
@@ -2918,6 +3672,7 @@ type State {
     constructors: List(#(String, String)),
     enum_aliases: List(String),
     imports: List(#(String, String)),
+    functions: List(#(String, String)),
     entity_work: List(String),
     custom_work: List(String),
     alias_work: List(String),
@@ -2935,6 +3690,7 @@ fn empty_state() -> State {
     constructors: [],
     enum_aliases: [],
     imports: [],
+    functions: [],
     entity_work: [],
     custom_work: [],
     alias_work: [],
@@ -2969,12 +3725,12 @@ fn out_file(
     string.contains(string.inspect(state.custom), "Page")
   {
     True, True ->
-      imports_text(state)
+      imports_text(state, with_decoder)
       |> string.replace(
         "import framework/page.{type Page}",
         "import framework/page.{type Page, Page, cursor}",
       )
-    _, _ -> imports_text(state)
+    _, _ -> imports_text(state, with_decoder)
   }
   let decoder_imports = case with_decoder {
     True -> "import gleam/dynamic/decode"
@@ -3095,16 +3851,34 @@ fn named_decoder(
   case string.starts_with(path, "gen/types/") {
     True -> value_decoder(app, name)
     False ->
-      case string.starts_with(path, "entity/") {
-        True ->
-          case
-            model.entity_by_module(app.entities, string.drop_start(path, 7))
-          {
-            Some(entity) -> entity_decoder(app, units, state, scope, entity)
-            None ->
+      case path {
+        "framework/time" -> opaque_model_decoder(name)
+        "framework/blob" -> opaque_model_decoder("Blob")
+        _ ->
+          case string.starts_with(path, "entity/") {
+            True ->
+              case
+                model.entity_by_module(app.entities, string.drop_start(path, 7))
+              {
+                Some(entity) ->
+                  case entity.type_name == name {
+                    True -> entity_decoder(app, units, state, scope, entity)
+                    False ->
+                      custom_or_alias_decoder(
+                        app,
+                        units,
+                        state,
+                        scope,
+                        path,
+                        name,
+                      )
+                  }
+                None ->
+                  custom_or_alias_decoder(app, units, state, scope, path, name)
+              }
+            False ->
               custom_or_alias_decoder(app, units, state, scope, path, name)
           }
-        False -> custom_or_alias_decoder(app, units, state, scope, path, name)
       }
   }
 }
@@ -3161,18 +3935,31 @@ fn custom_decoder(
   scope: Scope,
   definition: glance.CustomType,
 ) -> String {
-  case definition.variants {
-    [] -> "decode.dynamic"
-    [variant] ->
-      variant_decoder(app, units, state, scope, definition.name, variant)
-    variants ->
-      case list.all(variants, fn(variant) { variant.fields == [] }) {
-        True -> enum_decoder(state, scope, definition)
-        False ->
-          case variants {
-            [first, ..] ->
-              variant_decoder(app, units, state, scope, definition.name, first)
-            [] -> "decode.dynamic"
+  case
+    list.contains(state.enum_aliases, scope.module <> ":" <> definition.name)
+  {
+    True -> "decode.string"
+    False ->
+      case definition.variants {
+        [] -> "decode.dynamic"
+        [variant] ->
+          variant_decoder(app, units, state, scope, definition.name, variant)
+        variants ->
+          case list.all(variants, fn(variant) { variant.fields == [] }) {
+            True -> enum_decoder(state, scope, definition)
+            False ->
+              case variants {
+                [first, ..] ->
+                  variant_decoder(
+                    app,
+                    units,
+                    state,
+                    scope,
+                    definition.name,
+                    first,
+                  )
+                [] -> "decode.dynamic"
+              }
           }
       }
   }
@@ -3186,11 +3973,11 @@ fn variant_decoder(
   type_name: String,
   variant: glance.Variant,
 ) -> String {
-  let constructor =
-    case type_name {
-      "Row" -> row_constructor_name(state, last_segment(scope.module), variant.name)
-      _ -> mapped_constructor(state, scope.module, type_name, variant.name)
-    }
+  let constructor = case type_name {
+    "Row" ->
+      row_constructor_name(state, last_segment(scope.module), variant.name)
+    _ -> mapped_constructor(state, scope.module, type_name, variant.name)
+  }
   case variant.fields {
     [] -> "decode.success(" <> constructor <> ")"
     [glance.UnlabelledVariantField(item)] ->
@@ -3414,17 +4201,46 @@ fn model_ref_decoder(
         True -> value_decoder(app, name)
         False ->
           case path {
-            "framework/time" ->
-              "decode.map(decode.string, fn(value) { "
-              <> name
-              <> "(value: value) })"
-            "framework/blob" ->
-              "decode.map(decode.string, fn(value) { Blob(key: value) })"
+            "framework/time" -> opaque_model_decoder(name)
+            "framework/blob" -> opaque_model_decoder("Blob")
             _ -> "decode.dynamic"
           }
       }
     _, _ -> "decode.dynamic"
   }
+}
+
+fn opaque_model_decoder(name: String) -> String {
+  case name {
+    "Blob" -> opaque_parser_decoder("parse", "placeholder", "Blob")
+    "Date" -> opaque_parser_decoder("date", "2000-01-01", "Date")
+    "Datetime" ->
+      opaque_parser_decoder("datetime", "2000-01-01T00:00:00Z", "Datetime")
+    "Time" -> opaque_parser_decoder("time", "00:00", "Time")
+    _ -> "decode.dynamic"
+  }
+}
+
+fn opaque_parser_decoder(
+  parser: String,
+  default_raw: String,
+  expected: String,
+) -> String {
+  "decode.then(decode.string, fn(raw) {\n"
+  <> "    let assert Ok(default_value) = "
+  <> parser
+  <> "(\""
+  <> default_raw
+  <> "\")\n"
+  <> "    case "
+  <> parser
+  <> "(raw) {\n"
+  <> "      Ok(value) -> decode.success(value)\n"
+  <> "      Error(_) -> decode.failure(default_value, expected: \""
+  <> expected
+  <> "\")\n"
+  <> "    }\n"
+  <> "  })"
 }
 
 fn has_decoder() -> String {
@@ -3577,8 +4393,9 @@ fn collect_named(
               })
             }
           }
-        "framework/time" -> add_import(state, path, name)
-        "framework/blob" -> add_import(state, path, name)
+        "framework/time" -> add_time_decoder_import(state, path, name)
+        "framework/blob" ->
+          add_function_import(add_import(state, path, name), path, "parse")
         _ -> collect_back_named(state, app, units, scope, path, name)
       }
   }
@@ -3752,8 +4569,9 @@ fn collect_model_named(
         }
         False -> add_import(state, path, name)
       }
-    "framework/time" -> add_import(state, path, name)
-    "framework/blob" -> add_import(state, path, name)
+    "framework/time" -> add_time_decoder_import(state, path, name)
+    "framework/blob" ->
+      add_function_import(add_import(state, path, name), path, "parse")
     _ ->
       case string.starts_with(path, "gen/types/") {
         True -> ensure_value_alias(state, app, path, name)
@@ -4211,22 +5029,37 @@ fn declarations_text(state: State, app: model.App) -> String {
   )
 }
 
-fn imports_text(state: State) -> String {
-  state.imports
+fn imports_text(state: State, with_functions: Bool) -> String {
+  let types = list.map(state.imports, fn(item) { #(item.0, item.1, True) })
+  let functions = case with_functions {
+    True -> list.map(state.functions, fn(item) { #(item.0, item.1, False) })
+    False -> []
+  }
+  list.append(types, functions)
   |> list.sort(fn(left, right) {
     case string.compare(left.0, right.0) {
-      order.Eq -> string.compare(left.1, right.1)
+      order.Eq ->
+        case string.compare(left.1, right.1) {
+          order.Eq ->
+            case left.2, right.2 {
+              True, False -> order.Lt
+              False, True -> order.Gt
+              _, _ -> order.Eq
+            }
+          other -> other
+        }
       other -> other
     }
   })
   |> group_imports
 }
 
-fn group_imports(imports: List(#(String, String))) -> String {
+fn group_imports(imports: List(#(String, String, Bool))) -> String {
   case imports {
     [] -> ""
     [first, ..rest] -> {
-      let groups = collect_import_groups(rest, [#(first.0, [first.1])])
+      let groups =
+        collect_import_groups(rest, [#(first.0, [#(first.1, first.2)])])
       groups
       |> list.map(fn(group) {
         let #(path, names) = group
@@ -4234,7 +5067,12 @@ fn group_imports(imports: List(#(String, String))) -> String {
         <> path
         <> ".{"
         <> string.join(
-          list.map(list.unique(names), fn(name) { "type " <> name }),
+          list.map(list.unique(names), fn(name) {
+            case name.1 {
+              True -> "type " <> name.0
+              False -> name.0
+            }
+          }),
           ", ",
         )
         <> "}"
@@ -4245,25 +5083,28 @@ fn group_imports(imports: List(#(String, String))) -> String {
 }
 
 fn collect_import_groups(
-  imports: List(#(String, String)),
-  groups: List(#(String, List(String))),
-) -> List(#(String, List(String))) {
+  imports: List(#(String, String, Bool)),
+  groups: List(#(String, List(#(String, Bool)))),
+) -> List(#(String, List(#(String, Bool)))) {
   case imports {
     [] -> groups
-    [#(path, name), ..rest] ->
+    [#(path, name, is_type), ..rest] ->
       case list.find(groups, fn(group) { group.0 == path }) {
         Ok(_) ->
           collect_import_groups(
             rest,
             list.map(groups, fn(group) {
               case group.0 == path {
-                True -> #(group.0, list.append(group.1, [name]))
+                True -> #(group.0, list.append(group.1, [#(name, is_type)]))
                 False -> group
               }
             }),
           )
         Error(_) ->
-          collect_import_groups(rest, list.append(groups, [#(path, [name])]))
+          collect_import_groups(
+            rest,
+            list.append(groups, [#(path, [#(name, is_type)])]),
+          )
       }
   }
 }
@@ -4640,6 +5481,24 @@ fn add_import(state: State, path: String, name: String) -> State {
     True -> state
     False ->
       State(..state, imports: list.append(state.imports, [#(path, name)]))
+  }
+}
+
+fn add_function_import(state: State, path: String, name: String) -> State {
+  case list.contains(state.functions, #(path, name)) {
+    True -> state
+    False ->
+      State(..state, functions: list.append(state.functions, [#(path, name)]))
+  }
+}
+
+fn add_time_decoder_import(state: State, path: String, name: String) -> State {
+  let state = add_import(state, path, name)
+  case name {
+    "Date" -> add_function_import(state, path, "date")
+    "Datetime" -> add_function_import(state, path, "datetime")
+    "Time" -> add_function_import(state, path, "time")
+    _ -> state
   }
 }
 

@@ -121,6 +121,55 @@ fn synthetic_out(
   synthetic_out_for(app(), module, service_source, extra_units)
 }
 
+fn synthetic_decoder_out() -> String {
+  let assert Ok(back_units) = source.load(fixture)
+  let back_units =
+    list.filter(back_units, fn(unit) { unit.path != "service/widget_list" })
+  let service_unit =
+    source_unit(
+      "service/widget_list",
+      "import entity/article\n"
+        <> "import framework/blob.{type Blob}\n"
+        <> "import framework/time.{type Time}\n\n"
+        <> "pub type Phase {\n  Draft\n  Published\n}\n\n"
+        <> "pub type Row {\n"
+        <> "  Article(article: article.Article, phase: Phase, icon: Blob, at: Time)\n"
+        <> "}\n\n"
+        <> "pub type Out {\n  Out(rows: List(Row))\n}\n\n"
+        <> "pub const service: Service(Args, Out, Error) = Nil",
+    )
+  let units = list.append(back_units, [service_unit])
+  let service =
+    model.Service(
+      module: "widget_list",
+      params: [],
+      queries: [],
+      args: [],
+      allow_module: None,
+      subjects: [],
+      effect: model.ReadEffect,
+      faces: [],
+      faces_declared: True,
+    )
+  let test_app = model.App(..app(), services: [service])
+  let assert Ok(face_units) = source.load("fixtures/article/public")
+  let model_ = front_from_units_named("public", face_units, [service])
+  let package =
+    face.Package(
+      name: "public",
+      path: "fixtures/article/public",
+      pages: face.UndeclaredPages,
+      units: face_units,
+    )
+  let generated =
+    front_emit.emit(test_app, units, package, model_, hash.of(units))
+  let assert Ok(file) =
+    list.find(generated, fn(file) {
+      file.path == "public/src/gen/out/widget_list.gleam"
+    })
+  file.text
+}
+
 fn synthetic_out_for(
   base: model.App,
   module: String,
@@ -796,8 +845,10 @@ pub fn every_file_carries_the_generated_header_test() {
           True -> string.starts_with(found, "// GENERATED ") |> should.be_true
           False ->
             case string.ends_with(path, ".css") {
-              True -> string.starts_with(found, "/* GENERATED ") |> should.be_true
-              False -> string.starts_with(found, "//// GENERATED ") |> should.be_true
+              True ->
+                string.starts_with(found, "/* GENERATED ") |> should.be_true
+              False ->
+                string.starts_with(found, "//// GENERATED ") |> should.be_true
             }
         }
     }
@@ -1852,9 +1903,75 @@ pub fn front_emit_live_contains_literal_transport_route_and_decoder_test() {
   string.contains(out, "decode.field(\"counts\"") |> should.be_true
 }
 
+pub fn front_emit_live_send_runs_validate_test() {
+  let live = text("public/src/gen/live/article_create.gleam")
+  string.contains(live, "live.Send ->\n      case model.waiting")
+  |> should.be_true
+  string.contains(live, "case validate(model) {") |> should.be_true
+  string.contains(
+    live,
+    "Ok(args) -> #(live.State(..model, waiting: True), send(args))",
+  )
+  |> should.be_true
+  string.contains(live, "pub fn validate(model: State)") |> should.be_true
+}
+
+pub fn front_emit_shell_carries_language_title_and_theme_test() {
+  let page = text("public/src/gen/load/article/arg_slug/page.gleam")
+  [
+    "attribute.attribute(\"lang\", \"ja\")",
+    "raw_html.title([], \"yumemi front fixture\")",
+    "option_string(background, \"#FAF7F0\")",
+    "option_string(text, \"#3D2419\")",
+    "option_string(accent, \"#A93632\")",
+    "option_background(background_image)",
+  ]
+  |> list.each(fn(row) { string.contains(page, row) |> should.be_true })
+}
+
+pub fn missing_shell_uses_defaults_and_one_warning_test() {
+  let assert Ok(units) = source.load("fixtures/article/public")
+  let units = list.filter(units, fn(unit) { unit.path != "shell" })
+  let assert Ok(model_) =
+    front.read_with_package("public", "public", units, app().services)
+  let notes = front.notes(model_, app().services)
+  notes
+  |> list.filter(fn(note) { note.class == stop.Warning })
+  |> list.length
+  |> should.equal(1)
+  let assert [warning] =
+    notes |> list.filter(fn(note) { note.class == stop.Warning })
+  string.contains(warning.text, "shell.gleam") |> should.be_true
+  model_.shell.lang |> should.equal("ja")
+  model_.shell.title |> should.equal("public")
+}
+
+pub fn front_emit_grid_css_has_breakpoint_pin_and_hidden_area_rules_test() {
+  let css = text("public/priv/static/_yumemi/style.css")
+  string.contains(css, "grid-template-areas: \"header\" \"page\" \"footer\";")
+  |> should.be_true
+  string.contains(css, "@media (min-width: 1024px)") |> should.be_true
+  string.contains(css, "grid-area: aside;") |> should.be_true
+  string.contains(css, "display: none;") |> should.be_true
+  string.contains(css, "position: sticky;") |> should.be_true
+}
+
+pub fn front_emit_decoder_only_uses_declared_constructors_test() {
+  let out = synthetic_decoder_out()
+  string.contains(out, "pub type ArticleRow(") |> should.be_false
+  string.contains(out, "ArticleRow(") |> should.be_true
+  string.contains(out, "decode.success(ArticleRow(") |> should.be_true
+  string.contains(out, "\"Draft\" -> decode.success(Draft)") |> should.be_true
+  string.contains(out, "parse(\"placeholder\")") |> should.be_true
+  string.contains(out, "decode.field(\"icon\", decode.then") |> should.be_true
+}
+
 pub fn front_emit_transport_and_client_are_generic_and_given_safe_test() {
   let transport = text("public/src/gen/live/transport_ffi.mjs")
-  string.contains(transport, "export function send(method, path, body, onOk, onError)")
+  string.contains(
+    transport,
+    "export function send(method, path, body, onOk, onError)",
+  )
   |> should.be_true
   string.contains(transport, "ArticlePublish") |> should.be_false
 
@@ -1881,7 +1998,8 @@ pub fn front_calls_without_face_route_are_exit_four_test() {
   let assert Ok(test_app) = reader.read(back_units)
   let assert Ok(face_units) = source.load("fixtures/article/public")
   let model_ = front_from_units_named("public", face_units, test_app.services)
-  let notes = front_emit.route_notes(test_app, "public", model_, hash.of(back_units))
+  let notes =
+    front_emit.route_notes(test_app, "public", model_, hash.of(back_units))
   stop.worst(notes) |> should.equal(4)
   notes
   |> list.any(fn(note) {

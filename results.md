@@ -676,3 +676,31 @@ musearch 本体には触れていない。入力は指定 snapshot、出力と�
 `effect` / `faces` / `Args` / `allow` / `admit` / `subject` / `prefix` / 他の 5 Service / `entity/**` / `db/` の DDL は 1 文字も動いていない。**musearch の back 604 file は本文 diff 0**(動いたのは `_diagnostics.txt` の警告 1 行だけ ── §面の `shell.gleam` 不在)。
 
 面の生成物(`public/src/gen/**`)は back ではない ── `out/article_read.gleam` / `api.gleam` / `service.gleam` / `live/**` / `load/**` / `shell.mjs` はこの巡の成果物そのもの。
+
+## 巡10(P0-4 decoder、test、生成物12/13)
+
+### 状態
+
+- 束1: `named_decoder` が Entity の型名一致時だけ record decoder に落ちるよう修正。enum alias は `String` decoder、constructor は宣言側の `mapped_constructor`、Blob/Date/Datetime/Time は framework の parser 経由にした。framework は変更していない。
+- 束2: `live.Send -> validate`、shell 値/既定値/警告、grid CSS、decoder の宣言構成子検査を追加。`gleam test` は **128 passed, no failures**。
+- 束3: 参照される6 Blockの `src/gen/skeleton/*.gleam` と `blocks_preview.gleam` を生成。`src/blocks/**` と `src/components/**` は変更していない。
+- 束4: dev 限定 `/_blocks`、PC固定 preview、runtime 経由の `build-blocks.mjs` を追加。`build/blocks.html` は gitignore 対象のため commit していない。
+
+### DDL
+
+無し。migration / schema / staging / production / framework / `~/yumemism_repo/musearch` は変更していない。
+
+### 検証
+
+- root `gleam build`: `Compiled in 0.03s`。既存 `src/framework/secret.gleam` の unused private constructor warning 1件。`build/r10-final-root-build-2.txt`
+- `cd gen && gleam test`: **128 passed, no failures**。`gen/build/r10-final-gen-test-2.txt`
+- fixture generator: **86 files**。`public/src/gen` と static の生成結果との差分 **0**。`gen/build/r10-final-fixture-generate-exact.txt`
+- fixture public build: `error:` **0**、生成コード由来の unused warning **0**。Gleam の transitive dependency notice は preview import の5件。`gen/build/r10-final-fixture-public-build-2.txt`
+- verify SSR: **ALL PASS**（NO-JS、INITIAL、ISLAND、SELECTED、RELOAD 1回）。`gen/build/r10-final-verify-ssr-3.txt`
+- verify isolate: **ALL PASS**（40 requests、first/second style length 2228、混入なし）。`gen/build/r10-final-verify-isolate-3.txt`
+- `node gen/scripts/build-blocks.mjs`: **BLOCKS: PASS (6 blocks)**。`gen/fixtures/article/public/build/blocks.html` は 2194 bytes、6 module label、inline style、client reference を含む。`gen/build/r10-final-build-blocks-2.txt`
+- musearch snapshot generator: **生成 exit 4**。診断 `exit 0=30 / exit 3=0 / exit 4=18`、back **604 files**。`build/r10-final-musearch-generate-2.txt`
+- musearch 面 build: **build exit 0 / error 0**。snapshot の transitive dependency notice 56件。`build/r10-final-musearch-face-build-2.txt`
+- generated header check: `.gleam` / `.mjs` とも違反 **0**。
+
+未実行: 無し。

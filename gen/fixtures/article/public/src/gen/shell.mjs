@@ -1,6 +1,7 @@
 // GENERATED from public/src/{gen/route.gleam,gen/load/**,pages/**,layout.gleam,shell.gleam} [sha256:656c43d408ff] — 手で編集しない
 
 import * as api from "./api.mjs";
+import * as blocksPreview from "./blocks_preview.mjs";
 import * as frontCss from "../../yumemi/framework/front/css.mjs";
 import * as layoutDefinition from "../layout.mjs";
 import * as out_article_create from "./out/article_create.mjs";
@@ -252,8 +253,19 @@ function htmlWithGridCss(html, layout) {
   return rendered.replace("</head>", '<script type="module" src="/_yumemi/client.mjs"></script></head>');
 }
 
+
+
+function renderBlocksPreview() {
+  const html = to_document_string(blocksPreview.render());
+  const withStyle = html.includes("<style>")
+    ? html
+    : html.replace("<head>", "<head><style></style>");
+  return new Response(withStyle.replace("</head>", '<script type="module" src="/_yumemi/client.mjs"></script></head>'), {status: 200, headers: {"content-type": "text/html; charset=utf-8"}});
+}
+
 export default {
   async fetch(request, env) {
+    if (new URL(request.url).pathname === "/_blocks" && env.YUMEMI_DEV === "1") return renderBlocksPreview();
     const matched = matchPage(new URL(request.url).pathname);
     if (!matched) {
       if (env.SVELTE) return env.SVELTE.fetch(request);
