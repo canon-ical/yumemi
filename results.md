@@ -737,11 +737,12 @@ musearch 本体には触れていない。入力は指定 snapshot、出力と�
 - 巡8: 島の transport は Service 分岐を持たない汎用送信、route/method/path は `api.gleam` から literal 化し、`given` と `reloads` は client runtime が扱う。FFI の業務分岐は残さない。
 - 巡9: shell は Page/decoder/theme/grid CSS を生成し、route 表外は `SVELTE` へ元 Request のまま fallback する。`www/src/shell.gleam` 不在時は既定値と warning 1 本を使う。
 - 巡10: skeleton は `src/gen/skeleton/**` へ毎回生成し、Block の ★ は `src/blocks/**` に残す。Block list は生成 Gleam を面 runtime で実行して `build/blocks.html` に落とす。生成 decoder の placeholder assert は P1 のまま。
-- 本巡: ▲ の header だけは無視し、意図差 2 系統は生成物を正、▲ の古さは追随便で置換、生成側の route/Row decoder/preview 欠落は P1 とした。`gen/src/**`・`src/**`・`gen/fixtures/**` は変更していない。
+- 本巡: ▲ の header だけは無視し、意図差 2 系統は生成物を正、▲ の古さは追随便で置換、生成側の Row decoder / Block preview の欠落は P1 とした。面の `api.gleam` は**同じ run が吐いた back の route 表と 87 route 全一致**で、生成器の穴は無い(古い `registry.mjs` との差は世代差)。`gen/src/**`・`src/**`・`gen/fixtures/**` は変更していない。
 
 ## musearch 追随便への申し送り
 
-- 入力は `ms-96fb8cc`、出力は `out-ms10` を保存したままにする。まず E-1/E-2 の P1 を解消した生成結果を別 output で作り、face build と back 604 file 本文 diff 0 を確認する。
+- 入力は `ms-96fb8cc`、出力は `out-ms10` を保存したままにする。まず `out/widget_list.gleam` の Row decoder(P1 E-1)を解消した生成結果を別 output で作り、face build と back 604 file 本文 diff 0 を確認する。
+- **面だけを差し替えない ── back の生成物も同じ世代に揃える。**musearch が今持つ `api/src/gen/registry.mjs` と `entry/http.gleam` は古い世代の back 生成物で、生成した面の `api.gleam` とは 48 route で method / path が食い違う(面と back を同じ run で出せば差は 0、`gen/build/gen6-e-api-vs-backroutes.txt`)。追随便は面 15 file と back 604 file を 1 つの生成で同時に取る。
 - 追随便では `www/src/gen/` の ▲ 15 fileをバックアップし、生成物の同名 15 fileを同じ path へ差し替える。動く file は `route.gleam`、`widgets.gleam`、`load/layout.gleam`、`blocks.gleam`、`service.gleam`、`api.gleam`、`load/muse/arg_handle/page.gleam`、`shell.mjs`、`out/article_list.gleam`、`out/link_list.gleam`、`out/space_list.gleam`、`out/muse_heaven_list.gleam`、`out/subscription_read.gleam`、`out/muse_read.gleam`、`out/widget_list.gleam`。
 - 差し替え後に `www` package を build し、Page/SSR/isolate と registry の route/method/path を検査する。`www/src/media.gleam` は ★ なので置き換えない。musearch の main へは鷹野の承認後まで書かない。
 - 生成物 **14 種目**(back の静的資料の写し ── 外部送信 6 件 / API v1 本文)は P4 の ▲ が置かれた後の便で、源は `.mjs` を読む口か `api/priv/` の置き直しかを鷹野が P4 の results を見て裁く(裁定 7)。
