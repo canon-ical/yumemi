@@ -79,6 +79,7 @@ pub type Block {
     name: String,
     module: String,
     input: Option(String),
+    input_module: Option(String),
     has_view: Bool,
     has_sample: Bool,
   )
@@ -225,10 +226,15 @@ fn parse_block(unit: Unit) -> Result(Block, Nil) {
   let module = g.in_order(unit.module)
   let name = last_segment(unit.path) |> naming.pascal
   let view = public_function(module, "view")
+  let #(input, input_module) =
+    view
+    |> option.then(fn(function) { first_parameter_input(module, function) })
+    |> option.unwrap(#(None, None))
   Ok(Block(
     name: name,
     module: unit.path,
-    input: view |> option.then(fn(function) { first_parameter_type(function) }),
+    input: input,
+    input_module: input_module,
     has_view: view != None,
     has_sample: has_public_constant(module, "sample"),
   ))
@@ -908,14 +914,33 @@ fn first_constructor(expressions: List(glance.Expression)) -> Option(String) {
   }
 }
 
-fn first_parameter_type(function: glance.Function) -> Option(String) {
+fn first_parameter_input(
+  module: glance.Module,
+  function: glance.Function,
+) -> Option(#(Option(String), Option(String))) {
   case function.parameters {
     [parameter, ..] ->
       case parameter.type_ {
-        Some(annotation) -> g.type_name(annotation)
+        Some(annotation) -> Some(resolved_input(module, annotation))
         None -> None
       }
     [] -> None
+  }
+}
+
+fn resolved_input(
+  module: glance.Module,
+  annotation: glance.Type,
+) -> #(Option(String), Option(String)) {
+  case annotation {
+    glance.NamedType(name: name, module: Some(path), ..) ->
+      #(Some(name), Some(path))
+    glance.NamedType(name: name, module: None, ..) ->
+      case g.find_type_alias(module, name) {
+        Some(alias) -> resolved_input(module, alias.aliased)
+        None -> #(Some(name), None)
+      }
+    _ -> #(None, None)
   }
 }
 

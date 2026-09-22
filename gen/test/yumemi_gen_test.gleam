@@ -118,11 +118,19 @@ fn synthetic_out(
   service_source: String,
   extra_units: List(source.Unit),
 ) -> String {
+  synthetic_out_for(app(), module, service_source, extra_units)
+}
+
+fn synthetic_out_for(
+  base: model.App,
+  module: String,
+  service_source: String,
+  extra_units: List(source.Unit),
+) -> String {
   let assert Ok(back_units) = source.load(fixture)
   let assert Ok(face_units) = source.load("fixtures/article/public")
   let service_unit = source_unit("service/" <> module, service_source)
   let units = list.append(back_units, [service_unit, ..extra_units])
-  let base = app()
   let service = model.Service(
     module: module,
     params: [],
@@ -146,6 +154,30 @@ fn synthetic_out(
     front_emit.emit(test_app, units, package, model_, hash.of(units))
   let assert Ok(file) = list.find(generated, fn(file) {
     file.path == "public/src/gen/out/" <> module <> ".gleam"
+  })
+  file.text
+}
+
+fn synthetic_empty_layout_load() -> String {
+  let assert Ok(back_units) = source.load(fixture)
+  let face_units = [
+    source_unit(
+      "layout",
+      "pub const public: Layout(service.Service, blocks.Block) = Layout(sp: Frame(areas: [], placements: []))",
+    ),
+  ]
+  let base = app()
+  let model_ = front_from_units_named("public", face_units, base.services)
+  let package = face.Package(
+    name: "public",
+    path: "fixtures/article/public",
+    pages: face.UndeclaredPages,
+    units: face_units,
+  )
+  let generated =
+    front_emit.emit(base, back_units, package, model_, hash.of(back_units))
+  let assert Ok(file) = list.find(generated, fn(file) {
+    file.path == "public/src/gen/load/layout.gleam"
   })
   file.text
 }
@@ -1694,7 +1726,14 @@ pub fn front_model_reads_url_blocks_widgets_components_and_style_test() {
   page.url |> should.equal("/article/{slug}")
   page.of |> should.equal(Some("ArticleRead"))
   list.map(value.blocks, fn(block) { block.name })
-  |> should.equal(["Article", "Summary"])
+  |> should.equal([
+    "Article",
+    "Feed",
+    "RowArticle",
+    "RowSummary",
+    "SiteHeader",
+    "Summary",
+  ])
   value.widget_keys |> should.equal(["ArticleFeed", "ArticleKinds"])
   value.services |> should.equal(["WidgetList", "ArticleRead"])
   value.style.tokens
@@ -1720,7 +1759,7 @@ pub fn front_model_reads_url_blocks_widgets_components_and_style_test() {
   media.1 |> should.equal(["Thumb", "W800", "W1600", "Cast"])
   value.blocks
   |> list.map(fn(block) { block.has_sample })
-  |> should.equal([True, True])
+  |> should.equal([True, True, True, True, False, True])
   value.components
   |> list.map(fn(component) { component.after_send })
   |> should.equal([Some("Stay"), Some("ReloadPage")])
@@ -1816,12 +1855,96 @@ pub fn front_emit_copies_back_module_types_and_imports_blob_test() {
   string.contains(blob, "pub type Blob {") |> should.be_false
 }
 
+pub fn front_emit_reserves_entity_constructor_over_row_variant_test() {
+  let out = synthetic_out(
+    "row_collision",
+    "import entity/article\n\npub type Row {\n  Article(kind: String, article: article.Article)\n}\n\npub type Out {\n  Out(rows: List(Row))\n}\n\npub const service: Service(Args, Out, Error) = Nil",
+    [],
+  )
+  string.contains(out, "pub type Row {\n  ArticleRow(") |> should.be_true
+}
+
+pub fn front_emit_drops_enum_constructors_that_collide_with_row_test() {
+  let out = synthetic_out(
+    "enum_collision",
+    "import entity/widget.{type Kind}\n\npub type Row {\n  Text(kind: Kind)\n}\n\npub type Out {\n  Out(rows: List(Row))\n}\n\npub const service: Service(Args, Out, Error) = Nil",
+    [source_unit("entity/widget", "pub type Kind {\n  Text\n}")],
+  )
+  string.contains(out, "pub type Kind = String") |> should.be_true
+  string.contains(out, "pub type Kind {") |> should.be_false
+  string.contains(out, "pub type Row {\n  Text(") |> should.be_true
+}
+
+pub fn front_emit_flattens_value_alias_chain_test() {
+  let base = model.App(
+    ..app(),
+    value_types: [
+      model.ValueType(
+        name: "ledger_store_id",
+        type_name: "LedgerStoreId",
+        spec: "Uuid",
+        backing: model.StringValue,
+        range: None,
+      ),
+    ],
+  )
+  let out = synthetic_out_for(
+    base,
+    "alias_chain",
+    "import ledger_store.{type LedgerStoreId}\n\npub type Out {\n  Out(id: LedgerStoreId)\n}\n\npub const service: Service(Args, Out, Error) = Nil",
+    [source_unit(
+      "ledger_store",
+      "import gen/types/ledger_store_id\n\npub type LedgerStoreId = ledger_store_id.LedgerStoreId",
+    )],
+  )
+  string.contains(out, "pub type LedgerStoreId = String") |> should.be_true
+  string.contains(out, "LedgerStoreIdLedgerStoreId") |> should.be_false
+  string.contains(out, "LedgerStoreLedgerStoreId") |> should.be_false
+}
+
 pub fn front_emit_writes_one_out_file_per_service_test() {
   files()
   |> list.map(fn(entry) { entry.0 })
   |> list.filter(string.starts_with(_, "public/src/gen/out/"))
   |> list.length
   |> should.equal(6)
+}
+
+pub fn front_emit_load_layout_without_sources_uses_empty_data_test() {
+  let layout = synthetic_empty_layout_load()
+  string.contains(layout, "pub type Data {\n  Data\n}") |> should.be_true
+  string.contains(layout, "pub fn load() -> Data {\n  Data\n}")
+  |> should.be_true
+}
+
+pub fn front_emit_load_page_data_orders_root_fixed_and_widgets_test() {
+  let page = text("public/src/gen/load/article/arg_slug/page.gleam")
+  string.contains(
+    page,
+    "Data(\n    layout: layout.Data,\n    article_read: article_read.Out,\n    article_kinds: Option(widget_list.Out),",
+  )
+  |> should.be_true
+  string.contains(
+    page,
+    "article_feed: Option(widget_list.Out),\n  article_read: article_read.Out,\n  article_kinds: Option(widget_list.Out),",
+  )
+  |> should.be_true
+}
+
+pub fn front_emit_load_separates_widget_names_into_sources_test() {
+  let page = text("public/src/gen/load/article/arg_slug/page.gleam")
+  string.contains(page, "article_kinds: Option(widget_list.Out)")
+  |> should.be_true
+  string.contains(page, "article_feed: Option(widget_list.Out)")
+  |> should.be_true
+}
+
+pub fn front_emit_load_by_kind_matches_row_constructors_directly_test() {
+  let page = text("public/src/gen/load/article/arg_slug/page.gleam")
+  string.contains(page, "widget_list.ArticleRow(..)") |> should.be_true
+  string.contains(page, "widget_list.Summary(..)") |> should.be_true
+  string.contains(page, "row_article.view(row)") |> should.be_true
+  string.contains(page, "page_definition.page") |> should.be_false
 }
 
 pub fn page_path_uses_folder_rules_and_reserved_suffix_test() {

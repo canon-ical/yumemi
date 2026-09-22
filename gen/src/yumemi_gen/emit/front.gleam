@@ -77,7 +77,14 @@ pub fn emit(
     |> list.map(fn(service) {
       out_file(app, type_units, service, hashes, face_name)
     })
-  list.append(files, out_files)
+  let load_files =
+    list.append(
+      [load_layout_file(app, package, model_)],
+      list.map(model_.pages, fn(page) {
+        load_page_file(app, type_units, package, model_, page)
+      }),
+    )
+  list.append(list.append(files, out_files), load_files)
 }
 
 fn source_hash(units: List(Unit), keep: fn(Unit) -> Bool) -> String {
@@ -87,6 +94,888 @@ fn source_hash(units: List(Unit), keep: fn(Unit) -> Bool) -> String {
   |> list.map(fn(unit) { unit.path <> "\n" <> unit.text })
   |> string.join("\n")
   |> digest.short
+}
+
+type LoadSource {
+  LoadSource(key: String, name: String, service: String, optional: Bool)
+}
+
+fn load_layout_file(
+  app: model.App,
+  package: face.Package,
+  front: reader_front.Front,
+) -> File {
+  let sources = layout_sources(front.layout, front.blocks, app.services)
+  let source_hash = source_hash(package.units, fn(unit) { unit.path == "layout" })
+  File(
+    path: package.name <> "/src/gen/load/layout.gleam",
+    text: load_layout_text(
+      package.name,
+      sources,
+      source_hash,
+    ),
+  )
+}
+
+fn load_page_file(
+  app: model.App,
+  units: List(Unit),
+  package: face.Package,
+  front: reader_front.Front,
+  page: reader_front.Page,
+) -> File {
+  let layout_sources = layout_sources(front.layout, front.blocks, app.services)
+  let page_sources = page_sources(page, front.blocks, app.services)
+  let source_hash = source_hash(package.units, fn(unit) { unit.path == page.module })
+  File(
+    path: package.name
+      <> "/src/gen/load/"
+      <> load_page_module_path(page.module)
+      <> ".gleam",
+    text: load_page_text(
+      app,
+      units,
+      package.name,
+      front,
+      page,
+      layout_sources,
+      page_sources,
+      source_hash,
+    ),
+  )
+}
+
+fn load_page_module_path(path: String) -> String {
+  case string.starts_with(path, "pages/") {
+    True -> string.drop_start(path, 6)
+    False -> path
+  }
+}
+
+fn layout_sources(
+  layout: reader_front.Layout,
+  blocks: List(reader_front.Block),
+  services: List(model.Service),
+) -> List(LoadSource) {
+  case layout.sp {
+    Some(frame) -> placement_sources(frame.placements, blocks, services, [])
+    None -> []
+  }
+}
+
+fn page_sources(
+  page: reader_front.Page,
+  blocks: List(reader_front.Block),
+  services: List(model.Service),
+) -> List(LoadSource) {
+  let root = case page.of {
+    Some(service) ->
+      case service_module(services, service) {
+        Some(module) ->
+          [LoadSource(
+            key: "service:" <> module,
+            name: module,
+            service: module,
+            optional: False,
+          )]
+        None -> []
+      }
+    None -> []
+  }
+  let placements = case page.sp {
+    Some(frame) -> frame.placements
+    None -> []
+  }
+  placement_sources(placements, blocks, services, root)
+}
+
+fn placement_sources(
+  placements: List(reader_front.Placement),
+  blocks: List(reader_front.Block),
+  services: List(model.Service),
+  initial: List(LoadSource),
+) -> List(LoadSource) {
+  case placements {
+    [] -> initial
+    [placement, ..rest] -> {
+      let next = case placement {
+        reader_front.Fixed(block: block_name, ..) ->
+          case block_source(blocks, block_name, services) {
+            Some(module) ->
+              add_load_source(
+                initial,
+                LoadSource(
+                  key: "service:" <> module,
+                  name: module,
+                  service: module,
+                  optional: True,
+                ),
+              )
+            None -> initial
+          }
+        reader_front.Widget(name: name, service: service_name, ..) ->
+          case service_module(services, service_name) {
+            Some(module) ->
+              add_load_source(
+                initial,
+                LoadSource(
+                  key: "widget:" <> module <> ":" <> name,
+                  name: name,
+                  service: module,
+                  optional: True,
+                ),
+              )
+            None -> initial
+          }
+      }
+      placement_sources(rest, blocks, services, next)
+    }
+  }
+}
+
+fn add_load_source(
+  sources: List(LoadSource),
+  source: LoadSource,
+) -> List(LoadSource) {
+  case list.find(sources, fn(item) { item.key == source.key }) {
+    Error(_) -> list.append(sources, [source])
+    Ok(found) ->
+      case found.optional, source.optional {
+        True, False ->
+          list.map(sources, fn(item) {
+            case item.key == source.key {
+              True -> LoadSource(..source, name: found.name)
+              False -> item
+            }
+          })
+        _, _ -> sources
+      }
+  }
+}
+
+fn service_module(services: List(model.Service), variant: String) -> Option(String) {
+  case list.find(services, fn(service) {
+    naming.pascal(service.module) == variant || service.module == variant
+  }) {
+    Ok(service) -> Some(service.module)
+    Error(_) -> None
+  }
+}
+
+fn block_source(
+  blocks: List(reader_front.Block),
+  block_name: String,
+  services: List(model.Service),
+) -> Option(String) {
+  case list.find(blocks, fn(block) { block.name == block_name }) {
+    Ok(block) ->
+      case block.input, block.input_module {
+        Some("Nil"), _ -> None
+        Some(_), Some(module) ->
+          service_module(services, last_segment(module))
+        _, _ -> None
+      }
+    Error(_) -> None
+  }
+}
+
+fn load_source_type(source: LoadSource) -> String {
+  let out = source.service <> ".Out"
+  case source.optional {
+    True -> "Option(" <> out <> ")"
+    False -> out
+  }
+}
+
+fn load_data_field_text(source: LoadSource) -> String {
+  "    " <> source.name <> ": " <> load_source_type(source) <> ",\n"
+}
+
+fn load_data_text(name: String, fields: List(String)) -> String {
+  case fields {
+    [] -> "pub type " <> name <> " {\n  Data\n}\n"
+    _ ->
+      "pub type "
+      <> name
+      <> " {\n  Data(\n"
+      <> string.concat(fields)
+      <> "  )\n}\n"
+  }
+}
+
+fn load_constructor_text(fields: List(LoadSource)) -> String {
+  case fields {
+    [] -> "Data"
+    _ ->
+      "Data(\n"
+      <> string.concat(
+        list.map(fields, fn(source) {
+          "    " <> source.name <> ": " <> source.name <> ",\n"
+        }),
+      )
+      <> "  )"
+  }
+}
+
+fn load_function_text(
+  fields: List(LoadSource),
+  constructor: String,
+) -> String {
+  case fields {
+    [] -> "pub fn load() -> Data {\n  " <> constructor <> "\n}\n"
+    _ ->
+      "pub fn load(\n"
+      <> string.concat(
+        list.map(fields, fn(source) {
+          "  " <> source.name <> ": " <> load_source_type(source) <> ",\n"
+        }),
+      )
+      <> ") -> Data {\n  "
+      <> constructor
+      <> "\n}\n"
+  }
+}
+
+fn load_layout_text(
+  face_name: String,
+  sources: List(LoadSource),
+  input_hash: String,
+) -> String {
+  let imports = layout_imports(sources)
+  let body =
+    header(face_name <> "/src/layout.gleam", input_hash)
+    <> "\n"
+    <> imports
+    <> import_gap(imports)
+    <> load_data_text(
+      "Data",
+      list.map(sources, load_data_field_text),
+    )
+    <> "\n"
+    <> load_function_text(sources, load_constructor_text(sources))
+  body
+}
+
+fn load_page_text(
+  app: model.App,
+  units: List(Unit),
+  face_name: String,
+  front: reader_front.Front,
+  page: reader_front.Page,
+  layout_sources: List(LoadSource),
+  page_sources: List(LoadSource),
+  input_hash: String,
+) -> String {
+  let imports = load_imports(front, list.append(layout_sources, page_sources), True)
+  let data_fields =
+    ["    layout: layout.Data,\n"]
+    |> list.append(list.map(page_sources, load_data_field_text))
+  let page_path = face_name <> "/src/" <> page.module <> ".gleam"
+  let source_body =
+    header(page_path, input_hash)
+    <> "\n"
+    <> imports
+    <> import_gap(imports)
+    <> load_data_text("Data", data_fields)
+    <> "\n"
+    <> page_load_function_text(layout_sources, page_sources)
+    <> "\n"
+    <> page_view_text(
+      app,
+      units,
+      front,
+      page,
+      layout_sources,
+      page_sources,
+    )
+  source_body
+}
+
+fn import_gap(imports: String) -> String {
+  case imports {
+    "" -> ""
+    _ -> "\n\n"
+  }
+}
+
+fn load_imports(
+  front: reader_front.Front,
+  sources: List(LoadSource),
+  include_layout: Bool,
+) -> String {
+  let base = [
+    "framework/front/css",
+    "framework/front/sketch_css",
+    "gleam/list",
+    "gleam/option.{type Option, None, Some}",
+    "lustre/attribute",
+    "sketch/lustre/element",
+    "sketch/lustre/element/html",
+    "style",
+  ]
+  let layout = case include_layout {
+    True -> ["gen/load/layout"]
+    False -> []
+  }
+  let blocks = case include_layout {
+    True -> list.map(front.blocks, fn(block) { block.module })
+    False -> []
+  }
+  let outs = list.map(sources, fn(source) { "gen/out/" <> source.service })
+  list.unique(list.append(base, list.append(layout, list.append(blocks, outs))))
+  |> list.sort(string.compare)
+  |> list.map(fn(path) {
+    case string.starts_with(path, "gleam/option.{") {
+      True -> "import " <> path
+      False -> "import " <> path
+    }
+  })
+  |> string.join("\n")
+}
+
+fn layout_imports(sources: List(LoadSource)) -> String {
+  let option_import = case sources {
+    [] -> []
+    _ -> ["gleam/option.{type Option, None, Some}"]
+  }
+  let out_imports = list.map(sources, fn(source) { "gen/out/" <> source.service })
+  list.unique(list.append(option_import, out_imports))
+  |> list.sort(string.compare)
+  |> list.map(fn(path) { "import " <> path })
+  |> string.join("\n")
+}
+
+fn page_load_function_text(
+  layout_sources: List(LoadSource),
+  page_sources: List(LoadSource),
+) -> String {
+  let fields = list.append(layout_sources, page_sources)
+  case fields {
+    [] ->
+      "pub fn load() -> Data {\n  Data(layout: layout.load())\n}\n"
+    _ ->
+      "pub fn load(\n"
+      <> string.concat(
+        list.map(fields, fn(source) {
+          "  " <> source.name <> ": " <> load_source_type(source) <> ",\n"
+        }),
+      )
+      <> ") -> Data {\n  Data(\n    layout: layout.load("
+      <> string.join(
+        list.map(layout_sources, fn(source) { source.name }),
+        ", ",
+      )
+      <> "),\n"
+      <> string.concat(
+        list.map(page_sources, fn(source) {
+          "    " <> source.name <> ": " <> source.name <> ",\n"
+        }),
+      )
+      <> "  )\n}\n"
+  }
+}
+
+fn page_view_text(
+  app: model.App,
+  units: List(Unit),
+  front: reader_front.Front,
+  page: reader_front.Page,
+  layout_sources: List(LoadSource),
+  page_sources: List(LoadSource),
+) -> String {
+  let layout_areas = case front.layout.sp {
+    Some(frame) -> frame.areas
+    None -> []
+  }
+  let layout_placements = case front.layout.sp {
+    Some(frame) -> frame.placements
+    None -> []
+  }
+  let page_areas = case page.sp {
+    Some(frame) -> frame.areas
+    None -> []
+  }
+  let page_placements = case page.sp {
+    Some(frame) -> frame.placements
+    None -> []
+  }
+  let areas =
+    string.concat(
+      list.map(layout_areas, fn(area) {
+        layout_area_text(area, layout_placements)
+      }),
+    )
+  let page_children = page_children_text(page_areas, page_placements)
+  let page_helpers = placement_helpers_text(
+    app,
+    units,
+    front,
+    "layout_placement",
+    layout_placements,
+    layout_sources,
+    "it.layout",
+  )
+  let page_helpers =
+    page_helpers
+    <> placement_helpers_text(
+      app,
+      units,
+      front,
+      "page_placement",
+      page_placements,
+      page_sources,
+      "it",
+    )
+  "pub fn view(it: Data) -> element.Element(Nil) {\n"
+  <> "  html.div_([attribute.attribute(\"data-yumemi-grid\", \"layout\")], [\n"
+  <> areas
+  <> "  ])\n}\n\n"
+  <> "fn page_children(it: Data) -> List(element.Element(Nil)) {\n"
+  <> page_children
+  <> "}\n\n"
+  <> styled_area_text()
+  <> plain_area_text()
+  <> page_helpers
+}
+
+fn layout_area_text(
+  area: reader_front.Area,
+  placements: List(reader_front.Placement),
+) -> String {
+  let extra = case area.name == "page" {
+    True -> Some("page_children(it)")
+    False -> None
+  }
+  let children =
+    area_children_expression("layout_placement", placements, area.name, extra)
+  let opener = case area.style {
+    [] -> "plain_area(\"" <> area.name <> "\", "
+    _ ->
+      "styled_area(\""
+      <> area.name
+      <> "\", "
+      <> style_expression(area.style)
+      <> ", "
+  }
+  let body = opener <> children <> "),\n"
+  "    " <> body
+}
+
+fn page_children_text(
+  areas: List(reader_front.Area),
+  placements: List(reader_front.Placement),
+) -> String {
+  case areas {
+    [] -> "  []\n"
+    _ ->
+      "  list.flatten([\n"
+      <> string.concat(
+        list.map(areas, fn(area) {
+          let children =
+            area_children_expression("page_placement", placements, area.name, None)
+          let expression = case area.name {
+            "page" -> children
+            _ -> "[" <> page_area_text(area, children) <> "]"
+          }
+          "    " <> expression <> ",\n"
+        }),
+      )
+      <> "  ])\n"
+  }
+}
+
+fn page_area_text(area: reader_front.Area, children: String) -> String {
+  let opener = case area.style {
+    [] -> "plain_area(\"" <> area.name <> "\", "
+    _ ->
+      "styled_area(\""
+      <> area.name
+      <> "\", "
+      <> style_expression(area.style)
+      <> ", "
+  }
+  opener <> children <> ")"
+}
+
+fn area_children_expression(
+  prefix: String,
+  placements: List(reader_front.Placement),
+  area: String,
+  extra: Option(String),
+) -> String {
+  let placement_children =
+    indexed_placements(placements, 0)
+    |> list.filter_map(fn(item) {
+      let #(index, placement) = item
+      case placement_area(placement) == area {
+        True -> Ok(prefix <> "_" <> int.to_string(index) <> "(it)")
+        False -> Error(Nil)
+      }
+    })
+  let children = case extra {
+    Some(value) -> list.append(placement_children, [value])
+    None -> placement_children
+  }
+  case children {
+    [] -> "[]"
+    [one] -> one
+    _ -> "list.flatten([" <> string.join(children, ", ") <> "])"
+  }
+}
+
+fn indexed_placements(
+  placements: List(reader_front.Placement),
+  index: Int,
+) -> List(#(Int, reader_front.Placement)) {
+  case placements {
+    [] -> []
+    [placement, ..rest] -> [#(index, placement), ..indexed_placements(rest, index + 1)]
+  }
+}
+
+fn placement_area(placement: reader_front.Placement) -> String {
+  case placement {
+    reader_front.Fixed(area: area, ..) -> area
+    reader_front.Widget(area: area, ..) -> area
+  }
+}
+
+fn style_expression(styles: List(String)) -> String {
+  case styles {
+    [] -> "[]"
+    [style] -> "style." <> style
+    _ -> "[" <> string.join(list.map(styles, fn(name) { "style." <> name }), ", ") <> "]"
+  }
+}
+
+fn styled_area_text() -> String {
+  "fn styled_area(\n"
+  <> "  name: String,\n"
+  <> "  styles: List(css.Style),\n"
+  <> "  children: List(element.Element(Nil)),\n"
+  <> ") -> element.Element(Nil) {\n"
+  <> "  html.div(\n"
+  <> "    sketch_css.class(styles),\n"
+  <> "    [attribute.attribute(\"data-yumemi-area\", name)],\n"
+  <> "    children,\n"
+  <> "  )\n"
+  <> "}\n\n"
+}
+
+fn plain_area_text() -> String {
+  "fn plain_area(\n"
+  <> "  name: String,\n"
+  <> "  children: List(element.Element(Nil)),\n"
+  <> ") -> element.Element(Nil) {\n"
+  <> "  html.div_([attribute.attribute(\"data-yumemi-area\", name)], children)\n"
+  <> "}\n\n"
+}
+
+fn placement_helpers_text(
+  app: model.App,
+  units: List(Unit),
+  front: reader_front.Front,
+  prefix: String,
+  placements: List(reader_front.Placement),
+  sources: List(LoadSource),
+  access: String,
+) -> String {
+  indexed_placements(placements, 0)
+  |> list.map(fn(item) {
+    let #(index, placement) = item
+    placement_helper_text(
+      app,
+      units,
+      front,
+      prefix,
+      index,
+      placement,
+      sources,
+      access,
+    )
+  })
+  |> string.join("\n")
+}
+
+fn placement_helper_text(
+  app: model.App,
+  units: List(Unit),
+  front: reader_front.Front,
+  prefix: String,
+  index: Int,
+  placement: reader_front.Placement,
+  sources: List(LoadSource),
+  access: String,
+) -> String {
+  let helper = prefix <> "_" <> int.to_string(index)
+  let body = case placement {
+    reader_front.Fixed(block: block_name, ..) ->
+      fixed_placement_body(
+        front,
+        block_name,
+        app.services,
+        sources,
+        access,
+      )
+    reader_front.Widget(
+      name: name,
+      service: service_name,
+      render: render,
+      ..
+    ) ->
+      widget_placement_body(
+        app,
+        units,
+        front,
+        helper,
+        name,
+        service_name,
+        render,
+        sources,
+        access,
+      )
+  }
+  let extra = placement_extra_text(app, units, front, prefix, index, placement)
+  "fn "
+  <> helper
+  <> "(it: Data) -> List(element.Element(Nil)) {\n"
+  <> body
+  <> "\n}\n"
+  <> extra
+}
+
+fn fixed_placement_body(
+  front: reader_front.Front,
+  block_name: String,
+  services: List(model.Service),
+  sources: List(LoadSource),
+  access: String,
+) -> String {
+  let block = block_module(front, block_name)
+  let view = module_ref(block) <> ".view"
+  case block_source(front.blocks, block_name, services) {
+    None -> "  [" <> view <> "(Nil)]"
+    Some(service) ->
+      case load_source(sources, "service:" <> service) {
+        Some(source) -> source_view_list(source, access, view)
+        None -> "  []"
+      }
+  }
+}
+
+fn widget_placement_body(
+  app: model.App,
+  units: List(Unit),
+  front: reader_front.Front,
+  helper: String,
+  name: String,
+  service_name: String,
+  render: reader_front.Render,
+  sources: List(LoadSource),
+  access: String,
+) -> String {
+  case service_module(app.services, service_name) {
+    None -> "  []"
+    Some(service) ->
+      case load_source(sources, "widget:" <> service <> ":" <> name) {
+        None -> "  []"
+        Some(source) ->
+          case render {
+            reader_front.One(block_name) ->
+              source_view_list(
+                source,
+                access,
+                module_ref(block_module(front, block_name)) <> ".view",
+              )
+            reader_front.ByKind(table: _table, ..) -> {
+              let rows_helper = "render_" <> helper
+              let row_field = row_field_name(units, service)
+              source_rows_list(
+                source,
+                access,
+                rows_helper,
+                row_field,
+              )
+            }
+            reader_front.UnknownRender -> "  []"
+          }
+      }
+  }
+}
+
+fn placement_extra_text(
+  app: model.App,
+  units: List(Unit),
+  front: reader_front.Front,
+  prefix: String,
+  index: Int,
+  placement: reader_front.Placement,
+) -> String {
+  case placement {
+    reader_front.Widget(
+      service: service_name,
+      render: reader_front.ByKind(table: table, ..),
+      ..
+    ) ->
+      case service_module(app.services, service_name) {
+        Some(service) -> {
+          let state = out_state(app, units, "service/" <> service).0
+          "\n"
+          <> rows_helper_text(
+            front,
+            service,
+            table,
+            state,
+            "render_" <> prefix <> "_" <> int.to_string(index),
+          )
+        }
+        None -> ""
+      }
+    _ -> ""
+  }
+}
+
+fn load_source(
+  sources: List(LoadSource),
+  key: String,
+) -> Option(LoadSource) {
+  case list.find(sources, fn(source) { source.key == key }) {
+    Ok(source) -> Some(source)
+    Error(_) -> None
+  }
+}
+
+fn source_view_list(
+  source: LoadSource,
+  access: String,
+  view: String,
+) -> String {
+  let value = access <> "." <> source.name
+  case source.optional {
+    True ->
+      "  case "
+      <> value
+      <> " {\n    Some(out) -> ["
+      <> view
+      <> "(out)]\n    None -> []\n  }"
+    False -> "  [" <> view <> "(" <> value <> ")]"
+  }
+}
+
+fn source_rows_list(
+  source: LoadSource,
+  access: String,
+  helper: String,
+  row_field: String,
+) -> String {
+  "  case "
+  <> access
+  <> "."
+  <> source.name
+  <> " {\n    Some(out) -> "
+  <> helper
+  <> "(out."
+  <> row_field
+  <> ")\n    None -> []\n  }"
+}
+
+fn rows_helper_text(
+  front: reader_front.Front,
+  service: String,
+  table: List(#(String, String)),
+  state: State,
+  helper: String,
+) -> String {
+  let out = module_ref("gen/out/" <> service)
+  let rows =
+    table
+    |> list.map(fn(entry) {
+      let #(key, block_name) = entry
+      let constructor = row_constructor_name(state, service, key)
+      "        "
+      <> out
+      <> "."
+      <> constructor
+      <> "(..) -> [\n          "
+      <> module_ref(block_module(front, block_name))
+      <> ".view(row),\n          .."
+      <> helper
+      <> "(rest),\n        ]\n"
+    })
+    |> string.concat
+  "fn "
+  <> helper
+  <> "(rows: List("
+  <> out
+  <> ".Row)) -> List(element.Element(Nil)) {\n"
+  <> "  case rows {\n    [] -> []\n    [row, ..rest] ->\n      case row {\n"
+  <> rows
+  <> "        _ -> "
+  <> helper
+  <> "(rest)\n      }\n  }\n}"
+}
+
+fn row_constructor_name(state: State, service: String, variant: String) -> String {
+  case entity_type_name(state, variant) {
+    Some(_) -> variant <> "Row"
+    None -> mapped_constructor(state, "service/" <> service, "Row", variant)
+  }
+}
+
+fn row_field_name(units: List(Unit), service: String) -> String {
+  let path = "service/" <> service
+  let scope = scope_for(units, path)
+  case output_type(units, path) {
+    Some(type_) ->
+      case resolved_path(scope, type_), type_name(type_) {
+        Some(output_path), name ->
+          case custom_for(units, output_path, name) {
+            Some(definition) ->
+              case list.find(definition.variants, fn(variant) {
+                variant.name == name
+              }) {
+                Ok(variant) ->
+                  case
+                    list.first(
+                      variant.fields
+                      |> list.filter_map(fn(field) {
+                        case list_row_field(field) {
+                          Some(value) -> Ok(value)
+                          None -> Error(Nil)
+                        }
+                      }),
+                    )
+                  {
+                    Ok(field) -> field
+                    Error(_) -> "rows"
+                  }
+                Error(_) -> "rows"
+              }
+            None -> "rows"
+          }
+        _, _ -> "rows"
+      }
+    None -> "rows"
+  }
+}
+
+fn list_row_field(field: glance.VariantField) -> Option(String) {
+  case g.variant_field_type(field) {
+    glance.NamedType(name: "List", parameters: [glance.NamedType(name: "Row", ..)], ..) ->
+      g.variant_field_label(field)
+    _ -> None
+  }
+}
+
+fn block_module(front: reader_front.Front, name: String) -> String {
+  case list.find(front.blocks, fn(block) { block.name == name }) {
+    Ok(block) -> block.module
+    Error(_) -> "blocks/" <> naming.snake(name)
+  }
+}
+
+fn module_ref(path: String) -> String {
+  last_segment(path)
 }
 
 fn header(source: String, input_hash: String) -> String {
@@ -317,6 +1206,7 @@ type CustomDecl {
 
 type AliasDecl {
   SourceAlias(scope: Scope, definition: glance.TypeAlias)
+  AliasRedirect(path: String, source_name: String)
   ValueAlias(
     path: String,
     source_name: String,
@@ -337,6 +1227,8 @@ type State {
     phantoms: List(String),
     opaque_names: List(String),
     names: List(#(String, String)),
+    constructors: List(#(String, String)),
+    enum_aliases: List(String),
     imports: List(#(String, String)),
     entity_work: List(String),
     custom_work: List(String),
@@ -352,6 +1244,8 @@ fn empty_state() -> State {
     phantoms: [],
     opaque_names: [],
     names: [],
+    constructors: [],
+    enum_aliases: [],
     imports: [],
     entity_work: [],
     custom_work: [],
@@ -368,11 +1262,7 @@ fn out_file(
 ) -> File {
   let service_path = "service/" <> service.module
   let scope = scope_for(units, service_path)
-  let output = output_type(units, service_path)
-  let state = case output {
-    Some(type_) -> collect_gl_type(empty_state(), app, units, scope, type_)
-    None -> empty_state()
-  }
+  let #(state, output) = out_state(app, units, service_path)
   let out_alias = case output {
     Some(type_) ->
       case has_local_decl(units, scope, type_) {
@@ -405,6 +1295,20 @@ fn out_file(
     path: face_name <> "/src/gen/out/" <> service.module <> ".gleam",
     text: body,
   )
+}
+
+fn out_state(
+  app: model.App,
+  units: List(Unit),
+  service_path: String,
+) -> #(State, Option(glance.Type)) {
+  let scope = scope_for(units, service_path)
+  let output = output_type(units, service_path)
+  let state = case output {
+    Some(type_) -> collect_gl_type(empty_state(), app, units, scope, type_)
+    None -> empty_state()
+  }
+  #(finalize_state(state), output)
 }
 
 fn scope_for(units: List(Unit), path: String) -> Scope {
@@ -867,15 +1771,49 @@ fn ensure_alias(
       case alias_for(units, path, name) {
         Some(definition) -> {
           let scope = scope_for(units, path)
-          let state = reserve_type(state, path, name).0
-          let state = State(..state, alias_work: [key, ..state.alias_work])
-          let state =
-            collect_gl_type(state, app, units, scope, definition.aliased)
-          State(
-            ..state,
-            aliases: list.append(state.aliases, [SourceAlias(scope, definition)]),
-            alias_work: without(state.alias_work, key),
-          )
+          case direct_named_target(scope, definition.aliased) {
+            Some(#(target_path, target_name)) ->
+              case string.starts_with(target_path, "gen/types/") {
+                True -> {
+                  let state =
+                    ensure_value_alias(state, app, target_path, target_name)
+                  let emitted_name = mapped_name(state, target_path, target_name)
+                  State(
+                    ..state,
+                    names: list.append(state.names, [#(key, emitted_name)]),
+                    aliases: list.append(state.aliases, [
+                      AliasRedirect(path: path, source_name: name),
+                    ]),
+                  )
+                }
+                False -> {
+                  let state = reserve_type(state, path, name).0
+                  let state = State(..state, alias_work: [key, ..state.alias_work])
+                  let state =
+                    collect_gl_type(state, app, units, scope, definition.aliased)
+                  State(
+                    ..state,
+                    aliases: list.append(state.aliases, [
+                      SourceAlias(scope, definition),
+                    ]),
+                    alias_work: without(state.alias_work, key),
+                  )
+                }
+              }
+            _ -> {
+              let state = reserve_type(state, path, name).0
+              let state = State(..state, alias_work: [key, ..state.alias_work])
+              let state =
+                collect_gl_type(state, app, units, scope, definition.aliased)
+              State(
+                ..state,
+                aliases: list.append(state.aliases, [
+                  SourceAlias(scope, definition),
+                ]),
+                alias_work: without(state.alias_work, key),
+              )
+            }
+          }
         }
         None -> state
       }
@@ -930,6 +1868,20 @@ fn alias_for(
   }
 }
 
+fn direct_named_target(
+  scope: Scope,
+  type_: glance.Type,
+) -> Option(#(String, String)) {
+  case type_ {
+    glance.NamedType(name: name, ..) ->
+      case resolved_path(scope, type_) {
+        Some(path) -> Some(#(path, name))
+        None -> None
+      }
+    _ -> None
+  }
+}
+
 fn has_custom(state: State, key: String) -> Bool {
   list.any(state.custom, fn(declaration) {
     let CustomDecl(scope: scope, definition: definition) = declaration
@@ -942,6 +1894,8 @@ fn has_alias(state: State, key: String) -> Bool {
     case declaration {
       SourceAlias(scope: scope, definition: definition) ->
         scope.module <> ":" <> definition.name == key
+      AliasRedirect(path: path, source_name: source_name) ->
+        key == path <> ":" <> source_name
       ValueAlias(path: path, source_name: source_name, ..) ->
         key == path <> ":" <> source_name
     }
@@ -953,8 +1907,140 @@ fn has_entity(state: State, name: String) -> Bool {
   || list.any(state.entity_work, fn(key) { string.ends_with(key, ":" <> name) })
 }
 
+fn finalize_state(state: State) -> State {
+  let enum_aliases = row_enum_aliases(state.custom)
+  let state = State(..state, enum_aliases: enum_aliases)
+  let constructors = constructor_names(state)
+  State(..state, constructors: constructors)
+}
+
+fn row_enum_aliases(declarations: List(CustomDecl)) -> List(String) {
+  let row_variants =
+    declarations
+    |> list.filter_map(fn(declaration) {
+      let CustomDecl(definition: definition, ..) = declaration
+      case definition.name {
+        "Row" -> Ok(definition.variants |> list.map(fn(variant) { variant.name }))
+        _ -> Error(Nil)
+      }
+    })
+    |> list.flatten
+  declarations
+  |> list.filter_map(fn(declaration) {
+    let CustomDecl(scope: scope, definition: definition) = declaration
+    case definition.name == "Row" {
+      True -> Error(Nil)
+      False ->
+        case
+          list.any(definition.variants, fn(variant) {
+            list.contains(row_variants, variant.name)
+          })
+        {
+          True -> Ok(scope.module <> ":" <> definition.name)
+          False -> Error(Nil)
+        }
+    }
+  })
+}
+
+fn constructor_names(state: State) -> List(#(String, String)) {
+  let entity_constructors =
+    list.map(state.entities, fn(entity) {
+      let path = "entity/" <> entity.module
+      #(
+        constructor_key(path, entity.type_name, entity.type_name),
+        mapped_name(state, path, entity.type_name),
+      )
+    })
+  list.fold(state.custom, entity_constructors, fn(acc, declaration) {
+    let CustomDecl(scope: scope, definition: definition) = declaration
+    case list.contains(state.enum_aliases, scope.module <> ":" <> definition.name) {
+      True -> acc
+      False ->
+        list.fold(definition.variants, acc, fn(_inner, variant) {
+          let candidate = case variant.name == definition.name {
+            True -> mapped_name(state, scope.module, definition.name)
+            False ->
+              case definition.name {
+                "Row" ->
+                  case entity_type_name(state, variant.name) {
+                    Some(_) ->
+                      fresh_constructor_name(acc, variant.name <> "Row")
+                    None -> fresh_constructor_name(acc, variant.name)
+                  }
+                _ -> fresh_constructor_name(acc, variant.name)
+              }
+          }
+          list.append(
+            acc,
+            [#(
+              constructor_key(scope.module, definition.name, variant.name),
+              candidate,
+            )],
+          )
+        })
+    }
+  })
+}
+
+fn entity_type_name(state: State, name: String) -> Option(String) {
+  case list.find(state.entities, fn(entity) { entity.type_name == name }) {
+    Ok(entity) -> Some(mapped_name(state, "entity/" <> entity.module, name))
+    Error(_) -> None
+  }
+}
+
+fn fresh_constructor_name(
+  constructors: List(#(String, String)),
+  base: String,
+) -> String {
+  case list.any(constructors, fn(item) { item.1 == base }) {
+    False -> base
+    True -> fresh_constructor_suffix(constructors, base, 2)
+  }
+}
+
+fn fresh_constructor_suffix(
+  constructors: List(#(String, String)),
+  base: String,
+  number: Int,
+) -> String {
+  let candidate = base <> int.to_string(number)
+  case list.any(constructors, fn(item) { item.1 == candidate }) {
+    True -> fresh_constructor_suffix(constructors, base, number + 1)
+    False -> candidate
+  }
+}
+
+fn constructor_key(path: String, type_name: String, variant: String) -> String {
+  path <> ":" <> type_name <> ":" <> variant
+}
+
+fn mapped_constructor(
+  state: State,
+  path: String,
+  type_name: String,
+  variant: String,
+) -> String {
+  case
+    list.find(state.constructors, fn(item) {
+      item.0 == constructor_key(path, type_name, variant)
+    })
+  {
+    Ok(item) -> item.1
+    Error(_) -> variant
+  }
+}
+
 fn declarations_text(state: State, app: model.App) -> String {
-  let aliases = list.map(state.aliases, fn(alias) { alias_text(state, alias) })
+  let aliases =
+    state.aliases
+    |> list.filter_map(fn(alias) {
+      case alias_text(state, alias) {
+        "" -> Error(Nil)
+        text -> Ok(text)
+      }
+    })
   let opaque_decls =
     list.map(state.opaque_names, fn(name) {
       opaque_text(mapped_name(state, opaque_path(name), name))
@@ -965,7 +2051,7 @@ fn declarations_text(state: State, app: model.App) -> String {
     list.map(state.phantoms, fn(name) { "pub type " <> name <> "\n" })
   let custom =
     list.map(state.custom, fn(declaration) {
-      custom_text(state, declaration, type_names(state))
+      custom_text(state, declaration)
     })
   string.join(
     list.append(
@@ -1038,6 +2124,7 @@ fn collect_import_groups(
 
 fn alias_text(state: State, alias: AliasDecl) -> String {
   case alias {
+    AliasRedirect(..) -> ""
     ValueAlias(name: name, backing: model.StringValue, ..) ->
       "pub type " <> name <> " = String\n"
     ValueAlias(name: name, backing: model.IntValue, ..) ->
@@ -1115,13 +2202,21 @@ fn entity_prop_type(state: State, prop: model.Prop, _app: model.App) -> String {
   }
 }
 
-fn custom_text(
-  state: State,
-  declaration: CustomDecl,
-  conflicts: List(String),
-) -> String {
+fn custom_text(state: State, declaration: CustomDecl) -> String {
   let CustomDecl(scope: scope, definition: definition) = declaration
   let name = mapped_name(state, scope.module, definition.name)
+  case list.contains(state.enum_aliases, scope.module <> ":" <> definition.name) {
+    True -> "pub type " <> name <> " = String\n"
+    False -> custom_definition_text(state, scope, definition, name)
+  }
+}
+
+fn custom_definition_text(
+  state: State,
+  scope: Scope,
+  definition: glance.CustomType,
+  name: String,
+) -> String {
   case definition.variants {
     [] -> "pub type " <> name <> type_parameters(definition.parameters) <> "\n"
     variants ->
@@ -1131,7 +2226,7 @@ fn custom_text(
       <> " {\n"
       <> string.join(
         list.map(variants, fn(variant) {
-          variant_text(state, scope, variant, conflicts, definition.name, name)
+          variant_text(state, scope, variant, definition.name)
         }),
         "\n",
       )
@@ -1143,17 +2238,11 @@ fn variant_text(
   state: State,
   scope: Scope,
   variant: glance.Variant,
-  conflicts: List(String),
   type_name: String,
-  emitted_type_name: String,
 ) -> String {
-  let name = case variant.name == type_name {
-    True -> emitted_type_name
-    False ->
-      case list.contains(conflicts, variant.name) {
-        True -> variant.name <> "Row"
-        False -> variant.name
-      }
+  let name = case type_name, entity_type_name(state, variant.name) {
+    "Row", Some(_) -> variant.name <> "Row"
+    _, _ -> mapped_constructor(state, scope.module, type_name, variant.name)
   }
   case variant.fields {
     [] -> "  " <> name
@@ -1206,7 +2295,7 @@ fn render_gl_type(state: State, scope: Scope, type_: glance.Type) -> String {
   case type_ {
     glance.NamedType(name: name, parameters: parameters, ..) ->
       case resolved_path(scope, type_) {
-        Some(path) -> mapped_name(state, path, name)
+        Some(path) -> reference_name(state, path, name)
         None -> name
       }
       <> case parameters {
@@ -1241,7 +2330,7 @@ fn render_gl_type(state: State, scope: Scope, type_: glance.Type) -> String {
 
 fn render_model_ref(state: State, reference: model.TypeRef) -> String {
   let name = case reference.module {
-    Some(path) -> mapped_name(state, path, reference.name)
+    Some(path) -> reference_name(state, path, reference.name)
     None -> reference.name
   }
   name
@@ -1263,7 +2352,7 @@ fn render_model_shape(state: State, shape: model.TypeShape) -> String {
   case shape {
     model.NamedShape(module: module, name: name, parameters: parameters) ->
       case module {
-        Some(path) -> mapped_name(state, path, name)
+        Some(path) -> reference_name(state, path, name)
         None -> name
       }
       <> case parameters {
@@ -1319,8 +2408,11 @@ fn type_name(type_: glance.Type) -> String {
   }
 }
 
-fn type_names(state: State) -> List(String) {
-  list.map(state.names, fn(item) { item.1 })
+fn reference_name(state: State, path: String, name: String) -> String {
+  case list.contains(state.enum_aliases, path <> ":" <> name) {
+    True -> "String"
+    False -> mapped_name(state, path, name)
+  }
 }
 
 fn resolved_path(scope: Scope, type_: glance.Type) -> Option(String) {

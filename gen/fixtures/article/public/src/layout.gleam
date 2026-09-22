@@ -28,12 +28,12 @@ pub const public: Layout(service.Service, blocks.Block) = Layout(
       ),
     ],
     placements: [
-      Fixed(area: "header", block: blocks.Summary),
+      Fixed(area: "header", block: blocks.SiteHeader),
       Widget(
         area: "page",
         name: "article_feed",
         of: service.WidgetList,
-        render: One(blocks.Article),
+        render: One(blocks.Feed),
       ),
     ],
   ),

@@ -27,6 +27,7 @@ pub const page: Page(service.Service, blocks.Block) = Page(
     ],
     placements: [
       Fixed(area: "page", block: blocks.Summary),
+      Fixed(area: "page", block: blocks.Article),
       Widget(
         area: "rail",
         name: "article_kinds",
@@ -34,8 +35,8 @@ pub const page: Page(service.Service, blocks.Block) = Page(
         render: ByKind(
           by: "kind",
           table: [
-            #("Article", blocks.Article),
-            #("Summary", blocks.Summary),
+            #("Article", blocks.RowArticle),
+            #("Summary", blocks.RowSummary),
           ],
         ),
       ),

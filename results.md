@@ -531,3 +531,29 @@
 - musearch main `api/` への clean run(読むだけ): exit 4 / 597 files / exit 4 行 18 /
   警告 29。巡 1 の出力と `diff -rq` 差 0、`*_id_id` 0 件、musearch の
   `git status --short` は実行前後で不変。
+
+# 指示 yumemi-gen-6 / 巡6 ── 束B後始末 + 段C前半
+
+## DDL
+
+無し。migration / schema / staging / production への適用はしていない。
+
+## 鷹野宛
+
+- 束1: 面の写しに構成子予約表を追加。Entity と Row の衝突は Entity を残して Row を `*Row` に綴り替え、Row と enum の衝突は enum を `String` 別名へ落とした。fixture の `ArticleRow` は維持した。
+- 束2: `gen/types` へ直結する別名連鎖を転送に畳み、`course_add` は `pub type LedgerStoreId = String` 1 本になった。
+- 束3: fixture 面へ `SiteHeader` / `Feed` / `RowArticle` / `RowSummary` を追加し、layout / Page の Fixed・One・ByKind を 51 v5 §180 の型へ合わせた。back `gen/fixtures/article/src/**` は変更していない。
+- 束4: `src/gen/load/layout.gleam` と Page と同じ道の `src/gen/load/<page path>/page.gleam` を生成。Data / load / view のみを出し、ByKind は Row variant の直接 `case` にした。
+- root `gleam build`: **exit 0**。既存 `src/framework/secret.gleam` の unused private constructor warning 1件。`gen/build/gen6-r6-root-build-final.txt`
+- `cd gen && gleam test`: **119 passed, no failures**。`gen/build/gen6-r6-test-final.txt`
+- fixture generator: **exit 0 / 73 files**。`diff -rq base-fixture-out-a2 /tmp/gen6-r6-fx --exclude=public`: **差 0**、back **60 files**。`gen/build/gen6-r6-fixture-generate-final2.txt`、`gen/build/gen6-r6-fixture-back-diff-final2.txt`
+- `cd gen/fixtures/article/public && gleam build`: **exit 0**、`Compiling public` **1**。`gen/build/gen6-r6-public-build-final.txt`
+- 指定 snapshot generator: **exit 4**、診断 `exit 0 = 29` / `exit 3 = 0` / `exit 4 = 18`、back **604 files**。`diff -rq base-ms-snap-a2 /tmp/gen6-r6-ms --exclude=www`: **差 0**。`gen/build/gen6-r6-musearch-generate-final2.txt`、`gen/build/gen6-r6-musearch-back-diff-final2.txt`
+- musearch 面の temp copy build: **exit 0**、`error:` **0**、`Compiling www` **1**。`gen/build/gen6-r6-face-build.txt`。snapshot の package 名が `musearch_www` のため、grep 証跡を合わせる `name = "www"` と yumemi path 依存の変更は `/tmp/gen6-r6-face` のみへ行った。
+- `git status --short` で live `~/yumemism_repo/musearch` は参照していない。live musearch へは 1 byte も書いていない。
+
+## musearch 追随便への申し送り
+
+- 入力は固定 snapshot `ms-96fb8cc` のみ。生成出力は `/tmp/gen6-r6-ms` と `/tmp/gen6-r6-face` に置いた。
+- `www/src/gen/load/muse/arg_handle/page.gleam` を含む面の source が実際に compile され、`Compiling www` 1 / `error:` 0 を確認した。
+- 段Dの `render` / `render_view` / `theme_global` / `style.css` / SSR `<style>`、生成物8の live service、島の update / calls は未着手。
