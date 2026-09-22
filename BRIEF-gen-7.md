@@ -42,7 +42,8 @@
 6. **面の ★ `src/shell.gleam` を読む**(gen-6 裁定 10、51 v5:121)── 3 const を読み、`shell.mjs` の殻に出す。**無いときの挙動を決める**(診断か既定か ── 決めた理由を results に)
 7. **P1 の 2 / 3 / 5 / 7 / 10 のうち、巡が余った分だけ**(**余らなければ全部申し送り** ── 本便は差し替えを止めている穴が先)
 8. **動詞 → method の対応表**(役員 人見 2026-09-23、musearch 4b の D1)── 生成器が知る動詞は create / read / list / delete / put の 5 つで、add / edit / remove は path 末尾に付く。**DELETE を生成できるのに add が `/courses/add` になる非対称を直す**:add → `POST /<複数形>`、edit → `PUT /<複数形>/:id`、remove → `DELETE /<複数形>/:id`。**path の親(型e、`root_for` が Entity しか親にできない)は仕様、直さない**(flat な path + Args の絞りが正)。対応表の全容と musearch snapshot での割れの before / after を results に
-9. **results**(`docs/reports/gen-7.md`)── `## DDL`(無し)、`## 鷹野宛`、`## 追随便への申し送り`、**閉じた穴と残した穴の表**(gen-6 の P1 13 件 + 追加分に対する行き先)、**基線の表**、**musearch snapshot での再走の数字**
+9. **grid の比と span ── Frame と Area の 2 段**(役員 人見 2026-09-23、console の bento 配置のため)── (i) `Frame` に `cols: List(Track)`(`Track = Fr(Int) | Rem | Px | Minmax`)と `template: List(List(String))`(行ごとの area 名、同じ名を続けて跨ぐ = CSS の `grid-template-areas` そのもの)を足す。**省略時は今の挙動**(SP は行積み、PC は `1fr + minmax(12rem, 20rem)` ── この定数を Frame の既定値へ移す)。(ii) `Flow.Grid` の `cols` を `List(Track)` に(`Int` は `Fr(1) × n` の略記として残す)、`Fixed` に `cell: Cell`(`Flow` = 流し込み(既定)/ `Span(cols:, rows:)` / `At(col:, row:, span:)`)を足し、wrapper に `grid-column` / `grid-row` を吐く。**Area ⊃ Area は足さない**(1 段の Area + span で足りる、足りない画面が出たら裁く)。**既存の Page は 1 行も動かないこと**を musearch snapshot の再走(差 0)で。51 v5 への追記(Frame の 2 欄・Track・Cell の 3 型と既定値)は results の成果物 ── 鷹野が tech に写す
+10. **results**(`docs/reports/gen-7.md`)── `## DDL`(無し)、`## 鷹野宛`、`## 追随便への申し送り`、**閉じた穴と残した穴の表**(gen-6 の P1 13 件 + 追加分に対する行き先)、**基線の表**、**musearch snapshot での再走の数字**
 
 ### 巡 1 の頭で読むもの
 
@@ -111,3 +112,4 @@
 2. **動詞 → method の対応表は本便に入れる**(「どこまで」8 に足した)。musearch 4b は本便の後に起こす。型e(親が落ちる)は直さない
 3. **面の間の共有 package(同じ Block を www / muses / console に置き、中身は party で変わる ── 通知の受信箱がその例)は 56 改訂の起案 ── 水無瀬、本便の射程外。**G7 か F5 の材料
 4. 真壁は luna(codex 復活後)。復活前は sonnet(`MAKABE_ROUTE=claude`)、鷹野の窓に影響がない範囲で
+5. **grid の比と span(「どこまで」9)は本便に入れる**(役員 人見 2026-09-23)── Page の仕事は「どの Block を、どの断点で、grid のどこに、どれだけの幅で」まで。Page を view 関数にする形(HTML 然の自由配置)は採らない ── loader / Widget / 検査 / ロジック無しの 4 つが表の上に立っている。Block ⊃ Block も無い(入れ子は Component だけ、容れ物は Area)。推定 +1:00〜1:30、中央 4:30 → **6:00**
