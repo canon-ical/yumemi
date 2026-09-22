@@ -660,8 +660,19 @@ musearch 本体には触れていない。入力は指定 snapshot、出力と�
 - verify SSR: **ALL PASS**（SVELTE fallback、NO-JS、INITIAL valid JSON、ISLAND `いいね -> ❤ 13`、SELECTED JSON、RELOAD 1回）。`gen/build/d2-final-verify-ssr.txt`
 - verify isolate: **ALL PASS**（40 requests、style長2228、混入なし）。`gen/build/d2-final-verify-isolate.txt`
 
-### 連動した back 生成物
+### 連動した back 生成物(贄川が実測で差し替え)
 
-- `public/src/gen/out/article_read.gleam`: source の Out/PageTheme 変更を反映。
-- `public/src/gen/api.gleam`、`service.gleam`、live transport: 入力 hash の追随。
-- 他の back Service / entity / db は変更していない。
+`fixtures/article/src/service/article_read.gleam` に `PageTheme` 型と `Out.theme` を足した(裁定 9 / 10 と同型の fixture の穴埋め、贄川が裁いた)。**これに連動して動いた back の生成物は 6 file、全部ヘッダの sha256 行だけで本文は 1 行も動いていない。**
+
+| file | 理由 |
+|---|---|
+| `src/gen/reads/article_read.gleam` | `service.article_read` の入力 hash が動いた(ヘッダのみ) |
+| `src/gen/root/article_read.gleam` | 同上(ヘッダのみ) |
+| `db/queries/article_read/to_category.sql` | 同上(ヘッダのみ) |
+| `db/queries/article_read/to_tags.sql` | 同上(ヘッダのみ) |
+| `src/gen/entry/http.gleam` | `entry.gleam / service declarations` の合成 hash が動いた(ヘッダのみ) |
+| `src/gen/face.gleam` | 同上(ヘッダのみ) |
+
+`effect` / `faces` / `Args` / `allow` / `admit` / `subject` / `prefix` / 他の 5 Service / `entity/**` / `db/` の DDL は 1 文字も動いていない。**musearch の back 604 file は本文 diff 0**(動いたのは `_diagnostics.txt` の警告 1 行だけ ── §面の `shell.gleam` 不在)。
+
+面の生成物(`public/src/gen/**`)は back ではない ── `out/article_read.gleam` / `api.gleam` / `service.gleam` / `live/**` / `load/**` / `shell.mjs` はこの巡の成果物そのもの。
