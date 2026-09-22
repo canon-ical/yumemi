@@ -78,7 +78,7 @@ raw の `diff` に出る `^[<>]` の数を併記する。先頭の sha256 header
 
 ## P1
 
-段 E で新たに立てた 3 件(E-1〜E-3)と、巡 3〜10 から持ち越した 8 件。**本便では 1 件も直さない。**
+段 E で新たに立てた 3 件(E-1〜E-3)、巡 3〜10 から持ち越した 8 件、柏木ゲート 2 の 1 件。**本便では 1 件も直さない。**
 
 1. **E-1 decoder の先頭 variant 固定** ── 根は `gen/src/yumemi_gen/emit/front.gleam:3956-3963` の `custom_decoder` で、**fields を持つ複数 variant の型なら型名を問わず先頭 variant だけを `decode.success` する**(`Row` 固有ではない)。musearch の `out/widget_list.gleam` は `Text` だけを構築し、他 5 variant と variant 固有欄(`articles` / `links` / `heaven_public`)を失う。**現に踏まれる経路が在る** ── 該当は musearch 98 本中 1 本と fixture 6 本中 1 本(`Row { ArticleRow Summary }`)の計 2 本で、fixture の方は `public/src/gen/shell.mjs:33,35` の `decodeWidgetList` が SSR の source として実際に通す。今 誤描画が出ていないのは fixture の `widget_list` logic が `Summary` 行を 1 度も返さない(下の P1-10)ためで、musearch の面が ▲ のままだからではない。P0 に上げないのは、面が毎回まるごと生成し直される値で DDL も外向き契約も ALTER も動かさないため。**追随便が面を生成物へ差し替える前に必ず閉じる。**
 2. **E-2 Block preview の Layout 欠落** ── `build/blocks.html` の header / nav / footer が Layout の Block を置かず literal area になる。page 区画へ全 Block を縦に置く部分は通過済み(巡 10 の P1 と同一)。
@@ -91,6 +91,7 @@ raw の `diff` に出る `^[<>]` の数を併記する。先頭の sha256 header
 9. `framework/page` を import する写しが 3 file。
 10. `widget_list` の `Out.Row` の `Summary` variant が logic から構成されない。
 11. 「穴を持たない名前付きクエリ」の `P` enum の扱いが 51 にも生成器にも無い。
+12. **client bundle が黙って劣化し得る**(柏木ゲート 2)── `gen/src/yumemi_gen_ffi.mjs` は `repositoryRoot()` を「cwd の basename が `gen` か」で決め、temp build か `npx --yes esbuild` が落ちると `fallbackClient` で素の entry を書いて **exit 0 + 警告 1 本**に落とす。`<repo>/gen` 以外から起こす・網が無いのどちらでも生成物 10 が本物の bundle でなくなる。追随便の再現性に効く。
 
 ## 基線と検証
 
