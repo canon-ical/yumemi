@@ -64,7 +64,7 @@ raw の `diff` に出る `^[<>]` の数を併記する。先頭の sha256 header
 - `shell.mjs`: a は ▲ の `@media 900px` / 固定 grid に対し、生成物が `css.Breakpoint` の SP / Tablet / PC の在否から CSS を組む差。b は Page table、source decoder、元 Request の APP forwarding、`SVELTE` fallback、`/_blocks` route を generic に出す差。c は `blocks_preview.gleam` の header/nav/footer が Layout の Block を置かず literal area text になる欠落で、P1 に残す。
 - `out/article_list.gleam` / `out/link_list.gleam` / `out/space_list.gleam` / `out/muse_heaven_list.gleam` / `out/subscription_read.gleam`: ▲ の back import と旧 alias formatting をやめ、面 package が単独で使える透明な型写しにする差。再輸出禁止に沿うので b。
 - `out/muse_read.gleam`: alias の再配置、`Phase`/`PageTheme` の写し、dynamic decoder の追加は b。Blob 2 本と Time 1 本が `parse("placeholder")` / `time("00:00")` を assert するため、invalid input で panic し得る既知 P1 を c とした。
-- `out/widget_list.gleam`: alias、Held、全 Row 宣言の型写しは b(`Kind = String` の alias が `String` に潰れるのも b)。decoder は `Row` の先頭 `Text` だけを `decode.success` し、`Image / Articles / HeavenDiary / HeavenReview / Links` の分岐も `articles / links / heaven_public` の読みも無い。実際の Row を Text として描くため c。**射程は測った ── 複数 variant の `Row` を持つ生成 `out/` は 98 本中この 1 本だけ、かつ ▲ 側に decoder は 0 本**(▲ は型の写しだけ)なので、▲ に対する後退ではなく生成器が足した分の穴。同じ placeholder Blob の既知 P1 もこの file に含む。
+- `out/widget_list.gleam`: alias、Held、全 Row 宣言の型写しは b(`Kind = String` の alias が `String` に潰れるのも b)。decoder は `Row` の先頭 `Text` だけを `decode.success` し、`Image / Articles / HeavenDiary / HeavenReview / Links` の分岐も `articles / links / heaven_public` の読みも無い。実際の Row を Text として描くため c。**射程 ── musearch の生成 `out/` 98 本のうち複数 variant の `Row` を持つのはこの 1 本、fixture の生成 `out/` 6 本のうち 1 本(`Row { ArticleRow Summary }`)で、合わせて 2 本**。▲ 側に decoder は 0 本(▲ は型の写しだけ)なので ▲ に対する後退ではなく生成器が足した分の穴。同じ placeholder Blob の既知 P1 もこの file に含む。
 
 `www/src/media.gleam` は生成しない（★、`gen/` の外）。15 file の突合対象から外した。
 
@@ -72,7 +72,7 @@ raw の `diff` に出る `^[<>]` の数を併記する。先頭の sha256 header
 
 - Page / Layout の配置表からの描画: `verify-front-ssr.mjs` の NO-JS / INITIAL / SELECTED が生成 loader と Page placement を通り、ALL PASS。
 - 島の再訪問時の古い Model: 同じ URL の document request が初回 + 1 回だけで止まる `SSR RELOAD: PASS`。`verify-front-isolate.mjs` も 40 request、style の混入 0。
-- 1 Block に島が複数: fixture の 1 Block に `like-button` と `pick-tag` があり、SSR 検査で両方を登録・操作し browser error 0、`13` と選択 POST を確認。
+- 1 Block に島が複数: fixture の 1 Block に `like-button` と `pick-tag` があり、SSR 検査で両方を登録・操作し browser error 0、`13` と選択 POST を確認。**覆えたのは「異なる tag が 2 本」までで、「同じ tag が 2 本」は覆えていない** ── SSR 側の `addGivenAttributes` は `String.replace` の string pattern なので最初の 1 本にしか `data-yumemi-given` を置かず、client 側の `registerWithGiven` も `document.querySelector` で最初の 1 本しか拾わない(`listenReload` だけが `querySelectorAll`)。柏木ゲート 2 の P0-1 に同梱して直す。
 - 断点ごとの非表示: `front_emit_grid_css_has_breakpoint_pin_and_hidden_area_rules_test` が `@media 1024px`、`display: none`、sticky、area を確認し、fixture build も通った。これは生成 CSS 契約の検証で、実 viewport の visual QA まではしていない。
 - WebSocket の push が `reloads` に無い: 本便でも閉じない。push は scope 外で、`reloads` は Page 再要求だけを扱う。
 
@@ -80,7 +80,7 @@ raw の `diff` に出る `^[<>]` の数を併記する。先頭の sha256 header
 
 段 E で新たに立てた 3 件(E-1〜E-3)と、巡 3〜10 から持ち越した 8 件。**本便では 1 件も直さない。**
 
-1. **E-1 Row decoder の先頭 variant 固定** ── `out/widget_list.gleam` の decoder が `Text` だけを構築し、他 5 variant と variant 固有欄(`articles` / `links` / `heaven_public`)を失う。複数 variant の `Row` は 98 本中 1 本、▲ 側に decoder は無いので今は誰も踏まない。`custom_decoder` が fields 付き複数 variant の先頭だけを選ぶ形として次便で直す。
+1. **E-1 decoder の先頭 variant 固定** ── 根は `gen/src/yumemi_gen/emit/front.gleam:3956-3963` の `custom_decoder` で、**fields を持つ複数 variant の型なら型名を問わず先頭 variant だけを `decode.success` する**(`Row` 固有ではない)。musearch の `out/widget_list.gleam` は `Text` だけを構築し、他 5 variant と variant 固有欄(`articles` / `links` / `heaven_public`)を失う。**現に踏まれる経路が在る** ── 該当は musearch 98 本中 1 本と fixture 6 本中 1 本(`Row { ArticleRow Summary }`)の計 2 本で、fixture の方は `public/src/gen/shell.mjs:33,35` の `decodeWidgetList` が SSR の source として実際に通す。今 誤描画が出ていないのは fixture の `widget_list` logic が `Summary` 行を 1 度も返さない(下の P1-10)ためで、musearch の面が ▲ のままだからではない。P0 に上げないのは、面が毎回まるごと生成し直される値で DDL も外向き契約も ALTER も動かさないため。**追随便が面を生成物へ差し替える前に必ず閉じる。**
 2. **E-2 Block preview の Layout 欠落** ── `build/blocks.html` の header / nav / footer が Layout の Block を置かず literal area になる。page 区画へ全 Block を縦に置く部分は通過済み(巡 10 の P1 と同一)。
 3. **E-3 opaque decoder の placeholder assert** ── `out/muse_read.gleam` と `out/widget_list.gleam` の計 4 箇所。`decode.failure` の既定値のために invalid Blob / Time を assert しており、`decode.new_primitive_decoder` の形なら既定値が要らない(巡 10 の P1 と同一)。
 4. **面 package の direct dependency** ── musearch の `www/gleam.toml` に `sketch` / `sketch_lustre` の直接依存が無く、生成 `page.gleam` の build が notice を出す(本便の snapshot 面 build で 56〜57 件)。
