@@ -4,6 +4,8 @@ import framework/front/live
 import framework/spec
 import gen/out/article_create
 import gen/out/article_list
+import gleam/dynamic.{type Dynamic}
+import gleam/dynamic/decode
 import gleam/json
 import gleam/list
 import gleam/option.{None, Some}
@@ -119,10 +121,37 @@ fn validate_field(
   }
 }
 
-fn send(_args: Args) -> Effect(Event) {
-  effect.none()
-}
+@external(javascript, "./transport_ffi.mjs", "send")
+fn transport_send(
+  method: String,
+  path: String,
+  body: json.Json,
+  on_ok: fn(Dynamic) -> Nil,
+  on_error: fn(Nil) -> Nil,
+) -> Nil
 
+fn send(args: Args) -> Effect(Event) {
+  effect.from(fn(dispatch) {
+    transport_send(
+      "POST",
+      "/api/articles",
+      json.object([
+    #("slug", json.string(args.slug)),
+    #("title", json.string(args.title)),
+    #("body", json.string(args.body)),
+    #("category", json.string(args.category)),
+    #("tags", json.string(args.tags)),
+  ]),
+      fn(value) {
+        case decode.run(value, article_create.decoder()) {
+          Ok(out) -> dispatch(live.Done(Ok(out)))
+          Error(_) -> dispatch(live.Done(Error(Nil)))
+        }
+      },
+      fn(_unit) { dispatch(live.Done(Error(Nil))) },
+    )
+  })
+}
 
 fn reload_page() -> Effect(Event) {
   event.emit("yumemi-done", json.null())

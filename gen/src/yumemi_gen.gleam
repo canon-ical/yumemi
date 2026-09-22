@@ -62,6 +62,13 @@ pub fn main() {
 @external(javascript, "./yumemi_gen_ffi.mjs", "halt")
 fn halt(code: Int) -> Nil
 
+@external(javascript, "./yumemi_gen_ffi.mjs", "bundle_front")
+fn bundle_front(
+  out_dir: String,
+  app_dir: String,
+  faces: List(String),
+) -> List(String)
+
 /// 生成束と、止まる理由。理由が1つでもあれば呼び手は非 0 で終わる。
 pub fn generate(
   app_dir: String,
@@ -95,8 +102,11 @@ pub fn generate(
     list.append(
       discovered.notes,
       list.flat_map(front_models, fn(item) {
-        let #(_, model) = item
-        front.notes(model, app.services)
+        let #(package, model) = item
+        list.append(
+          front.notes(model, app.services),
+          front_emit.route_notes(app, package.name, model, hashes),
+        )
       }),
     )
   let notes =
@@ -215,7 +225,42 @@ fn run(app_dir: String, out_dir: String) -> Result(#(Int, List(Note)), Note) {
     })
     |> result.map_error(io_note),
   )
+  let faces =
+    files
+    |> list.filter_map(fn(file) {
+      case string.ends_with(file.path, "/priv/static/_yumemi/client.mjs") {
+        True -> first_segment(file.path)
+        False -> Error(Nil)
+      }
+    })
+    |> list.unique
+  let bundle_warnings = bundle_front(out_dir, app_dir, faces)
+  use _ <- result.try(
+    write_bundle_warnings(out_dir, bundle_warnings)
+    |> result.map_error(io_note),
+  )
   Ok(#(list.length(files), notes))
+}
+
+fn first_segment(path: String) -> Result(String, Nil) {
+  case string.split(path, "/") {
+    [first, ..] -> Ok(first)
+    [] -> Error(Nil)
+  }
+}
+
+fn write_bundle_warnings(
+  out_dir: String,
+  warnings: List(String),
+) -> Result(Nil, simplifile.FileError) {
+  case warnings {
+    [] -> Ok(Nil)
+    _ ->
+      simplifile.write(
+        out_dir <> "/_diagnostics.txt",
+        string.join(warnings, "\n") <> "\n",
+      )
+  }
 }
 
 fn io_note(error: simplifile.FileError) -> Note {

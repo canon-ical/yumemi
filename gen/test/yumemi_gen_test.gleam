@@ -791,7 +791,12 @@ pub fn every_file_carries_the_generated_header_test() {
     let #(path, found) = entry
     case string.ends_with(path, ".sql") {
       True -> string.starts_with(found, "-- GENERATED ") |> should.be_true
-      False -> string.starts_with(found, "//// GENERATED ") |> should.be_true
+      False ->
+        case string.ends_with(path, ".mjs") {
+          True -> string.starts_with(found, "// GENERATED ") |> should.be_true
+          False ->
+            string.starts_with(found, "//// GENERATED ") |> should.be_true
+        }
     }
   })
 }
@@ -1828,6 +1833,59 @@ pub fn front_emit_api_is_filtered_by_face_services_test() {
   |> list.each(fn(row) { string.contains(api, row) |> should.be_true })
   ["service.ArticleCreate", "service.ArticlePublish", "service.ArticleRetract"]
   |> list.each(fn(row) { string.contains(api, row) |> should.be_false })
+}
+
+pub fn front_emit_live_contains_literal_transport_route_and_decoder_test() {
+  let live = text("public/src/gen/live/article_publish.gleam")
+  string.contains(live, "transport_send(") |> should.be_true
+  string.contains(live, "\"POST\"") |> should.be_true
+  string.contains(live, "\"/api/articles/\" <> args.slug <> \"/publish\"")
+  |> should.be_true
+  string.contains(live, "article_publish.decoder()") |> should.be_true
+
+  let out = text("public/src/gen/out/article_list.gleam")
+  string.contains(out, "pub fn decoder() -> decode.Decoder(Out)")
+  |> should.be_true
+  string.contains(out, "decode.field(\"counts\"") |> should.be_true
+}
+
+pub fn front_emit_transport_and_client_are_generic_and_given_safe_test() {
+  let transport = text("public/src/gen/live/transport_ffi.mjs")
+  string.contains(transport, "export function send(method, path, body, onOk, onError)")
+  |> should.be_true
+  string.contains(transport, "ArticlePublish") |> should.be_false
+
+  let client = text("public/priv/static/_yumemi/client.mjs")
+  string.contains(client, "registerWithGiven") |> should.be_true
+  string.contains(client, "data-yumemi-given") |> should.be_true
+  string.contains(client, "pick-tag") |> should.be_true
+  string.contains(client, "__YUMEMI_BUILD__") |> should.be_true
+}
+
+pub fn front_calls_without_face_route_are_exit_four_test() {
+  let entry_text =
+    "import framework/entry.{type Entry, Anonymous, AnySubject, Http, ReadOnly}\n\n"
+    <> "pub type Subject {\n  Staff\n}\n\n"
+    <> "pub type Host {\n  PublicHost\n}\n\n"
+    <> "pub const entries: List(Entry(Subject, Host)) = [\n"
+    <> "  Http(name: \"public\", hosts: [PublicHost], prefix: \"/api\", admit: Anonymous, subject: AnySubject, services: ReadOnly),\n"
+    <> "]"
+  let assert Ok(loaded_units) = source.load(fixture)
+  let back_units =
+    loaded_units
+    |> list.filter(fn(unit) { unit.path != "entry" })
+    |> list.append([source_unit("entry", entry_text)])
+  let assert Ok(test_app) = reader.read(back_units)
+  let assert Ok(face_units) = source.load("fixtures/article/public")
+  let model_ = front_from_units_named("public", face_units, test_app.services)
+  let notes = front_emit.route_notes(test_app, "public", model_, hash.of(back_units))
+  stop.worst(notes) |> should.equal(4)
+  notes
+  |> list.any(fn(note) {
+    string.contains(note.text, "article_publish")
+    && string.contains(note.text, "api.gleam")
+  })
+  |> should.be_true
 }
 
 pub fn front_emit_live_follows_island_calls_and_reload_out_test() {

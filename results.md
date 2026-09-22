@@ -606,3 +606,32 @@ base `/home/yumemism/.codex-agents/runs/niekawa-20260922-061417-3399503-22265/ba
 
 - musearch は指定 snapshot `ms-96fb8cc` の `api/` と、同 snapshot の `www/` を読むだけ。`~/yumemism_repo/musearch` には触っていない。
 - 入口の admit / subject / prefix は束2で変更していない。`article_retract` を面に出さない形も維持した。
+
+## 巡 8(段 D1)
+
+### 状態
+
+- 生成物10は fixture 面の `public/src/gen/live/` 2本、`public/priv/static/_yumemi/client.mjs` 1本。client は bundle 後 181,827 bytes。面15種の Gleam + `transport_ffi.mjs` + client の形で、島0本の musearch 面には追加なし。
+- `transport_ffi.mjs` は Service 分岐を持たない汎用 `send(method, path, body, onOk, onError)`。live の `send` は `api.gleam` の method/path を literal 化し、Args を JSON object にして送る。Out decoder は `gen/out/<service>` に `gleam/dynamic/decode` で生成。
+- client は `like-button` と `pick-tag` を register。given は `data-yumemi-given` を JSON decode し、属性無し/失敗時は register せず、`ReloadPage` は `yumemi-done` から同一 URL を1回だけ再要求する。
+- worker の SSR に `pick-tag` の given JSON を追加し、POST を `/api/articles` と `/api/articles/:slug/publish` に変更。verify の assert は旧 `/api/article/tag` と raw body を生成 route/JSON body に変更した。NO-JS、初回 POST、島の表示変化、再要求、isolate 40回の assert は削除していない。
+
+### DDL
+
+無し。migration / schema / staging / production / Hex publish は未実施。
+
+### 検証
+
+- root build: exit 0、既存 `src/framework/secret.gleam` warning 1件。`gen/build/gen6-d1-root-build.txt`
+- `cd gen && gleam test`: **123 passed, no failures**。`gen/build/gen6-d1-gen-test.txt`
+- fixture generator: exit 0 / 77 file、back 60 file と基線 diff 0、face Gleam 15 + transport 1 + client 1。`gen/build/gen6-d1-fixture-generate.txt`、`gen/build/gen6-d1-fixture-counts.txt`、`gen/build/gen6-d1-fixture-generated-diff.txt`
+- fixture public build: exit 0、非 transitive warning 0。`gen/build/gen6-d1-public-build.txt`
+- verify SSR: **ALL PASS**（NO-JS、INITIAL JSON、ISLAND `いいね -> ❤ 13`、SELECTED JSON、RELOAD 1回）。`gen/build/gen6-d1-verify-ssr.txt`
+- verify isolate: **ALL PASS**（40 requests、混入0）。`gen/build/gen6-d1-verify-isolate.txt`
+- musearch snapshotのみ: exit 4、exit0 warning 29 / exit3 0 / exit4 18、back 604 file diff 0、face 105 file、transport/client 0。`gen/build/gen6-d1-musearch-generate.txt`、`gen/build/gen6-d1-musearch-counts.txt`、`gen/build/gen6-d1-musearch-diagnostics-counts.txt`
+- snapshot `www` の一時コピーを worktree の yumemi path dependency と生成面に差し替え: exit 0、`Compiling musearch_www`、`error:` 0、face 非 transitive warning 0。`gen/build/gen6-d1-musearch-www-build.txt`
+- generated header violations 0、面 import allowlist violations 0、back module imports 0。`gen/build/gen6-d1-generated-header-check.txt`、`gen/build/gen6-d1-import-check.txt`
+
+### 鷹野宛
+
+musearch 本体には触れていない。入力は指定 snapshot、出力と一時 build は `gen/_out` / `/tmp` のみ。fixture back は変更していない。

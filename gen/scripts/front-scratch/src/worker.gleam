@@ -44,9 +44,9 @@ fn route(
       page(fn() { article.view(article.sample) })
     http.Get, ["article", "second"] ->
       page(fn() { summary.view(summary.sample) })
-    http.Get, ["article", _id] -> page(fn() { article.view(article.sample) })
-    http.Post, ["api", "article", "like"] -> like()
-    http.Post, ["api", "article", "tag"] -> tag()
+    http.Get, ["article", _slug] -> page(fn() { article.view(article.sample) })
+    http.Post, ["api", "articles", _slug, "publish"] -> like()
+    http.Post, ["api", "articles"] -> tag()
     _, _ -> text(404, "not found")
   }
 }
@@ -54,7 +54,7 @@ fn route(
 fn page(body: fn() -> element.Element(Nil)) -> Response(ResponseBody) {
   let assert Ok(stylesheet) = sketch_lustre.setup()
   let doc = render_doc(stylesheet, body)
-  let out = raw_element.to_document_string(doc)
+  let out = raw_element.to_document_string(doc) |> add_given_attribute
   let assert Ok(_) = sketch_lustre.teardown(stylesheet)
 
   response.new(200)
@@ -76,7 +76,7 @@ fn render_doc(
       raw_html.script(
         [
           attribute.attribute("type", "module"),
-          attribute.src("/client.mjs"),
+          attribute.src("/_yumemi/client.mjs"),
         ],
         "",
       ),
@@ -87,19 +87,71 @@ fn render_doc(
 
 fn like() -> Response(ResponseBody) {
   let count = bump_like_count()
+  let article = json.object([
+    #("slug", json.string("article")),
+    #("title", json.string("本日の記事")),
+    #("body", json.string("夜のシフトが得意な新人です。よろしくお願いします。")),
+    #("version", json.int(count)),
+    #("order", json.int(0)),
+    #("category", json.object([#("value", json.string("news"))])),
+    #(
+      "tags",
+      json.object([#("values", json.array(["fixture"], of: json.string))]),
+    ),
+  ])
   response.new(200)
   |> response.set_header("content-type", "application/json")
-  |> response.set_body(
-    Text(json.to_string(json.object([#("count", json.int(count))]))),
-  )
+  |> response.set_body(Text(json.to_string(article)))
 }
 
 fn tag() -> Response(ResponseBody) {
-  text(200, "ok")
+  response.new(200)
+  |> response.set_header("content-type", "application/json")
+  |> response.set_body(Text(json.to_string(json.string("article"))))
 }
 
 fn text(status: Int, body: String) -> Response(ResponseBody) {
   response.new(status)
   |> response.set_header("content-type", "text/plain; charset=utf-8")
   |> response.set_body(Text(body))
+}
+
+fn add_given_attribute(html: String) -> String {
+  let given =
+    given_json()
+    |> string.replace("\"", "&quot;")
+  string.replace(
+    html,
+    "<pick-tag ",
+    "<pick-tag data-yumemi-given=\"" <> given <> "\" ",
+  )
+}
+
+fn given_json() -> String {
+  json.to_string(json.object([
+    #(
+      "page",
+      json.object([
+        #("items", json.preprocessed_array([])),
+        #("next", json.null()),
+      ]),
+    ),
+    #(
+      "counts",
+      json.preprocessed_array([
+        json.preprocessed_array([
+          json.object([#("name", json.string("fixture"))]),
+          json.int(1),
+        ]),
+        json.preprocessed_array([
+          json.object([#("name", json.string("gleam"))]),
+          json.int(1),
+        ]),
+        json.preprocessed_array([
+          json.object([#("name", json.string("cloudflare"))]),
+          json.int(1),
+        ]),
+      ]),
+    ),
+  ]))
 }

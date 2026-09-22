@@ -18,6 +18,7 @@ import yumemi_gen/model
 import yumemi_gen/naming
 import yumemi_gen/reader/front as reader_front
 import yumemi_gen/source.{type Unit, Unit}
+import yumemi_gen/stop
 
 type ApiRoute {
   ApiRoute(service: String, method: String, path: String)
@@ -49,6 +50,23 @@ pub fn emit(
       string.starts_with(unit.path, "service/")
     })
   let type_units = back_type_units(app, back_units, hashes)
+  let live = live_targets(model_.components, app.services)
+  let decoder_services =
+    live
+    |> list.flat_map(fn(target) {
+      let #(service, component) = target
+      let given =
+        component.reloads
+        |> list.first
+        |> option.from_result
+        |> option.then(fn(reload) { service_for(app.services, reload.1) })
+      [service.module]
+      |> list.append(case given {
+        Some(value) -> [value.module]
+        None -> []
+      })
+    })
+    |> list.unique
   let files = [
     File(
       path: face_name <> "/src/gen/route.gleam",
@@ -75,14 +93,34 @@ pub fn emit(
     app.services
     |> list.sort(fn(left, right) { string.compare(left.module, right.module) })
     |> list.map(fn(service) {
-      out_file(app, type_units, service, hashes, face_name)
+      out_file(
+        app,
+        type_units,
+        service,
+        hashes,
+        face_name,
+        list.contains(decoder_services, service.module),
+      )
     })
   let live_files =
-    live_targets(model_.components, app.services)
+    live
     |> list.map(fn(target) {
       let #(service, component) = target
       live_file(app, back_units, package, service, component, hashes, face_name)
     })
+  let island_files = case live {
+    [] -> []
+    _ -> [
+      File(
+        path: face_name <> "/src/gen/live/transport_ffi.mjs",
+        text: transport_text(face_name, model_, hashes),
+      ),
+      File(
+        path: face_name <> "/priv/static/_yumemi/client.mjs",
+        text: client_text(face_name, model_, app, hashes),
+      ),
+    ]
+  }
   let load_files =
     list.append(
       [load_layout_file(app, package, model_)],
@@ -91,7 +129,10 @@ pub fn emit(
       }),
     )
   list.append(
-    list.append(files, list.append(out_files, live_files)),
+    list.append(
+      files,
+      list.append(out_files, list.append(live_files, island_files)),
+    ),
     load_files,
   )
 }
@@ -141,6 +182,166 @@ fn service_for(
   }
 }
 
+fn island_components(
+  components: List(reader_front.Component),
+) -> List(reader_front.Component) {
+  let empty: List(reader_front.Component) = []
+  components
+  |> list.filter(fn(component) { component.calls != [] })
+  |> list.fold(empty, fn(acc, component) {
+    case list.any(acc, fn(found) { found.module == component.module }) {
+      True -> acc
+      False -> list.append(acc, [component])
+    }
+  })
+  |> list.sort(fn(left, right) { string.compare(left.module, right.module) })
+}
+
+fn transport_text(
+  face_name: String,
+  front: reader_front.Front,
+  hashes: hash.Hashes,
+) -> String {
+  js_header(
+    face_name <> "/src/components/*.gleam and src/entry.gleam",
+    digest.short(hash.entry(hashes) <> string.inspect(front.components)),
+  )
+  <> "\n"
+  <> "export function send(method, path, body, onOk, onError) {\n"
+  <> "  fetch(path, {\n"
+  <> "    method,\n"
+  <> "    headers: { \"content-type\": \"application/json\" },\n"
+  <> "    body: method === \"GET\" ? undefined : JSON.stringify(body),\n"
+  <> "  })\n"
+  <> "    .then((response) =>\n"
+  <> "      response.ok\n"
+  <> "        ? response.json().then(onOk)\n"
+  <> "        : onError(undefined))\n"
+  <> "    .catch(() => onError(undefined));\n"
+  <> "  return undefined;\n"
+  <> "}\n"
+}
+
+fn client_text(
+  face_name: String,
+  front: reader_front.Front,
+  app: model.App,
+  hashes: hash.Hashes,
+) -> String {
+  let components = island_components(front.components)
+  let imports =
+    string.concat([
+      "import { register as lustreRegister } from \"__YUMEMI_BUILD__/lustre/lustre.mjs\";\n",
+      "import { run as decodeRun } from \"__YUMEMI_BUILD__/gleam_stdlib/gleam/dynamic/decode.mjs\";\n",
+      "import { Result$isOk, Result$Ok$0 } from \"__YUMEMI_BUILD__/__YUMEMI_FACE__/gleam.mjs\";\n",
+      string.concat(list.map(components, client_component_import)),
+      string.concat(
+        list.filter_map(components, fn(component) {
+          case component.reloads |> list.first |> option.from_result {
+            Some(reload) ->
+              case service_for(app.services, reload.1) {
+                Some(service) ->
+                  Ok(
+                    "import * as "
+                    <> service.module
+                    <> "Out from \"__YUMEMI_BUILD__/__YUMEMI_FACE__/gen/out/"
+                    <> service.module
+                    <> ".mjs\";\n",
+                  )
+                None -> Error(Nil)
+              }
+            None -> Error(Nil)
+          }
+        }),
+      ),
+    ])
+  let registrations =
+    string.concat(
+      list.map(components, fn(component) {
+        client_registration(component, app.services)
+      }),
+    )
+  let reloads =
+    string.concat(
+      components
+      |> list.filter(fn(component) {
+        component.after_send == Some("ReloadPage")
+      })
+      |> list.map(fn(component) {
+        "listenReload(\"" <> component_tag(component) <> "\");\n"
+      }),
+    )
+  js_header(
+    face_name <> "/src/components/*.gleam and src/entry.gleam",
+    digest.short(hash.entry(hashes) <> string.inspect(front.components)),
+  )
+  <> "\n"
+  <> imports
+  <> "\n"
+  <> "function registerWithGiven(app, decoder, tag) {\n"
+  <> "  const element = document.querySelector(tag);\n"
+  <> "  const raw = element?.getAttribute(\"data-yumemi-given\");\n"
+  <> "  if (raw === null) return;\n"
+  <> "  let given;\n"
+  <> "  try {\n"
+  <> "    const decoded = decodeRun(JSON.parse(raw), decoder());\n"
+  <> "    if (!Result$isOk(decoded)) return;\n"
+  <> "    given = Result$Ok$0(decoded);\n"
+  <> "  } catch (_error) {\n"
+  <> "    return;\n"
+  <> "  }\n"
+  <> "  lustreRegister({ ...app, init: () => app.init(given) }, tag);\n"
+  <> "}\n\n"
+  <> "function listenReload(tag) {\n"
+  <> "  document.querySelectorAll(tag).forEach((element) => {\n"
+  <> "    element.addEventListener(\"yumemi-done\", () => {\n"
+  <> "      globalThis.location.assign(globalThis.location.href);\n"
+  <> "    });\n"
+  <> "  });\n"
+  <> "}\n\n"
+  <> registrations
+  <> reloads
+}
+
+fn client_component_import(component: reader_front.Component) -> String {
+  "import * as "
+  <> component_js_name(component)
+  <> " from \"__YUMEMI_BUILD__/__YUMEMI_FACE__/"
+  <> component.module
+  <> ".mjs\";\n"
+}
+
+fn client_registration(
+  component: reader_front.Component,
+  services: List(model.Service),
+) -> String {
+  let name = component_js_name(component)
+  let tag = component_tag(component)
+  case component.reloads |> list.first |> option.from_result {
+    Some(reload) ->
+      case service_for(services, reload.1) {
+        Some(service) ->
+          "registerWithGiven("
+          <> name
+          <> ".app(), "
+          <> service.module
+          <> "Out.decoder, \""
+          <> tag
+          <> "\");\n"
+        None -> ""
+      }
+    None -> "lustreRegister(" <> name <> ".app(), \"" <> tag <> "\");\n"
+  }
+}
+
+fn component_js_name(component: reader_front.Component) -> String {
+  naming.snake(last_segment(component.module))
+}
+
+fn component_tag(component: reader_front.Component) -> String {
+  string.replace(component_js_name(component), "_", "-")
+}
+
 fn live_file(
   app: model.App,
   units: List(Unit),
@@ -159,6 +360,7 @@ fn live_file(
     source_hash(package.units, fn(unit) { unit.path == component.module })
   let input_hash =
     digest.short(hash.service(hashes, service.module) <> component_hash)
+  let route = api_route_for(app, hashes, face_name, service.module)
   File(
     path: face_name <> "/src/gen/live/" <> service.module <> ".gleam",
     text: live_text(
@@ -167,6 +369,7 @@ fn live_file(
       service,
       component,
       given_service,
+      route,
       header("src/" <> component.module <> ".gleam", input_hash),
     ),
   )
@@ -178,6 +381,7 @@ fn live_text(
   service: model.Service,
   component: reader_front.Component,
   given_service: Option(model.Service),
+  route: Option(ApiRoute),
   generated_header: String,
 ) -> String {
   let validations = validation_specs(app, units, service.args)
@@ -202,7 +406,7 @@ fn live_text(
   <> update_text(service, component)
   <> "\n"
   <> validate_text(validations)
-  <> send_text(component.after_send)
+  <> send_text(service, route, component.after_send)
 }
 
 fn live_imports(
@@ -225,7 +429,10 @@ fn live_imports(
   }
   let base = [
     "framework/front/live",
+    "gleam/dynamic.{type Dynamic}",
+    "gleam/dynamic/decode",
     "gen/out/" <> service.module,
+    "gleam/json",
     "gleam/option.{None, Some}",
     "lustre/effect.{type Effect}",
   ]
@@ -414,13 +621,84 @@ fn field_name(field: String) -> String {
   naming.snake(field)
 }
 
-fn send_text(after_send: Option(String)) -> String {
+fn send_text(
+  service: model.Service,
+  route: Option(ApiRoute),
+  after_send: Option(String),
+) -> String {
   let reload = case after_send {
     Some("ReloadPage") ->
       "\nfn reload_page() -> Effect(Event) {\n  event.emit(\"yumemi-done\", json.null())\n}\n"
     _ -> ""
   }
-  "fn send(_args: Args) -> Effect(Event) {\n  effect.none()\n}\n\n" <> reload
+  let send = case route {
+    None -> "fn send(_args: Args) -> Effect(Event) {\n  effect.none()\n}\n"
+    Some(route) ->
+      "@external(javascript, \"./transport_ffi.mjs\", \"send\")\n"
+      <> "fn transport_send(\n"
+      <> "  method: String,\n"
+      <> "  path: String,\n"
+      <> "  body: json.Json,\n"
+      <> "  on_ok: fn(Dynamic) -> Nil,\n"
+      <> "  on_error: fn(Nil) -> Nil,\n"
+      <> ") -> Nil\n\n"
+      <> "fn send(args: Args) -> Effect(Event) {\n"
+      <> "  effect.from(fn(dispatch) {\n"
+      <> "    transport_send(\n"
+      <> "      "
+      <> quoted(route.method)
+      <> ",\n"
+      <> "      "
+      <> path_expression(route.path)
+      <> ",\n"
+      <> "      "
+      <> body_expression(service.args)
+      <> ",\n"
+      <> "      fn(value) {\n"
+      <> "        case decode.run(value, "
+      <> service.module
+      <> ".decoder()) {\n"
+      <> "          Ok(out) -> dispatch(live.Done(Ok(out)))\n"
+      <> "          Error(_) -> dispatch(live.Done(Error(Nil)))\n"
+      <> "        }\n"
+      <> "      },\n"
+      <> "      fn(_unit) { dispatch(live.Done(Error(Nil))) },\n"
+      <> "    )\n"
+      <> "  })\n}\n"
+  }
+  send <> reload
+}
+
+fn path_expression(path: String) -> String {
+  case string.split(path, ":") {
+    [] -> quoted(path)
+    [first, ..rest] ->
+      quoted(first)
+      <> string.concat(
+        list.map(rest, fn(part) {
+          let #(name, suffix) = path_part(part)
+          " <> args." <> name <> " <> " <> quoted(suffix)
+        }),
+      )
+  }
+}
+
+fn path_part(part: String) -> #(String, String) {
+  case string.split(part, "/") {
+    [name, suffix, ..rest] -> #(name, "/" <> string.join([suffix, ..rest], "/"))
+    [name] -> #(name, "")
+    [] -> #("", "")
+  }
+}
+
+fn body_expression(args: List(model.Arg)) -> String {
+  "json.object([\n"
+  <> string.concat(
+    list.map(args, fn(arg) {
+      "    #(\"" <> arg.name <> "\", json.string(args." <> arg.name <> ")),\n"
+    }),
+  )
+  <> "  ])"
 }
 
 fn validation_specs(
@@ -1506,6 +1784,10 @@ fn header(source: String, input_hash: String) -> String {
   <> "] — 手で編集しない\n"
 }
 
+fn js_header(source: String, input_hash: String) -> String {
+  "// GENERATED from " <> source <> " [sha256:" <> input_hash <> "] — 手で編集しない"
+}
+
 fn route_text(
   face_name: String,
   pages: List(reader_front.Page),
@@ -1638,6 +1920,55 @@ fn api_routes(
       |> list.filter_map(fn(row) { api_route_from_row(row, face_name) })
     Error(_) -> []
   }
+}
+
+pub fn route_notes(
+  app: model.App,
+  package_name: String,
+  front: reader_front.Front,
+  hashes: hash.Hashes,
+) -> List(stop.Note) {
+  let routes = api_routes(app, hashes, package_name)
+  front.components
+  |> list.flat_map(fn(component) {
+    list.append(
+      component.calls,
+      list.map(component.reloads, fn(reload) { reload.1 }),
+    )
+    |> list.unique
+    |> list.filter_map(fn(variant) {
+      case service_for(app.services, variant) {
+        Some(service) ->
+          case
+            list.find(routes, fn(route) { route.service == service.module })
+          {
+            Ok(_) -> Error(Nil)
+            Error(_) ->
+              Ok(stop.Note(
+                class: stop.Conflict,
+                text: package_name
+                  <> "/"
+                  <> component.module
+                  <> ": calls の Service "
+                  <> service.module
+                  <> " に api.gleam の route が無い",
+              ))
+          }
+        None -> Error(Nil)
+      }
+    })
+  })
+}
+
+fn api_route_for(
+  app: model.App,
+  hashes: hash.Hashes,
+  face_name: String,
+  service: String,
+) -> Option(ApiRoute) {
+  api_routes(app, hashes, face_name)
+  |> list.find(fn(route) { route.service == service })
+  |> option.from_result
 }
 
 fn api_route_from_row(row: String, face_name: String) -> Result(ApiRoute, Nil) {
@@ -1776,6 +2107,7 @@ fn out_file(
   service: model.Service,
   hashes: hash.Hashes,
   face_name: String,
+  with_decoder: Bool,
 ) -> File {
   let service_path = "service/" <> service.module
   let scope = scope_for(units, service_path)
@@ -1792,14 +2124,34 @@ fn out_file(
     None -> "pub type Out\n"
     Some(_) -> declarations_text(state, app)
   }
+  let imports = case
+    with_decoder,
+    string.contains(string.inspect(state.custom), "Page")
+  {
+    True, True ->
+      imports_text(state)
+      |> string.replace(
+        "import framework/page.{type Page}",
+        "import framework/page.{type Page, Page, cursor}",
+      )
+    _, _ -> imports_text(state)
+  }
+  let decoder_imports = case with_decoder {
+    True -> "import gleam/dynamic/decode"
+    False -> ""
+  }
+  let all_imports =
+    [imports, decoder_imports]
+    |> list.filter(fn(value) { value != "" })
+    |> string.join("\n")
   let body =
     header(
       "src/service/" <> service.module <> ".gleam",
       hash.service(hashes, service.module),
     )
     <> "\n"
-    <> imports_text(state)
-    <> case imports_text(state) {
+    <> all_imports
+    <> case all_imports {
       "" -> ""
       _ -> "\n\n"
     }
@@ -1808,10 +2160,440 @@ fn out_file(
       None -> ""
       Some(alias) -> "\n" <> out_alias_text(state, alias)
     }
+    <> case with_decoder, output {
+      True, Some(type_) -> "\n" <> decoder_text(app, units, state, scope, type_)
+      _, _ -> ""
+    }
   File(
     path: face_name <> "/src/gen/out/" <> service.module <> ".gleam",
     text: body,
   )
+}
+
+fn decoder_text(
+  app: model.App,
+  units: List(Unit),
+  state: State,
+  scope: Scope,
+  output: glance.Type,
+) -> String {
+  "pub fn decoder() -> decode.Decoder(Out) {\n"
+  <> "  "
+  <> decoder_for_type(app, units, state, scope, output)
+  <> "\n}\n"
+}
+
+fn decoder_for_type(
+  app: model.App,
+  units: List(Unit),
+  state: State,
+  scope: Scope,
+  type_: glance.Type,
+) -> String {
+  case type_ {
+    glance.NamedType(name: name, parameters: parameters, ..) -> {
+      case name {
+        "String" | "Int" | "Bool" | "Float" | "List" | "Option" ->
+          builtin_decoder(name, parameters, app, units, state, scope)
+        _ -> {
+          let path = resolved_path(scope, type_)
+          case path {
+            Some("framework/page") ->
+              page_decoder(app, units, state, scope, name, parameters)
+            Some("framework/er") -> relation_decoder(name)
+            Some(path) ->
+              named_decoder(app, units, state, scope, path, name, parameters)
+            None -> builtin_decoder(name, parameters, app, units, state, scope)
+          }
+        }
+      }
+    }
+    glance.TupleType(elements: elements, ..) ->
+      tuple_decoder(
+        list.map(elements, fn(item) {
+          decoder_for_type(app, units, state, scope, item)
+        }),
+      )
+    _ -> "decode.dynamic"
+  }
+}
+
+fn builtin_decoder(
+  name: String,
+  parameters: List(glance.Type),
+  app: model.App,
+  units: List(Unit),
+  state: State,
+  scope: Scope,
+) -> String {
+  case name, parameters {
+    "String", [] -> "decode.string"
+    "Int", [] -> "decode.int"
+    "Bool", [] -> "decode.bool"
+    "Float", [] -> "decode.float"
+    "List", [inner] ->
+      "decode.list(of: "
+      <> decoder_for_type(app, units, state, scope, inner)
+      <> ")"
+    "Option", [inner] ->
+      "decode.optional("
+      <> decoder_for_type(app, units, state, scope, inner)
+      <> ")"
+    _, _ -> "decode.dynamic"
+  }
+}
+
+fn named_decoder(
+  app: model.App,
+  units: List(Unit),
+  state: State,
+  scope: Scope,
+  path: String,
+  name: String,
+  _parameters: List(glance.Type),
+) -> String {
+  case string.starts_with(path, "gen/types/") {
+    True -> value_decoder(app, name)
+    False ->
+      case string.starts_with(path, "entity/") {
+        True ->
+          case
+            model.entity_by_module(app.entities, string.drop_start(path, 7))
+          {
+            Some(entity) -> entity_decoder(app, units, state, scope, entity)
+            None ->
+              custom_or_alias_decoder(app, units, state, scope, path, name)
+          }
+        False -> custom_or_alias_decoder(app, units, state, scope, path, name)
+      }
+  }
+}
+
+fn value_decoder(app: model.App, name: String) -> String {
+  case model.value_type_by_name(app.value_types, name) {
+    Some(value) ->
+      case value.backing {
+        model.IntValue -> "decode.int"
+        model.StringValue -> "decode.string"
+      }
+    None -> "decode.string"
+  }
+}
+
+fn custom_or_alias_decoder(
+  app: model.App,
+  units: List(Unit),
+  state: State,
+  _scope: Scope,
+  path: String,
+  name: String,
+) -> String {
+  case
+    list.find(state.custom, fn(declaration) {
+      let CustomDecl(scope: declaration_scope, definition: definition) =
+        declaration
+      declaration_scope.module == path && definition.name == name
+    })
+  {
+    Ok(CustomDecl(scope: declaration_scope, definition: definition)) ->
+      custom_decoder(app, units, state, declaration_scope, definition)
+    Error(_) ->
+      case
+        list.find(state.aliases, fn(alias) {
+          case alias {
+            SourceAlias(scope: alias_scope, definition: definition) ->
+              alias_scope.module == path && definition.name == name
+            _ -> False
+          }
+        })
+      {
+        Ok(SourceAlias(scope: alias_scope, definition: definition)) ->
+          decoder_for_type(app, units, state, alias_scope, definition.aliased)
+        Ok(_) | Error(_) -> "decode.dynamic"
+      }
+  }
+}
+
+fn custom_decoder(
+  app: model.App,
+  units: List(Unit),
+  state: State,
+  scope: Scope,
+  definition: glance.CustomType,
+) -> String {
+  case definition.variants {
+    [] -> "decode.dynamic"
+    [variant] ->
+      variant_decoder(app, units, state, scope, definition.name, variant)
+    variants ->
+      case list.all(variants, fn(variant) { variant.fields == [] }) {
+        True -> enum_decoder(state, scope, definition)
+        False ->
+          case variants {
+            [first, ..] ->
+              variant_decoder(app, units, state, scope, definition.name, first)
+            [] -> "decode.dynamic"
+          }
+      }
+  }
+}
+
+fn variant_decoder(
+  app: model.App,
+  units: List(Unit),
+  state: State,
+  scope: Scope,
+  type_name: String,
+  variant: glance.Variant,
+) -> String {
+  let constructor =
+    mapped_constructor(state, scope.module, type_name, variant.name)
+  case variant.fields {
+    [] -> "decode.success(" <> constructor <> ")"
+    [glance.UnlabelledVariantField(item)] ->
+      "decode.map("
+      <> decoder_for_type(app, units, state, scope, item)
+      <> ", fn(value) { "
+      <> constructor
+      <> "(value) })"
+    fields -> {
+      let named =
+        list.map(fields, fn(field) {
+          case field {
+            glance.LabelledVariantField(label: label, item: item) -> #(
+              label,
+              label,
+              decoder_for_type(app, units, state, scope, item),
+            )
+            glance.UnlabelledVariantField(item) -> #(
+              "value",
+              "value",
+              decoder_for_type(app, units, state, scope, item),
+            )
+          }
+        })
+      field_decoder_chain(named, constructor)
+    }
+  }
+}
+
+fn field_decoder_chain(
+  fields: List(#(String, String, String)),
+  constructor: String,
+) -> String {
+  field_decoder_chain_from(fields, fields, constructor)
+}
+
+fn field_decoder_chain_from(
+  remaining: List(#(String, String, String)),
+  all: List(#(String, String, String)),
+  constructor: String,
+) -> String {
+  case remaining {
+    [] -> "decode.success(" <> constructor_with_fields(constructor, all) <> ")"
+    [#(label, variable, decoder), ..rest] ->
+      "decode.field(\""
+      <> label
+      <> "\", "
+      <> decoder
+      <> ", fn("
+      <> variable
+      <> ") {\n"
+      <> "    "
+      <> field_decoder_chain_from(rest, all, constructor)
+      <> "\n  })"
+  }
+}
+
+fn constructor_with_fields(
+  constructor: String,
+  fields: List(#(String, String, String)),
+) -> String {
+  constructor
+  <> "("
+  <> string.join(
+    list.map(fields, fn(field) { field.0 <> ": " <> field.1 }),
+    ", ",
+  )
+  <> ")"
+}
+
+fn enum_decoder(
+  state: State,
+  scope: Scope,
+  definition: glance.CustomType,
+) -> String {
+  let clauses =
+    string.concat(
+      list.map(definition.variants, fn(variant) {
+        "      \""
+        <> variant.name
+        <> "\" -> decode.success("
+        <> mapped_constructor(
+          state,
+          scope.module,
+          definition.name,
+          variant.name,
+        )
+        <> ")\n"
+      }),
+    )
+  case definition.variants {
+    [first, ..] ->
+      "decode.then(decode.string, fn(value) {\n"
+      <> "  case value {\n"
+      <> clauses
+      <> "    _ -> decode.failure("
+      <> mapped_constructor(state, scope.module, definition.name, first.name)
+      <> ", expected: \""
+      <> definition.name
+      <> "\")\n"
+      <> "  }\n"
+      <> "})"
+    [] -> "decode.dynamic"
+  }
+}
+
+fn tuple_decoder(decoders: List(String)) -> String {
+  case decoders {
+    [] -> "decode.success(#())"
+    [first, second] ->
+      "decode.then(decode.at([0], "
+      <> first
+      <> "), fn(first) {\n"
+      <> "    decode.map(decode.at([1], "
+      <> second
+      <> "), fn(second) { #(first, second) })\n"
+      <> "  })"
+    _ -> "decode.dynamic"
+  }
+}
+
+fn page_decoder(
+  app: model.App,
+  units: List(Unit),
+  state: State,
+  scope: Scope,
+  name: String,
+  parameters: List(glance.Type),
+) -> String {
+  case name, parameters {
+    "Page", [inner, ..] ->
+      "decode.field(\"items\", decode.list(of: "
+      <> decoder_for_type(app, units, state, scope, inner)
+      <> "), fn(items) {\n"
+      <> "    decode.field(\"next\", decode.optional(decode.map(decode.string, fn(raw) {\n"
+      <> "      let assert Ok(value) = cursor(raw)\n"
+      <> "      value\n"
+      <> "    })), fn(next) {\n"
+      <> "      decode.success(Page(items: items, next: next))\n"
+      <> "    })\n"
+      <> "  })"
+    "Cursor", _ -> "decode.string"
+    _, _ -> "decode.dynamic"
+  }
+}
+
+fn relation_decoder(name: String) -> String {
+  case name {
+    "Has" -> has_decoder()
+    "Held" -> held_decoder()
+    "Multi" -> multi_decoder()
+    _ -> "decode.dynamic"
+  }
+}
+
+fn entity_decoder(
+  app: model.App,
+  units: List(Unit),
+  state: State,
+  scope: Scope,
+  entity: model.Entity,
+) -> String {
+  let fields =
+    list.map(entity.props, fn(prop) {
+      #(prop.name, prop.name, prop_decoder(app, units, state, scope, prop))
+    })
+  field_decoder_chain(
+    fields,
+    mapped_name(state, "entity/" <> entity.module, entity.type_name),
+  )
+}
+
+fn prop_decoder(
+  app: model.App,
+  units: List(Unit),
+  state: State,
+  scope: Scope,
+  prop: model.Prop,
+) -> String {
+  let base = case prop.kind {
+    model.RelProp(kind: kind, ..) -> relation_property_decoder(kind)
+    model.ValueProp(reference) ->
+      model_ref_decoder(app, units, state, scope, reference)
+    model.SumProp(reference, ..) ->
+      model_ref_decoder(app, units, state, scope, reference)
+  }
+  let repeated = case prop.kind, prop.repeated {
+    model.RelProp(kind: model.Multi, ..), _ -> base
+    _, True -> "decode.list(of: " <> base <> ")"
+    _, False -> base
+  }
+  case prop.optional {
+    True -> "decode.optional(" <> repeated <> ")"
+    False -> repeated
+  }
+}
+
+fn relation_property_decoder(kind: model.RelKind) -> String {
+  case kind {
+    model.Has -> has_decoder()
+    model.Held -> held_decoder()
+    model.Multi -> multi_decoder()
+    model.Link -> "decode.optional(decode.string)"
+  }
+}
+
+fn model_ref_decoder(
+  app: model.App,
+  _units: List(Unit),
+  _state: State,
+  _scope: Scope,
+  reference: model.TypeRef,
+) -> String {
+  case reference.module, reference.name {
+    None, "String" -> "decode.string"
+    None, "Int" -> "decode.int"
+    None, "Bool" -> "decode.bool"
+    None, "Float" -> "decode.float"
+    Some(path), name ->
+      case string.starts_with(path, "gen/types/") {
+        True -> value_decoder(app, name)
+        False ->
+          case path {
+            "framework/time" ->
+              "decode.map(decode.string, fn(value) { "
+              <> name
+              <> "(value: value) })"
+            "framework/blob" ->
+              "decode.map(decode.string, fn(value) { Blob(key: value) })"
+            _ -> "decode.dynamic"
+          }
+      }
+    _, _ -> "decode.dynamic"
+  }
+}
+
+fn has_decoder() -> String {
+  "decode.field(\"value\", decode.string, fn(value) { decode.success(Has(value: value)) })"
+}
+
+fn held_decoder() -> String {
+  "decode.field(\"value\", decode.string, fn(value) { decode.success(Held(value: value)) })"
+}
+
+fn multi_decoder() -> String {
+  "decode.field(\"values\", decode.list(of: decode.string), fn(values) { decode.success(Multi(values: values)) })"
 }
 
 fn out_state(

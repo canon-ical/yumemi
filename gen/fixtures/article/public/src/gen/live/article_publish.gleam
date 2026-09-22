@@ -3,6 +3,9 @@
 import framework/front/live
 import framework/spec
 import gen/out/article_publish
+import gleam/dynamic.{type Dynamic}
+import gleam/dynamic/decode
+import gleam/json
 import gleam/list
 import gleam/option.{None, Some}
 import lustre/effect.{type Effect}
@@ -86,7 +89,30 @@ fn validate_field(
   }
 }
 
-fn send(_args: Args) -> Effect(Event) {
-  effect.none()
-}
+@external(javascript, "./transport_ffi.mjs", "send")
+fn transport_send(
+  method: String,
+  path: String,
+  body: json.Json,
+  on_ok: fn(Dynamic) -> Nil,
+  on_error: fn(Nil) -> Nil,
+) -> Nil
 
+fn send(args: Args) -> Effect(Event) {
+  effect.from(fn(dispatch) {
+    transport_send(
+      "POST",
+      "/api/articles/" <> args.slug <> "/publish",
+      json.object([
+    #("slug", json.string(args.slug)),
+  ]),
+      fn(value) {
+        case decode.run(value, article_publish.decoder()) {
+          Ok(out) -> dispatch(live.Done(Ok(out)))
+          Error(_) -> dispatch(live.Done(Error(Nil)))
+        }
+      },
+      fn(_unit) { dispatch(live.Done(Error(Nil))) },
+    )
+  })
+}
