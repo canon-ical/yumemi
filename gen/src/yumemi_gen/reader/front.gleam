@@ -21,7 +21,10 @@ pub type Error {
 pub type Front {
   Front(
     face: String,
+    package_name: String,
+    warn_missing_shell: Bool,
     layout: Layout,
+    shell: Shell,
     pages: List(Page),
     blocks: List(Block),
     components: List(Component),
@@ -29,6 +32,18 @@ pub type Front {
     widget_keys: List(String),
     services: List(String),
     violations: List(Violation),
+  )
+}
+
+pub type Shell {
+  Shell(
+    lang: String,
+    title: String,
+    background: String,
+    background_image: String,
+    text: String,
+    accent: String,
+    present: Bool,
   )
 }
 
@@ -49,6 +64,7 @@ pub type Page {
     url: String,
     of: Option(String),
     layout: Option(String),
+    theme: Option(String),
     sp: Option(Frame),
     pc: Option(Frame),
     tablet: Option(Frame),
@@ -112,10 +128,30 @@ pub type Violation {
 pub fn read(
   face: String,
   units: List(Unit),
+  services: List(model.Service),
+) -> Result(Front, Error) {
+  read_with_package_and_warning(face, face, units, services, False)
+}
+
+pub fn read_with_package(
+  face: String,
+  package_name: String,
+  units: List(Unit),
+  services: List(model.Service),
+) -> Result(Front, Error) {
+  read_with_package_and_warning(face, package_name, units, services, True)
+}
+
+fn read_with_package_and_warning(
+  face: String,
+  package_name: String,
+  units: List(Unit),
   _services: List(model.Service),
+  warn_missing_shell: Bool,
 ) -> Result(Front, Error) {
   use layout_unit <- result.try(find_unit(units, "layout"))
   use layout <- result.try(parse_layout(face, layout_unit))
+  let shell = shell_from_units(units, package_name)
   let pages =
     units
     |> list.filter(fn(unit) { string.starts_with(unit.path, "pages/") })
@@ -142,7 +178,10 @@ pub fn read(
     )
   Ok(Front(
     face: face,
+    package_name: package_name,
+    warn_missing_shell: warn_missing_shell,
     layout: layout,
+    shell: shell,
     pages: pages,
     blocks: blocks,
     components: components,
@@ -156,6 +195,7 @@ pub fn read(
 /// model に対する停止診断。検査はここに集め、emit は呼ばない。
 pub fn notes(front: Front, services: List(model.Service)) -> List(stop.Note) {
   list.flatten([
+    shell_notes(front),
     violation_notes(front.face, front.violations),
     frame_notes(
       front.face,
@@ -177,6 +217,61 @@ pub fn notes(front: Front, services: List(model.Service)) -> List(stop.Note) {
     layout_nested_notes(front.face, front.layout),
     unknown_service_notes(front.face, front.services, services),
   ])
+}
+
+fn shell_from_units(units: List(Unit), package_name: String) -> Shell {
+  case list.find(units, fn(unit) { unit.path == "shell" }) {
+    Error(_) -> Shell(
+      lang: "ja",
+      title: package_name,
+      background: "#FAF7F0",
+      background_image: "none",
+      text: "#3D2419",
+      accent: "#A93632",
+      present: False,
+    )
+    Ok(unit) -> {
+      let module = g.in_order(unit.module)
+      let theme = public_named_constant(module, "theme")
+      Shell(
+        lang: constant_string(module, "lang", "ja"),
+        title: constant_string(module, "title", package_name),
+        background: theme_string(theme, "background", "#FAF7F0"),
+        background_image: theme_string(theme, "background_image", "none"),
+        text: theme_string(theme, "text", "#3D2419"),
+        accent: theme_string(theme, "accent", "#A93632"),
+        present: True,
+      )
+    }
+  }
+}
+
+fn constant_string(module: glance.Module, name: String, fallback: String) -> String {
+  public_named_constant(module, name)
+  |> option.then(fn(constant) { g.string_value(constant.value) })
+  |> option.unwrap(fallback)
+}
+
+fn theme_string(
+  theme: Option(glance.Constant),
+  label: String,
+  fallback: String,
+) -> String {
+  theme
+  |> option.then(fn(constant) { g.labelled(constant.value, label) })
+  |> option.then(g.string_value)
+  |> option.unwrap(fallback)
+}
+
+fn shell_notes(front: Front) -> List(stop.Note) {
+  case front.warn_missing_shell, front.shell.present {
+    False, _ -> []
+    True, True -> []
+    _, False -> [stop.Note(
+      class: stop.Warning,
+      text: front.face <> "/src/shell.gleam: 無いので既定値を使う",
+    )]
+  }
 }
 
 fn find_unit(units: List(Unit), path: String) -> Result(Unit, Error) {
@@ -212,6 +307,7 @@ fn parse_page(unit: Unit) -> Result(Page, Nil) {
             url: page_url(unit.path),
             of: option_service(g.labelled(constant.value, "of")),
             layout: option_name(g.labelled(constant.value, "layout")),
+            theme: option_string_name(g.labelled(constant.value, "theme")),
             sp: frame_field(constant.value, "sp", "sp", unit.path),
             pc: frame_field(constant.value, "pc", "pc", unit.path),
             tablet: frame_field(constant.value, "tablet", "tablet", unit.path),
@@ -913,6 +1009,12 @@ fn option_name(value: Option(glance.Expression)) -> Option(String) {
   value
   |> option_value_option
   |> option.then(g.ctor_name)
+}
+
+fn option_string_name(value: Option(glance.Expression)) -> Option(String) {
+  value
+  |> option_value_option
+  |> option.then(g.string_value)
 }
 
 fn option_value(expression: glance.Expression) -> Option(glance.Expression) {

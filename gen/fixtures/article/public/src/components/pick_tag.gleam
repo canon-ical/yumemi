@@ -41,6 +41,18 @@ pub fn view(it: article_create.State) -> el.Element(article_create.Event) {
 
 pub fn app() -> lustre.App(article_list.Out, article_create.State, article_create.Event) {
   lustre.component(article_create.init, article_create.update, view, [
+    component.on_attribute_change("slug", fn(value) {
+      Ok(front_live.Set(article_create.Slug, value))
+    }),
+    component.on_attribute_change("title", fn(value) {
+      Ok(front_live.Set(article_create.Title, value))
+    }),
+    component.on_attribute_change("body", fn(value) {
+      Ok(front_live.Set(article_create.Body, value))
+    }),
+    component.on_attribute_change("category", fn(value) {
+      Ok(front_live.Set(article_create.Category, value))
+    }),
     component.on_attribute_change("selected", fn(value) {
       Ok(front_live.Set(article_create.Tags, value))
     }),

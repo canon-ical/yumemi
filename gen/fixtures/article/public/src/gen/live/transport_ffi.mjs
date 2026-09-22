@@ -1,4 +1,4 @@
-// GENERATED from public/src/components/*.gleam and src/entry.gleam [sha256:f55448eb8a79] — 手で編集しない
+// GENERATED from public/src/components/*.gleam and src/entry.gleam [sha256:4f2097e4dd4f] — 手で編集しない
 export function send(method, path, body, onOk, onError) {
   fetch(path, {
     method,

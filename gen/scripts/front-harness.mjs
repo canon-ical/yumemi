@@ -46,6 +46,13 @@ export function prepareFrontScratch(label) {
     ),
     path.join(work, "public/_yumemi/client.mjs"),
   );
+  fs.copyFileSync(
+    path.join(
+      genDir,
+      "fixtures/article/public/priv/static/_yumemi/style.css",
+    ),
+    path.join(work, "public/_yumemi/style.css"),
+  );
 
   const tomlPath = path.join(work, "gleam.toml");
   fs.writeFileSync(

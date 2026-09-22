@@ -795,7 +795,10 @@ pub fn every_file_carries_the_generated_header_test() {
         case string.ends_with(path, ".mjs") {
           True -> string.starts_with(found, "// GENERATED ") |> should.be_true
           False ->
-            string.starts_with(found, "//// GENERATED ") |> should.be_true
+            case string.ends_with(path, ".css") {
+              True -> string.starts_with(found, "/* GENERATED ") |> should.be_true
+              False -> string.starts_with(found, "//// GENERATED ") |> should.be_true
+            }
         }
     }
   })

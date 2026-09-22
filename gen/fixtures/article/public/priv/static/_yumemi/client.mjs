@@ -1,4 +1,4 @@
-// GENERATED from public/src/components/*.gleam and src/entry.gleam [sha256:f55448eb8a79] — 手で編集しない
+// GENERATED from public/src/components/*.gleam and src/entry.gleam [sha256:4f2097e4dd4f] — 手で編集しない
 // public/build/dev/javascript/prelude.mjs
 var CustomType = class {
   withFields(fields) {
@@ -619,6 +619,23 @@ function append_loop(loop$first, loop$second) {
 }
 function append(first, second) {
   return append_loop(reverse(first), second);
+}
+function flatten_loop(loop$lists, loop$acc) {
+  while (true) {
+    let lists = loop$lists;
+    let acc = loop$acc;
+    if (lists instanceof Empty) {
+      return reverse(acc);
+    } else {
+      let list4 = lists.head;
+      let further_lists = lists.tail;
+      loop$lists = further_lists;
+      loop$acc = reverse_and_prepend(list4, acc);
+    }
+  }
+}
+function flatten(lists) {
+  return flatten_loop(lists, List$Empty$const);
 }
 function fold2(loop$list, loop$initial, loop$fun) {
   while (true) {
@@ -5479,19 +5496,107 @@ var ReloadPage = class extends CustomType {
 };
 var After$ReloadPage$const = new ReloadPage();
 
+// public/build/dev/javascript/yumemi/framework/spec_ffi.mjs
+function matches2(raw, pattern) {
+  return new RegExp(pattern, "u").test(raw);
+}
+var codepoints = (raw) => Array.from(raw).length;
+function validInteger(raw, min2, max2) {
+  if (!/^-?(?:0|[1-9][0-9]*)$/.test(raw)) return false;
+  const n = Number(raw);
+  return Number.isSafeInteger(n) && n >= min2 && n <= max2;
+}
+function validUrl(raw) {
+  try {
+    const u = new URL(raw);
+    return ["http:", "https:"].includes(u.protocol) && !!u.hostname && !u.username && !u.password;
+  } catch {
+    return false;
+  }
+}
+
 // public/build/dev/javascript/yumemi/framework/spec.mjs
 var Uuid = class extends CustomType {
 };
 var Spec$Uuid$const = new Uuid();
+var Pattern = class extends CustomType {
+  constructor(min2, max2, regex) {
+    super();
+    this.min = min2;
+    this.max = max2;
+    this.regex = regex;
+  }
+};
+var Text2 = class extends CustomType {
+  constructor(min2, max2) {
+    super();
+    this.min = min2;
+    this.max = max2;
+  }
+};
 var Markdown = class extends CustomType {
 };
 var Spec$Markdown$const = new Markdown();
+var MarkdownText = class extends CustomType {
+  constructor(min2, max2) {
+    super();
+    this.min = min2;
+    this.max = max2;
+  }
+};
+var Range = class extends CustomType {
+  constructor(min2, max2) {
+    super();
+    this.min = min2;
+    this.max = max2;
+  }
+};
 var Url = class extends CustomType {
 };
 var Spec$Url$const = new Url();
 var Invalid = class extends CustomType {
 };
 var Error$Invalid$const = new Invalid();
+function within(raw, min2, max2) {
+  let length2 = codepoints(raw);
+  return length2 >= min2 && length2 <= max2;
+}
+function validate(raw, spec) {
+  let _block;
+  if (spec instanceof Uuid) {
+    _block = matches2(
+      raw,
+      "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    );
+  } else if (spec instanceof Pattern) {
+    let min2 = spec.min;
+    let max2 = spec.max;
+    let regex = spec.regex;
+    _block = within(raw, min2, max2) && matches2(raw, regex);
+  } else if (spec instanceof Text2) {
+    let min2 = spec.min;
+    let max2 = spec.max;
+    _block = within(raw, min2, max2);
+  } else if (spec instanceof Markdown) {
+    _block = true;
+  } else if (spec instanceof MarkdownText) {
+    let min2 = spec.min;
+    let max2 = spec.max;
+    _block = within(raw, min2, max2);
+  } else if (spec instanceof Range) {
+    let min2 = spec.min;
+    let max2 = spec.max;
+    _block = validInteger(raw, min2, max2);
+  } else {
+    _block = validUrl(raw);
+  }
+  let valid = _block;
+  if (valid) {
+    return new Ok(raw);
+  } else {
+    return new Error(Error$Invalid$const);
+  }
+}
 
 // public/build/dev/javascript/public/gen/out/article_publish.mjs
 var Has = class extends CustomType {
@@ -5606,6 +5711,15 @@ var Args = class extends CustomType {
 var Slug = class extends CustomType {
 };
 var Field$Slug$const = new Slug();
+var Invalid2 = class extends CustomType {
+  constructor($0) {
+    super();
+    this[0] = $0;
+  }
+};
+var Failed = class extends CustomType {
+};
+var Error$Failed$const = new Failed();
 function init(given) {
   return [
     new State(new Args(""), given, Option$None$const, false),
@@ -5625,15 +5739,39 @@ function send3(args) {
             let out = $[0];
             return dispatch2(new Done(new Ok(out)));
           } else {
-            return dispatch2(new Done(new Error(void 0)));
+            return dispatch2(new Done(new Error(Error$Failed$const)));
           }
         },
         (_) => {
-          return dispatch2(new Done(new Error(void 0)));
+          return dispatch2(new Done(new Error(Error$Failed$const)));
         }
       );
     }
   );
+}
+function validate_field(field2, raw, constraint) {
+  let $ = validate(raw, constraint);
+  if ($ instanceof Ok) {
+    return List$Empty$const;
+  } else {
+    return toList([[field2, "invalid"]]);
+  }
+}
+function validate2(model) {
+  let errors = flatten(
+    toList([
+      validate_field(
+        Field$Slug$const,
+        model.args.slug,
+        new Pattern(1, 64, "^[a-z0-9]+(-[a-z0-9]+)*$")
+      )
+    ])
+  );
+  if (errors instanceof Empty) {
+    return new Ok(model.args);
+  } else {
+    return new Error(errors);
+  }
 }
 function update2(model, msg) {
   if (msg instanceof Set2) {
@@ -5647,10 +5785,25 @@ function update2(model, msg) {
     if ($) {
       return [model, none()];
     } else {
-      return [
-        new State(model.args, model.given, model.last, true),
-        send3(model.args)
-      ];
+      let $1 = validate2(model);
+      if ($1 instanceof Ok) {
+        let args = $1[0];
+        return [
+          new State(model.args, model.given, model.last, true),
+          send3(args)
+        ];
+      } else {
+        let errors = $1[0];
+        return [
+          new State(
+            model.args,
+            model.given,
+            new Some(new Error(new Invalid2(errors))),
+            model.waiting
+          ),
+          none()
+        ];
+      }
     }
   } else if (msg instanceof Given) {
     let given = msg[0];
@@ -5966,6 +6119,15 @@ var Field$Category$const = new Category2();
 var Tags = class extends CustomType {
 };
 var Field$Tags$const = new Tags();
+var Invalid3 = class extends CustomType {
+  constructor($0) {
+    super();
+    this[0] = $0;
+  }
+};
+var Failed2 = class extends CustomType {
+};
+var Error$Failed$const2 = new Failed2();
 function init2(given) {
   return [
     new State(
@@ -6001,15 +6163,49 @@ function send4(args) {
             let out = $[0];
             return dispatch2(new Done(new Ok(out)));
           } else {
-            return dispatch2(new Done(new Error(void 0)));
+            return dispatch2(new Done(new Error(Error$Failed$const2)));
           }
         },
         (_) => {
-          return dispatch2(new Done(new Error(void 0)));
+          return dispatch2(new Done(new Error(Error$Failed$const2)));
         }
       );
     }
   );
+}
+function validate_field2(field2, raw, constraint) {
+  let $ = validate(raw, constraint);
+  if ($ instanceof Ok) {
+    return List$Empty$const;
+  } else {
+    return toList([[field2, "invalid"]]);
+  }
+}
+function validate3(model) {
+  let errors = flatten(
+    toList([
+      validate_field2(
+        Field$Slug$const2,
+        model.args.slug,
+        new Pattern(1, 64, "^[a-z0-9]+(-[a-z0-9]+)*$")
+      ),
+      validate_field2(
+        Field$Title$const,
+        model.args.title,
+        new Text2(1, 120)
+      ),
+      validate_field2(
+        Field$Body$const,
+        model.args.body,
+        Spec$Markdown$const
+      )
+    ])
+  );
+  if (errors instanceof Empty) {
+    return new Ok(model.args);
+  } else {
+    return new Error(errors);
+  }
 }
 function update3(model, msg) {
   if (msg instanceof Set2) {
@@ -6120,10 +6316,25 @@ function update3(model, msg) {
     if ($) {
       return [model, none()];
     } else {
-      return [
-        new State(model.args, model.given, model.last, true),
-        send4(model.args)
-      ];
+      let $1 = validate3(model);
+      if ($1 instanceof Ok) {
+        let args = $1[0];
+        return [
+          new State(model.args, model.given, model.last, true),
+          send4(args)
+        ];
+      } else {
+        let errors = $1[0];
+        return [
+          new State(
+            model.args,
+            model.given,
+            new Some(new Error(new Invalid3(errors))),
+            model.waiting
+          ),
+          none()
+        ];
+      }
     }
   } else if (msg instanceof Given) {
     let given = msg[0];
@@ -6185,6 +6396,38 @@ function app2() {
     update3,
     view2,
     toList([
+      on_attribute_change(
+        "slug",
+        (value2) => {
+          return new Ok(
+            new Set2(Field$Slug$const2, value2)
+          );
+        }
+      ),
+      on_attribute_change(
+        "title",
+        (value2) => {
+          return new Ok(
+            new Set2(Field$Title$const, value2)
+          );
+        }
+      ),
+      on_attribute_change(
+        "body",
+        (value2) => {
+          return new Ok(
+            new Set2(Field$Body$const, value2)
+          );
+        }
+      ),
+      on_attribute_change(
+        "category",
+        (value2) => {
+          return new Ok(
+            new Set2(Field$Category$const, value2)
+          );
+        }
+      ),
       on_attribute_change(
         "selected",
         (value2) => {

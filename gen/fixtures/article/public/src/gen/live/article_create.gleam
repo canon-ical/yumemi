@@ -1,4 +1,4 @@
-//// GENERATED from src/components/pick_tag.gleam [sha256:0e0795e35003] — 手で編集しない
+//// GENERATED from src/components/pick_tag.gleam [sha256:d914ac89b73a] — 手で編集しない
 
 import framework/front/live
 import framework/spec
@@ -30,7 +30,10 @@ pub type Field {
   Tags
 }
 
-pub type Error = Nil
+pub type Error {
+  Invalid(List(#(Field, String)))
+  Failed
+}
 
 pub type State = live.State(Args, article_list.Out, article_create.Out, Error)
 
@@ -79,10 +82,14 @@ pub fn update(model: State, msg: Event) -> #(State, Effect(Event)) {
     live.Send ->
       case model.waiting {
         True -> #(model, effect.none())
-        False -> #(
-          live.State(..model, waiting: True),
-          send(model.args),
-        )
+        False ->
+          case validate(model) {
+            Error(errors) -> #(
+              live.State(..model, last: Some(Error(Invalid(errors)))),
+              effect.none(),
+            )
+            Ok(args) -> #(live.State(..model, waiting: True), send(args))
+          }
       }
     live.Given(given) -> #(
       live.State(..model, given: given),
@@ -145,10 +152,10 @@ fn send(args: Args) -> Effect(Event) {
       fn(value) {
         case decode.run(value, article_create.decoder()) {
           Ok(out) -> dispatch(live.Done(Ok(out)))
-          Error(_) -> dispatch(live.Done(Error(Nil)))
+          Error(_) -> dispatch(live.Done(Error(Failed)))
         }
       },
-      fn(_unit) { dispatch(live.Done(Error(Nil))) },
+      fn(_unit) { dispatch(live.Done(Error(Failed))) },
     )
   })
 }

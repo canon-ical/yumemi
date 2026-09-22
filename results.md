@@ -635,3 +635,33 @@ base `/home/yumemism/.codex-agents/runs/niekawa-20260922-061417-3399503-22265/ba
 ### 鷹野宛
 
 musearch 本体には触れていない。入力は指定 snapshot、出力と一時 build は `gen/_out` / `/tmp` のみ。fixture back は変更していない。
+
+## 巡 9(段 D2・完了)
+
+### 状態
+
+- 束1: live.Send を validate 経由に変更。Invalid/Failed を生成。
+- 束2: 面の shell reader と既定値を追加。fixture の shell.gleam を追加。
+- 束3: article_read.Out に PageTheme/theme を追加。生成 load/page に render・theme を追加。
+- 束4: 生成物 `src/gen/shell.mjs` と page/layout Service decoder を追加。
+- 束5: SSR 用 grid CSS と `priv/static/_yumemi/style.css` を生成。
+- 束6: verify harness を生成 shell entry + APP/SVELTE stub に張り替え。手書き worker/ffi を削除。
+
+### DDL
+
+無し。migration / schema / staging / production には触れていない。
+
+### 検証
+
+- root `gleam build`: exit 0。既存 `src/framework/secret.gleam` warning 1件。`build/d2-final-root-build.txt`
+- `cd gen && gleam test`: **123 passed, no failures**。`gen/build/d2-final-gen-test.txt`
+- fixture generator: exit 0 / **79 file**。front src **17 file**、static **2 file**、生成結果との差分0。`gen/build/d2-final-generate.txt`
+- fixture public build: exit 0、`error:` 0件。`gen/build/d2-final-public-build.txt`
+- verify SSR: **ALL PASS**（SVELTE fallback、NO-JS、INITIAL valid JSON、ISLAND `いいね -> ❤ 13`、SELECTED JSON、RELOAD 1回）。`gen/build/d2-final-verify-ssr.txt`
+- verify isolate: **ALL PASS**（40 requests、style長2228、混入なし）。`gen/build/d2-final-verify-isolate.txt`
+
+### 連動した back 生成物
+
+- `public/src/gen/out/article_read.gleam`: source の Out/PageTheme 変更を反映。
+- `public/src/gen/api.gleam`、`service.gleam`、live transport: 入力 hash の追随。
+- 他の back Service / entity / db は変更していない。

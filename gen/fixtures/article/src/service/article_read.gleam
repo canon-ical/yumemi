@@ -11,6 +11,7 @@ import gen/face.{type Face, Admin, Public}
 import gen/reads/article_read as reads
 import gen/root/article_read.{type Actor, type Root, type Service, Service}
 import gen/types/slug.{type Slug}
+import gleam/option.{type Option, None}
 
 pub const effect: Effect = Read
 
@@ -20,12 +21,22 @@ pub type Args {
   Args(slug: Slug)
 }
 
+pub type PageTheme {
+  PageTheme(
+    background: Option(String),
+    background_image: Option(String),
+    text: Option(String),
+    accent: Option(String),
+  )
+}
+
 /// 返す形。ここが入口の契約(JSON / MCP の output schema)の正本になる。
 pub type Out {
   Out(
     article: article.Article,
     category: category.Category,
     tags: List(tag.Tag),
+    theme: Option(PageTheme),
   )
 }
 
@@ -50,5 +61,5 @@ pub const service: Service(Args, Out, Error) = Service(
 pub fn logic(_by: Actor, it: Root, _args: Args) -> Step(Out, Error, Start) {
   use category <- reads.to_category(it)
   use tags <- reads.to_tags(it)
-  step.done(Out(article: it.article, category: category, tags: tags))
+  step.done(Out(article: it.article, category: category, tags: tags, theme: None))
 }

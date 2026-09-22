@@ -4,6 +4,7 @@ import framework/front/css
 import framework/front/el
 import framework/front/sketch_css
 import gen/out/article_read
+import gleam/option.{None}
 import lustre/attribute
 import sketch/lustre/element/html
 
@@ -22,6 +23,7 @@ pub const sample: In = article_read.Out(
   ),
   category: article_read.Category(name: "news"),
   tags: [article_read.Tag(name: "fixture")],
+  theme: None,
 )
 
 const card: List(css.Style) = [
@@ -59,6 +61,10 @@ pub fn view(it: In) -> el.Element(Nil) {
         attribute.attribute("slug", it.article.slug),
       ]),
       el.island("pick-tag", [
+        attribute.attribute("slug", "article"),
+        attribute.attribute("title", "本日の記事"),
+        attribute.attribute("body", "夜のシフトが得意な新人です。よろしくお願いします。"),
+        attribute.attribute("category", "news"),
         attribute.attribute("tags", "fixture,gleam,cloudflare"),
         attribute.attribute("selected", "fixture"),
       ]),

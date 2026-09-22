@@ -15,6 +15,15 @@ let worker;
 try {
   worker = await startFrontWorker(work, 8792);
 
+  const fallbackResponse = await fetch(`${worker.baseUrl}/not-a-generated-route`);
+  const fallbackBody = await fallbackResponse.text();
+  assert(fallbackResponse.status === 200, `SVELTE fallback status: ${fallbackResponse.status}`);
+  assert(
+    fallbackBody.includes("SVELTE fallback: /not-a-generated-route"),
+    `SVELTE fallback body: ${fallbackBody}`,
+  );
+  console.log("SVELTE FALLBACK: PASS");
+
   const noJsBrowser = await chromium.launch();
   const noJsContext = await noJsBrowser.newContext({ javaScriptEnabled: false });
   const noJsPage = await noJsContext.newPage();

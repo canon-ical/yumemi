@@ -1,4 +1,4 @@
-//// GENERATED from src/entry.gleam [sha256:95073a5c7962] — 手で編集しない
+//// GENERATED from src/entry.gleam [sha256:b388397e8c94] — 手で編集しない
 
 import gen/service
 

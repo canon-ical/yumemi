@@ -51,7 +51,7 @@ pub fn emit(
     })
   let type_units = back_type_units(app, back_units, hashes)
   let live = live_targets(model_.components, app.services)
-  let decoder_services =
+  let live_decoder_services =
     live
     |> list.flat_map(fn(target) {
       let #(service, component) = target
@@ -66,6 +66,23 @@ pub fn emit(
         None -> []
       })
     })
+    |> list.unique
+  let page_decoder_services =
+    model_.pages
+    |> list.flat_map(fn(page) {
+      list.append(
+        layout_sources(model_.layout, model_.blocks, app.services),
+        page_sources(page, model_.blocks, app.services),
+      )
+      |> list.filter_map(fn(source) {
+        case source.type_name == "Out" {
+          True -> Ok(source.service)
+          False -> Error(Nil)
+        }
+      })
+    })
+  let decoder_services =
+    list.append(live_decoder_services, page_decoder_services)
     |> list.unique
   let files = [
     File(
@@ -87,6 +104,14 @@ pub fn emit(
     File(
       path: face_name <> "/src/gen/api.gleam",
       text: api_text(face_name, app, hashes),
+    ),
+    File(
+      path: face_name <> "/src/gen/shell.mjs",
+      text: shell_text(app, package, model_, hashes),
+    ),
+    File(
+      path: face_name <> "/priv/static/_yumemi/style.css",
+      text: style_text(package, model_),
     ),
   ]
   let out_files =
@@ -398,7 +423,10 @@ fn live_text(
   <> "\n"
   <> field_type_text(service.args)
   <> "\n"
-  <> "pub type Error = Nil\n\n"
+  <> "pub type Error {\n"
+  <> "  Invalid(List(#(Field, String)))\n"
+  <> "  Failed\n"
+  <> "}\n\n"
   <> state_type_text(service, given_service)
   <> "\n"
   <> init_text(service, given_service)
@@ -535,10 +563,14 @@ fn update_text(
   <> "    live.Send ->\n"
   <> "      case model.waiting {\n"
   <> "        True -> #(model, effect.none())\n"
-  <> "        False -> #(\n"
-  <> "          live.State(..model, waiting: True),\n"
-  <> "          send(model.args),\n"
-  <> "        )\n"
+  <> "        False ->\n"
+  <> "          case validate(model) {\n"
+  <> "            Error(errors) -> #(\n"
+  <> "              live.State(..model, last: Some(Error(Invalid(errors)))),\n"
+  <> "              effect.none(),\n"
+  <> "            )\n"
+  <> "            Ok(args) -> #(live.State(..model, waiting: True), send(args))\n"
+  <> "          }\n"
   <> "      }\n"
   <> "    live.Given(given) -> #(\n"
   <> "      live.State(..model, given: given),\n"
@@ -659,10 +691,10 @@ fn send_text(
       <> service.module
       <> ".decoder()) {\n"
       <> "          Ok(out) -> dispatch(live.Done(Ok(out)))\n"
-      <> "          Error(_) -> dispatch(live.Done(Error(Nil)))\n"
+      <> "          Error(_) -> dispatch(live.Done(Error(Failed)))\n"
       <> "        }\n"
       <> "      },\n"
-      <> "      fn(_unit) { dispatch(live.Done(Error(Nil))) },\n"
+      <> "      fn(_unit) { dispatch(live.Done(Error(Failed))) },\n"
       <> "    )\n"
       <> "  })\n}\n"
   }
@@ -823,7 +855,13 @@ fn quoted(value: String) -> String {
 }
 
 type LoadSource {
-  LoadSource(key: String, name: String, service: String, optional: Bool)
+  LoadSource(
+    key: String,
+    name: String,
+    service: String,
+    type_name: String,
+    optional: Bool,
+  )
 }
 
 fn load_layout_file(
@@ -892,26 +930,46 @@ fn page_sources(
   blocks: List(reader_front.Block),
   services: List(model.Service),
 ) -> List(LoadSource) {
-  let root = case page.of {
-    Some(service) ->
-      case service_module(services, service) {
-        Some(module) -> [
-          LoadSource(
-            key: "service:" <> module,
-            name: module,
-            service: module,
-            optional: False,
-          ),
-        ]
-        None -> []
-      }
+  let root_service = page_root_service(page, services)
+  let root = case root_service {
+    Some(module) -> [
+      LoadSource(
+        key: "service:" <> module,
+        name: module,
+        service: module,
+        type_name: "Out",
+        optional: False,
+      ),
+    ]
     None -> []
   }
   let placements = case page.sp {
     Some(frame) -> frame.placements
     None -> []
   }
-  placement_sources(placements, blocks, services, root)
+  let sources = placement_sources(placements, blocks, services, root)
+  case page.theme, root_service {
+    Some(name), Some(module) -> list.append(sources, [
+      LoadSource(
+        key: "theme:" <> module <> ":" <> name,
+        name: name,
+        service: module,
+        type_name: "PageTheme",
+        optional: True,
+      ),
+    ])
+    _, _ -> sources
+  }
+}
+
+fn page_root_service(
+  page: reader_front.Page,
+  services: List(model.Service),
+) -> Option(String) {
+  case page.of {
+    Some(service) -> service_module(services, service)
+    None -> None
+  }
 }
 
 fn placement_sources(
@@ -933,6 +991,7 @@ fn placement_sources(
                   key: "service:" <> module,
                   name: module,
                   service: module,
+                  type_name: "Out",
                   optional: True,
                 ),
               )
@@ -947,6 +1006,7 @@ fn placement_sources(
                   key: "widget:" <> module <> ":" <> name,
                   name: name,
                   service: module,
+                  type_name: "Out",
                   optional: True,
                 ),
               )
@@ -1009,7 +1069,7 @@ fn block_source(
 }
 
 fn load_source_type(source: LoadSource) -> String {
-  let out = source.service <> ".Out"
+  let out = source.service <> "." <> source.type_name
   case source.optional {
     True -> "Option(" <> out <> ")"
     False -> out
@@ -1104,8 +1164,137 @@ fn load_page_text(
     <> "\n"
     <> page_load_function_text(layout_sources, page_sources)
     <> "\n"
+    <> page_render_text(front, page_sources)
+    <> "\n"
     <> page_view_text(app, units, front, page, layout_sources, page_sources)
   source_body
+}
+
+fn page_render_text(
+  front: reader_front.Front,
+  page_sources: List(LoadSource),
+) -> String {
+  let theme = theme_source(page_sources)
+  let theme_call = case theme {
+    Some(_) -> "theme_global(it.theme)"
+    None -> "theme_global()"
+  }
+  "pub fn render(it: Data) -> element.Element(Nil) {\n"
+  <> "  let assert Ok(stylesheet) =\n"
+  <> "    sketch_lustre.construct(fn(stylesheet) {\n"
+  <> "      sketch.global(stylesheet, "
+  <> theme_call
+  <> ")\n"
+  <> "    })\n"
+  <> "  let output = render_view(stylesheet, fn() { view(it) })\n"
+  <> "  let assert Ok(_) = sketch_lustre.teardown(stylesheet)\n"
+  <> "  output\n"
+  <> "}\n\n"
+  <> "fn render_view(\n"
+  <> "  stylesheet: sketch.StyleSheet,\n"
+  <> "  body: fn() -> element.Element(Nil),\n"
+  <> ") -> element.Element(Nil) {\n"
+  <> "  let styled_body =\n"
+  <> "    sketch_lustre.render(stylesheet, in: [sketch_lustre.node()], after: body)\n"
+  <> "\n"
+  <> "  raw_html.html([attribute.attribute(\"lang\", "
+  <> quoted(front.shell.lang)
+  <> ")], [\n"
+  <> "    raw_html.head([], [\n"
+  <> "      raw_html.meta([attribute.attribute(\"charset\", \"utf-8\")]),\n"
+  <> "      raw_html.title([], "
+  <> quoted(front.shell.title)
+  <> "),\n"
+  <> "    ]),\n"
+  <> "    raw_html.body([], [styled_body]),\n"
+  <> "  ])\n"
+  <> "}\n\n"
+  <> theme_global_text(front, theme)
+}
+
+fn theme_source(sources: List(LoadSource)) -> Option(LoadSource) {
+  list.find(sources, fn(source) { source.type_name == "PageTheme" })
+  |> option.from_result
+}
+
+fn theme_global_text(
+  front: reader_front.Front,
+  theme: Option(LoadSource),
+) -> String {
+  let defaults =
+    quoted(front.shell.background)
+    <> ", "
+    <> quoted(front.shell.background_image)
+    <> ", "
+    <> quoted(front.shell.text)
+    <> ", "
+    <> quoted(front.shell.accent)
+  case theme {
+    Some(source) ->
+      "fn theme_global(value: Option("
+      <> source.service
+      <> "."
+      <> source.type_name
+      <> ")) -> raw_css.Global {\n"
+      <> "  let #(background, background_image, text, accent) = case value {\n"
+      <> "    Some("
+      <> source.service
+      <> "."
+      <> source.type_name
+      <> "(background:, background_image:, text:, accent:)) -> #(\n"
+      <> "      option_string(background, "
+      <> quoted(front.shell.background)
+      <> "),\n"
+      <> "      option_background(background_image),\n"
+      <> "      option_string(text, "
+      <> quoted(front.shell.text)
+      <> "),\n"
+      <> "      option_string(accent, "
+      <> quoted(front.shell.accent)
+      <> "),\n"
+      <> "    )\n"
+      <> "    None -> #("
+      <> defaults
+      <> ")\n"
+      <> "  }\n\n"
+      <> theme_global_body()
+      <> "}\n\n"
+      <> option_string_text()
+      <> "\n"
+      <> option_background_text()
+    None ->
+      "fn theme_global() -> raw_css.Global {\n"
+      <> "  let #(background, background_image, text, accent) = #("
+      <> defaults
+      <> ")\n\n"
+      <> theme_global_body()
+      <> "}\n"
+  }
+}
+
+fn theme_global_body() -> String {
+  "  raw_css.global(\"body\", [\n"
+  <> "    raw_css.property(\"--bg\", background),\n"
+  <> "    raw_css.property(\"--bg-image\", background_image),\n"
+  <> "    raw_css.property(\"--text\", text),\n"
+  <> "    raw_css.property(\"--accent\", accent),\n"
+  <> "  ])\n"
+}
+
+fn option_string_text() -> String {
+  "fn option_string(value: Option(String), default: String) -> String {\n"
+  <> "  case value {\n"
+  <> "    Some(value) -> value\n"
+  <> "    None -> default\n"
+  <> "  }\n}\n"
+}
+
+fn option_background_text() -> String {
+  "fn option_background(value: Option(String)) -> String {\n"
+  <> "  case value {\n"
+  <> "    Some(value) -> value\n"
+  <> "    None -> \"none\"\n"
+  <> "  }\n}\n"
 }
 
 fn import_gap(imports: String) -> String {
@@ -1126,6 +1315,10 @@ fn load_imports(
     "gleam/list",
     "gleam/option.{type Option, None, Some}",
     "lustre/attribute",
+    "lustre/element/html as raw_html",
+    "sketch",
+    "sketch/css as raw_css",
+    "sketch/lustre as sketch_lustre",
     "sketch/lustre/element",
     "sketch/lustre/element/html",
     "style",
@@ -1891,6 +2084,653 @@ fn api_text(face_name: String, app: model.App, hashes: hash.Hashes) -> String {
   <> "\n]\n"
 }
 
+fn shell_text(
+  app: model.App,
+  package: face.Package,
+  front: reader_front.Front,
+  hashes: hash.Hashes,
+) -> String {
+  let decoder_services = shell_services(app, front)
+  let source_hash =
+    source_hash(package.units, fn(unit) {
+      unit.path == "layout"
+        || unit.path == "shell"
+        || string.starts_with(unit.path, "pages/")
+    })
+  js_header(
+    package.name <> "/src/{gen/route.gleam,gen/load/**,pages/**,layout.gleam,shell.gleam}",
+    digest.short(hash.entry(hashes) <> source_hash),
+  )
+  <> "\n\n"
+  <> shell_imports(decoder_services, front)
+  <> "\n\n"
+  <> shell_page_tables(app, front)
+  <> "\n"
+  <> shell_decoder_text(decoder_services)
+  <> "\n"
+  <> shell_runtime_text(front.components != [])
+}
+
+fn shell_imports(
+  services: List(model.Service),
+  front: reader_front.Front,
+) -> String {
+  let base = [
+    "import {Some, Option$None$const} from \"../../gleam_stdlib/gleam/option.mjs\";",
+    "import {Ok} from \"../gleam.mjs\";",
+    "import {run as decodeRun} from \"../../gleam_stdlib/gleam/dynamic/decode.mjs\";",
+    "import {to_document_string} from \"../../lustre/lustre/element.mjs\";",
+    "import * as frontCss from \"../../yumemi/framework/front/css.mjs\";",
+    "import * as api from \"./api.mjs\";",
+    "import * as layoutDefinition from \"../layout.mjs\";",
+    "import * as route from \"./route.mjs\";",
+    "import * as service from \"./service.mjs\";",
+  ]
+  let outs =
+    services
+    |> list.map(fn(service) {
+      "import * as out_"
+      <> service.module
+      <> " from \"./out/"
+      <> service.module
+      <> ".mjs\";"
+    })
+  let pages =
+    front.pages
+    |> list.index_map(fn(page, index) {
+      [
+        "import * as pageDefinition"
+          <> int.to_string(index)
+          <> " from \"../"
+          <> page.module
+          <> ".mjs\";",
+        "import * as pageLoader"
+          <> int.to_string(index)
+          <> " from \"./load/"
+          <> load_page_module_path(page.module)
+          <> ".mjs\";",
+      ]
+    })
+    |> list.flatten
+  list.append(base, list.append(outs, pages))
+  |> list.unique
+  |> list.sort(string.compare)
+  |> string.join("\n")
+}
+
+fn shell_services(
+  app: model.App,
+  front: reader_front.Front,
+) -> List(model.Service) {
+  let from_pages =
+    front.pages
+    |> list.flat_map(fn(page) {
+      list.append(
+        layout_sources(front.layout, front.blocks, app.services),
+        page_sources(page, front.blocks, app.services),
+      )
+      |> list.map(fn(source) { source.service })
+    })
+  let from_components =
+    front.components
+    |> list.flat_map(fn(component) {
+      list.append(
+        component.calls,
+        list.map(component.reloads, fn(reload) { reload.1 }),
+      )
+      |> list.filter_map(fn(variant) {
+        case service_for(app.services, variant) {
+          Some(service) -> Ok(service.module)
+          None -> Error(Nil)
+        }
+      })
+    })
+  let names = list.unique(list.append(from_pages, from_components))
+  app.services
+  |> list.filter(fn(service) { list.contains(names, service.module) })
+}
+
+fn shell_page_tables(
+  app: model.App,
+  front: reader_front.Front,
+) -> String {
+  let page_rows =
+    front.pages
+    |> list.index_map(fn(page, index) {
+      "  ["
+      <> quoted(reader_front.route_path(page.path))
+      <> ", pageDefinition"
+      <> int.to_string(index)
+      <> ".page],"
+    })
+    |> string.join("\n")
+  let spec_rows =
+    front.pages
+    |> list.index_map(fn(page, index) {
+      let sources = list.append(
+        layout_sources(front.layout, front.blocks, app.services),
+        page_sources(page, front.blocks, app.services),
+      )
+      "  ["
+      <> quoted(reader_front.route_path(page.path))
+      <> ", {\n"
+      <> "    loader: pageLoader"
+      <> int.to_string(index)
+      <> ",\n"
+      <> "    layout: layoutDefinition."
+      <> js_export_name(front.layout.name)
+      <> ",\n"
+      <> "    givens: [\n"
+      <> shell_given_rows(app, front)
+      <> "    ],\n"
+      <> "    sources: [\n"
+      <> shell_source_rows(sources)
+      <> "    ],\n"
+      <> "  }],"
+    })
+    |> string.join("\n")
+  "const pageRoutes = [...route.routes];\n"
+  <> "const pages = new Map([\n"
+  <> page_rows
+  <> "\n]);\n"
+  <> "const pageSpecs = new Map([\n"
+  <> spec_rows
+  <> "\n]);\n"
+}
+
+fn shell_given_rows(
+  app: model.App,
+  front: reader_front.Front,
+) -> String {
+  front.components
+  |> list.filter_map(fn(component) {
+    case component.reloads |> list.first |> option.from_result {
+      Some(reload) ->
+        case service_for(app.services, reload.1) {
+          Some(service) -> Ok(
+            "      { tag: "
+            <> quoted(component_tag(component))
+            <> ", service: service.Service$"
+            <> naming.pascal(service.module)
+            <> "$const, decoder: decode"
+            <> naming.pascal(service.module)
+            <> " },\n",
+          )
+          None -> Error(Nil)
+        }
+      None -> Error(Nil)
+    }
+  })
+  |> string.concat
+}
+
+fn js_export_name(name: String) -> String {
+  case name {
+    "public" -> "public$"
+    "private" -> "private$"
+    "default" -> "default$"
+    _ -> name
+  }
+}
+
+fn shell_source_rows(sources: List(LoadSource)) -> String {
+  sources
+  |> list.map(fn(source) {
+    case source.type_name == "PageTheme" {
+      True -> "      { theme: true },\n"
+      False -> {
+        let widget = case string.starts_with(source.key, "widget:") {
+          True -> ", widget: " <> quoted(source.name)
+          False -> ""
+        }
+        "      { service: service.Service$"
+        <> naming.pascal(source.service)
+        <> "$const, decoder: decode"
+        <> naming.pascal(source.service)
+        <> widget
+        <> ", optional: "
+        <> bool_text(source.optional)
+        <> ", root: "
+        <> bool_text(!source.optional)
+        <> " },\n"
+      }
+    }
+  })
+  |> string.concat
+}
+
+fn bool_text(value: Bool) -> String {
+  case value {
+    True -> "true"
+    False -> "false"
+  }
+}
+
+fn style_text(
+  package: face.Package,
+  front: reader_front.Front,
+) -> String {
+  let input_hash =
+    source_hash(package.units, fn(unit) { unit.path == "layout" })
+  "/* GENERATED from "
+  <> package.name
+  <> "/src/layout.gleam [sha256:"
+  <> input_hash
+  <> "] — 手で編集しない */\n"
+  <> static_grid_css(front.layout)
+}
+
+fn static_grid_css(layout: reader_front.Layout) -> String {
+  let sp_areas = frame_areas(layout.sp, [])
+  let pc_areas = frame_areas(layout.pc, sp_areas)
+  let tablet_areas = frame_areas(layout.tablet, sp_areas)
+  let extras =
+    list.append(
+      list.map(pc_areas, fn(area) { area.name }),
+      list.map(tablet_areas, fn(area) { area.name }),
+    )
+    |> list.unique
+    |> list.filter(fn(name) { !list.any(sp_areas, fn(area) { area.name == name }) })
+  let base_rules =
+    list.append(
+      list.map(sp_areas, fn(area) { static_area_rule(area, "normal") }),
+      list.filter_map(extras, fn(name) {
+        case list.find(pc_areas, fn(area) { area.name == name }) {
+          Ok(area) -> Ok(static_area_rule(area, "hidden"))
+          Error(_) ->
+            case list.find(tablet_areas, fn(area) { area.name == name }) {
+              Ok(area) -> Ok(static_area_rule(area, "hidden"))
+              Error(_) -> Error(Nil)
+            }
+        }
+      }),
+    )
+    |> string.join("\n")
+  let base =
+    "\n[data-yumemi-grid=\"layout\"] {\n"
+    <> "  display: grid;\n"
+    <> "  grid-template-columns: minmax(0, 1fr);\n"
+    <> "  grid-template-areas: "
+    <> static_grid_template_areas(sp_areas)
+    <> ";\n"
+    <> "  gap: 0;\n}\n"
+    <> base_rules
+    <> "\n"
+  let tablet = case layout.tablet {
+    Some(_) ->
+      static_media_block(
+        "tablet",
+        static_frame_body(tablet_areas, sp_areas, static_grid_template_areas(tablet_areas)),
+      )
+    None -> ""
+  }
+  let pc = case layout.pc {
+    Some(_) ->
+      static_media_block(
+        "pc",
+        static_frame_body(
+          pc_areas,
+          sp_areas,
+          static_pc_grid_template_areas(sp_areas, pc_areas),
+        ),
+      )
+    None -> ""
+  }
+  base <> tablet <> pc
+}
+
+fn frame_areas(
+  frame: Option(reader_front.Frame),
+  fallback: List(reader_front.Area),
+) -> List(reader_front.Area) {
+  case frame {
+    Some(value) -> value.areas
+    None -> fallback
+  }
+}
+
+fn static_grid_template_areas(areas: List(reader_front.Area)) -> String {
+  areas
+  |> list.map(fn(area) { "\"" <> area.name <> "\"" })
+  |> string.join(" ")
+}
+
+fn static_pc_grid_template_areas(
+  sp_areas: List(reader_front.Area),
+  pc_areas: List(reader_front.Area),
+) -> String {
+  let pc_only =
+    pc_areas
+    |> list.filter(fn(area) {
+      !list.any(sp_areas, fn(candidate) { candidate.name == area.name })
+    })
+    |> list.map(fn(area) { area.name })
+    |> list.unique
+  let columns = list.length(pc_only) + 1
+  sp_areas
+  |> list.index_map(fn(area, _index) {
+    let pc_index = static_area_index(pc_areas, area.name, 0)
+    let following = static_pc_following(pc_areas, pc_index + 1, pc_only)
+    let names = static_pad_names([area.name, ..following], columns, area.name)
+    "\"" <> string.join(names, " ") <> "\""
+  })
+  |> string.join(" ")
+}
+
+fn static_area_index(
+  areas: List(reader_front.Area),
+  wanted: String,
+  index: Int,
+) -> Int {
+  case areas {
+    [] -> -1
+    [area, ..rest] ->
+      case area.name == wanted {
+        True -> index
+        False -> static_area_index(rest, wanted, index + 1)
+      }
+  }
+}
+
+fn static_pc_following(
+  areas: List(reader_front.Area),
+  index: Int,
+  pc_only: List(String),
+) -> List(String) {
+  case areas {
+    [] -> []
+    [area, ..rest] ->
+      case index {
+        0 ->
+          case list.contains(pc_only, area.name) {
+            True -> [area.name, ..static_pc_following(rest, 0, pc_only)]
+            False -> []
+          }
+        _ -> static_pc_following(rest, index - 1, pc_only)
+      }
+  }
+}
+
+fn static_pad_names(names: List(String), wanted: Int, fill: String) -> List(String) {
+  case list.length(names) >= wanted {
+    True -> names
+    False -> static_pad_names(list.append(names, [fill]), wanted, fill)
+  }
+}
+
+fn static_frame_body(
+  areas: List(reader_front.Area),
+  base_areas: List(reader_front.Area),
+  template: String,
+) -> String {
+  let rules =
+    areas
+    |> list.map(fn(area) {
+      let visibility =
+        case list.any(base_areas, fn(candidate) { candidate.name == area.name }) {
+          True -> "normal"
+          False -> "visible"
+        }
+      static_area_rule(area, visibility)
+    })
+    |> string.join("\n")
+  "  [data-yumemi-grid=\"layout\"] {\n"
+  <> "    grid-template-columns: minmax(0, 1fr) minmax(12rem, 20rem);\n"
+  <> "    grid-template-areas: "
+  <> template
+  <> ";\n"
+  <> "  }\n"
+  <> rules
+}
+
+fn static_media_block(media: String, body: String) -> String {
+  let query = case media {
+    "tablet" -> "@media (min-width: 768px) and (max-width: 1023px)"
+    _ -> "@media (min-width: 1024px)"
+  }
+  query <> " {\n" <> body <> "\n}\n"
+}
+
+fn static_area_rule(
+  area: reader_front.Area,
+  visibility: String,
+) -> String {
+  let base = [
+    "[data-yumemi-grid=\"layout\"] > [data-yumemi-area=\""
+      <> area.name
+      <> "\"] {",
+    "  grid-area: " <> area.name <> ";",
+  ]
+  let visible = case visibility {
+    "hidden" -> ["  display: none;"]
+    "visible" -> ["  display: block;"]
+    _ -> []
+  }
+  let pin = case area.pin {
+    "Top" -> [
+      "  position: sticky;",
+      "  top: env(safe-area-inset-top);",
+      "  z-index: 3;",
+    ]
+    "Bottom" -> [
+      "  position: sticky;",
+      "  bottom: env(safe-area-inset-bottom);",
+      "  z-index: 3;",
+    ]
+    _ -> []
+  }
+  string.join(list.append(base, list.append(visible, list.append(pin, ["}"]))), "\n")
+}
+
+fn shell_decoder_text(services: List(model.Service)) -> String {
+  services
+  |> list.sort(fn(left, right) { string.compare(left.module, right.module) })
+  |> list.map(fn(service) {
+    "function decode"
+    <> naming.pascal(service.module)
+    <> "(raw) {\n"
+    <> "  const decoded = decodeRun(raw, out_"
+    <> service.module
+    <> ".decoder());\n"
+    <> "  if (!(decoded instanceof Ok)) throw new Error(\"invalid "
+    <> service.module
+    <> " response\");\n"
+    <> "  return decoded[0];\n"
+    <> "}\n"
+  })
+  |> string.concat
+}
+
+fn shell_runtime_text(include_client: Bool) -> String {
+  "function areaNames(areas) {\n"
+  <> "  return areas.map((area) => area.name);\n"
+  <> "}\n\n"
+  <> "function gridTemplateAreas(areas) {\n"
+  <> "  return areas.map((area) => '\"' + area.name + '\"').join(\" \");\n"
+  <> "}\n\n"
+  <> "function pcGridTemplateAreas(spAreas, pcAreas) {\n"
+  <> "  const spNames = new Set(areaNames(spAreas));\n"
+  <> "  const pcOnlyNames = new Set(pcAreas.filter((area) => !spNames.has(area.name)).map((area) => area.name));\n"
+  <> "  const columns = pcOnlyNames.size + 1;\n"
+  <> "  return spAreas.map((area) => {\n"
+  <> "    const row = [area.name];\n"
+  <> "    const pcIndex = pcAreas.findIndex((candidate) => candidate.name === area.name);\n"
+  <> "    let next = pcIndex + 1;\n"
+  <> "    while (next < pcAreas.length && pcOnlyNames.has(pcAreas[next].name)) {\n"
+  <> "      row.push(pcAreas[next].name);\n"
+  <> "      next += 1;\n"
+  <> "    }\n"
+  <> "    while (row.length < columns) row.push(area.name);\n"
+  <> "    return '\"' + row.join(\" \") + '\"';\n"
+  <> "  }).join(\" \");\n"
+  <> "}\n\n"
+  <> "function areaRule(area, visibility) {\n"
+  <> "  const rules = [\n"
+  <> "    '[data-yumemi-grid=\"layout\"] > [data-yumemi-area=\"' + area.name + '\"] {',\n"
+  <> "    '  grid-area: ' + area.name + ';',\n"
+  <> "  ];\n"
+  <> "  if (visibility === \"hidden\") rules.push(\"  display: none;\");\n"
+  <> "  if (visibility === \"visible\") rules.push(\"  display: block;\");\n"
+  <> "  if (frontCss.Pin$isTop(area.pin)) {\n"
+  <> "    rules.push(\"  position: sticky;\", \"  top: env(safe-area-inset-top);\", \"  z-index: 3;\");\n"
+  <> "  }\n"
+  <> "  if (frontCss.Pin$isBottom(area.pin)) {\n"
+  <> "    rules.push(\"  position: sticky;\", \"  bottom: env(safe-area-inset-bottom);\", \"  z-index: 3;\");\n"
+  <> "  }\n"
+  <> "  rules.push(\"}\");\n"
+  <> "  return rules.join(\"\\n\");\n"
+  <> "}\n\n"
+  <> "function frameValue(value, fallback) {\n"
+  <> "  return value instanceof Some ? value[0] : fallback;\n"
+  <> "}\n\n"
+  <> "function mediaBlock(media, body) {\n"
+  <> "  const query = media === \"tablet\"\n"
+  <> "    ? \"@media (min-width: 768px) and (max-width: 1023px)\"\n"
+  <> "    : \"@media (min-width: 1024px)\";\n"
+  <> "  return query + \" {\\n\" + body + \"\\n}\\n\";\n"
+  <> "}\n\n"
+  <> "function gridCssFromLayout(layout) {\n"
+  <> "  const spAreas = [...layout.sp.areas];\n"
+  <> "  const pcFrame = frameValue(layout.pc, {areas: spAreas});\n"
+  <> "  const tabletFrame = frameValue(layout.tablet, {areas: spAreas});\n"
+  <> "  const pcAreas = [...pcFrame.areas];\n"
+  <> "  const tabletAreas = [...tabletFrame.areas];\n"
+  <> "  const extras = [...pcAreas, ...tabletAreas].filter((area, index, all) =>\n"
+  <> "    all.findIndex((candidate) => candidate.name === area.name) === index &&\n"
+  <> "    !spAreas.some((candidate) => candidate.name === area.name),\n"
+  <> "  );\n"
+  <> "  const baseRules = [\n"
+  <> "    ...spAreas.map((area) => areaRule(area, \"normal\")),\n"
+  <> "    ...extras.map((area) => areaRule(area, \"hidden\")),\n"
+  <> "  ].join(\"\\n\");\n"
+  <> "  let css = \"\\n[data-yumemi-grid=\\\"layout\\\"] {\\n\"\n"
+  <> "    + \"  display: grid;\\n\"\n"
+  <> "    + \"  grid-template-columns: minmax(0, 1fr);\\n\"\n"
+  <> "    + \"  grid-template-areas: \" + gridTemplateAreas(spAreas) + \";\\n\"\n"
+  <> "    + \"  gap: 0;\\n}\\n\"\n"
+  <> "    + baseRules + \"\\n\";\n"
+  <> "  if (layout.tablet instanceof Some) {\n"
+  <> "    const tabletRules = tabletAreas.map((area) => areaRule(area, spAreas.some((candidate) => candidate.name === area.name) ? \"normal\" : \"visible\")).join(\"\\n\");\n"
+  <> "    css += mediaBlock(\"tablet\", \"  [data-yumemi-grid=\\\"layout\\\"] {\\n\"\n"
+  <> "      + \"    grid-template-columns: minmax(0, 1fr) minmax(12rem, 20rem);\\n\"\n"
+  <> "      + \"    grid-template-areas: \" + gridTemplateAreas(tabletAreas) + \";\\n  }\\n\"\n"
+  <> "      + tabletRules);\n"
+  <> "  }\n"
+  <> "  if (layout.pc instanceof Some) {\n"
+  <> "    const pcRules = pcAreas.map((area) => areaRule(area, spAreas.some((candidate) => candidate.name === area.name) ? \"normal\" : \"visible\")).join(\"\\n\");\n"
+  <> "    css += mediaBlock(\"pc\", \"  [data-yumemi-grid=\\\"layout\\\"] {\\n\"\n"
+  <> "      + \"    grid-template-columns: minmax(0, 1fr) minmax(12rem, 20rem);\\n\"\n"
+  <> "      + \"    grid-template-areas: \" + pcGridTemplateAreas(spAreas, pcAreas) + \";\\n  }\\n\"\n"
+  <> "      + pcRules);\n"
+  <> "  }\n"
+  <> "  return css;\n"
+  <> "}\n\n"
+  <> "function matchPage(pathname) {\n"
+  <> "  for (const pageRoute of pageRoutes) {\n"
+  <> "    const expected = pageRoute.path.split(\"/\");\n"
+  <> "    const actual = pathname.split(\"/\");\n"
+  <> "    if (expected.length !== actual.length) continue;\n"
+  <> "    const params = {};\n"
+  <> "    let matches = true;\n"
+  <> "    for (let index = 0; index < expected.length; index += 1) {\n"
+  <> "      const segment = expected[index];\n"
+  <> "      const value = actual[index];\n"
+  <> "      if (segment.startsWith(\":\")) params[segment.slice(1)] = decodeURIComponent(value);\n"
+  <> "      else if (segment !== value) matches = false;\n"
+  <> "    }\n"
+  <> "    if (matches && pages.has(pageRoute.path)) {\n"
+  <> "      return {path: pageRoute.path, definition: pages.get(pageRoute.path), spec: pageSpecs.get(pageRoute.path), params};\n"
+  <> "    }\n"
+  <> "  }\n"
+  <> "  return null;\n"
+  <> "}\n\n"
+  <> "function apiPathFor(serviceValue) {\n"
+  <> "  const entry = [...api.routes].find((item) => item.service === serviceValue);\n"
+  <> "  if (!entry) throw new Error(\"missing front API route\");\n"
+  <> "  return entry.path;\n"
+  <> "}\n\n"
+  <> "function widgetNameFor(definition, serviceValue) {\n"
+  <> "  const placement = [...definition.sp.placements].find((candidate) => candidate.of === serviceValue && candidate.name !== undefined);\n"
+  <> "  return placement?.name ?? null;\n"
+  <> "}\n\n"
+  <> "async function readFromApp(app, request, definition, serviceValue, params, sourceWidget) {\n"
+  <> "  const path = apiPathFor(serviceValue).replace(/:([A-Za-z0-9_]+)/g, (_, name) => encodeURIComponent(params[name] ?? \"\"));\n"
+  <> "  const target = new URL(path, request.url);\n"
+  <> "  const widgetName = sourceWidget ?? widgetNameFor(definition, serviceValue);\n"
+  <> "  if (widgetName !== null) target.searchParams.set(\"widget\", widgetName);\n"
+  <> "  return app.fetch(new Request(target, request));\n"
+  <> "}\n\n"
+  <> "function pageTheme(definition, root) {\n"
+  <> "  if (!(definition.theme instanceof Some)) return Option$None$const;\n"
+  <> "  return root[definition.theme[0]] ?? Option$None$const;\n"
+  <> "}\n\n"
+  <> "function failure(status, body) {\n"
+  <> "  return new Response(body, {status, headers: {\"content-type\": \"text/plain; charset=utf-8\"}});\n"
+  <> "}\n\n"
+  <> "async function renderPage(request, env, matched) {\n"
+  <> "  const values = [];\n"
+  <> "  let root = null;\n"
+  <> "  for (const source of matched.spec.sources) {\n"
+  <> "    if (source.theme) {\n"
+  <> "      values.push(pageTheme(matched.definition, root));\n"
+  <> "      continue;\n"
+  <> "    }\n"
+  <> "    const response = await readFromApp(env.APP, request, matched.definition, source.service, matched.params, source.widget);\n"
+  <> "    if (!response.ok) {\n"
+  <> "      if (response.status === 403) return failure(403, \"adult declaration required\");\n"
+  <> "      if (response.status === 404 && !source.root) { values.push(Option$None$const); continue; }\n"
+  <> "      if (response.status === 404) return failure(404, \"muse not found\");\n"
+  <> "      return failure(response.status, source.root ? \"root read failed\" : \"widget read failed\");\n"
+  <> "    }\n"
+  <> "    const decoded = source.decoder(await response.json());\n"
+  <> "    if (source.root) root = decoded;\n"
+  <> "    values.push(source.optional ? new Some(decoded) : decoded);\n"
+  <> "  }\n"
+  <> "  const givens = [];\n"
+  <> "  for (const given of matched.spec.givens) {\n"
+  <> "    const response = await readFromApp(env.APP, request, matched.definition, given.service, matched.params, null);\n"
+  <> "    if (!response.ok) continue;\n"
+  <> "    const raw = await response.json();\n"
+  <> "    given.decoder(raw);\n"
+  <> "    givens.push({tag: given.tag, raw});\n"
+  <> "  }\n"
+  <> "  const html = to_document_string(matched.spec.loader.render(matched.spec.loader.load(...values)));\n"
+  <> "  const withGivens = addGivenAttributes(html, givens);\n"
+  <> "  return new Response(htmlWithGridCss(withGivens, matched.spec.layout), {status: 200, headers: {\"content-type\": \"text/html; charset=utf-8\"}});\n"
+  <> "}\n\n"
+  <> "function addGivenAttributes(html, givens) {\n"
+  <> "  let output = html;\n"
+  <> "  for (const given of givens) {\n"
+  <> "    const marker = `<${given.tag} `;\n"
+  <> "    const encoded = JSON.stringify(given.raw).replaceAll(\"&\", \"&amp;\").replaceAll(\"\\\"\", \"&quot;\");\n"
+  <> "    output = output.replace(marker, `<${given.tag} data-yumemi-given=\"${encoded}\" `);\n"
+  <> "  }\n"
+  <> "  return output;\n"
+  <> "}\n\n"
+  <> "function htmlWithGridCss(html, layout) {\n"
+  <> "  const marker = \"<style>\";\n"
+  <> "  const offset = html.indexOf(marker);\n"
+  <> "  if (offset < 0) throw new Error(\"SSR stylesheet is missing\");\n"
+  <> "  const insertion = offset + marker.length;\n"
+  <> "  const rendered = html.slice(0, insertion) + gridCssFromLayout(layout) + html.slice(insertion);\n"
+  <> case include_client {
+    True ->
+      "  return rendered.replace(\"</head>\", '<script type=\"module\" src=\"/_yumemi/client.mjs\"></script></head>');\n"
+    False -> "  return rendered;\n"
+  }
+  <> "}\n\n"
+  <> "export default {\n"
+  <> "  async fetch(request, env) {\n"
+  <> "    const matched = matchPage(new URL(request.url).pathname);\n"
+  <> "    if (!matched) {\n"
+  <> "      if (env.SVELTE) return env.SVELTE.fetch(request);\n"
+  <> "      return failure(404, \"page not found\");\n"
+  <> "    }\n"
+  <> "    return renderPage(request, env, matched);\n"
+  <> "  },\n"
+  <> "};\n"
+}
+
 fn method_variant(method: String) -> String {
   naming.pascal(string.lowercase(method))
 }
@@ -2347,7 +3187,10 @@ fn variant_decoder(
   variant: glance.Variant,
 ) -> String {
   let constructor =
-    mapped_constructor(state, scope.module, type_name, variant.name)
+    case type_name {
+      "Row" -> row_constructor_name(state, last_segment(scope.module), variant.name)
+      _ -> mapped_constructor(state, scope.module, type_name, variant.name)
+    }
   case variant.fields {
     [] -> "decode.success(" <> constructor <> ")"
     [glance.UnlabelledVariantField(item)] ->

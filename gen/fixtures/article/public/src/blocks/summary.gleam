@@ -4,6 +4,7 @@ import framework/front/css
 import framework/front/el
 import framework/front/sketch_css
 import gen/out/article_read
+import gleam/option.{None}
 import sketch/lustre/element/html
 
 pub type In = article_read.Out
@@ -20,6 +21,7 @@ pub const sample: In = article_read.Out(
   ),
   category: article_read.Category(name: "本日の記事サマリー"),
   tags: [],
+  theme: None,
 )
 
 const card: List(css.Style) = [

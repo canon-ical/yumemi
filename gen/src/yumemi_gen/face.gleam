@@ -69,6 +69,34 @@ pub fn discover(
   Ok(Discovery(packages: packages, notes: selection.notes))
 }
 
+/// 面の出力ディレクトリ名と、gleam package の name は別物である。
+/// shell が無いときの title の既定値には manifest の name を使う。
+pub fn package_name(path: String) -> String {
+  let fallback = last_segment(path)
+  case simplifile.read(path <> "/gleam.toml") {
+    Error(_) -> fallback
+    Ok(text) ->
+      case
+        text
+        |> string.split("\n")
+        |> list.find_map(fn(line) {
+          let trimmed = string.trim(line)
+          case string.starts_with(trimmed, "name = \"") {
+            True ->
+              case string.split(trimmed, "\"") {
+                [_, value, ..] -> Ok(value)
+                _ -> Error(Nil)
+              }
+            False -> Error(Nil)
+          }
+        })
+      {
+        Ok(value) -> value
+        Error(_) -> fallback
+      }
+  }
+}
+
 /// filesystem を使わない発見。負例を source 文字列だけで検査する入口。
 pub fn select(
   entries: List(HttpEntry),
@@ -211,5 +239,12 @@ fn parent(path: String) -> String {
       parts
       |> list.take(length - 1)
       |> string.join("/")
+  }
+}
+
+fn last_segment(path: String) -> String {
+  case list.last(string.split(path, "/")) {
+    Ok(value) -> value
+    Error(_) -> path
   }
 }
