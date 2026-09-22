@@ -749,3 +749,41 @@ musearch 本体には触れていない。入力は指定 snapshot、出力と�
 - musearch の現物で検査 8 本を効かせるには `api/src/entry.gleam` に `pages: AllPages` と `api/gleam.toml` の依存窓の引き上げが要る(裁定 9)。
 - **`www/src/shell.gleam` 6 行を置く**(`muses/` も同型)── 置くまで警告 1 本が出続ける(裁定 10)。
 - `www/gleam.toml` に `sketch` / `sketch_lustre` の直接依存が無く、生成 `page.gleam` の build が notice を出す(本便の面 build で 56〜57 件)。
+
+# 指示 段F ── ゲート 2 の P0-1
+
+## DDL
+
+無し。migration / schema / staging / production / Hex / framework には触れていない。
+
+## 状態
+
+- branch `gen-6`、開始点 `ad0d6ba`。checkpoint は `bb8eadc`（先に落ちる検査）と `c1e4228`（SSR 修正）。最後にこの便の checkpoint を1本へ squashする。
+- `addGivenAttributes` の SSR だけを修正した。`replace(marker, () => ...)` に変え、`JSON.stringify` の escape を `&` → `"` → `<` の順にした。`indexOf` で文書順の位置を進め、同じ tag の未処理 island へ given を1対1で割り当て、既存 `data-yumemi-given` は飛ばす。island / given の数が合わなくても落とさない。
+- client 側の per-element given は未修正。現行 Lustre の `register` は `App(Nil, ...)` 固定で、`build/packages/lustre/src/lustre/runtime/client/component.ffi.mjs` の `customElements.define` は tag 単位に1回だけなので、framework API の変更が必要。P1 に積んだ。
+
+## 束0の再現
+
+- 修正前: `build/gen6-f-repro-before.txt`。同じ入力で `attributeClose: 86`、生の `<script>alert(document.domain)</script>` は `scriptOffset: 124`。属性の外へ escape 前のマークアップが出た。
+- 修正後: `build/gen6-f-repro-after.txt`。`attributeClose: 154`、`scriptOffset: -1`。出力 given は `$` をそのまま保持し、`<script>` は `&lt;script>` になった。
+- 同じ tag 2本の旧挙動は、先頭 island への属性二重挿入と2本目の属性欠落。`build/gen6-f-same-tag-before-after.txt` に修正前後を保存した。修正後は `GIVEN SAME TAG ISLANDS: PASS` で各1個、値の入れ違いなし。
+
+## 検証
+
+- `node gen/scripts/verify-front-given.mjs`: 修正前 `GIVEN ESCAPE: FAIL`（`build/gen6-f-given-before.txt`）→ 修正後 `GIVEN ESCAPE: PASS`、`GIVEN SAME TAG ISLANDS: PASS`、`GIVEN EXISTING ATTRIBUTE: PASS`、`GIVEN TESTS: PASS`（`build/gen6-f-given-after.txt`）。生成済み `shell.mjs` を切り出して実行している。
+- `gleam build`: exit 0、`Compiled in 0.03s`。既存 `src/framework/secret.gleam` の unused private constructor warning 1件。`build/gen6-f-root-build.txt`
+- `cd gen && gleam test`: **128 passed, no failures**。`build/gen6-f-gleam-test.txt`
+- `cd gen/fixtures/article/public && gleam build`: exit 0、error / warning なし。`build/gen6-f-public-build.txt`
+- `gleam run -m yumemi_gen -- fixtures/article _out/gen6-f-given`: exit 0、**86 file**。生成された `shell.mjs` と fixture の shell diff はこの便の関数部分だけ。`build/gen6-f-given-generate-temp.txt`、`build/gen6-f-given-shell.diff`
+- `node gen/scripts/verify-front-ssr.mjs`: exit 0、SVELTE fallback / NO-JS / INITIAL / ISLAND / SELECTED / RELOAD / ALL PASS。`build/gen6-f-verify-front-ssr.txt`
+- `node gen/scripts/verify-front-isolate.mjs`: exit 0、**40 requests**、style length **2228 / 2228**、ALL PASS。`build/gen6-f-verify-front-isolate.txt`
+
+## 動いた file
+
+- `gen/src/yumemi_gen/emit/front.gleam`: `addGivenAttributes` の生成文字列を修正。
+- `gen/scripts/verify-front-given.mjs`: generated `shell.mjs` を実行する escape / 同じ tag 2本 / 既存属性の検査を追加。
+- `gen/fixtures/article/public/src/gen/shell.mjs`: generator の出力を fixture に追随。fixture の source、back、client bundle、framework は変更していない。
+- `docs/reports/gen-6.md`: front-1 / Y1c の同項を SSR で覆えた内容へ更新し、framework 待ちの client 部分を P1 に追加。
+- `results.md`: 本節を追加。
+
+P1、back 側、musearch、DDL、Hex publish、push、main、push は触っていない。

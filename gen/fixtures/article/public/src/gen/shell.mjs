@@ -236,10 +236,26 @@ async function renderPage(request, env, matched) {
 
 function addGivenAttributes(html, givens) {
   let output = html;
+  let searchFrom = 0;
   for (const given of givens) {
     const marker = `<${given.tag} `;
-    const encoded = JSON.stringify(given.raw).replaceAll("&", "&amp;").replaceAll("\"", "&quot;");
-    output = output.replace(marker, `<${given.tag} data-yumemi-given="${encoded}" `);
+    let markerOffset = output.indexOf(marker, searchFrom);
+    while (markerOffset >= 0) {
+      const tagEnd = output.indexOf(">", markerOffset + marker.length);
+      if (tagEnd < 0) break;
+      const tagText = output.slice(markerOffset, tagEnd);
+      searchFrom = tagEnd + 1;
+      if (tagText.includes("data-yumemi-given")) {
+        markerOffset = output.indexOf(marker, searchFrom);
+        continue;
+      }
+      const encoded = JSON.stringify(given.raw).replaceAll("&", "&amp;").replaceAll("\"", "&quot;").replaceAll("<", "&lt;");
+      const before = output.slice(0, markerOffset);
+      const fromMarker = output.slice(markerOffset);
+      output = before + fromMarker.replace(marker, () => `<${given.tag} data-yumemi-given="${encoded}" `);
+      searchFrom = markerOffset + `<${given.tag} data-yumemi-given="${encoded}" `.length;
+      break;
+    }
   }
   return output;
 }

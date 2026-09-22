@@ -72,7 +72,7 @@ raw の `diff` に出る `^[<>]` の数を併記する。先頭の sha256 header
 
 - Page / Layout の配置表からの描画: `verify-front-ssr.mjs` の NO-JS / INITIAL / SELECTED が生成 loader と Page placement を通り、ALL PASS。
 - 島の再訪問時の古い Model: 同じ URL の document request が初回 + 1 回だけで止まる `SSR RELOAD: PASS`。`verify-front-isolate.mjs` も 40 request、style の混入 0。
-- 1 Block に島が複数: fixture の 1 Block に `like-button` と `pick-tag` があり、SSR 検査で両方を登録・操作し browser error 0、`13` と選択 POST を確認。**覆えたのは「異なる tag が 2 本」までで、「同じ tag が 2 本」は覆えていない** ── SSR 側の `addGivenAttributes` は `String.replace` の string pattern なので最初の 1 本にしか `data-yumemi-given` を置かず、client 側の `registerWithGiven` も `document.querySelector` で最初の 1 本しか拾わない(`listenReload` だけが `querySelectorAll`)。柏木ゲート 2 の P0-1 に同梱して直す。
+- 1 Block に島が複数: fixture の 1 Block に `like-button` と `pick-tag` があり、既存 SSR 検査で異なる tag の登録・操作、`13` と選択 POST、browser error 0 を確認済み。さらに生成済み `shell.mjs` を実際に評価する `gen/scripts/verify-front-given.mjs` を追加し、`GIVEN ESCAPE: PASS`（`$&` / ``$` `` / `$'` / `<` / `"` / `&`）、`GIVEN SAME TAG ISLANDS: PASS`（同じ tag 2本を文書順に1対1）、`GIVEN EXISTING ATTRIBUTE: PASS` を確認した。SSR の `addGivenAttributes` は function replacement と `&` → `"` → `<` の順の escape になった。**client 側の各 island への given 配布は未完了** ── 現行 Lustre は `register` が tag 単位の `customElements.define` で、`App(Nil, ...)` 以外の初期引数を受けないため、framework 変更が要る。ここは P1 に積む。
 - 断点ごとの非表示: `front_emit_grid_css_has_breakpoint_pin_and_hidden_area_rules_test` が `@media 1024px`、`display: none`、sticky、area を確認し、fixture build も通った。これは生成 CSS 契約の検証で、実 viewport の visual QA まではしていない。
 - WebSocket の push が `reloads` に無い: 本便でも閉じない。push は scope 外で、`reloads` は Page 再要求だけを扱う。
 
@@ -92,6 +92,7 @@ raw の `diff` に出る `^[<>]` の数を併記する。先頭の sha256 header
 10. `widget_list` の `Out.Row` の `Summary` variant が logic から構成されない。
 11. 「穴を持たない名前付きクエリ」の `P` enum の扱いが 51 にも生成器にも無い。
 12. **client bundle が黙って劣化し得る**(柏木ゲート 2)── `gen/src/yumemi_gen_ffi.mjs` は `repositoryRoot()` を「cwd の basename が `gen` か」で決め、temp build か `npx --yes esbuild` が落ちると `fallbackClient` で素の entry を書いて **exit 0 + 警告 1 本**に落とす。`<repo>/gen` 以外から起こす・網が無いのどちらでも生成物 10 が本物の bundle でなくなる。追随便の再現性に効く。
+13. **同じ tag の各 island へ given を client 初期化時に配る** ── SSR の `data-yumemi-given` は本便で各 island に1個ずつ付くが、現行 `build/packages/lustre/src/lustre.gleam:473` の `register` は `App(Nil, ...)` 固定で、実装も `customElements.define` を tag ごとに1回だけ行う(`build/packages/lustre/src/lustre/runtime/client/component.ffi.mjs`)。per-element の初期 given は framework API の変更が必要。本便は P1 として残し、Hex / framework は変更していない。
 
 ## 基線と検証
 
