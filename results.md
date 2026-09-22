@@ -681,7 +681,7 @@ musearch 本体には触れていない。入力は指定 snapshot、出力と�
 
 ### 状態
 
-- 束1: `named_decoder` が Entity の型名一致時だけ record decoder に落ちるよう修正。enum alias は `String` decoder、constructor は宣言側の `mapped_constructor`、Blob/Date/Datetime/Time は framework の parser 経由にした。framework は変更していない。
+- 束1: `named_decoder` が Entity の型名一致時だけ record decoder に落ちるよう修正。型名が一致しないもの(`muse.Phase` など)は写しの宣言側へ落ち、variant 名で分岐する enum decoder になる。constructor は宣言側の `mapped_constructor`(`Muse` → `MusePublic`)、Blob / Date / Datetime / Time は framework の parser(`blob.parse` / `time.date` / `time.datetime` / `time.time`)経由にした。framework は変更していない。
 - 束2: `live.Send -> validate`、shell 値/既定値/警告、grid CSS、decoder の宣言構成子検査を追加。`gleam test` は **128 passed, no failures**。
 - 束3: 参照される6 Blockの `src/gen/skeleton/*.gleam` と `blocks_preview.gleam` を生成。`src/blocks/**` と `src/components/**` は変更していない。
 - 束4: dev 限定 `/_blocks`、PC固定 preview、runtime 経由の `build-blocks.mjs` を追加。`build/blocks.html` は gitignore 対象のため commit していない。
@@ -704,3 +704,23 @@ musearch 本体には触れていない。入力は指定 snapshot、出力と�
 - generated header check: `.gleam` / `.mjs` とも違反 **0**。
 
 未実行: 無し。
+
+### 基線(この巡で動いた数字)
+
+| 項 | 巡 9 | 巡 10 | 理由 |
+|---|---|---|---|
+| fixture 生成 file | 79 | **86** | skeleton 6 本 + `blocks_preview.gleam` |
+| musearch 面の生成 file | 107 | **119** | skeleton 11 本 + `blocks_preview.gleam` |
+| musearch back file | 604 | **604** | 本文 diff 0 |
+| 診断 | exit 0 = 30 / exit 3 = 0 / exit 4 = 18 | **同じ** | 不変 |
+| `gleam test` | 123 | **128** | 束 2 の 5 本 |
+
+### 鷹野宛(この巡で贄川が裁いた設計判断 2 点)
+
+1. **生成物 12 の「初回だけ」は `src/blocks/**` に掛かり、`src/gen/skeleton/**` には掛からない。**51 v5 §328 は置き場を `src/gen/skeleton/<block>.gleam` と書いており、`src/gen/` は ▲ の領域なので毎回作り直すのが筋。開発者はここから `src/blocks/<name>.gleam` へ 1 度だけ写し、以後その ★ を生成器は一切触らない ── これが「初回だけ」。存在で gate すると fixture も musearch も既に 6 / 11 本の ★ を持つので**この巡で 1 本も出ず、検収が原理的に効かない**。一方、`src/gen/` の外に出る面の package の骨組み(`gleam.toml` / `src/layout.gleam` / `src/pages/page.gleam`)は存在で gate する ── この巡は両方の面が既に持つので 0 本が正。
+2. **生成物 13 は「生成器が HTML を直に書く」のでなく「生成した Gleam を面の runtime に走らせて 1 枚落とす」。**Block の view は ★ の Gleam なので、生成器の file writer からは実行できない。51 v5 §333 は `<style>` 同梱・島が動く・各 Block に module 名と `of` と `Out` を添えると書いており、**view の実行が要る**。生成物 10(`client.mjs` + bundle)と同じく build の段を 1 つ挟む形にした ── (a) 生成物 `src/gen/blocks_preview.gleam`、(b) `shell.mjs` が dev のときだけ `/_blocks` で配る(**本番の route 表には生えない**)、(c) `gen/scripts/build-blocks.mjs` が面の worker を 1 回叩いて `build/blocks.html` を保存。`build/` は gitignore の中なので成果物は commit されない(dev の道具、本番に出ない)。
+
+### この巡の P1(直していない)
+
+1. **`build/blocks.html` の header / nav / footer の区画に Layout の Block が入らない** ── 現物は `header` / `aside` / `footer` の literal が置かれるだけ。51 v5 §333 の「header / nav / footer の Block を Layout どおりに置き」の半分。`page` の区画に全 Block を縦に並べる方は成立している。dev の道具なので本便では直さない
+2. **生成された decoder が `let assert Ok(default_value) = parse("placeholder")` の形を持つ**(4 本、`decode.failure` の既定値)。literal は 4 つとも今の framework の検査を通るので落ちないが、opaque の検査が後の便で厳しくなると生成コードが panic する。`decode.new_primitive_decoder` なら既定値が要らない
