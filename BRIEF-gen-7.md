@@ -2,7 +2,7 @@
 
 便: yumemi-gen-7
 
-**前提は 3 つ。**(a) **Y2(`yumemi-gen-6`)の承認** ── yumemi main `bd8f3fb`、Hex 0.7.0 のまま。`docs/reports/gen-6.md` の `## P1`(13 件)と `## 束 1: 15 file の差分分類`が本便の材料、(b) **musearch を snapshot に固定して読む** ── **基点の snapshot は musearch main `<段 6 merge sha>`**(穴のまま。段 6 の 2 便が `console/` の面 package を足した後)。**`~/yumemism_repo/musearch` は一度も書かない**(gen-6 の型 ── `git status --short` 0 行を証跡に)、(c) **F4 / F4B の URL の裁定は本便に要らない** ── 本便は route 表の中身ではなく生成器の口を触る。**基点は yumemi main `bd8f3fb`**。作業木は `~/yumemism_repo/yumemi-gen-7`(branch `impl/gen-7`、基点から、贄川が作る)。plan は贄川の run_dir、記録は `docs/reports/gen-7.md`(**`## DDL` 必須、本便は「無し」**)、証跡は `gen/build/gen7-*`。commit は `git-as <役>`、`main` に触らない、push と **Hex publish は鷹野**(`.hex-token` は `~/canonical/tech/`)。1 巡 = 1 session、ゲートは 1 も 2 も便に 1 回、ゲート 2 の P0 を直す巡は真壁を sol で。柏木は**実行経路 C**(`claude-kashiwagi`、Opus xhigh)、真壁は luna。**見積 4:30(推定** ── gen-6 の 10:01 / 巡 12 より小さく、gen-3b / Y1d より大きい。**裁定待ち 1 で Hex が動くなら +1:30**)。
+**前提は 3 つ。**(a) **Y2(`yumemi-gen-6`)の承認** ── yumemi main `bd8f3fb`、Hex 0.7.0 のまま。`docs/reports/gen-6.md` の `## P1`(13 件)と `## 束 1: 15 file の差分分類`が本便の材料、(b) **musearch を snapshot に固定して読む** ── **基点の snapshot は musearch main `9c2b0bd`**(段 6 の merge 後。`7bcae8a` との差は BRIEF 2 本だけで src は同一)。**`~/yumemism_repo/musearch` は一度も書かない**(gen-6 の型 ── `git status --short` 0 行を証跡に)、(c) **F4 / F4B の URL の裁定は本便に要らない** ── 本便は route 表の中身ではなく生成器の口を触る。**基点は yumemi main `0c59f35`**(`bd8f3fb` の上に本 BRIEF の commit だけ)。作業木は `~/yumemism_repo/yumemi-gen-7`(branch `impl/gen-7`、基点から、贄川が作る)。plan は贄川の run_dir、記録は `docs/reports/gen-7.md`(**`## DDL` 必須、本便は「無し」**)、証跡は `gen/build/gen7-*`。commit は `git-as <役>`、`main` に触らない、push と **Hex publish は鷹野**(`.hex-token` は `~/canonical/tech/`)。1 巡 = 1 session、ゲートは 1 も 2 も便に 1 回、ゲート 2 の P0 を直す巡は真壁を sol で。柏木は**実行経路 C**(`claude-kashiwagi`、Opus xhigh)、真壁は luna。**見積 4:30(推定** ── gen-6 の 10:01 / 巡 12 より小さく、gen-3b / Y1d より大きい。**裁定待ち 1 で Hex が動くなら +1:30**)。
 
 **親ゴール:** tech `_drafts/gleam-framework/00-goal.md` の G2 ── **`musearch-yumemi-5` が musearch の 3 面の ▲ を生成物へ差し替えられる状態を作る。**本便のゴールは生成器の完成ではなく、**差し替えを止めている穴だけを閉じること。**
 
@@ -72,7 +72,7 @@
 - root `gleam build` exit 0(既存 warning 1 から悪化しない)、**`cd gen && gleam test` が 128 以上**
 - **fixture 生成が exit 0 / 86 file 以上、再走 diff が空**、fixture face build exit 0 / error 0 / warning 0
 - **front SSR / isolate / given / Block preview が ALL PASS**、sha256 ヘッダの欠け 0
-- **musearch snapshot `<段 6 merge sha>` で:exit 2 = 0、exit 3 = 0、exit 4 と警告が基線から悪化しない**、file 数を results に。**再走 diff が空**
+- **musearch snapshot `9c2b0bd` で:exit 2 = 0、exit 3 = 0、exit 4 と警告が基線から悪化しない**、file 数を results に。**再走 diff が空**
 - **`custom_decoder`:**fixture の `Row { ArticleRow Summary }` と musearch の `out/widget_list.gleam` で**全 variant が構築され、variant 固有欄が落ちない**ことを試験 2 本以上で
 - **末尾カンマ:**`[a, ..rest,]` を含む file を fixture に 1 本置き、**exit 2 が出ない**
 - **`fallbackClient`:**esbuild を落とした状態で走らせ、**exit 0 で通らない**(停止コードと診断が出る)
@@ -113,3 +113,9 @@
 3. **面の間の共有 package(同じ Block を www / muses / console に置き、中身は party で変わる ── 通知の受信箱がその例)は 56 改訂の起案 ── 水無瀬、本便の射程外。**G7 か F5 の材料
 4. 真壁は luna(codex 復活後)。復活前は sonnet(`MAKABE_ROUTE=claude`)、鷹野の窓に影響がない範囲で
 5. **grid の比と span(「どこまで」9)は本便に入れる**(役員 人見 2026-09-23)── Page の仕事は「どの Block を、どの断点で、grid のどこに、どれだけの幅で」まで。Page を view 関数にする形(HTML 然の自由配置)は採らない ── loader / Widget / 検査 / ロジック無しの 4 つが表の上に立っている。Block ⊃ Block も無い(入れ子は Component だけ、容れ物は Area)。推定 +1:00〜1:30、中央 4:30 → **6:00**
+
+## 鷹野の裁定(2026-09-24、段 7 の準備)── 基点を埋めた、段 7 = (SV ∥ G7 ∥ 2b-4)
+
+1. **基点は yumemi main `0c59f35`、musearch の snapshot は `9c2b0bd`。**穴は 0
+2. **段 7 は (SV ∥ G7 ∥ 2b-4)**(tech 58 v4 §9-3)。musearch では SV と 2b-4 が同時に走るが、**本便の snapshot は `9c2b0bd` に固定し、走行中に musearch main が動いても追わない**。基線は exit 4 = 21 行 / 警告 30(2b-4 の Service が足す行は F5 の検収で名指しで許す ── tech 58 v4 §9-7)
+3. 承認後は merge → **Hex 0.8.0 publish(鷹野)**→ 4b と Y1e の起動条件(段 7b)
