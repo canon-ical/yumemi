@@ -1,4 +1,4 @@
-//// GENERATED from src/entry.gleam [sha256:fceb9b379055] — 手で編集しない
+//// GENERATED from src/entry.gleam [sha256:51c70c581820] — 手で編集しない
 
 import framework/front
 import gen/service
@@ -9,6 +9,7 @@ pub type Method {
 }
 
 pub type Attached {
+  BlobCopy
   FixtureBrowser
   FixtureSync
 }
@@ -20,6 +21,7 @@ pub type AttachedRoute {
 pub const attached: List(AttachedRoute) = [
   AttachedRoute(entry: FixtureBrowser, method: Get, path: "/fixture/browser"),
   AttachedRoute(entry: FixtureSync, method: Post, path: "/fixture/sync"),
+  AttachedRoute(entry: BlobCopy, method: Post, path: "/api/blobs"),
 ]
 
 pub type Target =
@@ -30,6 +32,11 @@ pub type Route {
 }
 
 pub const routes: List(Route) = [
+  Route(
+    service: service.ArticleBlobSave,
+    method: Post,
+    path: "/api/articles/:slug/blob_save",
+  ),
   Route(service: service.ArticleCreate, method: Post, path: "/api/articles"),
   Route(service: service.ArticleList, method: Get, path: "/api/articles"),
   Route(

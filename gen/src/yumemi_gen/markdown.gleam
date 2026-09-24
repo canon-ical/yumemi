@@ -16,36 +16,71 @@ pub fn parse(source: String) -> Result(Document, Nil) {
   |> parse_blocks([], [], 1)
 }
 
-pub fn helpers() -> String {
-  let headings = list.map([1, 2, 3, 4, 5, 6], heading_helper)
-  let shared = [
-    "fn paragraph(children: List(el.Element(Nil))) -> el.Element(Nil) {\n"
-      <> "  html.p(sketch_css.class([style.body, style.ink]), [], children)\n"
-      <> "}",
-    "fn inline_code(value: String) -> el.Element(Nil) {\n"
-      <> "  html.code(sketch_css.class([style.body, style.ink]), [], [el.text(value)])\n"
-      <> "}",
-    "fn fenced_code(value: String) -> el.Element(Nil) {\n"
-      <> "  html.pre(sketch_css.class([style.body, style.ink]), [], [\n"
-      <> "    html.code(sketch_css.class([style.body, style.ink]), [], [el.text(value)]),\n"
-      <> "  ])\n"
-      <> "}",
-    "fn unordered_list(items: List(List(el.Element(Nil)))) -> el.Element(Nil) {\n"
-      <> "  html.ul(sketch_css.class([style.body, style.ink]), [], list.map(items, fn(children) {\n"
-      <> "    html.li(sketch_css.class([style.body, style.ink]), [], children)\n"
-      <> "  }))\n"
-      <> "}",
-    "fn table_row(cells: List(el.Element(Nil))) -> el.Element(Nil) {\n"
-      <> "  html.tr(sketch_css.class([style.body, style.ink]), [], cells)\n"
-      <> "}",
-    "fn header_cell(children: List(el.Element(Nil))) -> el.Element(Nil) {\n"
-      <> "  html.th(sketch_css.class([style.body, style.ink]), [], children)\n"
-      <> "}",
-    "fn data_cell(children: List(el.Element(Nil))) -> el.Element(Nil) {\n"
-      <> "  html.td(sketch_css.class([style.body, style.ink]), [], children)\n"
-      <> "}",
+pub fn helpers(document: Document) -> String {
+  let rendered = string.join(list.append(document.nodes, document.tables), "\n")
+  let helpers = [
+    #("heading1", heading_helper(1)),
+    #("heading2", heading_helper(2)),
+    #("heading3", heading_helper(3)),
+    #("heading4", heading_helper(4)),
+    #("heading5", heading_helper(5)),
+    #("heading6", heading_helper(6)),
+    #(
+      "paragraph",
+      "fn paragraph(children: List(el.Element(Nil))) -> el.Element(Nil) {\n"
+        <> "  html.p(sketch_css.class([style.body, style.ink]), [], children)\n"
+        <> "}",
+    ),
+    #(
+      "inline_code",
+      "fn inline_code(value: String) -> el.Element(Nil) {\n"
+        <> "  html.code(sketch_css.class([style.body, style.ink]), [], [el.text(value)])\n"
+        <> "}",
+    ),
+    #(
+      "fenced_code",
+      "fn fenced_code(value: String) -> el.Element(Nil) {\n"
+        <> "  html.pre(sketch_css.class([style.body, style.ink]), [], [\n"
+        <> "    html.code(sketch_css.class([style.body, style.ink]), [], [el.text(value)]),\n"
+        <> "  ])\n"
+        <> "}",
+    ),
+    #(
+      "unordered_list",
+      "fn unordered_list(items: List(List(el.Element(Nil)))) -> el.Element(Nil) {\n"
+        <> "  html.ul(sketch_css.class([style.body, style.ink]), [], list.map(items, fn(children) {\n"
+        <> "    html.li(sketch_css.class([style.body, style.ink]), [], children)\n"
+        <> "  }))\n"
+        <> "}",
+    ),
+    #(
+      "table_row",
+      "fn table_row(cells: List(el.Element(Nil))) -> el.Element(Nil) {\n"
+        <> "  html.tr(sketch_css.class([style.body, style.ink]), [], cells)\n"
+        <> "}",
+    ),
+    #(
+      "header_cell",
+      "fn header_cell(children: List(el.Element(Nil))) -> el.Element(Nil) {\n"
+        <> "  html.th(sketch_css.class([style.body, style.ink]), [], children)\n"
+        <> "}",
+    ),
+    #(
+      "data_cell",
+      "fn data_cell(children: List(el.Element(Nil))) -> el.Element(Nil) {\n"
+        <> "  html.td(sketch_css.class([style.body, style.ink]), [], children)\n"
+        <> "}",
+    ),
   ]
-  string.join(list.append(headings, shared), "\n\n") <> "\n"
+  let used_helpers =
+    list.filter_map(helpers, fn(helper) {
+      let #(name, definition) = helper
+      case string.contains(rendered, name <> "(") {
+        True -> Ok(definition)
+        False -> Error(Nil)
+      }
+    })
+  string.join(used_helpers, "\n\n") <> "\n"
 }
 
 fn parse_blocks(

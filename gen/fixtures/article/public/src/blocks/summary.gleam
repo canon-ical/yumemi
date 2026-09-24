@@ -5,9 +5,11 @@ import framework/front/el
 import framework/front/sketch_css
 import gen/out/article_read
 import gleam/option.{None}
+import lustre/attribute
 import sketch/lustre/element/html
 
-pub type In = article_read.Out
+pub type In =
+  article_read.Out
 
 pub const sample: In = article_read.Out(
   article: article_read.Article(
@@ -43,5 +45,7 @@ const title: List(css.Style) = [
 pub fn view(it: In) -> el.Element(Nil) {
   html.section(sketch_css.class(card), [], [
     html.h1(sketch_css.class(title), [], [el.text(it.category.name)]),
+    el.closer("article-dialog", [el.text("Close article options")]),
+    el.island("like-button", [attribute.attribute("slug", it.article.slug)]),
   ])
 }

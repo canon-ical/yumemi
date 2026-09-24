@@ -10,7 +10,6 @@ import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/order
-import gleam/result
 import gleam/string
 import yumemi_gen/digest
 import yumemi_gen/emit/draft
@@ -57,6 +56,7 @@ pub fn emit(
   let type_units = back_type_units(app, back_units, hashes)
   let live = live_targets(model_.components, app.services)
   let attached_service_live = attached_service_live_targets(model_, app, live)
+  let blob_entries = blob_entry_targets(model_.components, app.attached)
   let live_decoder_services =
     list.append(live, attached_service_live)
     |> list.flat_map(fn(target) {
@@ -175,8 +175,26 @@ pub fn emit(
       let #(route, component) = target
       attached_live_file(route, package, component, hashes, face_name)
     })
+  let blob_entry_files =
+    blob_entries
+    |> list.map(fn(target) {
+      let #(route, _component) = target
+      File(
+        path: face_name
+          <> "/src/gen/live/"
+          <> naming.snake(route.name)
+          <> ".gleam",
+        text: blob_entry_live_text(route, hashes),
+      )
+    })
   let all_live_files =
-    list.append(live_files, list.append(attached_service_files, attached_live))
+    list.append(
+      live_files,
+      list.append(
+        attached_service_files,
+        list.append(attached_live, blob_entry_files),
+      ),
+    )
   let island_files = case all_live_files {
     [] -> []
     _ -> [
@@ -1399,9 +1417,20 @@ fn attached_live_targets(
             case service_for(app.services, name) {
               Some(_) -> Error(Nil)
               None ->
-                app.attached
-                |> list.find(fn(route) { route.name == name })
-                |> result.map(fn(route) { #(route, component) })
+                case
+                  app.attached |> list.find(fn(route) { route.name == name })
+                {
+                  Ok(route) ->
+                    case
+                      route.name == "BlobCopy"
+                      && route.method == "POST"
+                      && route.path == "/api/blobs"
+                    {
+                      True -> Error(Nil)
+                      False -> Ok(#(route, component))
+                    }
+                  Error(_) -> Error(Nil)
+                }
             }
           reader_front.ServiceCall(_) -> Error(Nil)
         }
@@ -1518,6 +1547,114 @@ fn attached_live_text(
   <> "  })\n}\n"
 }
 
+fn blob_entry_targets(
+  components: List(reader_front.Component),
+  attached: List(model.AttachedRoute),
+) -> List(#(model.AttachedRoute, reader_front.Component)) {
+  let empty: List(#(model.AttachedRoute, reader_front.Component)) = []
+  components
+  |> list.fold(empty, fn(targets, component) {
+    component.calls
+    |> list.fold(targets, fn(acc, target) {
+      case target {
+        reader_front.ServiceCall(_) -> acc
+        reader_front.AttachedCall(name) ->
+          case list.find(attached, fn(route) { route.name == name }) {
+            Ok(route)
+              if route.name == "BlobCopy"
+              && route.method == "POST"
+              && route.path == "/api/blobs"
+            ->
+              case list.any(acc, fn(found) { found.0.name == route.name }) {
+                True -> acc
+                False -> list.append(acc, [#(route, component)])
+              }
+            _ -> acc
+          }
+      }
+    })
+  })
+}
+
+fn blob_entry_live_text(
+  route: model.AttachedRoute,
+  hashes: hash.Hashes,
+) -> String {
+  let input_hash = digest.short(hash.entry(hashes) <> string.inspect(route))
+  "//// GENERATED from api/src/gen/http_runtime.mjs [sha256:"
+  <> input_hash
+  <> "] — 手で編集しない\n\n"
+  <> "import framework/front/live\n"
+  <> "import gleam/dynamic.{type Dynamic}\n"
+  <> "import gleam/dynamic/decode\n"
+  <> "import gleam/option.{None, Some}\n"
+  <> "import lustre/attribute\n"
+  <> "import lustre/effect.{type Effect}\n"
+  <> "import lustre/event\n\n"
+  <> "pub type Args {\n  Args(file: String)\n}\n\n"
+  <> "pub type Field {\n  File\n}\n\n"
+  <> "pub type State = live.State(Args, Nil, String, String)\n\n"
+  <> "pub type Event = live.Event(Field, Nil, String, String)\n\n"
+  <> "pub fn init(_given: Nil) -> #(State, Effect(Event)) {\n"
+  <> "  #(\n"
+  <> "    live.State(args: Args(file: \"\"), given: Nil, last: None, waiting: False),\n"
+  <> "    effect.none(),\n"
+  <> "  )\n}\n\n"
+  <> "pub fn update(model: State, msg: Event) -> #(State, Effect(Event)) {\n"
+  <> "  case msg {\n"
+  <> "    live.Set(File, value) -> #(\n"
+  <> "      live.State(..model, args: Args(file: value)),\n"
+  <> "      effect.none(),\n"
+  <> "    )\n"
+  <> "    live.Send ->\n"
+  <> "      case model.waiting {\n"
+  <> "        True -> #(model, effect.none())\n"
+  <> "        False -> #(live.State(..model, waiting: True), send(model.args))\n"
+  <> "      }\n"
+  <> "    live.Given(_) -> #(model, effect.none())\n"
+  <> "    live.Done(result) -> #(\n"
+  <> "      live.State(..model, last: Some(result), waiting: False),\n"
+  <> "      effect.none(),\n"
+  <> "    )\n"
+  <> "  }\n}\n\n"
+  <> "pub fn file_input() -> List(attribute.Attribute(Event)) {\n"
+  <> "  [\n"
+  <> "    attribute.attribute(\"type\", \"file\"),\n"
+  <> "    attribute.attribute(\"data-yumemi-file-input\", \"\"),\n"
+  <> "    event.on(\"change\", file_input_event()),\n"
+  <> "  ]\n}\n\n"
+  <> "fn file_input_event() -> decode.Decoder(Event) {\n"
+  <> "  decode.map(\n"
+  <> "    decode.dynamic,\n"
+  <> "    fn(event) { live.Set(File, file_token(event)) },\n"
+  <> "  )\n}\n\n"
+  <> "@external(javascript, \"./transport_ffi.mjs\", \"file_token\")\n"
+  <> "fn file_token(event: Dynamic) -> String\n\n"
+  <> "@external(javascript, \"./transport_ffi.mjs\", \"upload_file\")\n"
+  <> "fn transport_upload(\n"
+  <> "  method: String,\n"
+  <> "  path: String,\n"
+  <> "  token: String,\n"
+  <> "  on_ok: fn(String) -> Nil,\n"
+  <> "  on_error: fn(Nil) -> Nil,\n"
+  <> ") -> Nil\n\n"
+  <> "fn send(args: Args) -> Effect(Event) {\n"
+  <> "  effect.from(fn(dispatch) {\n"
+  <> "    transport_upload(\n"
+  <> "      "
+  <> quoted(route.method)
+  <> ",\n"
+  <> "      "
+  <> quoted(route.path)
+  <> ",\n"
+  <> "      args.file,\n"
+  <> "      fn(key) { dispatch(live.Done(Ok(key))) },\n"
+  <> "      fn(_unit) { dispatch(live.Done(Error(\"file upload failed\"))) },\n"
+  <> "    )\n"
+  <> "    Nil\n"
+  <> "  })\n}\n"
+}
+
 fn service_for(
   services: List(model.Service),
   variant: String,
@@ -1567,20 +1704,70 @@ fn transport_text(
     digest.short(hash.entry(hashes) <> string.inspect(front.components)),
   )
   <> "\n"
-  <> "export function send(method, path, body, onOk, onError) {\n"
-  <> "  fetch(path, {\n"
+  <> "const selectedFiles = new Map();\n"
+  <> "const uploadedFiles = new Map();\n"
+  <> "const pendingUploads = new Map();\n\n"
+  <> "export function file_token(event) {\n"
+  <> "  const input = event.currentTarget ?? event.target;\n"
+  <> "  if (!(input instanceof HTMLInputElement)) return \"\";\n"
+  <> "  const previous = input.dataset.yumemiFileToken;\n"
+  <> "  if (previous) { selectedFiles.delete(previous); uploadedFiles.delete(previous); }\n"
+  <> "  const file = input.files?.[0];\n"
+  <> "  if (!file) { delete input.dataset.yumemiFileToken; return \"\"; }\n"
+  <> "  const token = `~yumemi-file:${crypto.randomUUID()}`;\n"
+  <> "  selectedFiles.set(token, file);\n"
+  <> "  input.dataset.yumemiFileToken = token;\n"
+  <> "  return token;\n"
+  <> "}\n\n"
+  <> "async function uploadToken(token, method = \"POST\", path = \"/api/blobs\") {\n"
+  <> "  if (uploadedFiles.has(token)) return uploadedFiles.get(token);\n"
+  <> "  const file = selectedFiles.get(token);\n"
+  <> "  if (!file) throw new Error(\"unknown file token\");\n"
+  <> "  if (pendingUploads.has(token)) return pendingUploads.get(token);\n"
+  <> "  const upload = fetch(path, {\n"
   <> "    method,\n"
-  <> "    headers: { \"content-type\": \"application/json\" },\n"
-  <> "    body: method === \"GET\" ? undefined : JSON.stringify(body),\n"
-  <> "  })\n"
-  <> "    .then((response) => {\n"
-  <> "      if (response.ok) {\n"
-  <> "        response.json().then(onOk).catch(() => onError({ code: \"invalid_response\" }));\n"
-  <> "      } else {\n"
-  <> "        response.json().then(onError).catch(() => onError({ code: \"request_failed\" }));\n"
-  <> "      }\n"
-  <> "    })\n"
-  <> "    .catch(() => onError({ code: \"network_error\" }));\n"
+  <> "    headers: { \"content-type\": file.type || \"application/octet-stream\" },\n"
+  <> "    body: file,\n"
+  <> "  }).then(async (response) => {\n"
+  <> "    if (!response.ok) throw new Error(\"blob upload failed\");\n"
+  <> "    const result = await response.json();\n"
+  <> "    if (typeof result?.key !== \"string\" || result.key === \"\") throw new Error(\"blob response has no key\");\n"
+  <> "    selectedFiles.delete(token);\n"
+  <> "    uploadedFiles.set(token, result.key);\n"
+  <> "    return result.key;\n"
+  <> "  }).catch(() => { throw new Error(\"file upload failed\"); })\n"
+  <> "    .finally(() => pendingUploads.delete(token));\n"
+  <> "  pendingUploads.set(token, upload);\n"
+  <> "  return upload;\n"
+  <> "}\n\n"
+  <> "export function send(method, path, body, blobFields, onOk, onError) {\n"
+  <> "  Promise.resolve().then(async () => {\n"
+  <> "    const nextBody = { ...body };\n"
+  <> "    for (const field of blobFields) {\n"
+  <> "      const value = nextBody[field];\n"
+  <> "      if (typeof value !== \"string\") continue;\n"
+  <> "      if (selectedFiles.has(value) || uploadedFiles.has(value)) nextBody[field] = await uploadToken(value);\n"
+  <> "    }\n"
+  <> "    const response = await fetch(path, {\n"
+  <> "      method,\n"
+  <> "      headers: { \"content-type\": \"application/json\" },\n"
+  <> "      body: method === \"GET\" ? undefined : JSON.stringify(nextBody),\n"
+  <> "    });\n"
+  <> "    return response;\n"
+  <> "  }).then((response) => {\n"
+  <> "    if (response.ok) {\n"
+  <> "      response.json().then(onOk).catch(() => onError({ code: \"invalid_response\" }));\n"
+  <> "    } else {\n"
+  <> "      response.json().then(onError).catch(() => onError({ code: \"request_failed\" }));\n"
+  <> "    }\n"
+  <> "  }).catch((error) => onError({ code: error?.message ?? \"network_error\" }));\n"
+  <> "  return undefined;\n"
+  <> "}\n\n"
+  <> "export function upload_file(method, path, token, onOk, onError) {\n"
+  <> "  if (!selectedFiles.has(token) && !uploadedFiles.has(token)) { onError(undefined); return undefined; }\n"
+  <> "  uploadToken(token, method, path)\n"
+  <> "    .then(onOk)\n"
+  <> "    .catch(() => onError(undefined));\n"
   <> "  return undefined;\n"
   <> "}\n"
 }
@@ -1801,6 +1988,7 @@ fn live_text(
     Some(_) -> error_failure_text(service_errors)
     None -> ""
   }
+  let blob_args = blob_args(service.args)
   generated_header
   <> "\n"
   <> live_imports(
@@ -1808,6 +1996,7 @@ fn live_text(
     given_service,
     validations != [],
     component.after_send == Some("ReloadPage"),
+    blob_args != [],
   )
   <> "\n\n"
   <> args_type_text(service.args)
@@ -1822,6 +2011,7 @@ fn live_text(
   <> "\n"
   <> update_text(service, component, validations != [])
   <> "\n"
+  <> file_input_text(blob_args)
   <> validate_text(validations)
   <> validation_error_text(validations)
   <> error_handling
@@ -1936,6 +2126,7 @@ fn live_imports(
   given_service: Option(model.Service),
   has_validation: Bool,
   reloads_page: Bool,
+  has_blob_fields: Bool,
 ) -> String {
   let validation = case has_validation {
     True -> ["framework/spec", "gleam/list", "gleam/string"]
@@ -1947,6 +2138,10 @@ fn live_imports(
   }
   let reload = case reloads_page {
     True -> ["gleam/json", "lustre/event"]
+    False -> []
+  }
+  let file_input = case has_blob_fields {
+    True -> ["lustre/attribute", "lustre/event"]
     False -> []
   }
   let base = [
@@ -1961,6 +2156,7 @@ fn live_imports(
   base
   |> list.append(validation)
   |> list.append(reload)
+  |> list.append(file_input)
   |> list.append(given)
   |> list.unique
   |> list.sort(string.compare)
@@ -1988,6 +2184,57 @@ fn field_type_text(args: List(model.Arg)) -> String {
   case variants {
     "" -> "pub type Field\n"
     _ -> "pub type Field {\n" <> variants <> "\n}\n"
+  }
+}
+
+fn blob_args(args: List(model.Arg)) -> List(model.Arg) {
+  list.filter(args, fn(arg) { blob_shape(arg.type_) })
+}
+
+fn blob_shape(shape: model.TypeShape) -> Bool {
+  case shape {
+    model.NamedShape(
+      module: Some("framework/blob"),
+      name: "Blob",
+      parameters: [],
+    ) -> True
+    model.NamedShape(
+      module: Some("gleam/option"),
+      name: "Option",
+      parameters: [inner],
+    ) -> blob_shape(inner)
+    _ -> False
+  }
+}
+
+fn file_input_text(args: List(model.Arg)) -> String {
+  case args {
+    [] -> ""
+    _ ->
+      string.concat(
+        list.map(args, fn(arg) {
+          "pub fn "
+          <> arg.name
+          <> "_file_input() -> List(attribute.Attribute(Event)) {\n"
+          <> "  file_input("
+          <> naming.pascal(arg.name)
+          <> ")\n"
+          <> "}\n\n"
+        }),
+      )
+      <> "fn file_input(field: Field) -> List(attribute.Attribute(Event)) {\n"
+      <> "  [\n"
+      <> "    attribute.attribute(\"type\", \"file\"),\n"
+      <> "    attribute.attribute(\"data-yumemi-file-input\", \"\"),\n"
+      <> "    event.on(\"change\", file_input_event(field)),\n"
+      <> "  ]\n}\n\n"
+      <> "fn file_input_event(field: Field) -> decode.Decoder(Event) {\n"
+      <> "  decode.map(\n"
+      <> "    decode.dynamic,\n"
+      <> "    fn(event) { live.Set(field, file_token(event)) },\n"
+      <> "  )\n}\n\n"
+      <> "@external(javascript, \"./transport_ffi.mjs\", \"file_token\")\n"
+      <> "fn file_token(event: Dynamic) -> String\n\n"
   }
 }
 
@@ -2165,6 +2412,11 @@ fn send_text(
   route: Option(ApiRoute),
   after_send: Option(String),
 ) -> String {
+  let blob_fields =
+    blob_args(service.args)
+    |> list.map(fn(arg) { quoted(arg.name) })
+    |> string.join(", ")
+  let blob_fields = "[" <> blob_fields <> "]"
   let reload = case after_send {
     Some("ReloadPage") ->
       "\nfn reload_page() -> Effect(Event) {\n  event.emit(\"yumemi-done\", json.null())\n}\n"
@@ -2178,6 +2430,7 @@ fn send_text(
       <> "  method: String,\n"
       <> "  path: String,\n"
       <> "  body: json.Json,\n"
+      <> "  blob_fields: List(String),\n"
       <> "  on_ok: fn(Dynamic) -> Nil,\n"
       <> "  on_error: fn(Dynamic) -> Nil,\n"
       <> ") -> Nil\n\n"
@@ -2192,6 +2445,9 @@ fn send_text(
       <> ",\n"
       <> "      "
       <> body_expression(service.args)
+      <> ",\n"
+      <> "      "
+      <> blob_fields
       <> ",\n"
       <> "      fn(value) {\n"
       <> "        case decode.run(value, "
@@ -2234,10 +2490,27 @@ fn body_expression(args: List(model.Arg)) -> String {
   "json.object([\n"
   <> string.concat(
     list.map(args, fn(arg) {
-      "    #(\"" <> arg.name <> "\", json.string(args." <> arg.name <> ")),\n"
+      "    #(\"" <> arg.name <> "\", " <> body_value_expression(arg) <> "),\n"
     }),
   )
   <> "  ])"
+}
+
+fn body_value_expression(arg: model.Arg) -> String {
+  case arg.type_ {
+    model.NamedShape(
+      module: Some("gleam/option"),
+      name: "Option",
+      parameters: [_inner],
+    ) ->
+      "case args."
+      <> arg.name
+      <> " {\n"
+      <> "  \"\" -> json.null()\n"
+      <> "  value -> json.string(value)\n"
+      <> "}"
+    _ -> "json.string(args." <> arg.name <> ")"
+  }
 }
 
 fn validation_specs(
@@ -3028,6 +3301,7 @@ fn load_imports(
 ) -> String {
   let base = [
     "framework/front/css",
+    "framework/front/el as el",
     "framework/front/sketch_css",
     "gleam/list",
     "gleam/option.{type Option, None, Some}",
@@ -3192,11 +3466,19 @@ fn page_view_text(
     True -> plain_area_text()
     False -> ""
   }
+  <> case has_overlay_area(list.append(layout_areas, page_areas)) {
+    True -> overlay_area_text()
+    False -> ""
+  }
   <> page_helpers
 }
 
 fn has_plain_page_area(areas: List(reader_front.Area)) -> Bool {
   list.any(areas, fn(area) { area.name != "page" && area.style == [] })
+}
+
+fn has_overlay_area(areas: List(reader_front.Area)) -> Bool {
+  list.any(areas, fn(area) { area.pin == "Overlay" })
 }
 
 fn layout_area_text(
@@ -3209,16 +3491,7 @@ fn layout_area_text(
   }
   let children =
     area_children_expression("layout_placement", placements, area.name, extra)
-  let opener = case area.style {
-    [] -> "plain_area(\"" <> area.name <> "\", "
-    _ ->
-      "styled_area(\""
-      <> area.name
-      <> "\", "
-      <> style_expression(area.style)
-      <> ", "
-  }
-  let body = opener <> children <> "),\n"
+  let body = area_element_text(area, children) <> ",\n"
   "    " <> body
 }
 
@@ -3269,16 +3542,32 @@ fn page_children_text(
 }
 
 fn page_area_text(area: reader_front.Area, children: String) -> String {
-  let opener = case area.style {
-    [] -> "plain_area(\"" <> area.name <> "\", "
-    _ ->
-      "styled_area(\""
+  area_element_text(area, children)
+}
+
+fn area_element_text(area: reader_front.Area, children: String) -> String {
+  case area.pin {
+    "Overlay" ->
+      "overlay_area(\""
       <> area.name
       <> "\", "
       <> style_expression(area.style)
       <> ", "
+      <> children
+      <> ")"
+    _ ->
+      case area.style {
+        [] -> "plain_area(\"" <> area.name <> "\", " <> children <> ")"
+        _ ->
+          "styled_area(\""
+          <> area.name
+          <> "\", "
+          <> style_expression(area.style)
+          <> ", "
+          <> children
+          <> ")"
+      }
   }
-  opener <> children <> ")"
 }
 
 fn area_children_expression(
@@ -3373,6 +3662,25 @@ fn plain_area_text() -> String {
   <> "  children: List(element.Element(Nil)),\n"
   <> ") -> element.Element(Nil) {\n"
   <> "  html.div_([attribute.attribute(\"data-yumemi-area\", name)], children)\n"
+  <> "}\n\n"
+}
+
+fn overlay_area_text() -> String {
+  "fn overlay_area(\n"
+  <> "  name: String,\n"
+  <> "  styles: List(css.Style),\n"
+  <> "  children: List(element.Element(Nil)),\n"
+  <> ") -> element.Element(Nil) {\n"
+  <> "  let attributes = [\n"
+  <> "    attribute.attribute(\"id\", el.overlay_id_prefix <> name),\n"
+  <> "    attribute.attribute(\"popover\", \"\"),\n"
+  <> "    attribute.attribute(\"data-yumemi-area\", name),\n"
+  <> "    attribute.attribute(\"data-yumemi-overlay\", \"\"),\n"
+  <> "  ]\n"
+  <> "  case styles {\n"
+  <> "    [] -> html.div_(attributes, children)\n"
+  <> "    _ -> html.div(sketch_css.class(styles), attributes, children)\n"
+  <> "  }\n"
   <> "}\n\n"
 }
 
@@ -4140,7 +4448,9 @@ fn shell_text(
   <> "\n"
   <> shell_runtime_text(
     front.components != [],
-    static_grid_css(front.layout) <> static_pages_grid_css(front.pages),
+    static_grid_css(front.layout)
+      <> static_pages_grid_css(front.pages)
+      <> generated_front_css(front),
   )
 }
 
@@ -4338,7 +4648,9 @@ fn bool_text(value: Bool) -> String {
 
 fn style_text(package: face.Package, front: reader_front.Front) -> String {
   let input_hash =
-    source_hash(package.units, fn(unit) { unit.path == "layout" })
+    source_hash(package.units, fn(unit) {
+      unit.path == "layout" || string.starts_with(unit.path, "pages/")
+    })
   "/* GENERATED from "
   <> package.name
   <> "/src/layout.gleam [sha256:"
@@ -4346,6 +4658,52 @@ fn style_text(package: face.Package, front: reader_front.Front) -> String {
   <> "] — 手で編集しない */\n"
   <> static_grid_css(front.layout)
   <> static_pages_grid_css(front.pages)
+  <> generated_front_css(front)
+}
+
+fn generated_front_css(front: reader_front.Front) -> String {
+  badge_css()
+  <> case front_has_overlay(front) {
+    True -> "[popover]::backdrop { background: rgba(0, 0, 0, 0.45); }\n"
+    False -> ""
+  }
+}
+
+fn badge_css() -> String {
+  "[data-yumemi-badge] {\n"
+  <> "  position: absolute;\n"
+  <> "  inset-block-start: 0;\n"
+  <> "  inset-inline-end: 0;\n"
+  <> "  display: inline-flex;\n"
+  <> "  align-items: center;\n"
+  <> "  justify-content: center;\n"
+  <> "  min-width: 1.25rem;\n"
+  <> "  height: 1.25rem;\n"
+  <> "  padding-inline: 0.25rem;\n"
+  <> "  border-radius: 999px;\n"
+  <> "  color: var(--bg);\n"
+  <> "  background: var(--accent);\n"
+  <> "  font: 600 0.75rem/1 system-ui, sans-serif;\n"
+  <> "}\n"
+  <> "[data-yumemi-badge][data-count=\"\"],\n"
+  <> "[data-yumemi-badge][data-count=\"0\"] { display: none; }\n"
+}
+
+fn front_has_overlay(front: reader_front.Front) -> Bool {
+  let layout_frames =
+    option_frame_list(front.layout.sp)
+    |> list.append(option_frame_list(front.layout.pc))
+    |> list.append(option_frame_list(front.layout.tablet))
+  let page_frames =
+    front.pages
+    |> list.flat_map(fn(page) {
+      option_frame_list(page.sp)
+      |> list.append(option_frame_list(page.pc))
+      |> list.append(option_frame_list(page.tablet))
+    })
+  list.any(list.append(layout_frames, page_frames), fn(frame) {
+    list.any(frame.areas, fn(area) { area.pin == "Overlay" })
+  })
 }
 
 fn static_grid_css(layout: reader_front.Layout) -> String {
@@ -4378,7 +4736,7 @@ fn static_frames_grid_css(
   tablet: Option(reader_front.Frame),
 ) -> String {
   let sp_frame = option.unwrap(sp, empty_frame("sp"))
-  let sp_areas = sp_frame.areas
+  let sp_areas = without_overlay_areas(sp_frame.areas)
   let pc_areas = frame_areas(pc, sp_areas)
   let tablet_areas = frame_areas(tablet, sp_areas)
   let extras =
@@ -4503,12 +4861,22 @@ fn frame_template_css(
   at: framework_css.Breakpoint,
 ) -> String {
   framework_front.resolved_template(
-    framework_frame(sp),
-    framework_frame(frame),
+    framework_frame(frame_without_overlay(sp)),
+    framework_frame(frame_without_overlay(frame)),
     at,
   )
   |> list.map(fn(row) { "\"" <> string.join(row, " ") <> "\"" })
   |> string.join(" ")
+}
+
+fn frame_without_overlay(frame: reader_front.Frame) -> reader_front.Frame {
+  reader_front.Frame(..frame, areas: without_overlay_areas(frame.areas))
+}
+
+fn without_overlay_areas(
+  areas: List(reader_front.Area),
+) -> List(reader_front.Area) {
+  list.filter(areas, fn(area) { area.pin != "Overlay" })
 }
 
 fn framework_frame(
@@ -4584,12 +4952,15 @@ fn page_has_explicit_grid(page: reader_front.Page) -> Bool {
       frame.cols != []
       || frame.rows != []
       || frame.template != []
-      || list.any(frame.areas, fn(area) { area.grid_tracks != None })
+      || list.any(frame.areas, fn(area) {
+        area.pin != "Overlay" && area.grid_tracks != None
+      })
       || list.any(frame.placements, fn(placement) {
         case placement {
-          reader_front.Fixed(cell: reader_front.Flow, ..) -> False
-          reader_front.Fixed(..) -> True
-          reader_front.Widget(..) -> False
+          reader_front.Fixed(area:, cell: reader_front.Flow, ..) ->
+            !area_is_overlay(frame, area)
+          reader_front.Fixed(area:, ..) -> !area_is_overlay(frame, area)
+          reader_front.Widget(area:, ..) -> !area_is_overlay(frame, area)
         }
       })
     },
@@ -4610,9 +4981,13 @@ fn frame_areas(
   fallback: List(reader_front.Area),
 ) -> List(reader_front.Area) {
   case frame {
-    Some(value) -> value.areas
-    None -> fallback
+    Some(value) -> without_overlay_areas(value.areas)
+    None -> without_overlay_areas(fallback)
   }
+}
+
+fn area_is_overlay(frame: reader_front.Frame, name: String) -> Bool {
+  list.any(frame.areas, fn(area) { area.name == name && area.pin == "Overlay" })
 }
 
 fn static_frame_body(
@@ -4662,10 +5037,11 @@ fn static_area_rule(
   area: reader_front.Area,
   visibility: String,
 ) -> String {
-  let base = [
-    selector <> " > [data-yumemi-area=\"" <> area.name <> "\"] {",
-    "  grid-area: " <> area.name <> ";",
-  ]
+  let base = [selector <> " > [data-yumemi-area=\"" <> area.name <> "\"] {"]
+  let grid_area = case area.pin {
+    "Overlay" -> []
+    _ -> ["  grid-area: " <> area.name <> ";"]
+  }
   let grid_tracks = case area.grid_tracks {
     Some(reader_front.GridTracks(cols:, gap: gap)) -> [
       "  display: grid;",
@@ -4697,7 +5073,10 @@ fn static_area_rule(
   string.join(
     list.append(
       base,
-      list.append(grid_tracks, list.append(visible, list.append(pin, ["}"]))),
+      list.append(
+        grid_area,
+        list.append(grid_tracks, list.append(visible, list.append(pin, ["}"]))),
+      ),
     ),
     "\n",
   )

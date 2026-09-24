@@ -63,7 +63,7 @@ pub fn api_v1_text(source: String, input_hash: String) -> String {
   <> "  [\n"
   <> string.join(list.map(document.nodes, fn(node) { "    " <> node }), ",\n")
   <> "\n  ]\n}\n\n"
-  <> markdown.helpers()
+  <> markdown.helpers(document)
   <> "\n"
   <> string.join(document.tables, "\n\n")
 }

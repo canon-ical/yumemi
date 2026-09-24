@@ -98,6 +98,7 @@ fn transport_send(
   method: String,
   path: String,
   body: json.Json,
+  blob_fields: List(String),
   on_ok: fn(Dynamic) -> Nil,
   on_error: fn(Nil) -> Nil,
 ) -> Nil
@@ -110,6 +111,7 @@ fn send(args: Args) -> Effect(Event) {
       json.object([
         #("slug", json.string(args.slug)),
       ]),
+      [],
       fn(value) {
         case decode.run(value, article_publish.decoder()) {
           Ok(out) -> dispatch(live.Done(Ok(out)))

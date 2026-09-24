@@ -92,6 +92,8 @@ const verb_fixture = "fixtures/verb_features"
 
 const value_prop_column_fixture = "fixtures/value_prop_column"
 
+const front_overlay_negative_fixture = "fixtures/front_overlay_negative"
+
 pub fn main() {
   gleeunit.main()
 }
@@ -338,7 +340,7 @@ pub fn gen_types_value_prop_keeps_property_column_test() {
 
 pub fn fixture_gleam_files_parse_including_trailing_spread_test() {
   let assert Ok(units) = source.load(fixture)
-  list.length(units) |> should.equal(15)
+  list.length(units) |> should.equal(16)
   list.any(units, fn(unit) { unit.path == "trailing_spread" })
   |> should.be_true
 }
@@ -347,7 +349,7 @@ pub fn types_entities_services_counted_test() {
   let loaded = app()
   list.length(loaded.value_types) |> should.equal(5)
   list.length(loaded.entities) |> should.equal(4)
-  list.length(loaded.services) |> should.equal(6)
+  list.length(loaded.services) |> should.equal(7)
 }
 
 pub fn lifecycle_read_from_edges_test() {
@@ -358,13 +360,14 @@ pub fn lifecycle_read_from_edges_test() {
   article.collection |> should.equal("articles")
 }
 
-pub fn article_http_route_table_has_nine_rows_test() {
+pub fn article_http_route_table_has_twelve_rows_test() {
   let face = text("src/gen/face.gleam")
   string.contains(face, "pub type Face {\n  Public\n  Admin\n}")
   |> should.be_true
   let http = text("src/gen/entry/http.gleam")
   [
     "Route(face: \"public\", method: \"POST\", path: \"/api/articles\", service: \"article_create\", path_keys: [], credential: Session),",
+    "Route(face: \"public\", method: \"POST\", path: \"/api/articles/{slug}/blob_save\", service: \"article_blob_save\", path_keys: [\"slug\"], credential: Session),",
     "Route(face: \"admin\", method: \"POST\", path: \"/api/admin/articles\", service: \"article_create\", path_keys: [], credential: Session),",
     "Route(face: \"public\", method: \"GET\", path: \"/api/articles\", service: \"article_list\", path_keys: [], credential: Session),",
     "Route(face: \"admin\", method: \"GET\", path: \"/api/admin/articles\", service: \"article_list\", path_keys: [], credential: Session),",
@@ -384,7 +387,7 @@ pub fn article_http_route_table_has_nine_rows_test() {
     && string.contains(line, "path: \"")
   })
   |> list.length
-  |> should.equal(11)
+  |> should.equal(12)
 }
 
 pub fn entry_prefix_is_required_named_and_one_word_test() {
@@ -1945,6 +1948,7 @@ pub fn front_model_reads_url_blocks_widgets_components_and_style_test() {
   |> should.equal([
     "WidgetList",
     "ArticleRead",
+    "ArticleBlobSave",
     "ArticlePublish",
     "ArticleCreate",
     "ArticleList",
@@ -1975,7 +1979,109 @@ pub fn front_model_reads_url_blocks_widgets_components_and_style_test() {
   |> should.equal([True, True, True, True, False, True])
   value.components
   |> list.map(fn(component) { component.after_send })
-  |> should.equal([Some("Stay"), Some("ReloadPage")])
+  |> should.equal([None, None, Some("Stay"), Some("ReloadPage")])
+}
+
+pub fn front_emit_overlay_area_and_badge_use_generator_css_test() {
+  let page = text("public/src/gen/load/article/arg_slug/page.gleam")
+  [
+    "overlay_area(\"article-dialog\", [],",
+    "attribute.attribute(\"id\", el.overlay_id_prefix <> name)",
+    "attribute.attribute(\"popover\", \"\")",
+    "attribute.attribute(\"data-yumemi-overlay\", \"\")",
+  ]
+  |> list.each(fn(row) { string.contains(page, row) |> should.be_true })
+
+  let css = text("public/priv/static/_yumemi/style.css")
+  [
+    "grid-template-areas: \"page\" \"rail\";",
+    "[data-yumemi-badge] {",
+    "position: absolute;",
+    "[data-yumemi-badge][data-count=\"\"]",
+    "[data-yumemi-badge][data-count=\"0\"] { display: none; }",
+    "[popover]::backdrop { background: rgba(0, 0, 0, 0.45); }",
+  ]
+  |> list.each(fn(row) { string.contains(css, row) |> should.be_true })
+  string.contains(css, "article-dialog") |> should.be_false
+}
+
+pub fn front_overlay_missing_area_opener_is_exit_four_test() {
+  let notes =
+    overlay_negative_notes(
+      "missing_area",
+      "Area(name: \"page\", flow: css.Stack(gap: css.Px(0.0)), pin: css.NoPin, style: [])",
+      "Fixed(area: \"page\", block: blocks.Open, cell: Flow)",
+      "[]",
+    )
+  assert_overlay_exit_four(
+    notes,
+    "el.opener が同じ Page / Layout に無い area \"missing-dialog\" を名指している",
+  )
+}
+
+pub fn front_overlay_non_overlay_area_opener_is_exit_four_test() {
+  let notes =
+    overlay_negative_notes(
+      "non_overlay_area",
+      "Area(name: \"page\", flow: css.Stack(gap: css.Px(0.0)), pin: css.NoPin, style: []), Area(name: \"plain-dialog\", flow: css.Stack(gap: css.Px(0.0)), pin: css.NoPin, style: [])",
+      "Fixed(area: \"page\", block: blocks.Open, cell: Flow)",
+      "[]",
+    )
+  assert_overlay_exit_four(
+    notes,
+    "el.opener の area \"plain-dialog\" は pin: Overlay ではない",
+  )
+}
+
+pub fn front_overlay_dynamic_opener_area_is_exit_four_test() {
+  let notes =
+    overlay_negative_notes(
+      "dynamic_area",
+      "Area(name: \"page\", flow: css.Stack(gap: css.Px(0.0)), pin: css.NoPin, style: []), Area(name: \"article-dialog\", flow: css.Stack(gap: css.Px(0.0)), pin: css.Overlay, style: [])",
+      "Fixed(area: \"page\", block: blocks.Open, cell: Flow)",
+      "[]",
+    )
+  assert_overlay_exit_four(notes, "el.opener の area は文字列リテラルでなければならない")
+}
+
+pub fn front_overlay_explicit_template_is_exit_four_test() {
+  let assert Ok(fixture_units) =
+    source.load(front_overlay_negative_fixture <> "/explicit_template")
+  let units =
+    list.append(
+      [source_unit("layout", overlay_negative_layout())],
+      fixture_units,
+    )
+  let notes = front.notes(front_from_units_named("negative", units, []), [])
+  assert_overlay_exit_four(
+    notes,
+    "明示 template に Overlay area \"article-dialog\" を指定できない",
+  )
+}
+
+pub fn front_overlay_dynamic_each_modal_scope_is_exit_four_test() {
+  let notes =
+    overlay_negative_notes(
+      "dynamic_scope",
+      "Area(name: \"page\", flow: css.Stack(gap: css.Px(0.0)), pin: css.NoPin, style: [])",
+      "Fixed(area: \"page\", block: blocks.Listing, cell: Flow)",
+      "[]",
+    )
+  assert_overlay_exit_four(notes, "el.each_modal の scope は文字列リテラルでなければならない")
+}
+
+pub fn front_overlay_duplicate_each_modal_scope_is_exit_four_test() {
+  let notes =
+    overlay_negative_notes(
+      "duplicate_scope",
+      "Area(name: \"page\", flow: css.Stack(gap: css.Px(0.0)), pin: css.NoPin, style: [])",
+      "Fixed(area: \"page\", block: blocks.First, cell: Flow), Fixed(area: \"page\", block: blocks.Second, cell: Flow)",
+      "[]",
+    )
+  assert_overlay_exit_four(
+    notes,
+    "el.each_modal の scope \"shared-row\" が同じ Page + Layout 内で重複している",
+  )
 }
 
 pub fn front_emit_route_uses_page_only_and_colon_arguments_test() {
@@ -2005,7 +2111,8 @@ pub fn front_emit_api_is_filtered_by_face_services_test() {
   ["service.ArticleCreate", "service.ArticlePublish", "service.ArticleRetract"]
   |> list.each(fn(row) { string.contains(api, row) |> should.be_false })
   string.contains(api, "import framework/front as front") |> should.be_true
-  string.contains(api, "pub type Attached = Nil") |> should.be_true
+  string.contains(api, "pub type Attached {") |> should.be_true
+  string.contains(api, "  BlobCopy") |> should.be_true
   string.contains(
     api,
     "pub type Target = front.Target(service.Service, Attached)",
@@ -2026,14 +2133,16 @@ pub fn attached_runtime_table_matches_generated_face_api_test() {
     runtime |> string.split("name:'") |> list.length |> int.subtract(1)
   let face_rows =
     api
-    |> string.split("AttachedRoute(entry: Fixture")
+    |> string.split("AttachedRoute(entry:")
     |> list.length
     |> int.subtract(1)
-  runtime_rows |> should.equal(2)
+    |> int.subtract(1)
+  runtime_rows |> should.equal(3)
   face_rows |> should.equal(runtime_rows)
   [
     "AttachedRoute(entry: FixtureBrowser, method: Get, path: \"/fixture/browser\")",
     "AttachedRoute(entry: FixtureSync, method: Post, path: \"/fixture/sync\")",
+    "AttachedRoute(entry: BlobCopy, method: Post, path: \"/api/blobs\")",
   ]
   |> list.each(fn(route) { string.contains(api, route) |> should.be_true })
 }
@@ -2303,29 +2412,39 @@ pub fn static_material_copy_keeps_front_four_names_and_markdown_structure_test()
   let document = static_emit.api_v1_text(sources.api_v1, sources.api_v1_hash)
   string.contains(document, "pub fn nodes() -> List(el.Element(Nil))")
   |> should.be_true
-  string.contains(document, "heading1(\"MuseArch REST API\")") |> should.be_true
+  string.contains(document, "heading1(\"Fixture API\")") |> should.be_true
   string.contains(document, "html.table(") |> should.be_true
-  string.contains(document, "html.pre(") |> should.be_true
+  string.contains(document, "html.pre(") |> should.be_false
   string.contains(document, string.inspect(sources.api_v1)) |> should.be_false
   text_occurrences(document, "\n    heading") |> should.equal(3)
   text_occurrences(document, "html.table(") |> should.equal(2)
-  text_occurrences(document, "table_row([") |> should.equal(11)
+  text_occurrences(document, "table_row([") |> should.equal(4)
   let inline_code_count = text_occurrences(document, "inline_code(") - 1
-  inline_code_count |> should.equal(67)
-  text_occurrences(document, "html.pre(") |> should.equal(1)
-  let list_count = text_occurrences(document, "unordered_list(") - 1
-  list_count |> should.equal(0)
+  inline_code_count |> should.equal(4)
+  text_occurrences(document, "html.pre(") |> should.equal(0)
+  [
+    "heading3",
+    "heading4",
+    "heading5",
+    "heading6",
+    "unordered_list",
+    "fenced_code",
+  ]
+  |> list.each(fn(name) {
+    string.contains(document, "fn " <> name <> "(") |> should.be_false
+  })
+  text_occurrences(document, "unordered_list(") |> should.equal(0)
 }
 
 pub fn static_api_v1_source_change_changes_generated_structure_test() {
   let assert Ok(sources) = static_source.load(fixture)
   let changed_source =
-    string.replace(sources.api_v1, "MuseArch REST API", "MuseArch REST API!")
+    string.replace(sources.api_v1, "Fixture API", "Fixture API!")
   let original_document = static_emit.api_v1_text(sources.api_v1, "same-hash")
   let changed_document = static_emit.api_v1_text(changed_source, "same-hash")
   let different = original_document != changed_document
   different |> should.be_true
-  string.contains(changed_document, "MuseArch REST API!") |> should.be_true
+  string.contains(changed_document, "Fixture API!") |> should.be_true
 }
 
 pub fn static_api_v1_parser_rejects_unhandled_markdown_test() {
@@ -2548,7 +2667,7 @@ pub fn front_calls_parse_framework_target_of_and_entry_test() {
   let assert Ok(#(_, generated_api)) =
     synthetic_front_files(face_units)
     |> list.find(fn(file) { file.0 == "public/src/gen/api.gleam" })
-  string.contains(generated_api, "pub type Attached {\n  BrowserAdult\n}")
+  string.contains(generated_api, "  BrowserAdult\n")
   |> should.be_true
   string.contains(
     generated_api,
@@ -2952,7 +3071,7 @@ pub fn front_emit_transport_and_client_are_generic_and_given_safe_test() {
   let transport = text("public/src/gen/live/transport_ffi.mjs")
   string.contains(
     transport,
-    "export function send(method, path, body, onOk, onError)",
+    "export function send(method, path, body, blobFields, onOk, onError)",
   )
   |> should.be_true
   string.contains(transport, "ArticlePublish") |> should.be_false
@@ -2962,6 +3081,65 @@ pub fn front_emit_transport_and_client_are_generic_and_given_safe_test() {
   string.contains(client, "data-yumemi-given") |> should.be_true
   string.contains(client, "pick-tag") |> should.be_true
   string.contains(client, "__YUMEMI_BUILD__") |> should.be_true
+}
+
+pub fn front_emit_blob_fields_issue_tokens_and_upload_only_registered_tokens_test() {
+  let live = text("public/src/gen/live/article_blob_save.gleam")
+  [
+    "pub fn blob_file_input() -> List(attribute.Attribute(Event))",
+    "event.on(\"change\", file_input_event(field))",
+    "fn file_token(event: Dynamic) -> String",
+    "live.Set(field, file_token(event))",
+    "blob_fields: List(String)",
+    "[\"blob\", \"existing\"]",
+    "case args.existing",
+    "\"\" -> json.null()",
+  ]
+  |> list.each(fn(row) { string.contains(live, row) |> should.be_true })
+
+  let transport = text("public/src/gen/live/transport_ffi.mjs")
+  [
+    "const selectedFiles = new Map()",
+    "const uploadedFiles = new Map()",
+    "export function file_token(event)",
+    "selectedFiles.set(token, file)",
+    "selectedFiles.has(value) || uploadedFiles.has(value)",
+  ]
+  |> list.each(fn(row) { string.contains(transport, row) |> should.be_true })
+  string.contains(transport, "document.addEventListener") |> should.be_false
+}
+
+pub fn front_emit_blob_upload_failure_precedes_and_skips_service_request_test() {
+  let transport = text("public/src/gen/live/transport_ffi.mjs")
+  string.contains(
+    transport,
+    "if (!response.ok) throw new Error(\"blob upload failed\")",
+  )
+  |> should.be_true
+  let assert [_, after_upload] =
+    string.split(transport, "await uploadToken(value)")
+  string.contains(after_upload, "const response = await fetch(path")
+  |> should.be_true
+  string.contains(
+    transport,
+    "}).catch((error) => onError({ code: error?.message ?? \"network_error\" }))",
+  )
+  |> should.be_true
+}
+
+pub fn front_emit_blob_copy_entry_uses_attached_target_route_test() {
+  let api = text("public/src/gen/api.gleam")
+  string.contains(api, "  BlobCopy\n") |> should.be_true
+  string.contains(
+    api,
+    "AttachedRoute(entry: BlobCopy, method: Post, path: \"/api/blobs\")",
+  )
+  |> should.be_true
+
+  let live = text("public/src/gen/live/blob_copy.gleam")
+  string.contains(live, "upload_file") |> should.be_true
+  string.contains(live, "\"POST\",\n      \"/api/blobs\"") |> should.be_true
+  string.contains(live, "live.Done(Ok(key))") |> should.be_true
 }
 
 pub fn client_bundle_uses_generated_output_over_input_test() {
@@ -3053,7 +3231,11 @@ pub fn front_emit_live_follows_island_calls_and_reload_out_test() {
 
   let transport = text("public/src/gen/live/transport_ffi.mjs")
   string.contains(transport, "response.json().then(onError)") |> should.be_true
-  string.contains(transport, "onError(undefined)") |> should.be_false
+  string.contains(
+    transport,
+    "onError({ code: error?.message ?? \"network_error\" })",
+  )
+  |> should.be_true
 }
 
 pub fn front_emit_out_redefines_opaque_relations_test() {
@@ -3181,7 +3363,7 @@ pub fn front_emit_writes_one_out_file_per_service_test() {
   |> list.map(fn(entry) { entry.0 })
   |> list.filter(string.starts_with(_, "public/src/gen/out/"))
   |> list.length
-  |> should.equal(6)
+  |> should.equal(7)
 }
 
 pub fn front_emit_load_layout_without_sources_uses_empty_data_test() {
@@ -3390,6 +3572,84 @@ pub fn nested_layout_is_exit_four_test() {
     )
   assert_one_note(notes, stop.Conflict, "Layout の中に Layout")
   stop.worst(notes) |> should.equal(4)
+}
+
+fn overlay_negative_notes(
+  fixture_name: String,
+  areas: String,
+  placements: String,
+  template: String,
+) -> List(stop.Note) {
+  let assert Ok(fixture_units) =
+    source.load(front_overlay_negative_fixture <> "/" <> fixture_name)
+  let block_units =
+    fixture_units
+    |> list.filter(fn(unit) { string.starts_with(unit.path, "blocks/") })
+  let units =
+    list.append(
+      [
+        source_unit("layout", overlay_negative_layout()),
+        source_unit(
+          "pages/example/page",
+          overlay_negative_page(areas, placements, template),
+        ),
+      ],
+      block_units,
+    )
+  front.notes(front_from_units_named("negative", units, []), [])
+}
+
+fn overlay_negative_layout() -> String {
+  "import framework/front.{type Layout, Frame, Layout}\n"
+  <> "import gleam/option.{None}\n\n"
+  <> "pub const negative: Layout(Nil, Nil) = Layout(\n"
+  <> "  sp: Frame(areas: [], placements: [], cols: [], rows: [], template: []),\n"
+  <> "  pc: None,\n"
+  <> "  tablet: None,\n"
+  <> "  reads: [],\n"
+  <> ")\n"
+}
+
+fn overlay_negative_page(
+  areas: String,
+  placements: String,
+  template: String,
+) -> String {
+  "import framework/front.{type Page, Area, Fixed, Flow, Frame, Page}\n"
+  <> "import framework/front/css\n"
+  <> "import gleam/option.{None}\n"
+  <> "import blocks\n\n"
+  <> "pub const page: Page(Nil, Nil) = Page(\n"
+  <> "  of: None,\n"
+  <> "  layout: None,\n"
+  <> "  theme: None,\n"
+  <> "  sp: Frame(\n"
+  <> "    areas: ["
+  <> areas
+  <> "],\n"
+  <> "    placements: ["
+  <> placements
+  <> "],\n"
+  <> "    cols: [],\n"
+  <> "    rows: [],\n"
+  <> "    template: "
+  <> template
+  <> ",\n"
+  <> "  ),\n"
+  <> "  pc: None,\n"
+  <> "  tablet: None,\n"
+  <> "  reads: [],\n"
+  <> ")\n"
+}
+
+fn assert_overlay_exit_four(notes: List(stop.Note), expected: String) -> Nil {
+  stop.worst(notes) |> should.equal(4)
+  let conflicts = list.filter(notes, fn(note) { note.class == stop.Conflict })
+  list.length(conflicts) |> should.equal(1)
+  let assert [note] = conflicts
+  stop.code(note.class) |> should.equal(4)
+  string.contains(stop.line(note), "[exit 4 宣言の矛盾]") |> should.be_true
+  string.contains(note.text, expected) |> should.be_true
 }
 
 fn article_front() -> front.Front {

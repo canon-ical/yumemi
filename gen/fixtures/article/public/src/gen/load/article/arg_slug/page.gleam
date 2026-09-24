@@ -1,4 +1,4 @@
-//// GENERATED from public/src/pages/article/arg_slug/page.gleam [sha256:82c83adc55b4] — 手で編集しない
+//// GENERATED from public/src/pages/article/arg_slug/page.gleam [sha256:b0af993d9f89] — 手で編集しない
 
 import blocks/article
 import blocks/feed
@@ -7,6 +7,7 @@ import blocks/row_summary
 import blocks/site_header
 import blocks/summary
 import framework/front/css
+import framework/front/el
 import framework/front/sketch_css
 import gen/load/layout
 import gen/out/article_read
@@ -65,6 +66,13 @@ fn render_view(
   raw_html.html([attribute.attribute("lang", "ja")], [
     raw_html.head([], [
       raw_html.meta([attribute.attribute("charset", "utf-8")]),
+      raw_html.meta([
+        attribute.attribute("name", "viewport"),
+        attribute.attribute(
+          "content",
+          "width=device-width, initial-scale=1, viewport-fit=cover",
+        ),
+      ]),
       raw_html.title([], "yumemi front fixture"),
     ]),
     raw_html.body([], [styled_body]),
@@ -117,11 +125,21 @@ pub fn view(it: Data) -> element.Element(Nil) {
 }
 
 fn page_children(it: Data) -> List(element.Element(Nil)) {
-  list.flatten([
-    page_placement_0(it),
-    page_placement_1(it),
-    [plain_area("rail", page_placement_2(it))],
-  ])
+  [
+    html.div_(
+      [
+        attribute.attribute(
+          "data-yumemi-grid",
+          "page:pages/article/arg_slug/page",
+        ),
+      ],
+      list.flatten([
+        [styled_area("page", style.page, page_placement_0(it))],
+        [plain_area("rail", page_placement_2(it))],
+        [overlay_area("article-dialog", [], page_placement_1(it))],
+      ]),
+    ),
+  ]
 }
 
 fn styled_area(
@@ -143,6 +161,23 @@ fn plain_area(
   html.div_([attribute.attribute("data-yumemi-area", name)], children)
 }
 
+fn overlay_area(
+  name: String,
+  styles: List(css.Style),
+  children: List(element.Element(Nil)),
+) -> element.Element(Nil) {
+  let attributes = [
+    attribute.attribute("id", el.overlay_id_prefix <> name),
+    attribute.attribute("popover", ""),
+    attribute.attribute("data-yumemi-area", name),
+    attribute.attribute("data-yumemi-overlay", ""),
+  ]
+  case styles {
+    [] -> html.div_(attributes, children)
+    _ -> html.div(sketch_css.class(styles), attributes, children)
+  }
+}
+
 fn layout_placement_0(_it: Data) -> List(element.Element(Nil)) {
   [site_header.view(Nil)]
 }
@@ -155,11 +190,11 @@ fn layout_placement_1(it: Data) -> List(element.Element(Nil)) {
 }
 
 fn page_placement_0(it: Data) -> List(element.Element(Nil)) {
-  [summary.view(it.article_read)]
+  [article.view(it.article_read)]
 }
 
 fn page_placement_1(it: Data) -> List(element.Element(Nil)) {
-  [article.view(it.article_read)]
+  [summary.view(it.article_read)]
 }
 
 fn page_placement_2(it: Data) -> List(element.Element(Nil)) {

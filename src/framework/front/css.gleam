@@ -66,6 +66,7 @@ pub type Pin {
   Top
   Bottom
   NoPin
+  Overlay
 }
 
 pub type Animation {

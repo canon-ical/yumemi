@@ -91,18 +91,19 @@ try {
     () => customElements.get("pick-tag") !== undefined,
     { timeout: 5000 },
   );
-  const before = await page.locator("like-button button").textContent();
-  await page.locator("like-button button").click();
+  const likeButton = page.locator("like-button").first().locator("button");
+  const before = await likeButton.textContent();
+  await likeButton.click();
   await page.waitForFunction(
     () => {
       const button = document
-        .querySelector("like-button")
+        .querySelector('[data-yumemi-area="page"] like-button')
         ?.shadowRoot?.querySelector("button");
       return button?.textContent?.includes("13") === true;
     },
     { timeout: 5000 },
   );
-  const after = await page.locator("like-button button").textContent();
+  const after = await likeButton.textContent();
 
   assert(after?.includes("13"), `island did not change after click: ${after}`);
   assert(errors.length === 0, `browser errors: ${errors.join("; ")}`);

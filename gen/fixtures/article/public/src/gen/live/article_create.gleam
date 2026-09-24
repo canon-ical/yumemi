@@ -143,6 +143,7 @@ fn transport_send(
   method: String,
   path: String,
   body: json.Json,
+  blob_fields: List(String),
   on_ok: fn(Dynamic) -> Nil,
   on_error: fn(Nil) -> Nil,
 ) -> Nil
@@ -159,6 +160,7 @@ fn send(args: Args) -> Effect(Event) {
         #("category", json.string(args.category)),
         #("tags", json.string(args.tags)),
       ]),
+      [],
       fn(value) {
         case decode.run(value, article_create.decoder()) {
           Ok(out) -> dispatch(live.Done(Ok(out)))
