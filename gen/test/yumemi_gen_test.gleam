@@ -2752,7 +2752,7 @@ pub fn front_emit_decoder_only_uses_declared_constructors_test() {
   string.contains(out, "pub type ArticleRow(") |> should.be_false
   string.contains(out, "ArticleRow(") |> should.be_true
   string.contains(out, "decode.success(ArticleRow(") |> should.be_true
-  string.contains(out, "\"Draft\" -> decode.success(Draft)") |> should.be_true
+  string.contains(out, "\"draft\" -> decode.success(Draft)") |> should.be_true
   string.contains(out, "parse(\"placeholder\")") |> should.be_true
   string.contains(out, "decode.new_primitive_decoder(\"Blob\"")
   |> should.be_true
@@ -2909,7 +2909,7 @@ pub fn front_emit_decodes_custom_record_with_cross_module_enum_test() {
     "pub type Phase {",
     "decode.field(\"settings\"",
     "decode.field(\"phase\", decode.then(decode.string",
-    "\"Draft\" -> decode.success(Draft)",
+    "\"draft\" -> decode.success(Draft)",
     "decode.success(Settings(phase: phase, title: title))",
     "decode.success(Out(settings: settings))",
   ]
@@ -2968,13 +2968,15 @@ pub fn front_emit_decodes_untagged_custom_union_test() {
     "decode.one_of(\n  ",
     "or: [",
     "decode.failure(External, expected: \"Source\")",
-    "decode.map(decode.string, fn(value) { Tagged(value) })",
+    "decode.field(\"0\", decode.string, fn(arg_0)",
+    "decode.success(Tagged(arg_0))",
+    "\"external\" -> decode.success(External)",
     "decode.success(Out(source: source))",
   ]
   |> list.each(fn(row) { string.contains(out, row) |> should.be_true })
 }
 
-pub fn front_emit_decodes_visit_source_from_codec_fields_test() {
+pub fn front_emit_decodes_visit_source_from_generic_codec_test() {
   let out =
     synthetic_out_for(
       app(),
@@ -2990,20 +2992,61 @@ pub fn front_emit_decodes_visit_source_from_codec_fields_test() {
       ],
     )
   [
-    "decode.field(\"source_kind\", decode.string",
-    "\"tagged\" ->",
-    "decode.field(\"source_key\", decode.string",
-    "decode.success(Tagged(key))",
-    "\"external\" ->",
-    "decode.field(\"source_key\", decode.optional(decode.string)",
-    "decode.success(External)",
-    "\"internal\" ->",
-    "decode.success(Internal)",
-    "\"direct\" ->",
-    "decode.success(Direct)",
+    "decode.field(\"0\", decode.string, fn(arg_0)",
+    "decode.success(Tagged(arg_0))",
+    "\"external\" -> decode.success(External)",
+    "\"internal\" -> decode.success(Internal)",
+    "\"direct\" -> decode.success(Direct)",
   ]
   |> list.each(fn(part) { string.contains(out, part) |> should.be_true })
-  string.contains(out, "decode.one_of(") |> should.be_false
+  string.contains(out, "source_kind") |> should.be_false
+  string.contains(out, "source_key") |> should.be_false
+  string.contains(out, "decode.one_of(") |> should.be_true
+}
+
+pub fn front_emit_decodes_value_key_records_and_positional_fields_test() {
+  let out =
+    synthetic_multi_decoder_out(
+      "pub type ValueBox { ValueBox(value: String) }\n"
+      <> "pub type KeyBox { KeyBox(key: String) }\n"
+      <> "pub type Pair { Pair(String, Int) }\n"
+      <> "pub type Out { Out(value_box: ValueBox, key_box: KeyBox, pair: Pair) }\n"
+      <> "pub const service: Service(Args, Out, Error) = Nil",
+    )
+  [
+    "decode.map(decode.string, fn(value) { ValueBox(value: value) })",
+    "decode.map(decode.string, fn(key) { KeyBox(key: key) })",
+    "decode.field(\"0\", decode.string, fn(arg_0)",
+    "decode.field(\"1\", decode.int, fn(arg_1)",
+    "decode.success(Pair(arg_0, arg_1))",
+  ]
+  |> list.each(fn(part) { string.contains(out, part) |> should.be_true })
+}
+
+pub fn front_emit_nullary_tag_matches_codec_acronym_rule_test() {
+  let out =
+    synthetic_multi_decoder_out(
+      "pub type State { HTTPReady Page2Up }\n"
+      <> "pub type Out { Out(state: State) }\n"
+      <> "pub const service: Service(Args, Out, Error) = Nil",
+    )
+  string.contains(out, "\"httpready\" -> decode.success(HTTPReady)")
+  |> should.be_true
+  string.contains(out, "\"page2_up\" -> decode.success(Page2Up)")
+  |> should.be_true
+}
+
+/// The Node round-trip verifier compiles this emitted decoder as a fixture.
+/// It is deliberately independent of entity/visit and metrics services.
+pub fn codec_roundtrip_fixture() -> String {
+  synthetic_multi_decoder_out(
+    "pub type Choice { Named(String) Skipped HTTPReady }\n"
+    <> "pub type ValueBox { ValueBox(value: String) }\n"
+    <> "pub type KeyBox { KeyBox(key: String) }\n"
+    <> "pub type Pair { Pair(String, Int) }\n"
+    <> "pub type Out { Out(choice: Choice, value_box: ValueBox, key_box: KeyBox, pair: Pair) }\n"
+    <> "pub const service: Service(Args, Out, Error) = Nil",
+  )
 }
 
 pub fn front_emit_roster_read_qualifies_public_entity_types_test() {
@@ -3072,7 +3115,7 @@ pub fn front_emit_undiscriminable_union_has_stop_diagnostic_test() {
       ),
       source_unit(
         "service/ambiguous",
-        "pub type Row { Alpha(title: String) Beta(count: Int) }\n\n"
+        "pub type Row { Alpha(title: String) Beta(title: String) }\n\n"
           <> "pub type Out { Out(rows: List(Row)) }\n\n"
           <> "pub const service: Service(Args, Out, Error) = Nil",
       ),
@@ -3085,6 +3128,32 @@ pub fn front_emit_undiscriminable_union_has_stop_diagnostic_test() {
   notes
   |> list.any(fn(note) { string.contains(note.text, "entity/visit.Source") })
   |> should.be_false
+}
+
+pub fn front_emit_flattened_and_colliding_tags_stop_test() {
+  let assert Ok(units) = source.load(fixture)
+  let units =
+    list.append(units, [
+      source_unit(
+        "service/flattened",
+        "pub type Choice { ByValue(value: String) ByKey(key: String) }\n"
+          <> "pub type Out { Out(choice: Choice) }\n"
+          <> "pub const service: Service(Args, Out, Error) = Nil",
+      ),
+      source_unit(
+        "service/tag_collision",
+        "pub type Choice { HTTPRequest Httprequest }\n"
+          <> "pub type Out { Out(choice: Choice) }\n"
+          <> "pub const service: Service(Args, Out, Error) = Nil",
+      ),
+    ])
+  let notes = front_emit.decoder_notes(app(), units)
+  notes
+  |> list.any(fn(note) { string.contains(note.text, "flattened.Choice") })
+  |> should.be_true
+  notes
+  |> list.any(fn(note) { string.contains(note.text, "tag_collision.Choice") })
+  |> should.be_true
 }
 
 pub fn front_emit_transport_and_client_are_generic_and_given_safe_test() {

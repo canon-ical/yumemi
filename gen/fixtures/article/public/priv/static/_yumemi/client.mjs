@@ -6720,13 +6720,13 @@ function decoder3() {
         then$(
           string2,
           (value2) => {
-            if (value2 === "Draft") {
+            if (value2 === "draft") {
               return success(Phase$Draft$const);
-            } else if (value2 === "Scheduled") {
+            } else if (value2 === "scheduled") {
               return success(Phase$Scheduled$const);
-            } else if (value2 === "Published") {
+            } else if (value2 === "published") {
               return success(Phase$Published$const);
-            } else if (value2 === "Retracted") {
+            } else if (value2 === "retracted") {
               return success(Phase$Retracted$const);
             } else {
               return failure(Phase$Draft$const, "Phase");

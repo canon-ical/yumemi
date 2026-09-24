@@ -22,10 +22,10 @@ pub fn decoder() -> decode.Decoder(Out) {
       "phase",
       decode.then(decode.string, fn(value) {
         case value {
-          "Draft" -> decode.success(Draft)
-          "Scheduled" -> decode.success(Scheduled)
-          "Published" -> decode.success(Published)
-          "Retracted" -> decode.success(Retracted)
+          "draft" -> decode.success(Draft)
+          "scheduled" -> decode.success(Scheduled)
+          "published" -> decode.success(Published)
+          "retracted" -> decode.success(Retracted)
           _ -> decode.failure(Draft, expected: "Phase")
         }
       }),

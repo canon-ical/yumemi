@@ -5802,7 +5802,6 @@ fn decoder_for_type(
             Some("framework/page"), _ ->
               page_decoder(app, units, state, scope, name, parameters)
             Some("framework/er"), _ -> relation_decoder(name)
-            Some("entity/visit"), "Source" -> visit_source_decoder(state)
             Some(path), _ ->
               named_decoder(app, units, state, scope, path, name, parameters)
             None, _ ->
@@ -5975,7 +5974,7 @@ fn custom_decoder(
             True -> enum_decoder(state, scope, definition)
             False ->
               case discriminator_field(state, scope, variants) {
-                Some(label) ->
+                Some("kind") ->
                   tagged_union_decoder(
                     app,
                     units,
@@ -5983,9 +5982,9 @@ fn custom_decoder(
                     scope,
                     definition,
                     variants,
-                    label,
+                    "kind",
                   )
-                None ->
+                _ ->
                   untagged_union_decoder(
                     app,
                     units,
@@ -6008,8 +6007,12 @@ fn untagged_union_decoder(
   definition: glance.CustomType,
   variants: List(glance.Variant),
 ) -> String {
+  // A decoder for fewer fields also accepts an object with more fields.
   let decoders =
     variants
+    |> list.sort(fn(left, right) {
+      int.compare(list.length(right.fields), list.length(left.fields))
+    })
     |> list.map(fn(variant) {
       let constructor =
         variant_constructor(state, scope, definition.name, variant.name)
@@ -6020,12 +6023,6 @@ fn untagged_union_decoder(
             variant.name,
             constructor,
           )
-        [glance.UnlabelledVariantField(item)] ->
-          "decode.map("
-          <> decoder_for_type(app, units, state, scope, item)
-          <> ", fn(value) { "
-          <> constructor
-          <> "(value) })"
         _ -> variant_decoder(app, units, state, scope, definition.name, variant)
       }
     })
@@ -6048,7 +6045,7 @@ fn untagged_nullary_variant_decoder(
   "decode.then(decode.string, fn(value) {\n"
   <> "  case value {\n"
   <> "    "
-  <> string.inspect(variant)
+  <> string.inspect(codec_tag(variant))
   <> " -> decode.success("
   <> constructor
   <> ")\n"
@@ -6280,31 +6277,64 @@ fn variant_decoder(
 ) -> String {
   let constructor = variant_constructor(state, scope, type_name, variant.name)
   case variant.fields {
-    [] -> "decode.success(" <> constructor <> ")"
-    [glance.UnlabelledVariantField(item)] ->
+    [] -> untagged_nullary_variant_decoder(type_name, variant.name, constructor)
+    [glance.LabelledVariantField(label: "value", item: item)] ->
       "decode.map("
       <> decoder_for_type(app, units, state, scope, item)
       <> ", fn(value) { "
       <> constructor
-      <> "(value) })"
+      <> "(value: value) })"
+    [glance.LabelledVariantField(label: "key", item: item)] ->
+      "decode.map("
+      <> decoder_for_type(app, units, state, scope, item)
+      <> ", fn(key) { "
+      <> constructor
+      <> "(key: key) })"
     fields -> {
-      let named =
-        list.map(fields, fn(field) {
+      let wire_fields =
+        list.index_map(fields, fn(field, index) {
           case field {
             glance.LabelledVariantField(label: label, item: item) -> #(
               label,
               label,
               decoder_for_type(app, units, state, scope, item),
+              label <> ": " <> label,
             )
             glance.UnlabelledVariantField(item) -> #(
-              "value",
-              "value",
+              int.to_string(index),
+              "arg_" <> int.to_string(index),
               decoder_for_type(app, units, state, scope, item),
+              "arg_" <> int.to_string(index),
             )
           }
         })
-      field_decoder_chain(named, constructor)
+      codec_field_decoder_chain(wire_fields, wire_fields, constructor)
     }
+  }
+}
+
+fn codec_field_decoder_chain(
+  remaining: List(#(String, String, String, String)),
+  all: List(#(String, String, String, String)),
+  constructor: String,
+) -> String {
+  case remaining {
+    [] ->
+      "decode.success("
+      <> constructor
+      <> "("
+      <> string.join(list.map(all, fn(field) { field.3 }), ", ")
+      <> "))"
+    [#(key, variable, decoder, _), ..rest] ->
+      "decode.field("
+      <> string.inspect(key)
+      <> ", "
+      <> decoder
+      <> ", fn("
+      <> variable
+      <> ") {\n    "
+      <> codec_field_decoder_chain(rest, all, constructor)
+      <> "\n  })"
   }
 }
 
@@ -6358,7 +6388,7 @@ fn enum_decoder(
     string.concat(
       list.map(definition.variants, fn(variant) {
         "      \""
-        <> variant.name
+        <> codec_tag(variant.name)
         <> "\" -> decode.success("
         <> mapped_constructor(
           state,
@@ -6436,42 +6466,25 @@ fn relation_decoder(name: String) -> String {
   }
 }
 
-fn visit_source_decoder(state: State) -> String {
-  let tagged = mapped_constructor(state, "entity/visit", "Source", "Tagged")
-  let external = mapped_constructor(state, "entity/visit", "Source", "External")
-  let internal = mapped_constructor(state, "entity/visit", "Source", "Internal")
-  let direct = mapped_constructor(state, "entity/visit", "Source", "Direct")
-  "decode.field(\"source_kind\", decode.string, fn(kind) {\n"
-  <> "  case kind {\n"
-  <> "    \"tagged\" ->\n"
-  <> "      decode.field(\"source_key\", decode.string, fn(key) {\n"
-  <> "        decode.success("
-  <> tagged
-  <> "(key))\n"
-  <> "      })\n"
-  <> "    \"external\" ->\n"
-  <> "      decode.field(\"source_key\", decode.optional(decode.string), fn(_) {\n"
-  <> "        decode.success("
-  <> external
-  <> ")\n"
-  <> "      })\n"
-  <> "    \"internal\" ->\n"
-  <> "      decode.field(\"source_key\", decode.optional(decode.string), fn(_) {\n"
-  <> "        decode.success("
-  <> internal
-  <> ")\n"
-  <> "      })\n"
-  <> "    \"direct\" ->\n"
-  <> "      decode.field(\"source_key\", decode.optional(decode.string), fn(_) {\n"
-  <> "        decode.success("
-  <> direct
-  <> ")\n"
-  <> "      })\n"
-  <> "    _ -> decode.failure("
-  <> direct
-  <> ", expected: \"Source.source_kind\")\n"
-  <> "  }\n"
-  <> "})"
+// api/src/gen/codec.mjs:135,144 uses /([a-z0-9])([A-Z])/g then toLowerCase().
+// Unlike naming.snake, consecutive capitals do not introduce an underscore.
+fn codec_tag(name: String) -> String {
+  let #(result, _) =
+    name
+    |> string.to_graphemes
+    |> list.fold(#("", ""), fn(acc, char) {
+      let #(result, previous) = acc
+      let boundary =
+        previous != ""
+        && string.contains("abcdefghijklmnopqrstuvwxyz0123456789", previous)
+        && string.contains("ABCDEFGHIJKLMNOPQRSTUVWXYZ", char)
+      let separator = case boundary {
+        True -> "_"
+        False -> ""
+      }
+      #(result <> separator <> string.lowercase(char), char)
+    })
+  result
 }
 
 fn entity_decoder(
@@ -7340,8 +7353,7 @@ fn finalize_state(state: State) -> State {
   State(..state, constructors: constructors)
 }
 
-/// Stop before writing a lossy decoder when a multi-variant output type has no
-/// common string field that can distinguish its variants.
+/// Stop before writing a decoder for variants with the same encoded shape.
 pub fn decoder_notes(app: model.App, units: List(Unit)) -> List(stop.Note) {
   units
   |> list.filter(fn(unit) { string.starts_with(unit.path, "service/") })
@@ -7353,15 +7365,9 @@ pub fn decoder_notes(app: model.App, units: List(Unit)) -> List(stop.Note) {
         state.custom
         |> list.filter_map(fn(declaration) {
           let CustomDecl(scope: scope, definition: definition) = declaration
-          let needs_discriminator =
-            list.length(definition.variants) > 1
-            && !list.all(definition.variants, fn(variant) {
-              variant.fields == []
-            })
-            && !has_visit_source_codec(scope, definition)
           case
-            needs_discriminator
-            && discriminator_field(state, scope, definition.variants) == None
+            list.length(definition.variants) > 1
+            && !decodable_variant_shapes(state, scope, definition.variants)
           {
             True ->
               Ok(stop.Note(
@@ -7371,7 +7377,7 @@ pub fn decoder_notes(app: model.App, units: List(Unit)) -> List(stop.Note) {
                   <> scope.module
                   <> "."
                   <> definition.name
-                  <> " の複数 variant を判別できない。全 variant に共通する String 欄 kind(または唯一の候補欄)を宣言する",
+                  <> " の複数 variant を判別できない。汎用 encode の欄名または tag が重なる",
               ))
             False -> Error(Nil)
           }
@@ -7380,8 +7386,47 @@ pub fn decoder_notes(app: model.App, units: List(Unit)) -> List(stop.Note) {
   })
 }
 
-fn has_visit_source_codec(scope: Scope, definition: glance.CustomType) -> Bool {
-  scope.module == "entity/visit" && definition.name == "Source"
+fn decodable_variant_shapes(
+  state: State,
+  scope: Scope,
+  variants: List(glance.Variant),
+) -> Bool {
+  let nullary = list.filter(variants, fn(variant) { variant.fields == [] })
+  let tags = list.map(nullary, fn(variant) { codec_tag(variant.name) })
+  let unique_tags = list.length(tags) == list.length(list.unique(tags))
+  let fielded = list.filter(variants, fn(variant) { variant.fields != [] })
+  case fielded {
+    [] -> unique_tags
+    _ ->
+      case discriminator_field(state, scope, variants) {
+        Some("kind") -> unique_tags
+        _ -> {
+          let flattened =
+            list.any(fielded, fn(variant) {
+              case variant.fields {
+                [glance.LabelledVariantField(label: "value", ..)]
+                | [glance.LabelledVariantField(label: "key", ..)] -> True
+                _ -> False
+              }
+            })
+          let shapes = list.map(fielded, variant_wire_keys)
+          unique_tags
+          && !flattened
+          && list.length(shapes) == list.length(list.unique(shapes))
+        }
+      }
+  }
+}
+
+fn variant_wire_keys(variant: glance.Variant) -> List(String) {
+  variant.fields
+  |> list.index_map(fn(field, index) {
+    case field {
+      glance.LabelledVariantField(label: label, ..) -> label
+      glance.UnlabelledVariantField(..) -> int.to_string(index)
+    }
+  })
+  |> list.sort(string.compare)
 }
 
 fn row_enum_aliases(declarations: List(CustomDecl)) -> List(String) {

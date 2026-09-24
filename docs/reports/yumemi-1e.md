@@ -2,7 +2,7 @@
 
 ## DDL
 
-無し。`git diff --stat 8875df6 -- db/ gen/fixtures/article/db/` は空(基点)。fresh fixture は各92 files、`db/queries` は32 files、2回生成の差分は空。tracked `public/src/gen` と `_yumemi` (client を含む) は fresh 出力と一致。証跡: `gen/build/y1e-n-ddl-diff.txt`、`gen/build/y1e-n-fixture-{a,b}.txt`、`gen/build/y1e-n-fixture-diff.txt`、`gen/build/y1e-n-fixture-tracked-public-{gen,assets}-diff.txt`。
+無し。巡7の開始点 `60f7d8f` から `db/` と `gen/fixtures/article/db/` の差分は0行。fresh fixture は各92 files、2回生成の差分は空。tracked `public/src/gen` と `_yumemi` (client を含む) は fresh 出力と一致。証跡: `gen/build/y1e-p-ddl-diff.txt`、`gen/build/y1e-p-fixture-{c,d}.txt`、`gen/build/y1e-p-fixture-{cd-diff,c-tracked-diff}.txt`。
 
 ## 鷹野宛
 
@@ -16,12 +16,13 @@
 
 検証:
 
-- root `gleam build`: exit 0、warning 1件 (`src/framework/secret.gleam:5`)。`gen/build/y1e-n-root-build.txt`
-- `cd gen && gleam test`: **178 passed, no failures**。`gen/build/y1e-n-generator-test-tag.txt`
-- fixture 生成を2回: 各 exit 0 / 92 files、fresh 同士 diff 0行。tracked `public/src/gen` / `_yumemi` と fresh 出力の差分は各0行。`db/queries` は32 files。
-- `gleam format --check`: fixture 56 `.gleam`、snapshot 951 `.gleam` とも exit 0。`gen/build/y1e-n-format-{fixture,snapshot}.txt`
-- `verify-front-ssr`, `-isolate`, `-given`, `-file`, `-overlay`: ALL PASS。初回に SSR/isolate を並列実行したときは Wrangler の port bind が衝突し、順番に再実行して両方 ALL PASS。Block preview は `BLOCKS: PASS (6 blocks)`。各 `gen/build/y1e-n-verify-front-*.txt`、`gen/build/y1e-n-build-blocks.txt`
-- snapshot `a109b47` を2回生成: 各 exit 4 / 1347 files / exit 1=3 / exit 2=0 / exit 3=1 / exit 4=20 / warnings=43。生成先 diff は0行。`gen/build/y1e-n-snapshot-final{5,6}.txt`、`gen/build/y1e-n-snapshot-final56-diff.txt`
+- root `gleam build`: exit 0、warning 1件 (`src/framework/secret.gleam:5`)。`gen/build/y1e-p-root-build.txt`
+- `cd gen && gleam test`: **181 passed, no failures**。`gen/build/y1e-p-tests-final.txt`
+- fixture 生成を2回: 各 exit 0 / 92 files、fresh 同士 diff 0行。tracked `public/src/gen` / `_yumemi` と fresh 出力の差分は0行。`gen/build/y1e-p-fixture-{c,d}.txt`、`gen/build/y1e-p-fixture-{cd-diff,c-tracked-diff}.txt`。
+- `gleam format --check`: fixture 56 `.gleam`、snapshot 951 `.gleam` とも exit 0。`gen/build/y1e-p-format-{fixture,snapshot}-final.txt`
+- `verify-front-ssr`, `-isolate`, `-given`, `-file`, `-overlay`: ALL PASS。Block preview は `BLOCKS: PASS (6 blocks)`。`gen/build/y1e-p-verify-*.txt`。
+- snapshot `a109b47` を2回生成: 各 exit 4 / 1347 files / exit 1=3 / exit 2=0 / exit 3=1 / exit 4=20 / warnings=43。生成先 diff は0行。`gen/build/y1e-p-snapshot-{c,d}.txt`、`gen/build/y1e-p-snapshot-cd-diff.txt`
+- `node scripts/verify-codec-roundtrip.mjs build/y1e-p-snapshot-c`: **ALL PASS**。生成した `metrics_muse` / `metrics_store` の decoder 各4値 (`Tagged` / `External` / `Internal` / `Direct`) と、別の `Choice` 和型3値を back `codec.mjs:135-146` と同じ encode で往復。結果の構成子と中身を比較した。`gen/build/y1e-p-codec-roundtrip.txt`。
 - snapshot runtime の全診断は www=4、muses=9、console=18。Hex 0.7.0 の `framework/front.Target` 不在と、Page load の値不足に分け、F5 の face-side と `値の出所` の表に転記した。summary の3行はすべて `[exit 1 値の出所]`。
 
 ## 追随便への申し送り
@@ -128,7 +129,8 @@ Y1f には役員 人見 09-24 16:52 の裁定(A 案:Page が取りに行く Serv
 | gen-6 P1-11 named query の P enum | 留。query 列の次便 |
 | gen-6 P1-13 per-element given | 留。Lustre の対応待ち |
 | transport sha256 の一度だけの変化 | 同一 input 2回は byte 一致。B′ reader model の serialization が変わった際の一度の変化は履歴上の説明として残す |
-| decoder exit 1 (`metrics_muse`, `metrics_store`) | 閉。`visit.Source` variant decoder。snapshot exit 1 の baseline 5 から該当2件を除いた |
+| decoder exit 1 (`metrics_muse`, `metrics_store`) | 閉。back の汎用 `encode` と同じ形 (`Tagged(k)` → `{"0":"card"}`、欄なし → `"external"` 等)を生成 decoder で読む。`verify-codec-roundtrip.mjs` で両 Out の各4構成子と汎用 `Choice` 和型3構成子の往復を値で照合。snapshot exit 1=3、metrics 2件は戻らない |
+| 柏木 P1: decoder にある musearch 固有の名前 | `entity/visit.Source` の名指し分岐、専用 decoder、停止判定の特例を削除。構成子の欄名・位置番号・tag を汎用規則で読む |
 | route/config/session/variant/period の値 | 留。Y1f と F5 に hand-coded exception として渡す |
 
 未分類: **0**。
@@ -143,7 +145,7 @@ File input は Service の `Blob` / `Option(Blob)` field ごとに `<field>_file
 
 | 指標 | 基線 | 最終値 |
 |---|---:|---:|
-| `cd gen && gleam test` | 159 | 178 passed |
+| `cd gen && gleam test` | 159 | 181 passed |
 | fixture generated files | 88 | 92 |
 | snapshot exit 1 summary | 5 (decoder 2 + face 3) | 3 (console / muses / www; all three tagged `値の出所`) |
 | snapshot exit 2 | 0 | 0 |
@@ -164,6 +166,6 @@ F5 face build の診断内訳 (各 `gleam build` は face-side と値の出所�
 
 F5 写しの generated `gen/live` では `gleam_json` / `lustre` の `Transitive dependency imported` が各面0。`Unused imported*` も3面とも0。警告15件は依存・framework 側で同数。証跡の一覧は `gen/build/y1e-n-final-counts.txt`。
 
-確かめたこと: root build exit 0 / warning 1、gen test 178 passed、fixture 2回92 files / diff 0、SSR / isolate / given / file / overlay / block preview ALL PASS、format check 56 + 951 files、snapshot 2回 exit 4 / 1347 files / diff 0、F5 3面の errors / warnings は上表のとおり。
+確かめたこと: root build exit 0 / warning 1、gen test 181 passed、codec 往復 11 値 PASS、fixture 2回92 files / diff 0、SSR / isolate / given / file / overlay / block preview ALL PASS、format check 56 + 951 files、snapshot 2回 exit 4 / 1347 files / diff 0。F5 3面の errors / warnings は前巡の上表の値。
 
-確かめていないこと: F5 consumer manifest への直接依存追加は probe copy のみ。`musearch` への適用、Hex publish、staging / production build は未実施。
+確かめていないこと: 巡7で F5 3面の consumer build は再実行していない。F5 consumer manifest への直接依存追加は前巡の probe copy のみ。`musearch` への適用、Hex publish、staging / production build は未実施。
