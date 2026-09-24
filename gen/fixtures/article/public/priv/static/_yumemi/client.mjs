@@ -1,4 +1,4 @@
-// GENERATED from public/src/components/*.gleam and src/entry.gleam [sha256:a8e8768eb5d4] — 手で編集しない
+// GENERATED from public/src/components/*.gleam and src/entry.gleam [sha256:8fde9ebb404a] — 手で編集しない
 // public/build/dev/javascript/prelude.mjs
 var CustomType = class {
   withFields(fields) {
@@ -270,7 +270,7 @@ var Ok = class extends Result {
 var Result$Ok = (value2) => new Ok(value2);
 var Result$isOk = (value2) => value2 instanceof Ok;
 var Result$Ok$0 = (value2) => value2[0];
-var Error = class extends Result {
+var Error2 = class extends Result {
   constructor(detail) {
     super();
     this[0] = detail;
@@ -279,8 +279,8 @@ var Error = class extends Result {
     return false;
   }
 };
-var Result$Error = (detail) => new Error(detail);
-var Result$isError = (value2) => value2 instanceof Error;
+var Result$Error = (detail) => new Error2(detail);
+var Result$isError = (value2) => value2 instanceof Error2;
 function isEqual(x, y) {
   let values3 = [x, y];
   while (values3.length) {
@@ -1034,6 +1034,31 @@ function concat_loop(loop$strings, loop$accumulator) {
 function concat2(strings) {
   return concat_loop(strings, "");
 }
+function join_loop(loop$strings, loop$separator, loop$accumulator) {
+  while (true) {
+    let strings = loop$strings;
+    let separator = loop$separator;
+    let accumulator = loop$accumulator;
+    if (strings instanceof Empty) {
+      return accumulator;
+    } else {
+      let string5 = strings.head;
+      let strings$1 = strings.tail;
+      loop$strings = strings$1;
+      loop$separator = separator;
+      loop$accumulator = accumulator + separator + string5;
+    }
+  }
+}
+function join(strings, separator) {
+  if (strings instanceof Empty) {
+    return "";
+  } else {
+    let first$1 = strings.head;
+    let rest = strings.tail;
+    return join_loop(rest, separator, first$1);
+  }
+}
 
 // public/build/dev/javascript/gleam_stdlib/gleam/dynamic/decode.mjs
 var DecodeError = class extends CustomType {
@@ -1051,17 +1076,22 @@ var Decoder = class extends CustomType {
     this.function = function$;
   }
 };
+var dynamic = /* @__PURE__ */ new Decoder(decode_dynamic);
 var float2 = /* @__PURE__ */ new Decoder(decode_float);
 var int2 = /* @__PURE__ */ new Decoder(decode_int);
 var string2 = /* @__PURE__ */ new Decoder(decode_string);
-function run(data, decoder4) {
-  let $ = decoder4.function(data);
+var bool = /* @__PURE__ */ new Decoder(decode_bool);
+function decode_dynamic(data) {
+  return [data, List$Empty$const];
+}
+function run(data, decoder5) {
+  let $ = decoder5.function(data);
   let maybe_invalid_data = $[0];
   let errors = $[1];
   if (errors instanceof Empty) {
     return new Ok(maybe_invalid_data);
   } else {
-    return new Error(errors);
+    return new Error2(errors);
   }
 }
 function run_dynamic_function(data, name, f) {
@@ -1080,10 +1110,10 @@ function run_dynamic_function(data, name, f) {
 function decode_float(data) {
   return run_dynamic_function(data, "Float", float);
 }
-function map3(decoder4, transformer) {
+function map3(decoder5, transformer) {
   return new Decoder(
     (d) => {
-      let $ = decoder4.function(d);
+      let $ = decoder5.function(d);
       let data = $[0];
       let errors = $[1];
       return [transformer(data), errors];
@@ -1104,9 +1134,9 @@ function run_decoders(loop$data, loop$failure, loop$decoders) {
     if (decoders instanceof Empty) {
       return failure2;
     } else {
-      let decoder4 = decoders.head;
+      let decoder5 = decoders.head;
       let decoders$1 = decoders.tail;
-      let $ = decoder4.function(data);
+      let $ = decoder5.function(data);
       let layer = $;
       let errors = $[1];
       if (errors instanceof Empty) {
@@ -1134,7 +1164,7 @@ function one_of(first, alternatives) {
   );
 }
 function path_segment_to_string(key) {
-  let decoder4 = one_of(
+  let decoder5 = one_of(
     string2,
     toList([
       (() => {
@@ -1147,7 +1177,7 @@ function path_segment_to_string(key) {
       })()
     ])
   );
-  let $ = run(key, decoder4);
+  let $ = run(key, decoder5);
   if ($ instanceof Ok) {
     let key$1 = $[0];
     return key$1;
@@ -1294,6 +1324,54 @@ function decode_error(expected, found) {
 function field(field_name, field_decoder, next) {
   return subfield(toList([field_name]), field_decoder, next);
 }
+function optional_field(key, default$, field_decoder, next) {
+  return new Decoder(
+    (data) => {
+      let _block;
+      let _block$1;
+      let $1 = index2(data, key);
+      if ($1 instanceof Ok) {
+        let $22 = $1[0];
+        if ($22 instanceof Some) {
+          let data$1 = $22[0];
+          _block$1 = field_decoder.function(data$1);
+        } else {
+          _block$1 = [default$, List$Empty$const];
+        }
+      } else {
+        let kind = $1[0];
+        _block$1 = [
+          default$,
+          toList([
+            new DecodeError(kind, classify_dynamic(data), List$Empty$const)
+          ])
+        ];
+      }
+      let _pipe = _block$1;
+      _block = push_path(_pipe, toList([key]));
+      let $ = _block;
+      let out = $[0];
+      let errors1 = $[1];
+      let $2 = next(out).function(data);
+      let out$1 = $2[0];
+      let errors2 = $2[1];
+      return [out$1, append(errors1, errors2)];
+    }
+  );
+}
+function decode_bool(data) {
+  let $ = isEqual(identity(true), data);
+  if ($) {
+    return [true, List$Empty$const];
+  } else {
+    let $1 = isEqual(identity(false), data);
+    if ($1) {
+      return [false, List$Empty$const];
+    } else {
+      return [false, decode_error("Bool", data)];
+    }
+  }
+}
 function optional(inner) {
   return new Decoder(
     (data) => {
@@ -1309,10 +1387,10 @@ function optional(inner) {
     }
   );
 }
-function then$(decoder4, next) {
+function then$(decoder5, next) {
   return new Decoder(
     (dynamic_data) => {
-      let $ = decoder4.function(dynamic_data);
+      let $ = decoder5.function(dynamic_data);
       let data = $[0];
       let errors = $[1];
       let decoder$1 = next(data);
@@ -1583,7 +1661,7 @@ var DecodeError$UnexpectedEndOfInput$const = new UnexpectedEndOfInput();
 function string3(input) {
   return identity3(input);
 }
-function bool(input) {
+function bool2(input) {
   return identity3(input);
 }
 function null$() {
@@ -1615,7 +1693,7 @@ function escape(string5) {
 
 // public/build/dev/javascript/lustre/lustre/internals/constants.mjs
 var empty_list = List$Empty$const;
-var error_nil = /* @__PURE__ */ new Error(void 0);
+var error_nil = /* @__PURE__ */ new Error2(void 0);
 function singleton_list(item) {
   return prepend(item, empty_list);
 }
@@ -1839,7 +1917,7 @@ function boolean_attribute(name, value2) {
   if (value2) {
     return attribute2(name, "");
   } else {
-    return property2(name, bool(false));
+    return property2(name, bool2(false));
   }
 }
 function disabled(is_disabled) {
@@ -2001,12 +2079,12 @@ var Map2 = class extends CustomType {
   }
 };
 var Memo = class extends CustomType {
-  constructor(kind, key, dependencies, view3) {
+  constructor(kind, key, dependencies, view5) {
     super();
     this.kind = kind;
     this.key = key;
     this.dependencies = dependencies;
-    this.view = view3;
+    this.view = view5;
   }
 };
 var fragment_kind = 0;
@@ -2086,8 +2164,8 @@ function map4(element5, mapper) {
     return new Map2(map_kind, element5.key, identity2(mapper), identity2(element5));
   }
 }
-function memo(key, dependencies, view3) {
-  return new Memo(memo_kind, key, dependencies, view3);
+function memo(key, dependencies, view5) {
+  return new Memo(memo_kind, key, dependencies, view5);
 }
 function to_keyed(key, node) {
   if (node instanceof Fragment) {
@@ -2119,13 +2197,13 @@ function to_keyed(key, node) {
     let child2 = node.child;
     return new Map2(node.kind, key, node.mapper, to_keyed(key, child2));
   } else {
-    let view3 = node.view;
+    let view5 = node.view;
     return new Memo(
       node.kind,
       key,
       node.dependencies,
       () => {
-        return to_keyed(key, view3());
+        return to_keyed(key, view5());
       }
     );
   }
@@ -2165,8 +2243,8 @@ function text2(content) {
 function none2() {
   return text("", "");
 }
-function memo2(dependencies, view3) {
-  return memo("", dependencies, view3);
+function memo2(dependencies, view5) {
+  return memo("", dependencies, view5);
 }
 function ref(value2) {
   return identity2(value2);
@@ -2585,9 +2663,9 @@ function do_add_children(loop$handlers, loop$children, loop$vdoms, loop$parent, 
         loop$nodes = rest;
       } else {
         let rest = nodes.tail;
-        let view3 = $.view;
-        let child_node = view3();
-        let vdoms$1 = insert2(vdoms, view3, child_node);
+        let view5 = $.view;
+        let child_node = view5();
+        let vdoms$1 = insert2(vdoms, view5, child_node);
         let next$1 = child_index;
         let rest$1 = prepend(child_node, rest);
         loop$handlers = handlers;
@@ -2794,10 +2872,10 @@ function do_remove_children(loop$handlers, loop$children, loop$vdoms, loop$paren
         loop$nodes = rest;
       } else {
         let rest = nodes.tail;
-        let view3 = $.view;
-        let $1 = has_key(vdoms, view3);
+        let view5 = $.view;
+        let $1 = has_key(vdoms, view5);
         if ($1) {
-          let child2 = get2(vdoms, view3);
+          let child2 = get2(vdoms, view5);
           let nodes$1 = prepend(child2, rest);
           loop$handlers = handlers;
           loop$children = children;
@@ -2939,12 +3017,12 @@ var Message$isSystemRequestedShutdown = (value2) => value2 instanceof SystemRequ
 
 // public/build/dev/javascript/lustre/lustre/runtime/app.mjs
 var App = class extends CustomType {
-  constructor(name, init3, update4, view3, config) {
+  constructor(name, init5, update6, view5, config) {
     super();
     this.name = name;
-    this.init = init3;
-    this.update = update4;
-    this.view = view3;
+    this.init = init5;
+    this.update = update6;
+    this.view = view5;
     this.config = config;
   }
 };
@@ -4875,11 +4953,11 @@ var toList2 = (arr) => arr.reduceRight((xs, x) => List$NonEmpty(x, xs), empty_li
 // public/build/dev/javascript/lustre/lustre/runtime/client/runtime.ffi.mjs
 var is_browser = () => !!globalThis.document;
 var Runtime = class {
-  constructor(root2, [model, effects], view3, update4, options) {
+  constructor(root2, [model, effects], view5, update6, options) {
     this.root = root2;
     this.#model = model;
-    this.#view = view3;
-    this.#update = update4;
+    this.#view = view5;
+    this.#update = update6;
     this.root.addEventListener("context-request", (event4) => {
       if (!(event4.context && event4.callback)) return;
       if (!this.#contexts.has(event4.context)) return;
@@ -4958,7 +5036,7 @@ var Runtime = class {
       }
     }
   }
-  subscribe(key, decoder4) {
+  subscribe(key, decoder5) {
     if (!key) return;
     this.#contextSubscriptions.get(key)?.();
     const target = this.root.host ?? this.root;
@@ -4970,7 +5048,7 @@ var Runtime = class {
           if (previousUnsubscribe !== unsubscribe2) {
             previousUnsubscribe?.();
           }
-          const decoded = run(value2, decoder4);
+          const decoded = run(value2, decoder5);
           this.#contextSubscriptions.set(key, unsubscribe2);
           if (Result$isOk(decoded)) {
             this.dispatch(Result$Ok$0(decoded), true);
@@ -5014,7 +5092,7 @@ var Runtime = class {
     },
     root: () => this.root,
     provide: (key, value2) => this.provide(key, value2),
-    subscribe: (key, decoder4) => this.subscribe(key, decoder4),
+    subscribe: (key, decoder5) => this.subscribe(key, decoder5),
     unsubscribe: (key) => this.unsubscribe(key)
   };
   #scheduleRender(shouldFlush = false) {
@@ -5137,7 +5215,7 @@ var LustreEvent = class extends CustomEvent {
 };
 
 // public/build/dev/javascript/lustre/lustre/runtime/client/component.ffi.mjs
-var make_component = ({ init: init3, update: update4, view: view3, config }, name) => {
+var make_component = ({ init: init5, update: update6, view: view5, config }, name) => {
   if (!is_browser()) return Result$Error(Error$NotABrowser());
   if (!name.includes("-")) return Result$Error(Error$BadComponentName(name));
   if (globalThis.customElements.get(name)) {
@@ -5145,12 +5223,12 @@ var make_component = ({ init: init3, update: update4, view: view3, config }, nam
   }
   const attributes = /* @__PURE__ */ new Map();
   const observedAttributes = [];
-  iterate(config.attributes, ([name2, decoder4]) => {
+  iterate(config.attributes, ([name2, decoder5]) => {
     if (attributes.has(name2)) return;
-    attributes.set(name2, decoder4);
+    attributes.set(name2, decoder5);
     observedAttributes.push(name2);
   });
-  const [model, effects] = init3(void 0);
+  const [model, effects] = init5(void 0);
   const component2 = class Component extends globalThis.HTMLElement {
     static get observedAttributes() {
       return observedAttributes;
@@ -5174,8 +5252,8 @@ var make_component = ({ init: init3, update: update4, view: view3, config }, nam
       this.#runtime = new Runtime(
         this.internals.shadowRoot,
         [model, effects],
-        view3,
-        update4
+        view5,
+        update6
       );
     }
     // CUSTOM ELEMENT LIFECYCLE METHODS ----------------------------------------
@@ -5271,8 +5349,8 @@ var make_component = ({ init: init3, update: update4, view: view3, config }, nam
     provide(key, value2) {
       this.#runtime.provide(key, value2);
     }
-    subscribe(key, decoder4) {
-      this.#runtime.subscribe(key, decoder4);
+    subscribe(key, decoder5) {
+      this.#runtime.subscribe(key, decoder5);
     }
     unsubscribe(key) {
       this.#runtime.unsubscribe(key);
@@ -5283,10 +5361,10 @@ var make_component = ({ init: init3, update: update4, view: view3, config }, nam
     // INTERNAL METHODS --------------------------------------------------------
     #requestContexts() {
       const requested = /* @__PURE__ */ new Set();
-      iterate(this.#initialContexts, ([key, decoder4]) => {
+      iterate(this.#initialContexts, ([key, decoder5]) => {
         if (!key) return;
         if (requested.has(key)) return;
-        this.#runtime.subscribe(key, decoder4);
+        this.#runtime.subscribe(key, decoder5);
         requested.add(key);
       });
     }
@@ -5303,7 +5381,7 @@ var make_component = ({ init: init3, update: update4, view: view3, config }, nam
       );
     }
   };
-  iterate(config.properties, ([name2, decoder4]) => {
+  iterate(config.properties, ([name2, decoder5]) => {
     if (Object.hasOwn(component2.prototype, name2)) {
       return;
     }
@@ -5313,7 +5391,7 @@ var make_component = ({ init: init3, update: update4, view: view3, config }, nam
       },
       set(value2) {
         this[`_${name2}`] = value2;
-        const decoded = run(value2, decoder4);
+        const decoded = run(value2, decoder5);
         if (Result$isOk(decoded)) {
           this.dispatch(Result$Ok$0(decoded), true);
         }
@@ -5325,10 +5403,10 @@ var make_component = ({ init: init3, update: update4, view: view3, config }, nam
 };
 
 // public/build/dev/javascript/lustre/lustre/component.mjs
-function on_attribute_change(name, decoder4) {
+function on_attribute_change(name, decoder5) {
   return new Option(
     (config) => {
-      let attributes = prepend([name, decoder4], config.attributes);
+      let attributes = prepend([name, decoder5], config.attributes);
       return new Config2(
         config.open_shadow_root,
         config.adopt_styles,
@@ -5368,12 +5446,12 @@ var NotABrowser = class extends CustomType {
 };
 var Error$NotABrowser$const = new NotABrowser();
 var Error$NotABrowser = () => Error$NotABrowser$const;
-function component(init3, update4, view3, options) {
+function component(init5, update6, view5, options) {
   return new App(
     Option$None$const,
-    init3,
-    update4,
-    view3,
+    init5,
+    update6,
+    view5,
     configure(options)
   );
 }
@@ -5457,8 +5535,14 @@ function button_(attributes, children) {
 function div_(attributes, children) {
   return element_("div", attributes, children);
 }
+function input_(attributes) {
+  return element_("input", attributes, List$Empty$const);
+}
 function option_(attributes, children) {
   return element_("option", attributes, children);
+}
+function p_(attributes, children) {
+  return element_("p", attributes, children);
 }
 function select_(attributes, children) {
   return element_("select", attributes, children);
@@ -5534,6 +5618,9 @@ var Pin$Bottom$const = new Bottom();
 var NoPin = class extends CustomType {
 };
 var Pin$NoPin$const = new NoPin();
+var Overlay = class extends CustomType {
+};
+var Pin$Overlay$const = new Overlay();
 var Fade = class extends CustomType {
 };
 var Animation$Fade$const = new Fade();
@@ -5590,6 +5677,247 @@ var After$Stay$const = new Stay();
 var ReloadPage = class extends CustomType {
 };
 var After$ReloadPage$const = new ReloadPage();
+
+// public/build/dev/javascript/public/gen/service.mjs
+var ArticleBlobSave = class extends CustomType {
+};
+var Service$ArticleBlobSave$const = new ArticleBlobSave();
+var ArticleCreate = class extends CustomType {
+};
+var Service$ArticleCreate$const = new ArticleCreate();
+var ArticleList = class extends CustomType {
+};
+var Service$ArticleList$const = new ArticleList();
+var ArticlePublish = class extends CustomType {
+};
+var Service$ArticlePublish$const = new ArticlePublish();
+var ArticleRead = class extends CustomType {
+};
+var Service$ArticleRead$const = new ArticleRead();
+var ArticleRetract = class extends CustomType {
+};
+var Service$ArticleRetract$const = new ArticleRetract();
+var WidgetList = class extends CustomType {
+};
+var Service$WidgetList$const = new WidgetList();
+
+// public/build/dev/javascript/public/gen/api.mjs
+var Get = class extends CustomType {
+};
+var Method$Get$const = new Get();
+var Post = class extends CustomType {
+};
+var Method$Post$const = new Post();
+var BlobCopy = class extends CustomType {
+};
+var Attached$BlobCopy$const = new BlobCopy();
+var FixtureBrowser = class extends CustomType {
+};
+var Attached$FixtureBrowser$const = new FixtureBrowser();
+var FixtureSync = class extends CustomType {
+};
+var Attached$FixtureSync$const = new FixtureSync();
+
+// public/build/dev/javascript/public/gen/live/transport_ffi.mjs
+var selectedFiles = /* @__PURE__ */ new Map();
+var uploadedFiles = /* @__PURE__ */ new Map();
+var pendingUploads = /* @__PURE__ */ new Map();
+function file_token(event4) {
+  const input = event4.currentTarget ?? event4.target;
+  if (!(input instanceof HTMLInputElement)) return "";
+  const previous = input.dataset.yumemiFileToken;
+  if (previous) {
+    selectedFiles.delete(previous);
+    uploadedFiles.delete(previous);
+  }
+  const file = input.files?.[0];
+  if (!file) {
+    delete input.dataset.yumemiFileToken;
+    return "";
+  }
+  const token = `~yumemi-file:${crypto.randomUUID()}`;
+  selectedFiles.set(token, file);
+  input.dataset.yumemiFileToken = token;
+  return token;
+}
+async function uploadToken(token, method = "POST", path = "/api/blobs") {
+  if (uploadedFiles.has(token)) return uploadedFiles.get(token);
+  const file = selectedFiles.get(token);
+  if (!file) throw new Error("unknown file token");
+  if (pendingUploads.has(token)) return pendingUploads.get(token);
+  const upload = fetch(path, {
+    method,
+    headers: { "content-type": file.type || "application/octet-stream" },
+    body: file
+  }).then(async (response) => {
+    if (!response.ok) throw new Error("blob upload failed");
+    const result = await response.json();
+    if (typeof result?.key !== "string" || result.key === "") throw new Error("blob response has no key");
+    selectedFiles.delete(token);
+    uploadedFiles.set(token, result.key);
+    return result.key;
+  }).catch(() => {
+    throw new Error("file upload failed");
+  }).finally(() => pendingUploads.delete(token));
+  pendingUploads.set(token, upload);
+  return upload;
+}
+function send2(method, path, body, blobFields, onOk, onError) {
+  Promise.resolve().then(async () => {
+    const nextBody = { ...body };
+    for (const field2 of blobFields) {
+      const value2 = nextBody[field2];
+      if (typeof value2 !== "string") continue;
+      if (selectedFiles.has(value2) || uploadedFiles.has(value2)) nextBody[field2] = await uploadToken(value2);
+    }
+    const response = await fetch(path, {
+      method,
+      headers: { "content-type": "application/json" },
+      body: method === "GET" ? void 0 : JSON.stringify(nextBody)
+    });
+    return response;
+  }).then((response) => {
+    if (response.ok) {
+      response.json().then(onOk).catch(() => onError({ code: "invalid_response" }));
+    } else {
+      response.json().then(onError).catch(() => onError({ code: "request_failed" }));
+    }
+  }).catch((error) => onError({ code: error?.message ?? "network_error" }));
+  return void 0;
+}
+function upload_file(method, path, token, onOk, onError) {
+  if (!selectedFiles.has(token) && !uploadedFiles.has(token)) {
+    onError(void 0);
+    return void 0;
+  }
+  uploadToken(token, method, path).then(onOk).catch(() => onError(void 0));
+  return void 0;
+}
+
+// public/build/dev/javascript/public/gen/live/blob_copy.mjs
+var Args = class extends CustomType {
+  constructor(file) {
+    super();
+    this.file = file;
+  }
+};
+var File = class extends CustomType {
+};
+var Field$File$const = new File();
+function init(_) {
+  return [
+    new State(new Args(""), void 0, Option$None$const, false),
+    none()
+  ];
+}
+function send3(args) {
+  return from2(
+    (dispatch2) => {
+      upload_file(
+        "POST",
+        "/api/blobs",
+        args.file,
+        (key) => {
+          return dispatch2(new Done(new Ok(key)));
+        },
+        (_) => {
+          return dispatch2(new Done(new Error2("file upload failed")));
+        }
+      );
+      return void 0;
+    }
+  );
+}
+function update2(model, msg) {
+  if (msg instanceof Set2) {
+    let value2 = msg[1];
+    return [
+      new State(new Args(value2), model.given, model.last, model.waiting),
+      none()
+    ];
+  } else if (msg instanceof Send) {
+    let $ = model.waiting;
+    if ($) {
+      return [model, none()];
+    } else {
+      return [
+        new State(model.args, model.given, model.last, true),
+        send3(model.args)
+      ];
+    }
+  } else if (msg instanceof Given) {
+    return [model, none()];
+  } else {
+    let result = msg[0];
+    return [
+      new State(model.args, model.given, new Some(result), false),
+      none()
+    ];
+  }
+}
+function file_input_event() {
+  return map3(
+    dynamic,
+    (event4) => {
+      return new Set2(Field$File$const, file_token(event4));
+    }
+  );
+}
+function file_input() {
+  return toList([
+    attribute2("type", "file"),
+    attribute2("data-yumemi-file-input", ""),
+    on("change", file_input_event())
+  ]);
+}
+
+// public/build/dev/javascript/public/components/article_blob_copy.mjs
+function view(it) {
+  return div_(
+    List$Empty$const,
+    toList([
+      input_(file_input()),
+      button_(
+        toList([
+          on_click(Event$Send$const),
+          disabled(it.waiting)
+        ]),
+        toList([text4("Upload article image")])
+      ),
+      (() => {
+        let $ = it.last;
+        if ($ instanceof Some) {
+          let $1 = $[0];
+          if ($1 instanceof Ok) {
+            let key = $1[0];
+            return p_(
+              toList([attribute2("data-blob-key", key)]),
+              toList([text4(key)])
+            );
+          } else {
+            return p_(
+              List$Empty$const,
+              toList([text4("upload failed")])
+            );
+          }
+        } else {
+          return p_(
+            List$Empty$const,
+            toList([text4("choose a file")])
+          );
+        }
+      })()
+    ])
+  );
+}
+function app() {
+  return component(
+    init,
+    update2,
+    view,
+    List$Empty$const
+  );
+}
 
 // public/build/dev/javascript/yumemi/framework/spec_ffi.mjs
 function matches2(raw, pattern) {
@@ -5689,8 +6017,347 @@ function validate(raw, spec) {
   if (valid) {
     return new Ok(raw);
   } else {
-    return new Error(Error$Invalid$const);
+    return new Error2(Error$Invalid$const);
   }
+}
+
+// public/build/dev/javascript/public/gen/out/article_blob_save.mjs
+var Out = class extends CustomType {
+  constructor(saved) {
+    super();
+    this.saved = saved;
+  }
+};
+function decoder() {
+  return field(
+    "saved",
+    bool,
+    (saved) => {
+      return success(new Out(saved));
+    }
+  );
+}
+
+// public/build/dev/javascript/public/gen/live/article_blob_save.mjs
+var Args2 = class extends CustomType {
+  constructor(slug, blob, existing) {
+    super();
+    this.slug = slug;
+    this.blob = blob;
+    this.existing = existing;
+  }
+};
+var Slug = class extends CustomType {
+};
+var Field$Slug$const = new Slug();
+var Blob = class extends CustomType {
+};
+var Field$Blob$const = new Blob();
+var Existing = class extends CustomType {
+};
+var Field$Existing$const = new Existing();
+var Broke = class extends CustomType {
+  constructor($0) {
+    super();
+    this[0] = $0;
+  }
+};
+function init2(given) {
+  return [
+    new State(new Args2("", "", ""), given, Option$None$const, false),
+    none()
+  ];
+}
+function error_field_decoder(field2) {
+  return optional_field(
+    field2,
+    "",
+    string2,
+    (value2) => {
+      return success(value2);
+    }
+  );
+}
+function error_text(value2) {
+  let $ = run(value2, error_field_decoder("code"));
+  if ($ instanceof Ok) {
+    let code = $[0];
+    if (code !== "") {
+      return code;
+    } else {
+      let $1 = run(value2, error_field_decoder("message"));
+      if ($1 instanceof Ok) {
+        let message = $1[0];
+        if (message !== "") {
+          return message;
+        } else {
+          return "invalid error payload";
+        }
+      } else {
+        return "invalid error payload";
+      }
+    }
+  } else {
+    let $1 = run(value2, error_field_decoder("message"));
+    if ($1 instanceof Ok) {
+      let message = $1[0];
+      if (message !== "") {
+        return message;
+      } else {
+        return "invalid error payload";
+      }
+    } else {
+      return "invalid error payload";
+    }
+  }
+}
+function error_failure(value2) {
+  let $ = error_text(value2);
+  let code = $;
+  return new Broke(code);
+}
+function send4(args) {
+  return from2(
+    (dispatch2) => {
+      return send2(
+        "POST",
+        "/api/articles/" + args.slug + "/blob_save",
+        object2(
+          toList([
+            ["slug", string3(args.slug)],
+            ["blob", string3(args.blob)],
+            [
+              "existing",
+              (() => {
+                let $ = args.existing;
+                if ($ === "") {
+                  return null$();
+                } else {
+                  let value2 = $;
+                  return string3(value2);
+                }
+              })()
+            ]
+          ])
+        ),
+        toList(["blob", "existing"]),
+        (value2) => {
+          let $ = run(value2, decoder());
+          if ($ instanceof Ok) {
+            let out = $[0];
+            return dispatch2(new Done(new Ok(out)));
+          } else {
+            return dispatch2(
+              new Done(new Error2(new Broke("invalid response")))
+            );
+          }
+        },
+        (value2) => {
+          return dispatch2(new Done(new Error2(error_failure(value2))));
+        }
+      );
+    }
+  );
+}
+function validation_error_text(errors) {
+  let _pipe = errors;
+  let _pipe$1 = map2(_pipe, (error) => {
+    return error[1];
+  });
+  return join(_pipe$1, "; ");
+}
+function validate_field(field2, raw, constraint, message) {
+  let $ = validate(raw, constraint);
+  if ($ instanceof Ok) {
+    return List$Empty$const;
+  } else {
+    return toList([[field2, message]]);
+  }
+}
+function validate2(model) {
+  let errors = flatten(
+    toList([
+      validate_field(
+        Field$Slug$const,
+        model.args.slug,
+        new Pattern(1, 64, "^[a-z0-9]+(-[a-z0-9]+)*$"),
+        "must contain 1 to 64 characters and match /^[a-z0-9]+(-[a-z0-9]+)*$/"
+      )
+    ])
+  );
+  if (errors instanceof Empty) {
+    return new Ok(model.args);
+  } else {
+    return new Error2(errors);
+  }
+}
+function update3(model, msg) {
+  if (msg instanceof Set2) {
+    let $ = msg[0];
+    if ($ instanceof Slug) {
+      let value2 = msg[1];
+      return [
+        new State(
+          (() => {
+            let _record = model.args;
+            return new Args2(value2, _record.blob, _record.existing);
+          })(),
+          model.given,
+          model.last,
+          model.waiting
+        ),
+        none()
+      ];
+    } else if ($ instanceof Blob) {
+      let value2 = msg[1];
+      return [
+        new State(
+          (() => {
+            let _record = model.args;
+            return new Args2(_record.slug, value2, _record.existing);
+          })(),
+          model.given,
+          model.last,
+          model.waiting
+        ),
+        none()
+      ];
+    } else {
+      let value2 = msg[1];
+      return [
+        new State(
+          (() => {
+            let _record = model.args;
+            return new Args2(_record.slug, _record.blob, value2);
+          })(),
+          model.given,
+          model.last,
+          model.waiting
+        ),
+        none()
+      ];
+    }
+  } else if (msg instanceof Send) {
+    let $ = model.waiting;
+    if ($) {
+      return [model, none()];
+    } else {
+      let $1 = validate2(model);
+      if ($1 instanceof Ok) {
+        let args = $1[0];
+        return [
+          new State(model.args, model.given, model.last, true),
+          send4(args)
+        ];
+      } else {
+        let errors = $1[0];
+        return [
+          new State(
+            model.args,
+            model.given,
+            new Some(new Error2(new Broke(validation_error_text(errors)))),
+            model.waiting
+          ),
+          none()
+        ];
+      }
+    }
+  } else if (msg instanceof Given) {
+    let given = msg[0];
+    return [
+      new State(model.args, given, model.last, model.waiting),
+      none()
+    ];
+  } else {
+    let result = msg[0];
+    let next = new State(model.args, model.given, new Some(result), false);
+    if (result instanceof Ok) {
+      return [next, none()];
+    } else {
+      return [next, none()];
+    }
+  }
+}
+function file_input_event2(field2) {
+  return map3(
+    dynamic,
+    (event4) => {
+      return new Set2(field2, file_token(event4));
+    }
+  );
+}
+function file_input2(field2) {
+  return toList([
+    attribute2("type", "file"),
+    attribute2("data-yumemi-file-input", ""),
+    on("change", file_input_event2(field2))
+  ]);
+}
+function blob_file_input() {
+  return file_input2(Field$Blob$const);
+}
+
+// public/build/dev/javascript/public/components/blob_save.mjs
+function view2(it) {
+  return div_(
+    List$Empty$const,
+    toList([
+      input_(blob_file_input()),
+      button_(
+        toList([
+          on_click(Event$Send$const),
+          disabled(it.waiting)
+        ]),
+        toList([text4("Save image")])
+      ),
+      (() => {
+        let $ = it.last;
+        if ($ instanceof Some) {
+          let $1 = $[0];
+          if ($1 instanceof Ok) {
+            return p_(List$Empty$const, toList([text4("saved")]));
+          } else {
+            return p_(List$Empty$const, toList([text4("failed")]));
+          }
+        } else {
+          return p_(List$Empty$const, toList([text4("ready")]));
+        }
+      })()
+    ])
+  );
+}
+function app2() {
+  return component(
+    init2,
+    update3,
+    view2,
+    toList([
+      on_attribute_change(
+        "slug",
+        (value2) => {
+          return new Ok(
+            new Set2(Field$Slug$const, value2)
+          );
+        }
+      ),
+      on_attribute_change(
+        "blob",
+        (value2) => {
+          return new Ok(
+            new Set2(Field$Blob$const, value2)
+          );
+        }
+      ),
+      on_attribute_change(
+        "existing",
+        (value2) => {
+          return new Ok(
+            new Set2(Field$Existing$const, value2)
+          );
+        }
+      )
+    ])
+  );
 }
 
 // public/build/dev/javascript/public/gen/out/article_publish.mjs
@@ -5718,7 +6385,7 @@ var Article = class extends CustomType {
     this.tags = tags;
   }
 };
-function decoder() {
+function decoder2() {
   return field(
     "slug",
     string2,
@@ -5786,65 +6453,128 @@ function decoder() {
   );
 }
 
-// public/build/dev/javascript/public/gen/live/transport_ffi.mjs
-function send2(method, path, body, onOk, onError) {
-  fetch(path, {
-    method,
-    headers: { "content-type": "application/json" },
-    body: method === "GET" ? void 0 : JSON.stringify(body)
-  }).then((response) => response.ok ? response.json().then(onOk) : onError(void 0)).catch(() => onError(void 0));
-  return void 0;
-}
-
 // public/build/dev/javascript/public/gen/live/article_publish.mjs
-var Args = class extends CustomType {
+var Args3 = class extends CustomType {
   constructor(slug) {
     super();
     this.slug = slug;
   }
 };
-var Slug = class extends CustomType {
+var Slug2 = class extends CustomType {
 };
-var Field$Slug$const = new Slug();
-var Invalid2 = class extends CustomType {
+var Field$Slug$const2 = new Slug2();
+var AlreadyPublished = class extends CustomType {
+};
+var Error$AlreadyPublished$const = new AlreadyPublished();
+var AlreadyRetracted = class extends CustomType {
+};
+var Error$AlreadyRetracted$const = new AlreadyRetracted();
+var Refused = class extends CustomType {
   constructor($0) {
     super();
     this[0] = $0;
   }
 };
-var Failed = class extends CustomType {
+var Broke2 = class extends CustomType {
+  constructor($0) {
+    super();
+    this[0] = $0;
+  }
 };
-var Error$Failed$const = new Failed();
-function init(given) {
+function init3(given) {
   return [
-    new State(new Args(""), given, Option$None$const, false),
+    new State(new Args3(""), given, Option$None$const, false),
     none()
   ];
 }
-function send3(args) {
+function error_field_decoder2(field2) {
+  return optional_field(
+    field2,
+    "",
+    string2,
+    (value2) => {
+      return success(value2);
+    }
+  );
+}
+function error_text2(value2) {
+  let $ = run(value2, error_field_decoder2("code"));
+  if ($ instanceof Ok) {
+    let code = $[0];
+    if (code !== "") {
+      return code;
+    } else {
+      let $1 = run(value2, error_field_decoder2("message"));
+      if ($1 instanceof Ok) {
+        let message = $1[0];
+        if (message !== "") {
+          return message;
+        } else {
+          return "invalid error payload";
+        }
+      } else {
+        return "invalid error payload";
+      }
+    }
+  } else {
+    let $1 = run(value2, error_field_decoder2("message"));
+    if ($1 instanceof Ok) {
+      let message = $1[0];
+      if (message !== "") {
+        return message;
+      } else {
+        return "invalid error payload";
+      }
+    } else {
+      return "invalid error payload";
+    }
+  }
+}
+function error_failure2(value2) {
+  let $ = error_text2(value2);
+  if ($ === "already_published") {
+    return new Refused(Error$AlreadyPublished$const);
+  } else if ($ === "already_retracted") {
+    return new Refused(Error$AlreadyRetracted$const);
+  } else {
+    let code = $;
+    return new Broke2(code);
+  }
+}
+function send5(args) {
   return from2(
     (dispatch2) => {
       return send2(
         "POST",
         "/api/articles/" + args.slug + "/publish",
         object2(toList([["slug", string3(args.slug)]])),
+        List$Empty$const,
         (value2) => {
-          let $ = run(value2, decoder());
+          let $ = run(value2, decoder2());
           if ($ instanceof Ok) {
             let out = $[0];
             return dispatch2(new Done(new Ok(out)));
           } else {
-            return dispatch2(new Done(new Error(Error$Failed$const)));
+            return dispatch2(
+              new Done(new Error2(new Broke2("invalid response")))
+            );
           }
         },
-        (_) => {
-          return dispatch2(new Done(new Error(Error$Failed$const)));
+        (value2) => {
+          return dispatch2(new Done(new Error2(error_failure2(value2))));
         }
       );
     }
   );
 }
-function validate_field(field2, raw, constraint, message) {
+function validation_error_text2(errors) {
+  let _pipe = errors;
+  let _pipe$1 = map2(_pipe, (error) => {
+    return error[1];
+  });
+  return join(_pipe$1, "; ");
+}
+function validate_field2(field2, raw, constraint, message) {
   let $ = validate(raw, constraint);
   if ($ instanceof Ok) {
     return List$Empty$const;
@@ -5852,11 +6582,11 @@ function validate_field(field2, raw, constraint, message) {
     return toList([[field2, message]]);
   }
 }
-function validate2(model) {
+function validate3(model) {
   let errors = flatten(
     toList([
-      validate_field(
-        Field$Slug$const,
+      validate_field2(
+        Field$Slug$const2,
         model.args.slug,
         new Pattern(1, 64, "^[a-z0-9]+(-[a-z0-9]+)*$"),
         "must contain 1 to 64 characters and match /^[a-z0-9]+(-[a-z0-9]+)*$/"
@@ -5866,14 +6596,14 @@ function validate2(model) {
   if (errors instanceof Empty) {
     return new Ok(model.args);
   } else {
-    return new Error(errors);
+    return new Error2(errors);
   }
 }
-function update2(model, msg) {
+function update4(model, msg) {
   if (msg instanceof Set2) {
     let value2 = msg[1];
     return [
-      new State(new Args(value2), model.given, model.last, model.waiting),
+      new State(new Args3(value2), model.given, model.last, model.waiting),
       none()
     ];
   } else if (msg instanceof Send) {
@@ -5881,12 +6611,12 @@ function update2(model, msg) {
     if ($) {
       return [model, none()];
     } else {
-      let $1 = validate2(model);
+      let $1 = validate3(model);
       if ($1 instanceof Ok) {
         let args = $1[0];
         return [
           new State(model.args, model.given, model.last, true),
-          send3(args)
+          send5(args)
         ];
       } else {
         let errors = $1[0];
@@ -5894,7 +6624,7 @@ function update2(model, msg) {
           new State(
             model.args,
             model.given,
-            new Some(new Error(new Invalid2(errors))),
+            new Some(new Error2(new Broke2(validation_error_text2(errors)))),
             model.waiting
           ),
           none()
@@ -5918,26 +6648,6 @@ function update2(model, msg) {
   }
 }
 
-// public/build/dev/javascript/public/gen/service.mjs
-var ArticleCreate = class extends CustomType {
-};
-var Service$ArticleCreate$const = new ArticleCreate();
-var ArticleList = class extends CustomType {
-};
-var Service$ArticleList$const = new ArticleList();
-var ArticlePublish = class extends CustomType {
-};
-var Service$ArticlePublish$const = new ArticlePublish();
-var ArticleRead = class extends CustomType {
-};
-var Service$ArticleRead$const = new ArticleRead();
-var ArticleRetract = class extends CustomType {
-};
-var Service$ArticleRetract$const = new ArticleRetract();
-var WidgetList = class extends CustomType {
-};
-var Service$WidgetList$const = new WidgetList();
-
 // public/build/dev/javascript/public/components/like_button.mjs
 function label(model) {
   let $ = model.last;
@@ -5953,7 +6663,7 @@ function label(model) {
     return "\u3044\u3044\u306D";
   }
 }
-function view(it) {
+function view3(it) {
   return button_(
     toList([
       on_click(Event$Send$const),
@@ -5962,17 +6672,17 @@ function view(it) {
     toList([text4(label(it))])
   );
 }
-function app() {
+function app3() {
   return component(
-    init,
-    update2,
-    view,
+    init3,
+    update4,
+    view3,
     toList([
       on_attribute_change(
         "slug",
         (value2) => {
           return new Ok(
-            new Set2(Field$Slug$const, value2)
+            new Set2(Field$Slug$const2, value2)
           );
         }
       )
@@ -5993,14 +6703,14 @@ var Phase$Published$const = new Published();
 var Retracted = class extends CustomType {
 };
 var Phase$Retracted$const = new Retracted();
-var Out = class extends CustomType {
+var Out2 = class extends CustomType {
   constructor(slug, phase) {
     super();
     this.slug = slug;
     this.phase = phase;
   }
 };
-function decoder2() {
+function decoder3() {
   return field(
     "slug",
     string2,
@@ -6010,13 +6720,13 @@ function decoder2() {
         then$(
           string2,
           (value2) => {
-            if (value2 === "Draft") {
+            if (value2 === "draft") {
               return success(Phase$Draft$const);
-            } else if (value2 === "Scheduled") {
+            } else if (value2 === "scheduled") {
               return success(Phase$Scheduled$const);
-            } else if (value2 === "Published") {
+            } else if (value2 === "published") {
               return success(Phase$Published$const);
-            } else if (value2 === "Retracted") {
+            } else if (value2 === "retracted") {
               return success(Phase$Retracted$const);
             } else {
               return failure(Phase$Draft$const, "Phase");
@@ -6024,7 +6734,7 @@ function decoder2() {
           }
         ),
         (phase) => {
-          return success(new Out(slug, phase));
+          return success(new Out2(slug, phase));
         }
       );
     }
@@ -6047,7 +6757,7 @@ var Page = class extends CustomType {
 };
 function cursor(raw) {
   if (raw === "") {
-    return new Error(void 0);
+    return new Error2(void 0);
   } else {
     return new Ok(new Cursor(raw));
   }
@@ -6085,14 +6795,14 @@ var Category = class extends CustomType {
     this.name = name;
   }
 };
-var Out2 = class extends CustomType {
+var Out3 = class extends CustomType {
   constructor(page, counts) {
     super();
     this.page = page;
     this.counts = counts;
   }
 };
-function decoder3() {
+function decoder4() {
   return field(
     "page",
     field(
@@ -6228,7 +6938,7 @@ function decoder3() {
           )
         ),
         (counts) => {
-          return success(new Out2(page, counts));
+          return success(new Out3(page, counts));
         }
       );
     }
@@ -6236,7 +6946,7 @@ function decoder3() {
 }
 
 // public/build/dev/javascript/public/gen/live/article_create.mjs
-var Args2 = class extends CustomType {
+var Args4 = class extends CustomType {
   constructor(slug, title, body, category, tags) {
     super();
     this.slug = slug;
@@ -6246,9 +6956,9 @@ var Args2 = class extends CustomType {
     this.tags = tags;
   }
 };
-var Slug2 = class extends CustomType {
+var Slug3 = class extends CustomType {
 };
-var Field$Slug$const2 = new Slug2();
+var Field$Slug$const3 = new Slug3();
 var Title = class extends CustomType {
 };
 var Field$Title$const = new Title();
@@ -6261,19 +6971,16 @@ var Field$Category$const = new Category2();
 var Tags = class extends CustomType {
 };
 var Field$Tags$const = new Tags();
-var Invalid3 = class extends CustomType {
+var Broke3 = class extends CustomType {
   constructor($0) {
     super();
     this[0] = $0;
   }
 };
-var Failed2 = class extends CustomType {
-};
-var Error$Failed$const2 = new Failed2();
-function init2(given) {
+function init4(given) {
   return [
     new State(
-      new Args2("", "", "", "", ""),
+      new Args4("", "", "", "", ""),
       given,
       Option$None$const,
       false
@@ -6284,7 +6991,55 @@ function init2(given) {
 function reload_page() {
   return emit2("yumemi-done", null$());
 }
-function send4(args) {
+function error_field_decoder3(field2) {
+  return optional_field(
+    field2,
+    "",
+    string2,
+    (value2) => {
+      return success(value2);
+    }
+  );
+}
+function error_text3(value2) {
+  let $ = run(value2, error_field_decoder3("code"));
+  if ($ instanceof Ok) {
+    let code = $[0];
+    if (code !== "") {
+      return code;
+    } else {
+      let $1 = run(value2, error_field_decoder3("message"));
+      if ($1 instanceof Ok) {
+        let message = $1[0];
+        if (message !== "") {
+          return message;
+        } else {
+          return "invalid error payload";
+        }
+      } else {
+        return "invalid error payload";
+      }
+    }
+  } else {
+    let $1 = run(value2, error_field_decoder3("message"));
+    if ($1 instanceof Ok) {
+      let message = $1[0];
+      if (message !== "") {
+        return message;
+      } else {
+        return "invalid error payload";
+      }
+    } else {
+      return "invalid error payload";
+    }
+  }
+}
+function error_failure3(value2) {
+  let $ = error_text3(value2);
+  let code = $;
+  return new Broke3(code);
+}
+function send6(args) {
   return from2(
     (dispatch2) => {
       return send2(
@@ -6299,23 +7054,33 @@ function send4(args) {
             ["tags", string3(args.tags)]
           ])
         ),
+        List$Empty$const,
         (value2) => {
-          let $ = run(value2, decoder2());
+          let $ = run(value2, decoder3());
           if ($ instanceof Ok) {
             let out = $[0];
             return dispatch2(new Done(new Ok(out)));
           } else {
-            return dispatch2(new Done(new Error(Error$Failed$const2)));
+            return dispatch2(
+              new Done(new Error2(new Broke3("invalid response")))
+            );
           }
         },
-        (_) => {
-          return dispatch2(new Done(new Error(Error$Failed$const2)));
+        (value2) => {
+          return dispatch2(new Done(new Error2(error_failure3(value2))));
         }
       );
     }
   );
 }
-function validate_field2(field2, raw, constraint, message) {
+function validation_error_text3(errors) {
+  let _pipe = errors;
+  let _pipe$1 = map2(_pipe, (error) => {
+    return error[1];
+  });
+  return join(_pipe$1, "; ");
+}
+function validate_field3(field2, raw, constraint, message) {
   let $ = validate(raw, constraint);
   if ($ instanceof Ok) {
     return List$Empty$const;
@@ -6323,22 +7088,22 @@ function validate_field2(field2, raw, constraint, message) {
     return toList([[field2, message]]);
   }
 }
-function validate3(model) {
+function validate4(model) {
   let errors = flatten(
     toList([
-      validate_field2(
-        Field$Slug$const2,
+      validate_field3(
+        Field$Slug$const3,
         model.args.slug,
         new Pattern(1, 64, "^[a-z0-9]+(-[a-z0-9]+)*$"),
         "must contain 1 to 64 characters and match /^[a-z0-9]+(-[a-z0-9]+)*$/"
       ),
-      validate_field2(
+      validate_field3(
         Field$Title$const,
         model.args.title,
         new Text2(1, 120),
         "must contain 1 to 120 characters"
       ),
-      validate_field2(
+      validate_field3(
         Field$Body$const,
         model.args.body,
         Spec$Markdown$const,
@@ -6349,19 +7114,19 @@ function validate3(model) {
   if (errors instanceof Empty) {
     return new Ok(model.args);
   } else {
-    return new Error(errors);
+    return new Error2(errors);
   }
 }
-function update3(model, msg) {
+function update5(model, msg) {
   if (msg instanceof Set2) {
     let $ = msg[0];
-    if ($ instanceof Slug2) {
+    if ($ instanceof Slug3) {
       let value2 = msg[1];
       return [
         new State(
           (() => {
             let _record = model.args;
-            return new Args2(
+            return new Args4(
               value2,
               _record.title,
               _record.body,
@@ -6381,7 +7146,7 @@ function update3(model, msg) {
         new State(
           (() => {
             let _record = model.args;
-            return new Args2(
+            return new Args4(
               _record.slug,
               value2,
               _record.body,
@@ -6401,7 +7166,7 @@ function update3(model, msg) {
         new State(
           (() => {
             let _record = model.args;
-            return new Args2(
+            return new Args4(
               _record.slug,
               _record.title,
               value2,
@@ -6421,7 +7186,7 @@ function update3(model, msg) {
         new State(
           (() => {
             let _record = model.args;
-            return new Args2(
+            return new Args4(
               _record.slug,
               _record.title,
               _record.body,
@@ -6441,7 +7206,7 @@ function update3(model, msg) {
         new State(
           (() => {
             let _record = model.args;
-            return new Args2(
+            return new Args4(
               _record.slug,
               _record.title,
               _record.body,
@@ -6461,12 +7226,12 @@ function update3(model, msg) {
     if ($) {
       return [model, none()];
     } else {
-      let $1 = validate3(model);
+      let $1 = validate4(model);
       if ($1 instanceof Ok) {
         let args = $1[0];
         return [
           new State(model.args, model.given, model.last, true),
-          send4(args)
+          send6(args)
         ];
       } else {
         let errors = $1[0];
@@ -6474,7 +7239,7 @@ function update3(model, msg) {
           new State(
             model.args,
             model.given,
-            new Some(new Error(new Invalid3(errors))),
+            new Some(new Error2(new Broke3(validation_error_text3(errors)))),
             model.waiting
           ),
           none()
@@ -6499,7 +7264,7 @@ function update3(model, msg) {
 }
 
 // public/build/dev/javascript/public/components/pick_tag.mjs
-function view2(it) {
+function view4(it) {
   return div_(
     List$Empty$const,
     toList([
@@ -6535,17 +7300,17 @@ function view2(it) {
     ])
   );
 }
-function app2() {
+function app4() {
   return component(
-    init2,
-    update3,
-    view2,
+    init4,
+    update5,
+    view4,
     toList([
       on_attribute_change(
         "slug",
         (value2) => {
           return new Ok(
-            new Set2(Field$Slug$const2, value2)
+            new Set2(Field$Slug$const3, value2)
           );
         }
       ),
@@ -6586,19 +7351,19 @@ function app2() {
 }
 
 // client-entry.mjs
-function registerWithGiven(app3, decoder4, tag) {
+function registerWithGiven(app5, decoder5, tag) {
   const element5 = document.querySelector(tag);
   const raw = element5?.getAttribute("data-yumemi-given");
   if (raw === null) return;
   let given;
   try {
-    const decoded = run(JSON.parse(raw), decoder4());
+    const decoded = run(JSON.parse(raw), decoder5());
     if (!Result$isOk(decoded)) return;
     given = Result$Ok$0(decoded);
   } catch (_error) {
     return;
   }
-  make_component({ ...app3, init: () => app3.init(given) }, tag);
+  make_component({ ...app5, init: () => app5.init(given) }, tag);
 }
 function listenReload(tag) {
   document.querySelectorAll(tag).forEach((element5) => {
@@ -6607,6 +7372,8 @@ function listenReload(tag) {
     });
   });
 }
-make_component(app(), "like-button");
-registerWithGiven(app2(), decoder3, "pick-tag");
+make_component(app(), "article-blob-copy");
+make_component(app2(), "blob-save");
+make_component(app3(), "like-button");
+registerWithGiven(app4(), decoder4, "pick-tag");
 listenReload("pick-tag");

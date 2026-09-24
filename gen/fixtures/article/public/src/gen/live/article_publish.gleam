@@ -8,6 +8,7 @@ import gleam/dynamic/decode
 import gleam/json
 import gleam/list
 import gleam/option.{None, Some}
+import gleam/string
 import lustre/effect.{type Effect}
 
 pub type Args {
@@ -19,15 +20,20 @@ pub type Field {
 }
 
 pub type Error {
-  Invalid(List(#(Field, String)))
-  Failed
+  AlreadyPublished
+  AlreadyRetracted
+}
+
+pub type Failure {
+  Refused(Error)
+  Broke(String)
 }
 
 pub type State =
-  live.State(Args, Nil, article_publish.Out, Error)
+  live.State(Args, Nil, article_publish.Out, Failure)
 
 pub type Event =
-  live.Event(Field, Nil, article_publish.Out, Error)
+  live.Event(Field, Nil, article_publish.Out, Failure)
 
 pub fn init(given: Nil) -> #(State, Effect(Event)) {
   #(
@@ -48,7 +54,10 @@ pub fn update(model: State, msg: Event) -> #(State, Effect(Event)) {
         False ->
           case validate(model) {
             Error(errors) -> #(
-              live.State(..model, last: Some(Error(Invalid(errors)))),
+              live.State(
+                ..model,
+                last: Some(Error(Broke(validation_error_text(errors)))),
+              ),
               effect.none(),
             )
             Ok(args) -> #(live.State(..model, waiting: True), send(args))
@@ -93,13 +102,43 @@ fn validate_field(
   }
 }
 
+fn validation_error_text(errors: List(#(Field, String))) -> String {
+  errors |> list.map(fn(error) { error.1 }) |> string.join("; ")
+}
+
+fn error_failure(value: Dynamic) -> Failure {
+  case error_text(value) {
+    "already_published" -> Refused(AlreadyPublished)
+    "already_retracted" -> Refused(AlreadyRetracted)
+    code -> Broke(code)
+  }
+}
+
+fn error_text(value: Dynamic) -> String {
+  case decode.run(value, error_field_decoder("code")) {
+    Ok(code) if code != "" -> code
+    _ ->
+      case decode.run(value, error_field_decoder("message")) {
+        Ok(message) if message != "" -> message
+        _ -> "invalid error payload"
+      }
+  }
+}
+
+fn error_field_decoder(field: String) -> decode.Decoder(String) {
+  decode.optional_field(field, "", decode.string, fn(value) {
+    decode.success(value)
+  })
+}
+
 @external(javascript, "./transport_ffi.mjs", "send")
 fn transport_send(
   method: String,
   path: String,
   body: json.Json,
+  blob_fields: List(String),
   on_ok: fn(Dynamic) -> Nil,
-  on_error: fn(Nil) -> Nil,
+  on_error: fn(Dynamic) -> Nil,
 ) -> Nil
 
 fn send(args: Args) -> Effect(Event) {
@@ -110,13 +149,14 @@ fn send(args: Args) -> Effect(Event) {
       json.object([
         #("slug", json.string(args.slug)),
       ]),
+      [],
       fn(value) {
         case decode.run(value, article_publish.decoder()) {
           Ok(out) -> dispatch(live.Done(Ok(out)))
-          Error(_) -> dispatch(live.Done(Error(Failed)))
+          Error(_) -> dispatch(live.Done(Error(Broke("invalid response"))))
         }
       },
-      fn(_unit) { dispatch(live.Done(Error(Failed))) },
+      fn(value) { dispatch(live.Done(Error(error_failure(value)))) },
     )
   })
 }

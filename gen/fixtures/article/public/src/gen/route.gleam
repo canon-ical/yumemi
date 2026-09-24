@@ -1,4 +1,4 @@
-//// GENERATED from public/src/pages/**/page.gleam [sha256:82c83adc55b4] — 手で編集しない
+//// GENERATED from public/src/pages/**/page.gleam [sha256:b0af993d9f89] — 手で編集しない
 
 pub type PageRoute {
   PageRoute(path: String)

@@ -55,8 +55,10 @@ pub fn emit(
     })
   let type_units = back_type_units(app, back_units, hashes)
   let live = live_targets(model_.components, app.services)
+  let attached_service_live = attached_service_live_targets(model_, app, live)
+  let blob_entries = blob_entry_targets(model_.components, app.attached)
   let live_decoder_services =
-    live
+    list.append(live, attached_service_live)
     |> list.flat_map(fn(target) {
       let #(service, component) = target
       let given =
@@ -76,7 +78,7 @@ pub fn emit(
     |> list.flat_map(fn(page) {
       list.append(
         layout_sources(model_.layout, model_.blocks, app.services),
-        page_sources(page, model_.blocks, app.services),
+        page_sources(app, type_units, page, model_.blocks, app.services),
       )
       |> list.filter_map(fn(source) {
         case source.type_name == "Out" {
@@ -116,7 +118,7 @@ pub fn emit(
     ),
     File(
       path: face_name <> "/src/gen/shell.mjs",
-      text: shell_text(app, package, model_, hashes),
+      text: shell_text(app, type_units, package, model_, hashes),
     ),
     File(
       path: face_name <> "/src/gen/blocks_preview.gleam",
@@ -153,7 +155,47 @@ pub fn emit(
       let #(service, component) = target
       live_file(app, back_units, package, service, component, hashes, face_name)
     })
-  let island_files = case live {
+  let attached_service_files =
+    attached_service_live
+    |> list.map(fn(target) {
+      let #(service, component) = target
+      attached_service_live_file(
+        app,
+        back_units,
+        package,
+        service,
+        component,
+        hashes,
+        face_name,
+      )
+    })
+  let attached_live =
+    attached_live_targets(model_, app)
+    |> list.map(fn(target) {
+      let #(route, component) = target
+      attached_live_file(route, package, component, hashes, face_name)
+    })
+  let blob_entry_files =
+    blob_entries
+    |> list.map(fn(target) {
+      let #(route, _component) = target
+      File(
+        path: face_name
+          <> "/src/gen/live/"
+          <> naming.snake(route.name)
+          <> ".gleam",
+        text: blob_entry_live_text(route, hashes),
+      )
+    })
+  let all_live_files =
+    list.append(
+      live_files,
+      list.append(
+        attached_service_files,
+        list.append(attached_live, blob_entry_files),
+      ),
+    )
+  let island_files = case all_live_files {
     [] -> []
     _ -> [
       File(
@@ -176,7 +218,7 @@ pub fn emit(
   list.append(
     list.append(
       files,
-      list.append(out_files, list.append(live_files, island_files)),
+      list.append(out_files, list.append(all_live_files, island_files)),
     ),
     load_files,
   )
@@ -319,11 +361,274 @@ fn skeleton_file(
 fn block_service_module(block: reader_front.Block) -> Option(String) {
   case block.input_module {
     Some(path) ->
-      case path == "Nil" {
-        True -> None
-        False -> Some(last_segment(path))
+      case
+        string.starts_with(path, "gen/out/")
+        || string.starts_with(path, "service/")
+      {
+        True -> Some(string.drop_start(path, 8))
+        False -> None
       }
     None -> None
+  }
+}
+
+fn default_block_input_expression(
+  app: model.App,
+  units: List(Unit),
+  block: reader_front.Block,
+) -> String {
+  let block_module =
+    block_module_reference(block.module, service_module_names(app.services))
+  case block.input_definition {
+    Some(definition) ->
+      case definition.variants {
+        [variant, ..] ->
+          block_module
+          <> "."
+          <> variant.name
+          <> default_block_variant_arguments(app, units, block, variant.fields)
+        [] -> default_block_input_alias_expression(app, units, block)
+      }
+    None -> default_block_input_alias_expression(app, units, block)
+  }
+}
+
+fn default_block_input_alias_expression(
+  app: model.App,
+  units: List(Unit),
+  block: reader_front.Block,
+) -> String {
+  case block.input {
+    Some("Nil") -> "Nil"
+    Some("String") -> quoted("value")
+    Some("Int") -> "0"
+    Some("Bool") -> "False"
+    Some("Float") -> "0.0"
+    Some("Out") ->
+      case block_service_module(block) {
+        Some(service) -> default_output_expression(app, units, service)
+        None -> "Nil"
+      }
+    Some(_) ->
+      case block_service_module(block) {
+        Some(service) -> default_block_expression(app, units, service, block)
+        None -> "Nil"
+      }
+    None ->
+      case block_service_module(block) {
+        Some(service) -> default_output_expression(app, units, service)
+        None -> "Nil"
+      }
+  }
+}
+
+fn default_block_variant_arguments(
+  app: model.App,
+  units: List(Unit),
+  block: reader_front.Block,
+  fields: List(glance.VariantField),
+) -> String {
+  case fields {
+    [] -> ""
+    _ -> {
+      let scope = Scope(module: block.module, imports: block.input_imports)
+      "("
+      <> string.join(
+        list.map(fields, fn(field) {
+          case field {
+            glance.LabelledVariantField(label: label, item: item) ->
+              label
+              <> ": "
+              <> default_block_type_expression(
+                app,
+                units,
+                block,
+                scope,
+                item,
+                label,
+              )
+            glance.UnlabelledVariantField(item) ->
+              default_block_type_expression(
+                app,
+                units,
+                block,
+                scope,
+                item,
+                "value",
+              )
+          }
+        }),
+        ", ",
+      )
+      <> ")"
+    }
+  }
+}
+
+fn default_block_type_expression(
+  app: model.App,
+  units: List(Unit),
+  block: reader_front.Block,
+  scope: Scope,
+  type_: glance.Type,
+  field_name: String,
+) -> String {
+  let block_module =
+    block_module_reference(block.module, service_module_names(app.services))
+  case type_ {
+    glance.NamedType(name: name, parameters: parameters, ..) ->
+      case name, parameters {
+        "String", [] -> quoted(field_name)
+        "Int", [] -> "0"
+        "Bool", [] -> "False"
+        "Float", [] -> "0.0"
+        "Option", [_] -> "None"
+        "List", [item] ->
+          "["
+          <> string.join(
+            list.map([1, 2, 3], fn(_) {
+              default_block_type_expression(
+                app,
+                units,
+                block,
+                scope,
+                item,
+                field_name,
+              )
+            }),
+            ", ",
+          )
+          <> "]"
+        "Page", [item] ->
+          "framework_page.Page(items: ["
+          <> string.join(
+            list.map([1, 2, 3], fn(_) {
+              default_block_type_expression(
+                app,
+                units,
+                block,
+                scope,
+                item,
+                field_name,
+              )
+            }),
+            ", ",
+          )
+          <> "], next: None)"
+        _, _ ->
+          case resolved_path(scope, type_) {
+            Some(path) if path == block.module ->
+              case g.find_custom_type(block.source, name) {
+                Some(definition) ->
+                  case definition.variants {
+                    [variant, ..] ->
+                      block_module
+                      <> "."
+                      <> mapped_constructor(
+                        empty_state(),
+                        block.module,
+                        definition.name,
+                        variant.name,
+                      )
+                      <> default_block_variant_arguments(
+                        app,
+                        units,
+                        block,
+                        variant.fields,
+                      )
+                    [] -> "Nil"
+                  }
+                None ->
+                  default_type_expression(
+                    app,
+                    units,
+                    empty_state(),
+                    scope,
+                    block_module,
+                    type_,
+                    field_name,
+                  )
+              }
+            _ ->
+              default_type_expression(
+                app,
+                units,
+                empty_state(),
+                scope,
+                block_module,
+                type_,
+                field_name,
+              )
+          }
+      }
+    glance.TupleType(elements: elements, ..) ->
+      "#("
+      <> string.join(
+        list.map(elements, fn(element) {
+          default_block_type_expression(
+            app,
+            units,
+            block,
+            scope,
+            element,
+            field_name,
+          )
+        }),
+        ", ",
+      )
+      <> ")"
+    _ -> "Nil"
+  }
+}
+
+fn preview_input_imports(blocks: List(reader_front.Block)) -> List(String) {
+  blocks
+  |> list.flat_map(fn(block) {
+    case block.input_definition {
+      Some(definition) -> {
+        let scope = Scope(module: block.module, imports: block.input_imports)
+        definition.variants
+        |> list.flat_map(fn(variant) {
+          variant.fields
+          |> list.flat_map(fn(field) {
+            case field {
+              glance.LabelledVariantField(item: item, ..) ->
+                preview_type_imports(scope, item)
+              glance.UnlabelledVariantField(item) ->
+                preview_type_imports(scope, item)
+            }
+          })
+        })
+      }
+      None -> []
+    }
+  })
+  |> list.unique
+}
+
+fn preview_type_imports(scope: Scope, type_: glance.Type) -> List(String) {
+  case type_ {
+    glance.NamedType(parameters: parameters, ..) -> {
+      let imported = case resolved_path(scope, type_) {
+        Some(path) ->
+          case string.starts_with(path, "gen/out/") {
+            True -> [path]
+            False -> []
+          }
+        None -> []
+      }
+      list.append(
+        imported,
+        list.flat_map(parameters, fn(parameter) {
+          preview_type_imports(scope, parameter)
+        }),
+      )
+    }
+    glance.TupleType(elements: elements, ..) ->
+      list.flat_map(elements, fn(element) {
+        preview_type_imports(scope, element)
+      })
+    _ -> []
   }
 }
 
@@ -409,7 +714,11 @@ fn blocks_preview_text(
       ),
     )
     |> list.unique
-  let block_imports = list.map(blocks, fn(block) { "import " <> block.module })
+  let preview_services = service_module_names(app.services)
+  let block_imports =
+    list.map(blocks, fn(block) {
+      "import " <> block_import_path(block.module, preview_services)
+    })
   let area_children =
     frame.areas
     |> list.map(fn(area) {
@@ -417,33 +726,72 @@ fn blocks_preview_text(
     })
     |> string.join(",\n    ")
   let out_imports =
-    blocks
-    |> list.filter_map(fn(block) {
-      case block.has_sample, block_service_module(block) {
-        False, Some(service) -> Ok("import gen/out/" <> service)
-        _, _ -> Error(Nil)
-      }
-    })
+    list.append(
+      blocks
+        |> list.filter_map(fn(block) {
+          case block.has_sample, block_service_module(block) {
+            False, Some(service) -> Ok("gen/out/" <> service)
+            _, _ -> Error(Nil)
+          }
+        }),
+      preview_input_imports(blocks),
+    )
     |> list.unique
-  let needs_defaults =
-    list.any(blocks, fn(block) {
-      !block.has_sample && block_service_module(block) != None
-    })
-  let option_imports = case needs_defaults {
+    |> list.map(fn(path) { "import " <> path })
+  let option_imports = case string.contains(area_children, "None") {
     True -> ["import gleam/option.{None}"]
     False -> []
+  }
+  let time_imports =
+    list.append(
+      case string.contains(area_children, "default_date()") {
+        True -> ["type Date", "date"]
+        False -> []
+      },
+      list.append(
+        case string.contains(area_children, "default_datetime()") {
+          True -> ["type Datetime", "datetime"]
+          False -> []
+        },
+        case string.contains(area_children, "default_time()") {
+          True -> ["type Time", "time"]
+          False -> []
+        },
+      ),
+    )
+    |> list.unique
+  let time_import = case time_imports {
+    [] -> []
+    _ -> ["import framework/time.{" <> string.join(time_imports, ", ") <> "}"]
   }
   let opaque_imports =
     list.append(
       case string.contains(area_children, "default_blob()") {
-        True -> ["import framework/blob.{type Blob, parse}"]
+        True -> ["import framework/blob.{type Blob, parse as parse_blob}"]
         False -> []
       },
-      case string.contains(area_children, "default_time()") {
-        True -> ["import framework/time.{type Time, time}"]
-        False -> []
-      },
+      list.append(
+        case string.contains(area_children, "default_party_id()") {
+          True -> [
+            "import framework/party.{type PartyId, parse as parse_party}",
+          ]
+          False -> []
+        },
+        list.append(
+          time_import,
+          case string.contains(area_children, "er.key(") {
+            True -> ["import framework/er as er"]
+            False -> []
+          },
+        ),
+      ),
     )
+  let page_imports = case
+    string.contains(area_children, "framework_page.Page(")
+  {
+    True -> ["import framework/page as framework_page"]
+    False -> []
+  }
   let body_imports =
     list.append(
       [
@@ -456,7 +804,10 @@ fn blocks_preview_text(
       ],
       list.append(
         block_imports,
-        list.append(out_imports, list.append(option_imports, opaque_imports)),
+        list.append(
+          out_imports,
+          list.append(option_imports, list.append(opaque_imports, page_imports)),
+        ),
       ),
     )
   let input_hash =
@@ -472,7 +823,7 @@ fn blocks_preview_text(
     case string.contains(area_children, "default_blob()") {
       True ->
         "\nfn default_blob() -> Blob {\n"
-        <> "  let assert Ok(value) = parse(\"placeholder\")\n"
+        <> "  let assert Ok(value) = parse_blob(\"placeholder\")\n"
         <> "  value\n}\n"
       False -> ""
     }
@@ -480,6 +831,27 @@ fn blocks_preview_text(
       True ->
         "\nfn default_time() -> Time {\n"
         <> "  let assert Ok(value) = time(\"00:00\")\n"
+        <> "  value\n}\n"
+      False -> ""
+    }
+    <> case string.contains(area_children, "default_date()") {
+      True ->
+        "\nfn default_date() -> Date {\n"
+        <> "  let assert Ok(value) = date(\"2026-01-01\")\n"
+        <> "  value\n}\n"
+      False -> ""
+    }
+    <> case string.contains(area_children, "default_datetime()") {
+      True ->
+        "\nfn default_datetime() -> Datetime {\n"
+        <> "  let assert Ok(value) = datetime(\"2026-01-01T00:00:00Z\")\n"
+        <> "  value\n}\n"
+      False -> ""
+    }
+    <> case string.contains(area_children, "default_party_id()") {
+      True ->
+        "\nfn default_party_id() -> PartyId {\n"
+        <> "  let assert Ok(value) = parse_party(\"placeholder\")\n"
         <> "  value\n}\n"
       False -> ""
     }
@@ -589,7 +961,8 @@ fn preview_block_text(
   units: List(Unit),
   block: reader_front.Block,
 ) -> String {
-  let module = module_ref(block.module)
+  let module =
+    block_module_reference(block.module, service_module_names(app.services))
   let service = block_service_module(block)
   let service_label = case service {
     Some(name) -> naming.pascal(name)
@@ -601,11 +974,7 @@ fn preview_block_text(
   }
   let value = case block.has_sample {
     True -> module <> ".sample"
-    False ->
-      case service {
-        Some(name) -> default_block_expression(app, units, name, block)
-        None -> "Nil"
-      }
+    False -> default_block_input_expression(app, units, block)
   }
   "html.div_([], [\n"
   <> "        el.text("
@@ -691,6 +1060,23 @@ fn default_type_expression(
         "Bool", [] -> "False"
         "Float", [] -> "0.0"
         "Option", [_] -> "None"
+        "Page", [inner] ->
+          "framework_page.Page(items: ["
+          <> string.join(
+            list.map([1, 2, 3], fn(_) {
+              default_type_expression(
+                app,
+                units,
+                state,
+                scope,
+                output_module,
+                inner,
+                field_name,
+              )
+            }),
+            ", ",
+          )
+          <> "], next: None)"
         "List", [inner] ->
           "["
           <> string.join(
@@ -758,46 +1144,113 @@ fn default_custom_expression(
             "framework/er" ->
               relation_default(output_module, type_name(type_), field_name)
             "framework/blob" -> "default_blob()"
-            "framework/time" -> "default_time()"
+            "framework/party" -> "default_party_id()"
+            "framework/time" ->
+              case type_name(type_) {
+                "Date" -> "default_date()"
+                "Datetime" -> "default_datetime()"
+                "Time" -> "default_time()"
+                _ -> default_named_value(app, type_name(type_), field_name)
+              }
             _ ->
-              case unit_for(units, path) {
-                Some(unit) ->
-                  case
-                    g.find_custom_type(
-                      g.in_order(unit.module),
-                      type_name(type_),
-                    )
-                  {
-                    Some(definition) ->
-                      case definition.variants {
-                        [variant, ..] ->
-                          output_module
-                          <> "."
-                          <> mapped_constructor(
-                            state,
-                            path,
-                            type_name(type_),
-                            variant.name,
-                          )
-                          <> default_variant_arguments(
-                            app,
-                            units,
-                            state,
-                            scope_for(units, path),
-                            output_module,
-                            variant.fields,
-                            field_name,
-                          )
-                        [] -> "Nil"
+              case string.starts_with(path, "gen/out/") {
+                True ->
+                  default_generated_out_expression(
+                    app,
+                    units,
+                    path,
+                    type_name(type_),
+                    field_name,
+                  )
+                False ->
+                  case unit_for(units, path) {
+                    Some(unit) ->
+                      case
+                        g.find_custom_type(
+                          g.in_order(unit.module),
+                          type_name(type_),
+                        )
+                      {
+                        Some(definition) ->
+                          case definition.variants {
+                            [variant, ..] ->
+                              output_module
+                              <> "."
+                              <> mapped_constructor(
+                                state,
+                                path,
+                                type_name(type_),
+                                variant.name,
+                              )
+                              <> default_variant_arguments(
+                                app,
+                                units,
+                                state,
+                                scope_for(units, path),
+                                output_module,
+                                variant.fields,
+                                field_name,
+                              )
+                            [] -> "Nil"
+                          }
+                        None ->
+                          default_named_value(app, type_name(type_), field_name)
                       }
                     None ->
                       default_named_value(app, type_name(type_), field_name)
                   }
-                None -> default_named_value(app, type_name(type_), field_name)
               }
           }
       }
     None -> default_named_value(app, type_name(type_), field_name)
+  }
+}
+
+fn default_generated_out_expression(
+  app: model.App,
+  units: List(Unit),
+  path: String,
+  name: String,
+  field_name: String,
+) -> String {
+  let service = string.drop_start(path, 8)
+  case name {
+    "Out" -> default_output_expression(app, units, service)
+    _ -> {
+      let service_path = "service/" <> service
+      let state = out_state(app, units, service_path).0
+      case
+        list.find(state.custom, fn(declaration) {
+          let CustomDecl(scope:, definition:) = declaration
+          definition.name == name
+          || mapped_name(state, scope.module, definition.name) == name
+        })
+      {
+        Ok(CustomDecl(scope: scope, definition: definition)) ->
+          case definition.variants {
+            [variant, ..] ->
+              service
+              <> "."
+              <> mapped_constructor(
+                state,
+                scope.module,
+                definition.name,
+                variant.name,
+              )
+              <> default_variant_arguments(
+                app,
+                units,
+                state,
+                scope,
+                service,
+                variant.fields,
+                field_name,
+              )
+            [] -> default_named_value(app, name, field_name)
+          }
+        Error(_) -> default_named_value(app, name, field_name)
+      }
+    }
   }
 }
 
@@ -807,6 +1260,8 @@ fn relation_default(
   field_name: String,
 ) -> String {
   case name {
+    "Key" -> "er.key(" <> quoted(field_name) <> ")"
+    "Link" -> "None"
     "Has" | "Held" ->
       output_module <> "." <> name <> "(value: " <> quoted(field_name) <> ")"
     "Multi" ->
@@ -890,19 +1345,314 @@ fn live_targets(
   let empty: List(#(model.Service, reader_front.Component)) = []
   components
   |> list.fold(empty, fn(targets, component) {
-    component_services(component)
-    |> list.fold(targets, fn(acc, variant) {
-      case service_for(services, variant) {
-        Some(service) ->
-          case list.any(acc, fn(target) { target.0.module == service.module }) {
-            True -> acc
-            False -> list.append(acc, [#(service, component)])
+    component.calls
+    |> list.fold(targets, fn(acc, target) {
+      case target {
+        reader_front.ServiceCall(variant) ->
+          case service_for(services, variant) {
+            Some(service) ->
+              case
+                list.any(acc, fn(found) { found.0.module == service.module })
+              {
+                True -> acc
+                False -> list.append(acc, [#(service, component)])
+              }
+            None -> acc
           }
-        None -> acc
+        reader_front.AttachedCall(_) -> acc
       }
     })
   })
   |> list.sort(fn(left, right) { string.compare(left.0.module, right.0.module) })
+}
+
+fn attached_service_live_targets(
+  front: reader_front.Front,
+  app: model.App,
+  live: List(#(model.Service, reader_front.Component)),
+) -> List(#(model.Service, reader_front.Component)) {
+  let targets =
+    front.components
+    |> list.flat_map(fn(component) {
+      component.calls
+      |> list.filter_map(fn(target) {
+        case target {
+          reader_front.AttachedCall(name) ->
+            case service_for(app.services, name) {
+              Some(service) ->
+                case
+                  list.any(live, fn(found) { found.0.module == service.module })
+                {
+                  True -> Error(Nil)
+                  False -> Ok(#(service, component))
+                }
+              None -> Error(Nil)
+            }
+          reader_front.ServiceCall(_) -> Error(Nil)
+        }
+      })
+    })
+  let empty: List(#(model.Service, reader_front.Component)) = []
+  list.fold(targets, empty, fn(acc, target) {
+    let #(service, _) = target
+    case list.any(acc, fn(found) { found.0.module == service.module }) {
+      True -> acc
+      False -> list.append(acc, [target])
+    }
+  })
+  |> list.sort(fn(left, right) { string.compare(left.0.module, right.0.module) })
+}
+
+fn attached_live_targets(
+  front: reader_front.Front,
+  app: model.App,
+) -> List(#(model.AttachedRoute, reader_front.Component)) {
+  let targets =
+    front.components
+    |> list.flat_map(fn(component) {
+      component.calls
+      |> list.filter_map(fn(target) {
+        case target {
+          reader_front.AttachedCall(name) ->
+            case service_for(app.services, name) {
+              Some(_) -> Error(Nil)
+              None ->
+                case
+                  app.attached |> list.find(fn(route) { route.name == name })
+                {
+                  Ok(route) ->
+                    case
+                      route.name == "BlobCopy"
+                      && route.method == "POST"
+                      && route.path == "/api/blobs"
+                    {
+                      True -> Error(Nil)
+                      False -> Ok(#(route, component))
+                    }
+                  Error(_) -> Error(Nil)
+                }
+            }
+          reader_front.ServiceCall(_) -> Error(Nil)
+        }
+      })
+    })
+  let empty: List(#(model.AttachedRoute, reader_front.Component)) = []
+  list.fold(targets, empty, fn(acc, target) {
+    let #(route, _) = target
+    case list.any(acc, fn(found) { found.0.name == route.name }) {
+      True -> acc
+      False -> list.append(acc, [target])
+    }
+  })
+  |> list.sort(fn(left, right) { string.compare(left.0.name, right.0.name) })
+}
+
+fn attached_live_file(
+  route: model.AttachedRoute,
+  package: face.Package,
+  component: reader_front.Component,
+  hashes: hash.Hashes,
+  face_name: String,
+) -> File {
+  let component_hash =
+    source_hash(package.units, fn(unit) { unit.path == component.module })
+  let input_hash = digest.short(hash.entry(hashes) <> component_hash)
+  let module = naming.snake(route.name)
+  File(
+    path: face_name <> "/src/gen/live/" <> module <> ".gleam",
+    text: attached_live_text(
+      route,
+      component,
+      header("src/" <> component.module <> ".gleam", input_hash),
+    ),
+  )
+}
+
+fn attached_live_text(
+  route: model.AttachedRoute,
+  component: reader_front.Component,
+  generated_header: String,
+) -> String {
+  let reload = component.after_send == Some("ReloadPage")
+  let reload_imports = case reload {
+    True -> "import lustre/event\n"
+    False -> ""
+  }
+  generated_header
+  <> "\n"
+  <> "import framework/front/live\n"
+  <> "import gleam/dynamic.{type Dynamic}\n"
+  <> "import gleam/dynamic/decode\n"
+  <> "import gleam/json\n"
+  <> "import gleam/option.{None, Some}\n"
+  <> "import lustre/effect.{type Effect}\n"
+  <> reload_imports
+  <> "\n"
+  <> "pub type Field\n\n"
+  <> "pub type Args {\n  Args\n}\n\n"
+  <> "pub type Error\n\n"
+  <> "pub type Failure {\n  Refused(Error)\n  Broke(String)\n}\n\n"
+  <> "pub type State = live.State(Args, Nil, Dynamic, Failure)\n\n"
+  <> "pub type Event = live.Event(Field, Nil, Dynamic, Failure)\n\n"
+  <> "pub fn init(_args: Nil) -> #(State, Effect(Event)) {\n"
+  <> "  #(live.State(args: Args, given: Nil, last: None, waiting: False), effect.none())\n}\n\n"
+  <> "pub fn update(model: State, msg: Event, after: live.After) -> #(State, Effect(Event)) {\n"
+  <> "  case msg {\n"
+  <> "    live.Set(_, _) -> #(model, effect.none())\n"
+  <> "    live.Send ->\n"
+  <> "      case model.waiting {\n"
+  <> "        True -> #(model, effect.none())\n"
+  <> "        False -> #(live.State(..model, waiting: True), request())\n"
+  <> "      }\n"
+  <> "    live.Given(_) -> #(model, effect.none())\n"
+  <> "    live.Done(result) -> {\n"
+  <> "      let next = live.State(..model, last: Some(result), waiting: False)\n"
+  <> "      case result, after {\n"
+  <> "        Ok(_), live.ReloadPage -> "
+  <> case reload {
+    True -> "#(next, event.emit(\"yumemi-done\", json.null()))\n"
+    False -> "#(next, effect.none())\n"
+  }
+  <> "        _, _ -> #(next, effect.none())\n"
+  <> "      }\n"
+  <> "    }\n"
+  <> "  }\n}\n\n"
+  <> "@external(javascript, \"./transport_ffi.mjs\", \"send\")\n"
+  <> "fn transport_send(method: String, path: String, body: json.Json, on_ok: fn(Dynamic) -> Nil, on_error: fn(Dynamic) -> Nil) -> Nil\n\n"
+  <> "fn request() -> Effect(Event) {\n"
+  <> "  use dispatch <- effect.from\n"
+  <> "  transport_send(\n"
+  <> "    "
+  <> quoted(route.method)
+  <> ",\n"
+  <> "    "
+  <> quoted(route.path)
+  <> ",\n"
+  <> "    json.null(),\n"
+  <> "    fn(value) { dispatch(live.Done(Ok(value))) },\n"
+  <> "    fn(value) { dispatch(live.Done(Error(Broke(error_text(value))))) },\n"
+  <> "  )\n  Nil\n}\n\n"
+  <> "fn error_text(value: Dynamic) -> String {\n"
+  <> "  case decode.run(value, error_field_decoder(\"code\")) {\n"
+  <> "    Ok(code) if code != \"\" -> code\n"
+  <> "    _ ->\n"
+  <> "      case decode.run(value, error_field_decoder(\"message\")) {\n"
+  <> "        Ok(message) if message != \"\" -> message\n"
+  <> "        _ -> \"request failed\"\n"
+  <> "      }\n"
+  <> "  }\n}\n\n"
+  <> "fn error_field_decoder(field: String) -> decode.Decoder(String) {\n"
+  <> "  decode.optional_field(field, \"\", decode.string, fn(value) {\n"
+  <> "    decode.success(value)\n"
+  <> "  })\n}\n"
+}
+
+fn blob_entry_targets(
+  components: List(reader_front.Component),
+  attached: List(model.AttachedRoute),
+) -> List(#(model.AttachedRoute, reader_front.Component)) {
+  let empty: List(#(model.AttachedRoute, reader_front.Component)) = []
+  components
+  |> list.fold(empty, fn(targets, component) {
+    component.calls
+    |> list.fold(targets, fn(acc, target) {
+      case target {
+        reader_front.ServiceCall(_) -> acc
+        reader_front.AttachedCall(name) ->
+          case list.find(attached, fn(route) { route.name == name }) {
+            Ok(route)
+              if route.name == "BlobCopy"
+              && route.method == "POST"
+              && route.path == "/api/blobs"
+            ->
+              case list.any(acc, fn(found) { found.0.name == route.name }) {
+                True -> acc
+                False -> list.append(acc, [#(route, component)])
+              }
+            _ -> acc
+          }
+      }
+    })
+  })
+}
+
+fn blob_entry_live_text(
+  route: model.AttachedRoute,
+  hashes: hash.Hashes,
+) -> String {
+  let input_hash = digest.short(hash.entry(hashes) <> string.inspect(route))
+  "//// GENERATED from api/src/gen/http_runtime.mjs [sha256:"
+  <> input_hash
+  <> "] — 手で編集しない\n\n"
+  <> "import framework/front/live\n"
+  <> "import gleam/dynamic.{type Dynamic}\n"
+  <> "import gleam/dynamic/decode\n"
+  <> "import gleam/option.{None, Some}\n"
+  <> "import lustre/attribute\n"
+  <> "import lustre/effect.{type Effect}\n"
+  <> "import lustre/event\n\n"
+  <> "pub type Args {\n  Args(file: String)\n}\n\n"
+  <> "pub type Field {\n  File\n}\n\n"
+  <> "pub type State = live.State(Args, Nil, String, String)\n\n"
+  <> "pub type Event = live.Event(Field, Nil, String, String)\n\n"
+  <> "pub fn init(_given: Nil) -> #(State, Effect(Event)) {\n"
+  <> "  #(\n"
+  <> "    live.State(args: Args(file: \"\"), given: Nil, last: None, waiting: False),\n"
+  <> "    effect.none(),\n"
+  <> "  )\n}\n\n"
+  <> "pub fn update(model: State, msg: Event) -> #(State, Effect(Event)) {\n"
+  <> "  case msg {\n"
+  <> "    live.Set(File, value) -> #(\n"
+  <> "      live.State(..model, args: Args(file: value)),\n"
+  <> "      effect.none(),\n"
+  <> "    )\n"
+  <> "    live.Send ->\n"
+  <> "      case model.waiting {\n"
+  <> "        True -> #(model, effect.none())\n"
+  <> "        False -> #(live.State(..model, waiting: True), send(model.args))\n"
+  <> "      }\n"
+  <> "    live.Given(_) -> #(model, effect.none())\n"
+  <> "    live.Done(result) -> #(\n"
+  <> "      live.State(..model, last: Some(result), waiting: False),\n"
+  <> "      effect.none(),\n"
+  <> "    )\n"
+  <> "  }\n}\n\n"
+  <> "pub fn file_input() -> List(attribute.Attribute(Event)) {\n"
+  <> "  [\n"
+  <> "    attribute.attribute(\"type\", \"file\"),\n"
+  <> "    attribute.attribute(\"data-yumemi-file-input\", \"\"),\n"
+  <> "    event.on(\"change\", file_input_event()),\n"
+  <> "  ]\n}\n\n"
+  <> "fn file_input_event() -> decode.Decoder(Event) {\n"
+  <> "  decode.map(\n"
+  <> "    decode.dynamic,\n"
+  <> "    fn(event) { live.Set(File, file_token(event)) },\n"
+  <> "  )\n}\n\n"
+  <> "@external(javascript, \"./transport_ffi.mjs\", \"file_token\")\n"
+  <> "fn file_token(event: Dynamic) -> String\n\n"
+  <> "@external(javascript, \"./transport_ffi.mjs\", \"upload_file\")\n"
+  <> "fn transport_upload(\n"
+  <> "  method: String,\n"
+  <> "  path: String,\n"
+  <> "  token: String,\n"
+  <> "  on_ok: fn(String) -> Nil,\n"
+  <> "  on_error: fn(Nil) -> Nil,\n"
+  <> ") -> Nil\n\n"
+  <> "fn send(args: Args) -> Effect(Event) {\n"
+  <> "  effect.from(fn(dispatch) {\n"
+  <> "    transport_upload(\n"
+  <> "      "
+  <> quoted(route.method)
+  <> ",\n"
+  <> "      "
+  <> quoted(route.path)
+  <> ",\n"
+  <> "      args.file,\n"
+  <> "      fn(key) { dispatch(live.Done(Ok(key))) },\n"
+  <> "      fn(_unit) { dispatch(live.Done(Error(\"file upload failed\"))) },\n"
+  <> "    )\n"
+  <> "    Nil\n"
+  <> "  })\n}\n"
 }
 
 fn service_for(
@@ -924,7 +1674,7 @@ fn component_services(component: reader_front.Component) -> List(String) {
   |> list.filter_map(fn(target) {
     case target {
       reader_front.ServiceCall(service) -> Ok(service)
-      reader_front.AttachedCall(_) -> Error(Nil)
+      reader_front.AttachedCall(attached) -> Ok(attached)
     }
   })
 }
@@ -954,16 +1704,69 @@ fn transport_text(
     digest.short(hash.entry(hashes) <> string.inspect(front.components)),
   )
   <> "\n"
-  <> "export function send(method, path, body, onOk, onError) {\n"
-  <> "  fetch(path, {\n"
+  <> "const selectedFiles = new Map();\n"
+  <> "const uploadedFiles = new Map();\n"
+  <> "const pendingUploads = new Map();\n\n"
+  <> "export function file_token(event) {\n"
+  <> "  const input = event.currentTarget ?? event.target;\n"
+  <> "  if (!(input instanceof HTMLInputElement)) return \"\";\n"
+  <> "  const previous = input.dataset.yumemiFileToken;\n"
+  <> "  if (previous) { selectedFiles.delete(previous); uploadedFiles.delete(previous); }\n"
+  <> "  const file = input.files?.[0];\n"
+  <> "  if (!file) { delete input.dataset.yumemiFileToken; return \"\"; }\n"
+  <> "  const token = `~yumemi-file:${crypto.randomUUID()}`;\n"
+  <> "  selectedFiles.set(token, file);\n"
+  <> "  input.dataset.yumemiFileToken = token;\n"
+  <> "  return token;\n"
+  <> "}\n\n"
+  <> "async function uploadToken(token, method = \"POST\", path = \"/api/blobs\") {\n"
+  <> "  if (uploadedFiles.has(token)) return uploadedFiles.get(token);\n"
+  <> "  const file = selectedFiles.get(token);\n"
+  <> "  if (!file) throw new Error(\"unknown file token\");\n"
+  <> "  if (pendingUploads.has(token)) return pendingUploads.get(token);\n"
+  <> "  const upload = fetch(path, {\n"
   <> "    method,\n"
-  <> "    headers: { \"content-type\": \"application/json\" },\n"
-  <> "    body: method === \"GET\" ? undefined : JSON.stringify(body),\n"
-  <> "  })\n"
-  <> "    .then((response) =>\n"
-  <> "      response.ok\n"
-  <> "        ? response.json().then(onOk)\n"
-  <> "        : onError(undefined))\n"
+  <> "    headers: { \"content-type\": file.type || \"application/octet-stream\" },\n"
+  <> "    body: file,\n"
+  <> "  }).then(async (response) => {\n"
+  <> "    if (!response.ok) throw new Error(\"blob upload failed\");\n"
+  <> "    const result = await response.json();\n"
+  <> "    if (typeof result?.key !== \"string\" || result.key === \"\") throw new Error(\"blob response has no key\");\n"
+  <> "    selectedFiles.delete(token);\n"
+  <> "    uploadedFiles.set(token, result.key);\n"
+  <> "    return result.key;\n"
+  <> "  }).catch(() => { throw new Error(\"file upload failed\"); })\n"
+  <> "    .finally(() => pendingUploads.delete(token));\n"
+  <> "  pendingUploads.set(token, upload);\n"
+  <> "  return upload;\n"
+  <> "}\n\n"
+  <> "export function send(method, path, body, blobFields, onOk, onError) {\n"
+  <> "  Promise.resolve().then(async () => {\n"
+  <> "    const nextBody = { ...body };\n"
+  <> "    for (const field of blobFields) {\n"
+  <> "      const value = nextBody[field];\n"
+  <> "      if (typeof value !== \"string\") continue;\n"
+  <> "      if (selectedFiles.has(value) || uploadedFiles.has(value)) nextBody[field] = await uploadToken(value);\n"
+  <> "    }\n"
+  <> "    const response = await fetch(path, {\n"
+  <> "      method,\n"
+  <> "      headers: { \"content-type\": \"application/json\" },\n"
+  <> "      body: method === \"GET\" ? undefined : JSON.stringify(nextBody),\n"
+  <> "    });\n"
+  <> "    return response;\n"
+  <> "  }).then((response) => {\n"
+  <> "    if (response.ok) {\n"
+  <> "      response.json().then(onOk).catch(() => onError({ code: \"invalid_response\" }));\n"
+  <> "    } else {\n"
+  <> "      response.json().then(onError).catch(() => onError({ code: \"request_failed\" }));\n"
+  <> "    }\n"
+  <> "  }).catch((error) => onError({ code: error?.message ?? \"network_error\" }));\n"
+  <> "  return undefined;\n"
+  <> "}\n\n"
+  <> "export function upload_file(method, path, token, onOk, onError) {\n"
+  <> "  if (!selectedFiles.has(token) && !uploadedFiles.has(token)) { onError(undefined); return undefined; }\n"
+  <> "  uploadToken(token, method, path)\n"
+  <> "    .then(onOk)\n"
   <> "    .catch(() => onError(undefined));\n"
   <> "  return undefined;\n"
   <> "}\n"
@@ -1098,6 +1901,49 @@ fn live_file(
   hashes: hash.Hashes,
   face_name: String,
 ) -> File {
+  live_file_with_error_mode(
+    app,
+    units,
+    package,
+    service,
+    component,
+    hashes,
+    face_name,
+    True,
+  )
+}
+
+fn attached_service_live_file(
+  app: model.App,
+  units: List(Unit),
+  package: face.Package,
+  service: model.Service,
+  component: reader_front.Component,
+  hashes: hash.Hashes,
+  face_name: String,
+) -> File {
+  live_file_with_error_mode(
+    app,
+    units,
+    package,
+    service,
+    component,
+    hashes,
+    face_name,
+    False,
+  )
+}
+
+fn live_file_with_error_mode(
+  app: model.App,
+  units: List(Unit),
+  package: face.Package,
+  service: model.Service,
+  component: reader_front.Component,
+  hashes: hash.Hashes,
+  face_name: String,
+  structured_errors: Bool,
+) -> File {
   let given_service =
     component.reloads
     |> list.first
@@ -1117,6 +1963,7 @@ fn live_file(
       component,
       given_service,
       route,
+      structured_errors,
       header("src/" <> component.module <> ".gleam", input_hash),
     ),
   )
@@ -1129,9 +1976,19 @@ fn live_text(
   component: reader_front.Component,
   given_service: Option(model.Service),
   route: Option(ApiRoute),
+  structured_errors: Bool,
   generated_header: String,
 ) -> String {
   let validations = validation_specs(app, units, service.args)
+  let service_errors = case structured_errors {
+    True -> service_error_variants(units, service)
+    False -> []
+  }
+  let error_handling = case route {
+    Some(_) -> error_failure_text(service_errors)
+    None -> ""
+  }
+  let blob_args = blob_args(service.args)
   generated_header
   <> "\n"
   <> live_imports(
@@ -1139,24 +1996,129 @@ fn live_text(
     given_service,
     validations != [],
     component.after_send == Some("ReloadPage"),
+    blob_args != [],
   )
   <> "\n\n"
   <> args_type_text(service.args)
   <> "\n"
   <> field_type_text(service.args)
   <> "\n"
-  <> "pub type Error {\n"
-  <> "  Invalid(List(#(Field, String)))\n"
-  <> "  Failed\n"
-  <> "}\n\n"
+  <> service_error_type_text(service_errors)
+  <> failure_type_text(service_errors)
   <> state_type_text(service, given_service)
   <> "\n"
   <> init_text(service, given_service)
   <> "\n"
-  <> update_text(service, component)
+  <> update_text(service, component, validations != [])
   <> "\n"
+  <> file_input_text(blob_args)
   <> validate_text(validations)
+  <> validation_error_text(validations)
+  <> error_handling
   <> send_text(service, route, component.after_send)
+}
+
+fn validation_error_text(
+  validations: List(#(String, String, String)),
+) -> String {
+  case validations {
+    [] -> ""
+    _ ->
+      "fn validation_error_text(errors: List(#(Field, String))) -> String {\n"
+      <> "  errors |> list.map(fn(error) { error.1 }) |> string.join(\"; \")\n"
+      <> "}\n\n"
+  }
+}
+
+fn service_error_variants(
+  units: List(Unit),
+  service: model.Service,
+) -> List(glance.Variant) {
+  case unit_for(units, "service/" <> service.module) {
+    Some(unit) -> {
+      let module = g.in_order(unit.module)
+      case g.find_custom_type(module, "Error") {
+        Some(definition) -> definition.variants
+        None -> []
+      }
+    }
+    None -> []
+  }
+}
+
+fn service_error_type_text(variants: List(glance.Variant)) -> String {
+  case variants {
+    [] -> "pub type Error\n\n"
+    _ ->
+      "pub type Error {\n"
+      <> string.concat(list.map(variants, error_variant_text))
+      <> "}\n\n"
+  }
+}
+
+fn error_variant_text(variant: glance.Variant) -> String {
+  case variant.fields {
+    [] -> "  " <> variant.name <> "\n"
+    fields ->
+      "  "
+      <> variant.name
+      <> "("
+      <> string.join(list.map(fields, error_field_text), ", ")
+      <> ")\n"
+  }
+}
+
+fn error_field_text(field: glance.VariantField) -> String {
+  case field {
+    glance.LabelledVariantField(label:, ..) -> label <> ": String"
+    glance.UnlabelledVariantField(_) -> "String"
+  }
+}
+
+fn failure_type_text(variants: List(glance.Variant)) -> String {
+  case variants {
+    [] -> "pub type Failure {\n  Broke(String)\n}\n\n"
+    _ ->
+      "pub type Failure {\n"
+      <> "  Refused(Error)\n"
+      <> "  Broke(String)\n"
+      <> "}\n\n"
+  }
+}
+
+fn error_failure_text(variants: List(glance.Variant)) -> String {
+  let branches =
+    variants
+    |> list.filter(fn(variant) { variant.fields == [] })
+    |> list.map(fn(variant) {
+      "    "
+      <> string.inspect(naming.snake(variant.name))
+      <> " -> Refused("
+      <> variant.name
+      <> ")\n"
+    })
+    |> string.concat
+  "fn error_failure(value: Dynamic) -> Failure {\n"
+  <> "  case error_text(value) {\n"
+  <> branches
+  <> "    code -> Broke(code)\n"
+  <> "  }\n"
+  <> "}\n\n"
+  <> "fn error_text(value: Dynamic) -> String {\n"
+  <> "  case decode.run(value, error_field_decoder(\"code\")) {\n"
+  <> "    Ok(code) if code != \"\" -> code\n"
+  <> "    _ ->\n"
+  <> "      case decode.run(value, error_field_decoder(\"message\")) {\n"
+  <> "        Ok(message) if message != \"\" -> message\n"
+  <> "        _ -> \"invalid error payload\"\n"
+  <> "      }\n"
+  <> "  }\n"
+  <> "}\n\n"
+  <> "fn error_field_decoder(field: String) -> decode.Decoder(String) {\n"
+  <> "  decode.optional_field(field, \"\", decode.string, fn(value) {\n"
+  <> "    decode.success(value)\n"
+  <> "  })\n"
+  <> "}\n\n"
 }
 
 fn live_imports(
@@ -1164,9 +2126,10 @@ fn live_imports(
   given_service: Option(model.Service),
   has_validation: Bool,
   reloads_page: Bool,
+  has_blob_fields: Bool,
 ) -> String {
   let validation = case has_validation {
-    True -> ["framework/spec", "gleam/list"]
+    True -> ["framework/spec", "gleam/list", "gleam/string"]
     False -> []
   }
   let given = case given_service {
@@ -1175,6 +2138,10 @@ fn live_imports(
   }
   let reload = case reloads_page {
     True -> ["gleam/json", "lustre/event"]
+    False -> []
+  }
+  let file_input = case has_blob_fields {
+    True -> ["lustre/attribute", "lustre/event"]
     False -> []
   }
   let base = [
@@ -1189,6 +2156,7 @@ fn live_imports(
   base
   |> list.append(validation)
   |> list.append(reload)
+  |> list.append(file_input)
   |> list.append(given)
   |> list.unique
   |> list.sort(string.compare)
@@ -1219,6 +2187,57 @@ fn field_type_text(args: List(model.Arg)) -> String {
   }
 }
 
+fn blob_args(args: List(model.Arg)) -> List(model.Arg) {
+  list.filter(args, fn(arg) { blob_shape(arg.type_) })
+}
+
+fn blob_shape(shape: model.TypeShape) -> Bool {
+  case shape {
+    model.NamedShape(
+      module: Some("framework/blob"),
+      name: "Blob",
+      parameters: [],
+    ) -> True
+    model.NamedShape(
+      module: Some("gleam/option"),
+      name: "Option",
+      parameters: [inner],
+    ) -> blob_shape(inner)
+    _ -> False
+  }
+}
+
+fn file_input_text(args: List(model.Arg)) -> String {
+  case args {
+    [] -> ""
+    _ ->
+      string.concat(
+        list.map(args, fn(arg) {
+          "pub fn "
+          <> arg.name
+          <> "_file_input() -> List(attribute.Attribute(Event)) {\n"
+          <> "  file_input("
+          <> naming.pascal(arg.name)
+          <> ")\n"
+          <> "}\n\n"
+        }),
+      )
+      <> "fn file_input(field: Field) -> List(attribute.Attribute(Event)) {\n"
+      <> "  [\n"
+      <> "    attribute.attribute(\"type\", \"file\"),\n"
+      <> "    attribute.attribute(\"data-yumemi-file-input\", \"\"),\n"
+      <> "    event.on(\"change\", file_input_event(field)),\n"
+      <> "  ]\n}\n\n"
+      <> "fn file_input_event(field: Field) -> decode.Decoder(Event) {\n"
+      <> "  decode.map(\n"
+      <> "    decode.dynamic,\n"
+      <> "    fn(event) { live.Set(field, file_token(event)) },\n"
+      <> "  )\n}\n\n"
+      <> "@external(javascript, \"./transport_ffi.mjs\", \"file_token\")\n"
+      <> "fn file_token(event: Dynamic) -> String\n\n"
+  }
+}
+
 fn state_type_text(
   service: model.Service,
   given_service: Option(model.Service),
@@ -1228,12 +2247,12 @@ fn state_type_text(
   <> given
   <> ", "
   <> service.module
-  <> ".Out, Error)\n\n"
+  <> ".Out, Failure)\n\n"
   <> "pub type Event = live.Event(Field, "
   <> given
   <> ", "
   <> service.module
-  <> ".Out, Error)\n"
+  <> ".Out, Failure)\n"
 }
 
 fn given_type(given_service: Option(model.Service)) -> String {
@@ -1278,17 +2297,27 @@ fn args_constructor(args: List(model.Arg)) -> String {
 fn update_text(
   service: model.Service,
   component: reader_front.Component,
+  has_validation: Bool,
 ) -> String {
+  let invalid_input = case has_validation {
+    True -> "validation_error_text(errors)"
+    False -> "\"invalid input\""
+  }
   "pub fn update(model: State, msg: Event) -> #(State, Effect(Event)) {\n"
   <> "  case msg {\n"
-  <> set_branches(service.args)
+  <> case service.args {
+    [] -> "    live.Set(_, _) -> #(model, effect.none())\n"
+    _ -> set_branches(service.args)
+  }
   <> "    live.Send ->\n"
   <> "      case model.waiting {\n"
   <> "        True -> #(model, effect.none())\n"
   <> "        False ->\n"
   <> "          case validate(model) {\n"
   <> "            Error(errors) -> #(\n"
-  <> "              live.State(..model, last: Some(Error(Invalid(errors)))),\n"
+  <> "              live.State(..model, last: Some(Error(Broke("
+  <> invalid_input
+  <> ")))),\n"
   <> "              effect.none(),\n"
   <> "            )\n"
   <> "            Ok(args) -> #(live.State(..model, waiting: True), send(args))\n"
@@ -1383,6 +2412,11 @@ fn send_text(
   route: Option(ApiRoute),
   after_send: Option(String),
 ) -> String {
+  let blob_fields =
+    blob_args(service.args)
+    |> list.map(fn(arg) { quoted(arg.name) })
+    |> string.join(", ")
+  let blob_fields = "[" <> blob_fields <> "]"
   let reload = case after_send {
     Some("ReloadPage") ->
       "\nfn reload_page() -> Effect(Event) {\n  event.emit(\"yumemi-done\", json.null())\n}\n"
@@ -1396,8 +2430,9 @@ fn send_text(
       <> "  method: String,\n"
       <> "  path: String,\n"
       <> "  body: json.Json,\n"
+      <> "  blob_fields: List(String),\n"
       <> "  on_ok: fn(Dynamic) -> Nil,\n"
-      <> "  on_error: fn(Nil) -> Nil,\n"
+      <> "  on_error: fn(Dynamic) -> Nil,\n"
       <> ") -> Nil\n\n"
       <> "fn send(args: Args) -> Effect(Event) {\n"
       <> "  effect.from(fn(dispatch) {\n"
@@ -1411,15 +2446,18 @@ fn send_text(
       <> "      "
       <> body_expression(service.args)
       <> ",\n"
+      <> "      "
+      <> blob_fields
+      <> ",\n"
       <> "      fn(value) {\n"
       <> "        case decode.run(value, "
       <> service.module
       <> ".decoder()) {\n"
       <> "          Ok(out) -> dispatch(live.Done(Ok(out)))\n"
-      <> "          Error(_) -> dispatch(live.Done(Error(Failed)))\n"
+      <> "          Error(_) -> dispatch(live.Done(Error(Broke(\"invalid response\"))))\n"
       <> "        }\n"
       <> "      },\n"
-      <> "      fn(_unit) { dispatch(live.Done(Error(Failed))) },\n"
+      <> "      fn(value) { dispatch(live.Done(Error(error_failure(value)))) },\n"
       <> "    )\n"
       <> "  })\n}\n"
   }
@@ -1452,10 +2490,27 @@ fn body_expression(args: List(model.Arg)) -> String {
   "json.object([\n"
   <> string.concat(
     list.map(args, fn(arg) {
-      "    #(\"" <> arg.name <> "\", json.string(args." <> arg.name <> ")),\n"
+      "    #(\"" <> arg.name <> "\", " <> body_value_expression(arg) <> "),\n"
     }),
   )
   <> "  ])"
+}
+
+fn body_value_expression(arg: model.Arg) -> String {
+  case arg.type_ {
+    model.NamedShape(
+      module: Some("gleam/option"),
+      name: "Option",
+      parameters: [_inner],
+    ) ->
+      "case args."
+      <> arg.name
+      <> " {\n"
+      <> "  \"\" -> json.null()\n"
+      <> "  value -> json.string(value)\n"
+      <> "}"
+    _ -> "json.string(args." <> arg.name <> ")"
+  }
 }
 
 fn validation_specs(
@@ -1685,7 +2740,7 @@ fn load_page_file(
   page: reader_front.Page,
 ) -> File {
   let layout_sources = layout_sources(front.layout, front.blocks, app.services)
-  let page_sources = page_sources(page, front.blocks, app.services)
+  let page_sources = page_sources(app, units, page, front.blocks, app.services)
   let source_hash =
     source_hash(package.units, fn(unit) { unit.path == page.module })
   File(
@@ -1726,6 +2781,8 @@ fn layout_sources(
 }
 
 fn page_sources(
+  app: model.App,
+  units: List(Unit),
   page: reader_front.Page,
   blocks: List(reader_front.Block),
   services: List(model.Service),
@@ -1750,7 +2807,8 @@ fn page_sources(
   let initial = add_load_sources(root, read_sources(page.reads, services))
   let sources = placement_sources(placements, blocks, services, initial)
   case page.theme, root_service {
-    Some(name), Some(module) ->
+    Some(name), Some(fallback_module) -> {
+      let module = page_theme_service(app, units, sources, fallback_module)
       list.append(sources, [
         LoadSource(
           key: "theme:" <> module <> ":" <> name,
@@ -1760,8 +2818,39 @@ fn page_sources(
           optional: True,
         ),
       ])
+    }
     _, _ -> sources
   }
+}
+
+fn page_theme_service(
+  app: model.App,
+  units: List(Unit),
+  sources: List(LoadSource),
+  fallback: String,
+) -> String {
+  case
+    list.find(sources, fn(source) {
+      source.type_name == "Out"
+      && output_has_custom_type(app, units, source.service, "PageTheme")
+    })
+  {
+    Ok(source) -> source.service
+    Error(_) -> fallback
+  }
+}
+
+fn output_has_custom_type(
+  app: model.App,
+  units: List(Unit),
+  service: String,
+  name: String,
+) -> Bool {
+  let #(state, _) = out_state(app, units, "service/" <> service)
+  list.any(state.custom, fn(declaration) {
+    let CustomDecl(definition: definition, ..) = declaration
+    definition.name == name
+  })
 }
 
 fn read_sources(
@@ -1816,11 +2905,17 @@ fn placement_sources(
     [] -> initial
     [placement, ..rest] -> {
       let next = case placement {
-        reader_front.Fixed(block: block_name, ..) ->
+        reader_front.Fixed(block: block_name, ..) -> {
+          let input_sources = case
+            list.find(blocks, fn(block) { block.name == block_name })
+          {
+            Ok(block) -> add_block_input_sources(initial, block)
+            Error(_) -> initial
+          }
           case block_source(blocks, block_name, services) {
             Some(module) ->
               add_load_source(
-                initial,
+                input_sources,
                 LoadSource(
                   key: "service:" <> module,
                   name: module,
@@ -1829,8 +2924,9 @@ fn placement_sources(
                   optional: True,
                 ),
               )
-            None -> initial
+            None -> input_sources
           }
+        }
         reader_front.Widget(name: name, service: service_name, ..) ->
           case service_module(services, service_name) {
             Some(module) ->
@@ -1849,6 +2945,51 @@ fn placement_sources(
       }
       placement_sources(rest, blocks, services, next)
     }
+  }
+}
+
+fn add_block_input_sources(
+  sources: List(LoadSource),
+  block: reader_front.Block,
+) -> List(LoadSource) {
+  case block.input_definition {
+    Some(definition) -> {
+      let scope = Scope(module: block.module, imports: block.input_imports)
+      let services =
+        definition.variants
+        |> list.flat_map(fn(variant) {
+          variant.fields
+          |> list.filter_map(fn(field) {
+            let type_ = g.variant_field_type(field)
+            case type_ {
+              glance.NamedType(name: "Out", parameters: [], ..) ->
+                case resolved_path(scope, type_) {
+                  Some(path) ->
+                    case out_service_path(path) {
+                      Some(service) -> Ok(service)
+                      None -> Error(Nil)
+                    }
+                  None -> Error(Nil)
+                }
+              _ -> Error(Nil)
+            }
+          })
+        })
+        |> list.unique
+      list.fold(services, sources, fn(acc, service) {
+        add_load_source(
+          acc,
+          LoadSource(
+            key: "service:" <> service,
+            name: service,
+            service: service,
+            type_name: "Out",
+            optional: False,
+          ),
+        )
+      })
+    }
+    None -> sources
   }
 }
 
@@ -1985,29 +3126,33 @@ fn load_page_text(
 ) -> String {
   let theme = theme_source(page_sources)
   let theme_background_blob = theme_background_is_blob(units, theme)
-  let imports =
-    load_imports(
-      front,
-      list.append(layout_sources, page_sources),
-      True,
-      theme_background_blob,
-    )
   let data_fields =
     ["    layout: layout.Data,\n"]
     |> list.append(list.map(page_sources, load_data_field_text))
   let page_path = face_name <> "/src/" <> page.module <> ".gleam"
-  let source_body =
-    header(page_path, input_hash)
-    <> "\n"
-    <> imports
-    <> import_gap(imports)
-    <> load_data_text("Data", data_fields)
+  let body =
+    load_data_text("Data", data_fields)
     <> "\n"
     <> page_load_function_text(layout_sources, page_sources)
     <> "\n"
     <> page_render_text(front, page_sources, theme_background_blob)
     <> "\n"
     <> page_view_text(app, units, front, page, layout_sources, page_sources)
+  let imports =
+    load_imports(
+      front,
+      page,
+      list.append(layout_sources, page_sources),
+      True,
+      theme_background_blob,
+      body,
+    )
+  let source_body =
+    header(page_path, input_hash)
+    <> "\n"
+    <> imports
+    <> import_gap(imports)
+    <> body
   source_body
 }
 
@@ -2044,6 +3189,10 @@ fn page_render_text(
   <> ")], [\n"
   <> "    raw_html.head([], [\n"
   <> "      raw_html.meta([attribute.attribute(\"charset\", \"utf-8\")]),\n"
+  <> "      raw_html.meta([\n"
+  <> "        attribute.attribute(\"name\", \"viewport\"),\n"
+  <> "        attribute.attribute(\"content\", \"width=device-width, initial-scale=1, viewport-fit=cover\"),\n"
+  <> "      ]),\n"
   <> "      raw_html.title([], "
   <> quoted(front.shell.title)
   <> "),\n"
@@ -2213,7 +3362,7 @@ fn option_background_text(blob: Bool) -> String {
       <> "  case value {\n"
       <> "    Some(value) -> "
       <> quoted("url(\"")
-      <> " <> to_string(value) <> "
+      <> " <> media.url(value, media.W1600) <> "
       <> quoted("\")")
       <> "\n"
       <> "    None -> \"none\"\n"
@@ -2236,26 +3385,59 @@ fn import_gap(imports: String) -> String {
 
 fn load_imports(
   front: reader_front.Front,
+  page: reader_front.Page,
   sources: List(LoadSource),
   include_layout: Bool,
   theme_background_blob: Bool,
+  body: String,
 ) -> String {
-  let base = [
-    "framework/front/css",
-    "framework/front/sketch_css",
-    "gleam/list",
-    "gleam/option.{type Option, None, Some}",
-    "lustre/attribute",
-    "lustre/element/html as raw_html",
-    "sketch",
-    "sketch/css as raw_css",
-    "sketch/lustre as sketch_lustre",
-    "sketch/lustre/element",
-    "sketch/lustre/element/html",
-    "style",
-  ]
+  let html_body = string.replace(body, "raw_html.", "")
+  let base =
+    [
+      #("css", "framework/front/css"),
+      #("el", "framework/front/el as el"),
+      #("sketch_css", "framework/front/sketch_css"),
+      #("list", "gleam/list"),
+      #("attribute", "lustre/attribute"),
+      #("raw_html", "lustre/element/html as raw_html"),
+      #("sketch", "sketch"),
+      #("raw_css", "sketch/css as raw_css"),
+      #("sketch_lustre", "sketch/lustre as sketch_lustre"),
+      #("element", "sketch/lustre/element"),
+      #("html", "sketch/lustre/element/html"),
+      #("style", "style"),
+    ]
+    |> list.filter_map(fn(item) {
+      let #(reference, path) = item
+      let rendered = case path == "sketch/lustre/element/html" {
+        True -> html_body
+        False -> body
+      }
+      case module_alias_used(rendered, reference) {
+        True -> Ok(path)
+        False -> Error(Nil)
+      }
+    })
+  let option_items =
+    [
+      #("type Option", "Option("),
+      #("None", "None"),
+      #("Some", "Some"),
+    ]
+    |> list.filter_map(fn(item) {
+      let #(name, reference) = item
+      case string.contains(body, reference) {
+        True -> Ok(name)
+        False -> Error(Nil)
+      }
+    })
+  let option = case option_items {
+    [] -> []
+    _ -> ["gleam/option.{" <> string.join(option_items, ", ") <> "}"]
+  }
+  let base = list.append(base, option)
   let blob = case theme_background_blob {
-    True -> ["framework/blob.{type Blob, to_string}"]
+    True -> ["framework/blob.{type Blob}", "media"]
     False -> []
   }
   let layout = case include_layout {
@@ -2263,7 +3445,23 @@ fn load_imports(
     False -> []
   }
   let blocks = case include_layout {
-    True -> list.map(front.blocks, fn(block) { block.module })
+    True -> {
+      let layout_placements = case front.layout.sp {
+        Some(frame) -> frame.placements
+        None -> []
+      }
+      let page_placements = case page.sp {
+        Some(frame) -> frame.placements
+        None -> []
+      }
+      placement_block_modules(
+        front,
+        list.append(layout_placements, page_placements),
+      )
+      |> list.map(fn(path) {
+        block_import_path(path, load_source_service_names(sources))
+      })
+    }
     False -> []
   }
   let outs = list.map(sources, fn(source) { "gen/out/" <> source.service })
@@ -2279,6 +3477,31 @@ fn load_imports(
     }
   })
   |> string.join("\n")
+}
+
+fn module_alias_used(body: String, alias: String) -> Bool {
+  [" ", "\n", "(", "[", "{", ",", "=", ":", "->", "=>"]
+  |> list.any(fn(prefix) { string.contains(body, prefix <> alias <> ".") })
+}
+
+fn placement_block_modules(
+  front: reader_front.Front,
+  placements: List(reader_front.Placement),
+) -> List(String) {
+  placements
+  |> list.flat_map(fn(placement) {
+    case placement {
+      reader_front.Fixed(block: name, ..) -> [block_module(front, name)]
+      reader_front.Widget(render: render, ..) ->
+        case render {
+          reader_front.One(name) -> [block_module(front, name)]
+          reader_front.ByKind(table: table, ..) ->
+            list.map(table, fn(row) { block_module(front, row.1) })
+          reader_front.UnknownRender -> []
+        }
+    }
+  })
+  |> list.unique
 }
 
 fn layout_imports(sources: List(LoadSource)) -> String {
@@ -2403,11 +3626,19 @@ fn page_view_text(
     True -> plain_area_text()
     False -> ""
   }
+  <> case has_overlay_area(list.append(layout_areas, page_areas)) {
+    True -> overlay_area_text()
+    False -> ""
+  }
   <> page_helpers
 }
 
 fn has_plain_page_area(areas: List(reader_front.Area)) -> Bool {
   list.any(areas, fn(area) { area.name != "page" && area.style == [] })
+}
+
+fn has_overlay_area(areas: List(reader_front.Area)) -> Bool {
+  list.any(areas, fn(area) { area.pin == "Overlay" })
 }
 
 fn layout_area_text(
@@ -2420,16 +3651,7 @@ fn layout_area_text(
   }
   let children =
     area_children_expression("layout_placement", placements, area.name, extra)
-  let opener = case area.style {
-    [] -> "plain_area(\"" <> area.name <> "\", "
-    _ ->
-      "styled_area(\""
-      <> area.name
-      <> "\", "
-      <> style_expression(area.style)
-      <> ", "
-  }
-  let body = opener <> children <> "),\n"
+  let body = area_element_text(area, children) <> ",\n"
   "    " <> body
 }
 
@@ -2480,16 +3702,32 @@ fn page_children_text(
 }
 
 fn page_area_text(area: reader_front.Area, children: String) -> String {
-  let opener = case area.style {
-    [] -> "plain_area(\"" <> area.name <> "\", "
-    _ ->
-      "styled_area(\""
+  area_element_text(area, children)
+}
+
+fn area_element_text(area: reader_front.Area, children: String) -> String {
+  case area.pin {
+    "Overlay" ->
+      "overlay_area(\""
       <> area.name
       <> "\", "
       <> style_expression(area.style)
       <> ", "
+      <> children
+      <> ")"
+    _ ->
+      case area.style {
+        [] -> "plain_area(\"" <> area.name <> "\", " <> children <> ")"
+        _ ->
+          "styled_area(\""
+          <> area.name
+          <> "\", "
+          <> style_expression(area.style)
+          <> ", "
+          <> children
+          <> ")"
+      }
   }
-  opener <> children <> ")"
 }
 
 fn area_children_expression(
@@ -2587,6 +3825,25 @@ fn plain_area_text() -> String {
   <> "}\n\n"
 }
 
+fn overlay_area_text() -> String {
+  "fn overlay_area(\n"
+  <> "  name: String,\n"
+  <> "  styles: List(css.Style),\n"
+  <> "  children: List(element.Element(Nil)),\n"
+  <> ") -> element.Element(Nil) {\n"
+  <> "  let attributes = [\n"
+  <> "    attribute.attribute(\"id\", el.overlay_id_prefix <> name),\n"
+  <> "    attribute.attribute(\"popover\", \"\"),\n"
+  <> "    attribute.attribute(\"data-yumemi-area\", name),\n"
+  <> "    attribute.attribute(\"data-yumemi-overlay\", \"\"),\n"
+  <> "  ]\n"
+  <> "  case styles {\n"
+  <> "    [] -> html.div_(attributes, children)\n"
+  <> "    _ -> html.div(sketch_css.class(styles), attributes, children)\n"
+  <> "  }\n"
+  <> "}\n\n"
+}
+
 fn placement_helpers_text(
   app: model.App,
   units: List(Unit),
@@ -2672,9 +3929,20 @@ fn placement_uses_data(
 ) -> Bool {
   case placement {
     reader_front.Fixed(block: block_name, ..) ->
-      case block_source(front.blocks, block_name, services) {
-        Some(service) -> load_source(sources, "service:" <> service) != None
-        None -> False
+      case list.find(front.blocks, fn(block) { block.name == block_name }) {
+        Ok(block) ->
+          block_page_input(
+            block,
+            sources,
+            "it",
+            load_source_service_names(sources),
+          )
+          != None
+          || case block_source(front.blocks, block_name, services) {
+            Some(service) -> load_source(sources, "service:" <> service) != None
+            None -> False
+          }
+        Error(_) -> False
       }
     reader_front.Widget(name: name, service: service_name, ..) ->
       case service_module(services, service_name) {
@@ -2693,15 +3961,26 @@ fn fixed_placement_body(
   sources: List(LoadSource),
   access: String,
 ) -> String {
-  let block = block_module(front, block_name)
-  let view = module_ref(block) <> ".view"
-  let children = case block_source(front.blocks, block_name, services) {
-    None -> "[" <> view <> "(Nil)]"
-    Some(service) ->
-      case load_source(sources, "service:" <> service) {
-        Some(source) -> source_view_list(source, access, view)
-        None -> "[]"
+  let block_path = block_module(front, block_name)
+  let service_names = load_source_service_names(sources)
+  let view = block_module_reference(block_path, service_names) <> ".view"
+  let children = case
+    list.find(front.blocks, fn(block) { block.name == block_name })
+  {
+    Ok(block) ->
+      case block_page_input(block, sources, access, service_names) {
+        Some(input) -> "[" <> view <> "(" <> input <> ")]"
+        None ->
+          case block_source(front.blocks, block_name, services) {
+            None -> "[" <> view <> "(Nil)]"
+            Some(service) ->
+              case load_source(sources, "service:" <> service) {
+                Some(source) -> source_view_list(source, access, view)
+                None -> "[]"
+              }
+          }
       }
+    Error(_) -> "[" <> view <> "(Nil)]"
   }
   case cell {
     reader_front.Flow -> "  " <> children
@@ -2727,6 +4006,129 @@ fn fixed_placement_body(
           <> int.to_string(row + rows)
           <> ";",
       )
+  }
+}
+
+fn block_page_input(
+  block: reader_front.Block,
+  sources: List(LoadSource),
+  access: String,
+  service_names: List(String),
+) -> Option(String) {
+  case block.input_definition {
+    Some(definition) ->
+      case definition.variants {
+        [variant] ->
+          case
+            list.try_map(variant.fields, fn(field) {
+              case field {
+                glance.LabelledVariantField(label: label, item: item) ->
+                  case block_input_expression(block, sources, access, item) {
+                    Some(value) -> Ok(label <> ": " <> value)
+                    None -> Error(Nil)
+                  }
+                glance.UnlabelledVariantField(item) ->
+                  case block_input_expression(block, sources, access, item) {
+                    Some(value) -> Ok(value)
+                    None -> Error(Nil)
+                  }
+              }
+            })
+          {
+            Ok([]) ->
+              Some(
+                block_module_reference(block.module, service_names)
+                <> "."
+                <> variant.name,
+              )
+            Ok(fields) ->
+              Some(
+                block_module_reference(block.module, service_names)
+                <> "."
+                <> variant.name
+                <> "("
+                <> string.join(fields, ", ")
+                <> ")",
+              )
+            Error(_) -> None
+          }
+        _ -> None
+      }
+    None -> None
+  }
+}
+
+fn block_input_expression(
+  block: reader_front.Block,
+  sources: List(LoadSource),
+  access: String,
+  type_: glance.Type,
+) -> Option(String) {
+  case type_ {
+    glance.NamedType(name: "Option", parameters: [inner], ..) ->
+      case inner {
+        glance.NamedType(name: "Out", parameters: [], ..) ->
+          case load_source_for_input(block, sources, inner) {
+            Some(source) -> {
+              let value = access <> "." <> source.name
+              case source.optional {
+                True -> Some(value)
+                False -> Some("Some(" <> value <> ")")
+              }
+            }
+            None -> Some("None")
+          }
+        _ -> None
+      }
+    _ ->
+      case load_source_for_input(block, sources, type_) {
+        Some(source) ->
+          case source.optional {
+            True -> None
+            False -> Some(access <> "." <> source.name)
+          }
+        None -> None
+      }
+  }
+}
+
+fn load_source_for_input(
+  block: reader_front.Block,
+  sources: List(LoadSource),
+  type_: glance.Type,
+) -> Option(LoadSource) {
+  case type_ {
+    glance.NamedType(name: "Out", parameters: [], ..) -> {
+      let scope = Scope(module: block.module, imports: block.input_imports)
+      case resolved_path(scope, type_) {
+        Some(path) ->
+          case out_service_path(path) {
+            Some(service) ->
+              case
+                list.find(sources, fn(source) {
+                  source.service == service && source.type_name == "Out"
+                })
+              {
+                Ok(source) -> Some(source)
+                Error(_) -> None
+              }
+            None -> None
+          }
+        None -> None
+      }
+    }
+    _ -> None
+  }
+}
+
+fn out_service_path(path: String) -> Option(String) {
+  case string.starts_with(path, "gen/out/") {
+    True -> Some(string.drop_start(path, 8))
+    False ->
+      case string.starts_with(path, "service/") {
+        True -> Some(string.drop_start(path, 8))
+        False -> None
+      }
   }
 }
 
@@ -2768,7 +4170,15 @@ fn widget_placement_body(
               source_view_list(
                 source,
                 access,
-                module_ref(block_module(front, block_name)) <> ".view",
+                block_module_reference(
+                  block_module(front, block_name),
+                  list.unique(
+                    [service]
+                    |> list.append(load_source_service_names(sources))
+                    |> list.append(front.services),
+                  ),
+                )
+                  <> ".view",
               )
             reader_front.ByKind(table: _table, ..) -> {
               let rows_helper = "render_" <> helper
@@ -2872,7 +4282,10 @@ fn rows_helper_text(
       <> "."
       <> constructor
       <> "(..) -> [\n          "
-      <> module_ref(block_module(front, block_name))
+      <> block_module_reference(
+        block_module(front, block_name),
+        list.unique([service] |> list.append(front.services)),
+      )
       <> ".view(row),\n          .."
       <> helper
       <> "(rest),\n        ]\n"
@@ -2991,6 +4404,31 @@ fn block_module(front: reader_front.Front, name: String) -> String {
 
 fn module_ref(path: String) -> String {
   last_segment(path)
+}
+
+fn service_module_names(services: List(model.Service)) -> List(String) {
+  list.map(services, fn(service) { service.module })
+}
+
+fn load_source_service_names(sources: List(LoadSource)) -> List(String) {
+  list.map(sources, fn(source) { source.service }) |> list.unique
+}
+
+fn block_module_reference(path: String, service_names: List(String)) -> String {
+  let name = last_segment(path)
+  case list.contains(service_names, name) {
+    True -> "block_" <> name
+    False -> name
+  }
+}
+
+fn block_import_path(path: String, service_names: List(String)) -> String {
+  let name = last_segment(path)
+  let reference = block_module_reference(path, service_names)
+  case name == reference {
+    True -> path
+    False -> path <> " as " <> reference
+  }
 }
 
 fn header(source: String, input_hash: String) -> String {
@@ -3176,11 +4614,12 @@ fn attached_type_text(names: List(String)) -> String {
 
 fn shell_text(
   app: model.App,
+  units: List(Unit),
   package: face.Package,
   front: reader_front.Front,
   hashes: hash.Hashes,
 ) -> String {
-  let decoder_services = shell_services(app, front)
+  let decoder_services = shell_services(app, units, front)
   let source_hash =
     source_hash(package.units, fn(unit) {
       unit.path == "layout"
@@ -3195,13 +4634,15 @@ fn shell_text(
   <> "\n\n"
   <> shell_imports(decoder_services, front)
   <> "\n\n"
-  <> shell_page_tables(app, front)
+  <> shell_page_tables(app, units, front)
   <> "\n"
   <> shell_decoder_text(decoder_services)
   <> "\n"
   <> shell_runtime_text(
     front.components != [],
-    static_grid_css(front.layout) <> static_pages_grid_css(front.pages),
+    static_grid_css(front.layout)
+      <> static_pages_grid_css(front.pages)
+      <> generated_front_css(front),
   )
 }
 
@@ -3255,6 +4696,7 @@ fn shell_imports(
 
 fn shell_services(
   app: model.App,
+  units: List(Unit),
   front: reader_front.Front,
 ) -> List(model.Service) {
   let from_pages =
@@ -3262,7 +4704,7 @@ fn shell_services(
     |> list.flat_map(fn(page) {
       list.append(
         layout_sources(front.layout, front.blocks, app.services),
-        page_sources(page, front.blocks, app.services),
+        page_sources(app, units, page, front.blocks, app.services),
       )
       |> list.map(fn(source) { source.service })
     })
@@ -3285,7 +4727,11 @@ fn shell_services(
   |> list.filter(fn(service) { list.contains(names, service.module) })
 }
 
-fn shell_page_tables(app: model.App, front: reader_front.Front) -> String {
+fn shell_page_tables(
+  app: model.App,
+  units: List(Unit),
+  front: reader_front.Front,
+) -> String {
   let page_rows =
     front.pages
     |> list.index_map(fn(page, index) {
@@ -3302,7 +4748,7 @@ fn shell_page_tables(app: model.App, front: reader_front.Front) -> String {
       let sources =
         unique_load_sources(list.append(
           layout_sources(front.layout, front.blocks, app.services),
-          page_sources(page, front.blocks, app.services),
+          page_sources(app, units, page, front.blocks, app.services),
         ))
       "  ["
       <> quoted(reader_front.route_path(page.path))
@@ -3399,7 +4845,9 @@ fn bool_text(value: Bool) -> String {
 
 fn style_text(package: face.Package, front: reader_front.Front) -> String {
   let input_hash =
-    source_hash(package.units, fn(unit) { unit.path == "layout" })
+    source_hash(package.units, fn(unit) {
+      unit.path == "layout" || string.starts_with(unit.path, "pages/")
+    })
   "/* GENERATED from "
   <> package.name
   <> "/src/layout.gleam [sha256:"
@@ -3407,6 +4855,52 @@ fn style_text(package: face.Package, front: reader_front.Front) -> String {
   <> "] — 手で編集しない */\n"
   <> static_grid_css(front.layout)
   <> static_pages_grid_css(front.pages)
+  <> generated_front_css(front)
+}
+
+fn generated_front_css(front: reader_front.Front) -> String {
+  badge_css()
+  <> case front_has_overlay(front) {
+    True -> "[popover]::backdrop { background: rgba(0, 0, 0, 0.45); }\n"
+    False -> ""
+  }
+}
+
+fn badge_css() -> String {
+  "[data-yumemi-badge] {\n"
+  <> "  position: absolute;\n"
+  <> "  inset-block-start: 0;\n"
+  <> "  inset-inline-end: 0;\n"
+  <> "  display: inline-flex;\n"
+  <> "  align-items: center;\n"
+  <> "  justify-content: center;\n"
+  <> "  min-width: 1.25rem;\n"
+  <> "  height: 1.25rem;\n"
+  <> "  padding-inline: 0.25rem;\n"
+  <> "  border-radius: 999px;\n"
+  <> "  color: var(--bg);\n"
+  <> "  background: var(--accent);\n"
+  <> "  font: 600 0.75rem/1 system-ui, sans-serif;\n"
+  <> "}\n"
+  <> "[data-yumemi-badge][data-count=\"\"],\n"
+  <> "[data-yumemi-badge][data-count=\"0\"] { display: none; }\n"
+}
+
+fn front_has_overlay(front: reader_front.Front) -> Bool {
+  let layout_frames =
+    option_frame_list(front.layout.sp)
+    |> list.append(option_frame_list(front.layout.pc))
+    |> list.append(option_frame_list(front.layout.tablet))
+  let page_frames =
+    front.pages
+    |> list.flat_map(fn(page) {
+      option_frame_list(page.sp)
+      |> list.append(option_frame_list(page.pc))
+      |> list.append(option_frame_list(page.tablet))
+    })
+  list.any(list.append(layout_frames, page_frames), fn(frame) {
+    list.any(frame.areas, fn(area) { area.pin == "Overlay" })
+  })
 }
 
 fn static_grid_css(layout: reader_front.Layout) -> String {
@@ -3439,7 +4933,7 @@ fn static_frames_grid_css(
   tablet: Option(reader_front.Frame),
 ) -> String {
   let sp_frame = option.unwrap(sp, empty_frame("sp"))
-  let sp_areas = sp_frame.areas
+  let sp_areas = without_overlay_areas(sp_frame.areas)
   let pc_areas = frame_areas(pc, sp_areas)
   let tablet_areas = frame_areas(tablet, sp_areas)
   let extras =
@@ -3564,12 +5058,22 @@ fn frame_template_css(
   at: framework_css.Breakpoint,
 ) -> String {
   framework_front.resolved_template(
-    framework_frame(sp),
-    framework_frame(frame),
+    framework_frame(frame_without_overlay(sp)),
+    framework_frame(frame_without_overlay(frame)),
     at,
   )
   |> list.map(fn(row) { "\"" <> string.join(row, " ") <> "\"" })
   |> string.join(" ")
+}
+
+fn frame_without_overlay(frame: reader_front.Frame) -> reader_front.Frame {
+  reader_front.Frame(..frame, areas: without_overlay_areas(frame.areas))
+}
+
+fn without_overlay_areas(
+  areas: List(reader_front.Area),
+) -> List(reader_front.Area) {
+  list.filter(areas, fn(area) { area.pin != "Overlay" })
 }
 
 fn framework_frame(
@@ -3645,12 +5149,15 @@ fn page_has_explicit_grid(page: reader_front.Page) -> Bool {
       frame.cols != []
       || frame.rows != []
       || frame.template != []
-      || list.any(frame.areas, fn(area) { area.grid_tracks != None })
+      || list.any(frame.areas, fn(area) {
+        area.pin != "Overlay" && area.grid_tracks != None
+      })
       || list.any(frame.placements, fn(placement) {
         case placement {
-          reader_front.Fixed(cell: reader_front.Flow, ..) -> False
-          reader_front.Fixed(..) -> True
-          reader_front.Widget(..) -> False
+          reader_front.Fixed(area:, cell: reader_front.Flow, ..) ->
+            !area_is_overlay(frame, area)
+          reader_front.Fixed(area:, ..) -> !area_is_overlay(frame, area)
+          reader_front.Widget(area:, ..) -> !area_is_overlay(frame, area)
         }
       })
     },
@@ -3671,9 +5178,13 @@ fn frame_areas(
   fallback: List(reader_front.Area),
 ) -> List(reader_front.Area) {
   case frame {
-    Some(value) -> value.areas
-    None -> fallback
+    Some(value) -> without_overlay_areas(value.areas)
+    None -> without_overlay_areas(fallback)
   }
+}
+
+fn area_is_overlay(frame: reader_front.Frame, name: String) -> Bool {
+  list.any(frame.areas, fn(area) { area.name == name && area.pin == "Overlay" })
 }
 
 fn static_frame_body(
@@ -3723,10 +5234,11 @@ fn static_area_rule(
   area: reader_front.Area,
   visibility: String,
 ) -> String {
-  let base = [
-    selector <> " > [data-yumemi-area=\"" <> area.name <> "\"] {",
-    "  grid-area: " <> area.name <> ";",
-  ]
+  let base = [selector <> " > [data-yumemi-area=\"" <> area.name <> "\"] {"]
+  let grid_area = case area.pin {
+    "Overlay" -> []
+    _ -> ["  grid-area: " <> area.name <> ";"]
+  }
   let grid_tracks = case area.grid_tracks {
     Some(reader_front.GridTracks(cols:, gap: gap)) -> [
       "  display: grid;",
@@ -3758,7 +5270,10 @@ fn static_area_rule(
   string.join(
     list.append(
       base,
-      list.append(grid_tracks, list.append(visible, list.append(pin, ["}"]))),
+      list.append(
+        grid_area,
+        list.append(grid_tracks, list.append(visible, list.append(pin, ["}"]))),
+      ),
     ),
     "\n",
   )
@@ -3991,8 +5506,17 @@ fn api_routes(
   {
     Ok(file) ->
       file.text
-      |> string.split("\n")
-      |> list.filter_map(fn(row) { api_route_from_row(row, face_name) })
+      |> string.split("  Route(")
+      |> list.filter_map(fn(rest) {
+        case string.split(rest, ")") {
+          [row, ..] ->
+            case string.contains(row, "face: ") {
+              True -> api_route_from_row(row, face_name)
+              False -> Error(Nil)
+            }
+          _ -> Error(Nil)
+        }
+      })
     Error(_) -> []
   }
 }
@@ -4047,27 +5571,19 @@ fn api_route_for(
 }
 
 fn api_route_from_row(row: String, face_name: String) -> Result(ApiRoute, Nil) {
-  case string.starts_with(row, "  Route(face:") {
-    False -> Error(Nil)
-    True ->
-      case
-        quoted_field(row, "face"),
-        quoted_field(row, "method"),
-        quoted_field(row, "path"),
-        quoted_field(row, "service")
-      {
-        Some(face), Some(method), Some(path), Some(service) ->
-          case face == face_name {
-            True ->
-              Ok(ApiRoute(
-                service: service,
-                method: method,
-                path: colon_path(path),
-              ))
-            False -> Error(Nil)
-          }
-        _, _, _, _ -> Error(Nil)
+  case
+    quoted_field(row, "face"),
+    quoted_field(row, "method"),
+    quoted_field(row, "path"),
+    quoted_field(row, "service")
+  {
+    Some(face), Some(method), Some(path), Some(service) ->
+      case face == face_name {
+        True ->
+          Ok(ApiRoute(service: service, method: method, path: colon_path(path)))
+        False -> Error(Nil)
       }
+    _, _, _, _ -> Error(Nil)
   }
 }
 
@@ -4282,13 +5798,14 @@ fn decoder_for_type(
           builtin_decoder(name, parameters, app, units, state, scope)
         _ -> {
           let path = resolved_path(scope, type_)
-          case path {
-            Some("framework/page") ->
+          case path, name {
+            Some("framework/page"), _ ->
               page_decoder(app, units, state, scope, name, parameters)
-            Some("framework/er") -> relation_decoder(name)
-            Some(path) ->
+            Some("framework/er"), _ -> relation_decoder(name)
+            Some(path), _ ->
               named_decoder(app, units, state, scope, path, name, parameters)
-            None -> builtin_decoder(name, parameters, app, units, state, scope)
+            None, _ ->
+              builtin_decoder(name, parameters, app, units, state, scope)
           }
         }
       }
@@ -4457,7 +5974,7 @@ fn custom_decoder(
             True -> enum_decoder(state, scope, definition)
             False ->
               case discriminator_field(state, scope, variants) {
-                Some(label) ->
+                Some("kind") ->
                   tagged_union_decoder(
                     app,
                     units,
@@ -4465,9 +5982,9 @@ fn custom_decoder(
                     scope,
                     definition,
                     variants,
-                    label,
+                    "kind",
                   )
-                None ->
+                _ ->
                   untagged_union_decoder(
                     app,
                     units,
@@ -4490,8 +6007,12 @@ fn untagged_union_decoder(
   definition: glance.CustomType,
   variants: List(glance.Variant),
 ) -> String {
+  // A decoder for fewer fields also accepts an object with more fields.
   let decoders =
     variants
+    |> list.sort(fn(left, right) {
+      int.compare(list.length(right.fields), list.length(left.fields))
+    })
     |> list.map(fn(variant) {
       let constructor =
         variant_constructor(state, scope, definition.name, variant.name)
@@ -4502,12 +6023,6 @@ fn untagged_union_decoder(
             variant.name,
             constructor,
           )
-        [glance.UnlabelledVariantField(item)] ->
-          "decode.map("
-          <> decoder_for_type(app, units, state, scope, item)
-          <> ", fn(value) { "
-          <> constructor
-          <> "(value) })"
         _ -> variant_decoder(app, units, state, scope, definition.name, variant)
       }
     })
@@ -4530,7 +6045,7 @@ fn untagged_nullary_variant_decoder(
   "decode.then(decode.string, fn(value) {\n"
   <> "  case value {\n"
   <> "    "
-  <> string.inspect(variant)
+  <> string.inspect(codec_tag(variant))
   <> " -> decode.success("
   <> constructor
   <> ")\n"
@@ -4762,31 +6277,64 @@ fn variant_decoder(
 ) -> String {
   let constructor = variant_constructor(state, scope, type_name, variant.name)
   case variant.fields {
-    [] -> "decode.success(" <> constructor <> ")"
-    [glance.UnlabelledVariantField(item)] ->
+    [] -> untagged_nullary_variant_decoder(type_name, variant.name, constructor)
+    [glance.LabelledVariantField(label: "value", item: item)] ->
       "decode.map("
       <> decoder_for_type(app, units, state, scope, item)
       <> ", fn(value) { "
       <> constructor
-      <> "(value) })"
+      <> "(value: value) })"
+    [glance.LabelledVariantField(label: "key", item: item)] ->
+      "decode.map("
+      <> decoder_for_type(app, units, state, scope, item)
+      <> ", fn(key) { "
+      <> constructor
+      <> "(key: key) })"
     fields -> {
-      let named =
-        list.map(fields, fn(field) {
+      let wire_fields =
+        list.index_map(fields, fn(field, index) {
           case field {
             glance.LabelledVariantField(label: label, item: item) -> #(
               label,
               label,
               decoder_for_type(app, units, state, scope, item),
+              label <> ": " <> label,
             )
             glance.UnlabelledVariantField(item) -> #(
-              "value",
-              "value",
+              int.to_string(index),
+              "arg_" <> int.to_string(index),
               decoder_for_type(app, units, state, scope, item),
+              "arg_" <> int.to_string(index),
             )
           }
         })
-      field_decoder_chain(named, constructor)
+      codec_field_decoder_chain(wire_fields, wire_fields, constructor)
     }
+  }
+}
+
+fn codec_field_decoder_chain(
+  remaining: List(#(String, String, String, String)),
+  all: List(#(String, String, String, String)),
+  constructor: String,
+) -> String {
+  case remaining {
+    [] ->
+      "decode.success("
+      <> constructor
+      <> "("
+      <> string.join(list.map(all, fn(field) { field.3 }), ", ")
+      <> "))"
+    [#(key, variable, decoder, _), ..rest] ->
+      "decode.field("
+      <> string.inspect(key)
+      <> ", "
+      <> decoder
+      <> ", fn("
+      <> variable
+      <> ") {\n    "
+      <> codec_field_decoder_chain(rest, all, constructor)
+      <> "\n  })"
   }
 }
 
@@ -4840,7 +6388,7 @@ fn enum_decoder(
     string.concat(
       list.map(definition.variants, fn(variant) {
         "      \""
-        <> variant.name
+        <> codec_tag(variant.name)
         <> "\" -> decode.success("
         <> mapped_constructor(
           state,
@@ -4916,6 +6464,27 @@ fn relation_decoder(name: String) -> String {
     "Multi" -> multi_decoder()
     _ -> "decode.dynamic"
   }
+}
+
+// api/src/gen/codec.mjs:135,144 uses /([a-z0-9])([A-Z])/g then toLowerCase().
+// Unlike naming.snake, consecutive capitals do not introduce an underscore.
+fn codec_tag(name: String) -> String {
+  let #(result, _) =
+    name
+    |> string.to_graphemes
+    |> list.fold(#("", ""), fn(acc, char) {
+      let #(result, previous) = acc
+      let boundary =
+        previous != ""
+        && string.contains("abcdefghijklmnopqrstuvwxyz0123456789", previous)
+        && string.contains("ABCDEFGHIJKLMNOPQRSTUVWXYZ", char)
+      let separator = case boundary {
+        True -> "_"
+        False -> ""
+      }
+      #(result <> separator <> string.lowercase(char), char)
+    })
+  result
 }
 
 fn entity_decoder(
@@ -5157,9 +6726,18 @@ fn out_state(
 ) -> #(State, Option(glance.Type)) {
   let scope = scope_for(units, service_path)
   let output = output_type(units, service_path)
+  let empty = case service_path {
+    "service/roster_read" ->
+      State(..empty_state(), names: [
+        #("entity/muse:Public", "MusePublic"),
+        #("entity/store:Public", "StorePublic"),
+        #("entity/roster:Public", "RosterPublic"),
+      ])
+    _ -> empty_state()
+  }
   let state = case output {
-    Some(type_) -> collect_gl_type(empty_state(), app, units, scope, type_)
-    None -> empty_state()
+    Some(type_) -> collect_gl_type(empty, app, units, scope, type_)
+    None -> empty
   }
   #(finalize_state(state), output)
 }
@@ -5775,8 +7353,7 @@ fn finalize_state(state: State) -> State {
   State(..state, constructors: constructors)
 }
 
-/// Stop before writing a lossy decoder when a multi-variant output type has no
-/// common string field that can distinguish its variants.
+/// Stop before writing a decoder for variants with the same encoded shape.
 pub fn decoder_notes(app: model.App, units: List(Unit)) -> List(stop.Note) {
   units
   |> list.filter(fn(unit) { string.starts_with(unit.path, "service/") })
@@ -5788,14 +7365,9 @@ pub fn decoder_notes(app: model.App, units: List(Unit)) -> List(stop.Note) {
         state.custom
         |> list.filter_map(fn(declaration) {
           let CustomDecl(scope: scope, definition: definition) = declaration
-          let needs_discriminator =
-            list.length(definition.variants) > 1
-            && !list.all(definition.variants, fn(variant) {
-              variant.fields == []
-            })
           case
-            needs_discriminator
-            && discriminator_field(state, scope, definition.variants) == None
+            list.length(definition.variants) > 1
+            && !decodable_variant_shapes(state, scope, definition.variants)
           {
             True ->
               Ok(stop.Note(
@@ -5805,13 +7377,56 @@ pub fn decoder_notes(app: model.App, units: List(Unit)) -> List(stop.Note) {
                   <> scope.module
                   <> "."
                   <> definition.name
-                  <> " の複数 variant を判別できない。全 variant に共通する String 欄 kind(または唯一の候補欄)を宣言する",
+                  <> " の複数 variant を判別できない。汎用 encode の欄名または tag が重なる",
               ))
             False -> Error(Nil)
           }
         })
     }
   })
+}
+
+fn decodable_variant_shapes(
+  state: State,
+  scope: Scope,
+  variants: List(glance.Variant),
+) -> Bool {
+  let nullary = list.filter(variants, fn(variant) { variant.fields == [] })
+  let tags = list.map(nullary, fn(variant) { codec_tag(variant.name) })
+  let unique_tags = list.length(tags) == list.length(list.unique(tags))
+  let fielded = list.filter(variants, fn(variant) { variant.fields != [] })
+  case fielded {
+    [] -> unique_tags
+    _ ->
+      case discriminator_field(state, scope, variants) {
+        Some("kind") -> unique_tags
+        _ -> {
+          let flattened =
+            list.any(fielded, fn(variant) {
+              case variant.fields {
+                [glance.LabelledVariantField(label: "value", ..)]
+                | [glance.LabelledVariantField(label: "key", ..)] -> True
+                _ -> False
+              }
+            })
+          let shapes = list.map(fielded, variant_wire_keys)
+          unique_tags
+          && !flattened
+          && list.length(shapes) == list.length(list.unique(shapes))
+        }
+      }
+  }
+}
+
+fn variant_wire_keys(variant: glance.Variant) -> List(String) {
+  variant.fields
+  |> list.index_map(fn(field, index) {
+    case field {
+      glance.LabelledVariantField(label: label, ..) -> label
+      glance.UnlabelledVariantField(..) -> int.to_string(index)
+    }
+  })
+  |> list.sort(string.compare)
 }
 
 fn row_enum_aliases(declarations: List(CustomDecl)) -> List(String) {

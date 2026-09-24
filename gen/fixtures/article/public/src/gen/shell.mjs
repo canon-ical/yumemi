@@ -1,9 +1,10 @@
-// GENERATED from public/src/{gen/route.gleam,gen/load/**,pages/**,layout.gleam,shell.gleam} [sha256:48812fa89af6] — 手で編集しない
+// GENERATED from public/src/{gen/route.gleam,gen/load/**,pages/**,layout.gleam,shell.gleam} [sha256:130f5a3a8b39] — 手で編集しない
 
 import * as api from "./api.mjs";
 import * as blocksPreview from "./blocks_preview.mjs";
 import * as frontCss from "../../yumemi/framework/front/css.mjs";
 import * as layoutDefinition from "../layout.mjs";
+import * as out_article_blob_save from "./out/article_blob_save.mjs";
 import * as out_article_create from "./out/article_create.mjs";
 import * as out_article_list from "./out/article_list.mjs";
 import * as out_article_publish from "./out/article_publish.mjs";
@@ -38,6 +39,11 @@ const pageSpecs = new Map([
   }],
 ]);
 
+function decodeArticleBlobSave(raw) {
+  const decoded = decodeRun(raw, out_article_blob_save.decoder());
+  if (!(decoded instanceof Ok)) throw new Error("invalid article_blob_save response");
+  return decoded[0];
+}
 function decodeArticleCreate(raw) {
   const decoded = decodeRun(raw, out_article_create.decoder());
   if (!(decoded instanceof Ok)) throw new Error("invalid article_create response");
@@ -118,7 +124,7 @@ function mediaBlock(media, body) {
 }
 
 function gridCssFromLayout(_layout) {
-  return "\n[data-yumemi-grid=\"layout\"] {\n  display: grid;\n  grid-template-columns: minmax(0, 1fr);\n  grid-template-areas: \"header\" \"page\" \"footer\";\n  gap: 0;\n}\n[data-yumemi-grid=\"layout\"] > [data-yumemi-area=\"header\"] {\n  grid-area: header;\n  position: sticky;\n  top: env(safe-area-inset-top);\n  z-index: 3;\n}\n[data-yumemi-grid=\"layout\"] > [data-yumemi-area=\"page\"] {\n  grid-area: page;\n}\n[data-yumemi-grid=\"layout\"] > [data-yumemi-area=\"footer\"] {\n  grid-area: footer;\n  position: sticky;\n  bottom: env(safe-area-inset-bottom);\n  z-index: 3;\n}\n[data-yumemi-grid=\"layout\"] > [data-yumemi-area=\"aside\"] {\n  grid-area: aside;\n  display: none;\n}\n@media (min-width: 1024px) {\n  [data-yumemi-grid=\"layout\"] {\n    grid-template-columns: minmax(0, 1fr) minmax(12rem, 20rem);\n    grid-template-areas: \"header header\" \"page aside\" \"footer footer\";\n  }\n[data-yumemi-grid=\"layout\"] > [data-yumemi-area=\"header\"] {\n  grid-area: header;\n  position: sticky;\n  top: env(safe-area-inset-top);\n  z-index: 3;\n}\n[data-yumemi-grid=\"layout\"] > [data-yumemi-area=\"page\"] {\n  grid-area: page;\n}\n[data-yumemi-grid=\"layout\"] > [data-yumemi-area=\"aside\"] {\n  grid-area: aside;\n  display: block;\n}\n[data-yumemi-grid=\"layout\"] > [data-yumemi-area=\"footer\"] {\n  grid-area: footer;\n  position: sticky;\n  bottom: env(safe-area-inset-bottom);\n  z-index: 3;\n}\n}\n";
+  return "\n[data-yumemi-grid=\"layout\"] {\n  display: grid;\n  grid-template-columns: minmax(0, 1fr);\n  grid-template-areas: \"header\" \"page\" \"footer\";\n  gap: 0;\n}\n[data-yumemi-grid=\"layout\"] > [data-yumemi-area=\"header\"] {\n  grid-area: header;\n  position: sticky;\n  top: env(safe-area-inset-top);\n  z-index: 3;\n}\n[data-yumemi-grid=\"layout\"] > [data-yumemi-area=\"page\"] {\n  grid-area: page;\n}\n[data-yumemi-grid=\"layout\"] > [data-yumemi-area=\"footer\"] {\n  grid-area: footer;\n  position: sticky;\n  bottom: env(safe-area-inset-bottom);\n  z-index: 3;\n}\n[data-yumemi-grid=\"layout\"] > [data-yumemi-area=\"aside\"] {\n  grid-area: aside;\n  display: none;\n}\n@media (min-width: 1024px) {\n  [data-yumemi-grid=\"layout\"] {\n    grid-template-columns: minmax(0, 1fr) minmax(12rem, 20rem);\n    grid-template-areas: \"header header\" \"page aside\" \"footer footer\";\n  }\n[data-yumemi-grid=\"layout\"] > [data-yumemi-area=\"header\"] {\n  grid-area: header;\n  position: sticky;\n  top: env(safe-area-inset-top);\n  z-index: 3;\n}\n[data-yumemi-grid=\"layout\"] > [data-yumemi-area=\"page\"] {\n  grid-area: page;\n}\n[data-yumemi-grid=\"layout\"] > [data-yumemi-area=\"aside\"] {\n  grid-area: aside;\n  display: block;\n}\n[data-yumemi-grid=\"layout\"] > [data-yumemi-area=\"footer\"] {\n  grid-area: footer;\n  position: sticky;\n  bottom: env(safe-area-inset-bottom);\n  z-index: 3;\n}\n}\n\n[data-yumemi-grid=\"page:pages/article/arg_slug/page\"] {\n  display: grid;\n  grid-template-columns: minmax(0, 1fr);\n  grid-template-areas: \"page\" \"rail\";\n  gap: 0;\n}\n[data-yumemi-grid=\"page:pages/article/arg_slug/page\"] > [data-yumemi-area=\"page\"] {\n  grid-area: page;\n}\n[data-yumemi-grid=\"page:pages/article/arg_slug/page\"] > [data-yumemi-area=\"rail\"] {\n  grid-area: rail;\n}\n[data-yumemi-grid=\"page:pages/article/arg_slug/page\"] > [data-yumemi-area=\"aside\"] {\n  grid-area: aside;\n  display: none;\n}\n@media (min-width: 1024px) {\n  [data-yumemi-grid=\"page:pages/article/arg_slug/page\"] {\n    grid-template-columns: minmax(0, 1fr) minmax(12rem, 20rem);\n    grid-template-areas: \"page page\" \"rail aside\";\n  }\n[data-yumemi-grid=\"page:pages/article/arg_slug/page\"] > [data-yumemi-area=\"page\"] {\n  grid-area: page;\n}\n[data-yumemi-grid=\"page:pages/article/arg_slug/page\"] > [data-yumemi-area=\"rail\"] {\n  grid-area: rail;\n}\n[data-yumemi-grid=\"page:pages/article/arg_slug/page\"] > [data-yumemi-area=\"aside\"] {\n  grid-area: aside;\n  display: block;\n}\n}\n[data-yumemi-badge] {\n  position: absolute;\n  inset-block-start: 0;\n  inset-inline-end: 0;\n  display: inline-flex;\n  align-items: center;\n  justify-content: center;\n  min-width: 1.25rem;\n  height: 1.25rem;\n  padding-inline: 0.25rem;\n  border-radius: 999px;\n  color: var(--bg);\n  background: var(--accent);\n  font: 600 0.75rem/1 system-ui, sans-serif;\n}\n[data-yumemi-badge][data-count=\"\"],\n[data-yumemi-badge][data-count=\"0\"] { display: none; }\n[popover]::backdrop { background: rgba(0, 0, 0, 0.45); }\n";
 }
 
 function matchPage(pathname) {

@@ -33,6 +33,7 @@ pub type Front {
     widget_keys: List(String),
     services: List(String),
     violations: List(Violation),
+    overlay_calls: List(OverlayCall),
   )
 }
 
@@ -145,6 +146,9 @@ pub type Block {
     module: String,
     input: Option(String),
     input_module: Option(String),
+    input_definition: Option(glance.CustomType),
+    input_imports: List(glance.Definition(glance.Import)),
+    source: glance.Module,
     has_view: Bool,
     has_sample: Bool,
   )
@@ -175,6 +179,10 @@ pub type Violation {
   DirectCall(module: String, target: String)
   InternalImport(module: String, imported: String)
   NestedIsland(module: String)
+}
+
+pub type OverlayCall {
+  OverlayCall(module: String, function: String, literal: Option(String))
 }
 
 /// 面の source units を model にする。Service の variant と Args は back reader の
@@ -229,6 +237,7 @@ fn read_with_package_and_warning(
     list.flatten(
       list.map(units, fn(unit) { unit_violations(unit, components) }),
     )
+  let overlay_calls = overlay_calls(units)
   Ok(Front(
     face: face,
     package_name: package_name,
@@ -241,6 +250,7 @@ fn read_with_package_and_warning(
     widget_keys: widget_keys,
     services: services_used,
     violations: violations,
+    overlay_calls: overlay_calls,
   ))
 }
 
@@ -249,6 +259,8 @@ pub fn notes(front: Front, services: List(model.Service)) -> List(stop.Note) {
   list.flatten([
     shell_notes(front),
     violation_notes(front.face, front.violations),
+    overlay_template_notes(front),
+    overlay_call_notes(front),
     frame_notes(
       front.face,
       "layout",
@@ -270,6 +282,317 @@ pub fn notes(front: Front, services: List(model.Service)) -> List(stop.Note) {
     layout_nested_notes(front.face, front.layout),
     unknown_service_notes(front.face, front.services, services),
   ])
+}
+
+fn overlay_calls(units: List(Unit)) -> List(OverlayCall) {
+  units
+  |> list.filter_map(fn(unit) {
+    case string.starts_with(unit.path, "blocks/") {
+      False -> Error(Nil)
+      True -> {
+        let module = g.in_order(unit.module)
+        case public_function(module, "view") {
+          Some(view) ->
+            Ok(overlay_calls_in_statements(unit.path, view.body, module.imports))
+          None -> Error(Nil)
+        }
+      }
+    }
+  })
+  |> list.flatten
+}
+
+fn overlay_calls_in_statements(
+  module: String,
+  statements: List(glance.Statement),
+  imports: List(glance.Definition(glance.Import)),
+) -> List(OverlayCall) {
+  statements
+  |> list.flat_map(fn(statement) {
+    statement_expressions(statement)
+    |> list.flat_map(fn(expression) {
+      overlay_calls_in_expression(module, expression, imports)
+    })
+  })
+}
+
+fn overlay_calls_in_expression(
+  module: String,
+  expression: glance.Expression,
+  imports: List(glance.Definition(glance.Import)),
+) -> List(OverlayCall) {
+  let own = case expression {
+    glance.Call(function: function, ..) ->
+      case front_el_function(function, imports) {
+        Some(name) ->
+          case name {
+            "opener" | "closer" | "each_modal" -> [
+              OverlayCall(
+                module: module,
+                function: name,
+                literal: first_argument_literal(expression),
+              ),
+            ]
+            _ -> []
+          }
+        None -> []
+      }
+    _ -> []
+  }
+  list.append(
+    own,
+    expression_children(expression)
+      |> list.flat_map(fn(child) {
+        overlay_calls_in_expression(module, child, imports)
+      }),
+  )
+}
+
+fn front_el_function(
+  expression: glance.Expression,
+  imports: List(glance.Definition(glance.Import)),
+) -> Option(String) {
+  case expression {
+    glance.FieldAccess(
+      container: glance.Variable(name: alias, ..),
+      label: label,
+      ..,
+    ) ->
+      case imported_module(imports, alias) {
+        Some("framework/front/el") -> Some(label)
+        _ -> None
+      }
+    glance.Variable(name: name, ..) ->
+      case unqualified_module(imports, name) {
+        Some("framework/front/el") -> Some(name)
+        _ -> None
+      }
+    _ -> None
+  }
+}
+
+fn first_argument_literal(expression: glance.Expression) -> Option(String) {
+  case g.args(expression) {
+    [first, ..] -> g.string_value(first)
+    [] -> None
+  }
+}
+
+fn overlay_template_notes(front: Front) -> List(stop.Note) {
+  let layout_frames =
+    frames(front.layout.sp, front.layout.pc, front.layout.tablet)
+  let layout_notes =
+    overlay_template_notes_for_frames(front.face, "layout", layout_frames)
+  let page_notes =
+    front.pages
+    |> list.flat_map(fn(page) {
+      overlay_template_notes_for_frames(
+        front.face,
+        page.module,
+        frames(page.sp, page.pc, page.tablet),
+      )
+    })
+  list.append(layout_notes, page_notes)
+}
+
+fn overlay_template_notes_for_frames(
+  face: String,
+  module: String,
+  frames: List(Frame),
+) -> List(stop.Note) {
+  frames
+  |> list.flat_map(fn(frame) {
+    let template_areas = list.flatten(frame.template)
+    frame.areas
+    |> list.filter(fn(area) {
+      area.pin == "Overlay" && list.contains(template_areas, area.name)
+    })
+    |> list.map(fn(area) {
+      stop.Note(
+        class: stop.Conflict,
+        text: face
+          <> "/"
+          <> module
+          <> "/"
+          <> frame.media
+          <> ": 明示 template に Overlay area \""
+          <> area.name
+          <> "\" を指定できない",
+      )
+    })
+  })
+}
+
+fn overlay_call_notes(front: Front) -> List(stop.Note) {
+  front.pages
+  |> list.flat_map(fn(page) {
+    let layout_frames =
+      frames(front.layout.sp, front.layout.pc, front.layout.tablet)
+    let page_frames = frames(page.sp, page.pc, page.tablet)
+    let areas =
+      list.append(
+        list.flatten(list.map(layout_frames, fn(frame) { frame.areas })),
+        list.flatten(list.map(page_frames, fn(frame) { frame.areas })),
+      )
+    let modules =
+      list.append(
+        frame_block_modules(front, front.layout.sp),
+        frame_block_modules(front, page.sp),
+      )
+    let calls =
+      modules
+      |> list.flat_map(fn(module) {
+        front.overlay_calls
+        |> list.filter(fn(call) { call.module == module })
+      })
+    list.append(
+      overlay_area_call_notes(front.face, areas, calls),
+      overlay_scope_notes(front.face, page.module, calls),
+    )
+  })
+}
+
+fn overlay_area_call_notes(
+  face: String,
+  areas: List(Area),
+  calls: List(OverlayCall),
+) -> List(stop.Note) {
+  calls
+  |> list.filter_map(fn(call) {
+    case call.function {
+      "opener" | "closer" ->
+        case call.literal {
+          None ->
+            Ok(stop.Note(
+              class: stop.Conflict,
+              text: face
+                <> "/"
+                <> call.module
+                <> ": el."
+                <> call.function
+                <> " の area は文字列リテラルでなければならない",
+            ))
+          Some(name) -> {
+            let found = list.filter(areas, fn(area) { area.name == name })
+            case found {
+              [] ->
+                Ok(stop.Note(
+                  class: stop.Conflict,
+                  text: face
+                    <> "/"
+                    <> call.module
+                    <> ": el."
+                    <> call.function
+                    <> " が同じ Page / Layout に無い area \""
+                    <> name
+                    <> "\" を名指している",
+                ))
+              _ ->
+                case list.any(found, fn(area) { area.pin != "Overlay" }) {
+                  True ->
+                    Ok(stop.Note(
+                      class: stop.Conflict,
+                      text: face
+                        <> "/"
+                        <> call.module
+                        <> ": el."
+                        <> call.function
+                        <> " の area \""
+                        <> name
+                        <> "\" は pin: Overlay ではない",
+                    ))
+                  False -> Error(Nil)
+                }
+            }
+          }
+        }
+      _ -> Error(Nil)
+    }
+  })
+}
+
+fn overlay_scope_notes(
+  face: String,
+  page_module: String,
+  calls: List(OverlayCall),
+) -> List(stop.Note) {
+  let modal_calls =
+    list.filter(calls, fn(call) { call.function == "each_modal" })
+  let dynamic_notes =
+    modal_calls
+    |> list.filter_map(fn(call) {
+      case call.literal {
+        None ->
+          Ok(stop.Note(
+            class: stop.Conflict,
+            text: face
+              <> "/"
+              <> call.module
+              <> ": el.each_modal の scope は文字列リテラルでなければならない",
+          ))
+        Some(_) -> Error(Nil)
+      }
+    })
+  let duplicate_notes =
+    modal_calls
+    |> list.filter_map(fn(call) {
+      case call.literal {
+        Some(scope) -> Ok(scope)
+        None -> Error(Nil)
+      }
+    })
+    |> list.unique
+    |> list.filter(fn(scope) {
+      list.count(modal_calls, fn(call) { call.literal == Some(scope) }) > 1
+    })
+    |> list.map(fn(scope) {
+      stop.Note(
+        class: stop.Conflict,
+        text: face
+          <> "/"
+          <> page_module
+          <> ": el.each_modal の scope \""
+          <> scope
+          <> "\" が同じ Page + Layout 内で重複している",
+      )
+    })
+  list.append(dynamic_notes, duplicate_notes)
+}
+
+fn frame_block_modules(front: Front, frame: Option(Frame)) -> List(String) {
+  case frame {
+    None -> []
+    Some(frame) ->
+      frame.placements
+      |> list.flat_map(placement_block_names)
+      |> list.filter_map(fn(name) {
+        case list.find(front.blocks, fn(block) { block.name == name }) {
+          Ok(block) -> Ok(block.module)
+          Error(_) -> Error(Nil)
+        }
+      })
+  }
+}
+
+fn placement_block_names(placement: Placement) -> List(String) {
+  case placement {
+    Fixed(block: block, ..) -> [block]
+    Widget(render: One(block), ..) -> [block]
+    Widget(render: ByKind(table: table, ..), ..) ->
+      list.map(table, fn(row) { row.1 })
+    Widget(render: UnknownRender, ..) -> []
+  }
+}
+
+fn frames(
+  sp: Option(Frame),
+  pc: Option(Frame),
+  tablet: Option(Frame),
+) -> List(Frame) {
+  list.append(
+    option_to_list(sp),
+    list.append(option_to_list(pc), option_to_list(tablet)),
+  )
 }
 
 fn reads_type_notes(
@@ -540,11 +863,15 @@ fn parse_block(unit: Unit) -> Result(Block, Nil) {
     view
     |> option.then(fn(function) { first_parameter_input(module, function) })
     |> option.unwrap(#(None, None))
+  let input_definition = input |> option.then(g.find_custom_type(module, _))
   Ok(Block(
     name: name,
     module: unit.path,
     input: input,
     input_module: input_module,
+    input_definition: input_definition,
+    input_imports: module.imports,
+    source: module,
     has_view: view != None,
     has_sample: has_public_constant(module, "sample"),
   ))
@@ -1504,7 +1831,7 @@ fn resolved_input(
   case annotation {
     glance.NamedType(name: name, module: Some(path), ..) -> #(
       Some(name),
-      Some(path),
+      Some(imported_module(module.imports, path) |> option.unwrap(path)),
     )
     glance.NamedType(name: name, module: None, ..) ->
       case g.find_type_alias(module, name) {

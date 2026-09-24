@@ -1,4 +1,4 @@
-//// GENERATED from public/src/blocks/row_summary.gleam [sha256:afdb74236ed0] — 手で編集しない
+//// GENERATED from public/src/blocks/row_summary.gleam [sha256:22ec6a0cb9e8] — 手で編集しない
 
 import framework/front/el
 import gen/out/widget_list

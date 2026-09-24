@@ -53,7 +53,19 @@ const app = {
       return json(article(likeCount));
     }
     if (request.method === "POST" && url.pathname === "/api/articles") {
-      return json({ slug: "article", phase: "Draft" });
+      return json({ slug: "article", phase: "draft" });
+    }
+    if (request.method === "POST" && url.pathname === "/api/blobs") {
+      if (request.headers.get("content-type") === "image/fail") {
+        return new Response("upload failed", { status: 503 });
+      }
+      return json({ key: "uploaded-image-key" });
+    }
+    if (
+      request.method === "POST" &&
+      url.pathname === "/api/articles/article/blob_save"
+    ) {
+      return json({ saved: true });
     }
     return new Response("not found", { status: 404 });
   },

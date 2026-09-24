@@ -26,10 +26,16 @@ pub const page: Page(service.Service, blocks.Block) = Page(
         pin: css.NoPin,
         style: [],
       ),
+      Area(
+        name: "article-dialog",
+        flow: css.Stack(gap: style.s1),
+        pin: css.Overlay,
+        style: [],
+      ),
     ],
     placements: [
-      Fixed(area: "page", block: blocks.Summary, cell: Flow),
       Fixed(area: "page", block: blocks.Article, cell: Flow),
+      Fixed(area: "article-dialog", block: blocks.Summary, cell: Flow),
       Widget(
         area: "rail",
         name: "article_kinds",
@@ -45,7 +51,7 @@ pub const page: Page(service.Service, blocks.Block) = Page(
     ],
     cols: [],
     rows: [],
-    template: [],
+    template: [["page"], ["rail"]],
   ),
   pc: Some(
     Frame(
@@ -66,6 +72,12 @@ pub const page: Page(service.Service, blocks.Block) = Page(
           name: "aside",
           flow: css.Stack(gap: style.s1),
           pin: css.NoPin,
+          style: [],
+        ),
+        Area(
+          name: "article-dialog",
+          flow: css.Stack(gap: style.s1),
+          pin: css.Overlay,
           style: [],
         ),
       ],
