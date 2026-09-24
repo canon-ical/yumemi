@@ -22,6 +22,7 @@ import yumemi_gen/emit/hash
 import yumemi_gen/emit/query
 import yumemi_gen/emit/static as static_emit
 import yumemi_gen/face
+import yumemi_gen/markdown
 import yumemi_gen/model
 import yumemi_gen/naming
 import yumemi_gen/reader
@@ -2094,10 +2095,7 @@ pub fn front_emit_shell_carries_language_title_and_theme_test() {
 
 pub fn front_emit_shell_includes_viewport_meta_test() {
   let page = text("public/src/gen/load/article/arg_slug/page.gleam")
-  string.contains(
-    page,
-    "attribute.attribute(\"name\", \"viewport\")",
-  )
+  string.contains(page, "attribute.attribute(\"name\", \"viewport\")")
   |> should.be_true
   string.contains(
     page,
@@ -2256,7 +2254,7 @@ pub fn static_material_sources_are_required_and_classified_test() {
   stop.code(unreadable.class) |> should.equal(2)
 }
 
-pub fn static_material_copy_keeps_front_four_names_and_markdown_bytes_test() {
+pub fn static_material_copy_keeps_front_four_names_and_markdown_structure_test() {
   let assert Ok(sources) = static_source.load(fixture)
   list.length(sources.hosts) |> should.equal(3)
   let external =
@@ -2269,7 +2267,37 @@ pub fn static_material_copy_keeps_front_four_names_and_markdown_bytes_test() {
   let document = static_emit.api_v1_text(sources.api_v1, sources.api_v1_hash)
   string.contains(document, "pub fn nodes() -> List(el.Element(Nil))")
   |> should.be_true
-  string.contains(document, string.inspect(sources.api_v1)) |> should.be_true
+  string.contains(document, "heading1(\"MuseArch REST API\")") |> should.be_true
+  string.contains(document, "html.table(") |> should.be_true
+  string.contains(document, "html.pre(") |> should.be_true
+  string.contains(document, string.inspect(sources.api_v1)) |> should.be_false
+  text_occurrences(document, "\n    heading") |> should.equal(3)
+  text_occurrences(document, "html.table(") |> should.equal(2)
+  text_occurrences(document, "table_row([") |> should.equal(11)
+  let inline_code_count = text_occurrences(document, "inline_code(") - 1
+  inline_code_count |> should.equal(67)
+  text_occurrences(document, "html.pre(") |> should.equal(1)
+  let list_count = text_occurrences(document, "unordered_list(") - 1
+  list_count |> should.equal(0)
+}
+
+pub fn static_api_v1_source_change_changes_generated_structure_test() {
+  let assert Ok(sources) = static_source.load(fixture)
+  let changed_source =
+    string.replace(sources.api_v1, "MuseArch REST API", "MuseArch REST API!")
+  let original_document = static_emit.api_v1_text(sources.api_v1, "same-hash")
+  let changed_document = static_emit.api_v1_text(changed_source, "same-hash")
+  let different = original_document != changed_document
+  different |> should.be_true
+  string.contains(changed_document, "MuseArch REST API!") |> should.be_true
+}
+
+pub fn static_api_v1_parser_rejects_unhandled_markdown_test() {
+  let source = "# Title\n\n> A block quote is not supported."
+  case markdown.parse(source) {
+    Ok(_) -> should.be_false
+    Error(_) -> should.be_true
+  }
 }
 
 pub fn one_character_host_source_change_changes_the_generated_copy_test() {
@@ -2288,6 +2316,10 @@ pub fn one_character_host_source_change_changes_the_generated_copy_test() {
   same |> should.be_false
   string.contains(changed_text, "host: \"images.example.tesT\"")
   |> should.be_true
+}
+
+fn text_occurrences(source: String, needle: String) -> Int {
+  string.split(source, needle) |> list.length |> int.subtract(1)
 }
 
 pub fn front_emit_grid_css_has_breakpoint_pin_and_hidden_area_rules_test() {
