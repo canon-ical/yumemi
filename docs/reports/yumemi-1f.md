@@ -4,6 +4,8 @@
 
 ## 鷹野宛
 
+- Query を必須 Args へ流す6行(4 Page)は既定を Page に書けないため back の Args の形の区分へ移した(贄川の当てはめ、巡 5)。
+
 ### P0
 
 - **R19-P0-1:** 63 の `Var("handle", Path("muse"))` / `Origin("www")` を reader が読めず、F6 で `Vars(vars[0]: String)` を出した。巡4で贄川さんが検収時に拾い差し戻し。reader を位置引数・ラベル付き・合法な混在形に対応させ、非リテラル名は安全な `invalid_var_<n>` に置き換えた。位置引数の `Var` / `Origin`、ラベル付き `Origin`、exit 4 の負例を test で確認。`Page` / `Layout`、`Frame` / `Area` / `Fixed` / `Widget`、`Minmax` / `GridTracks` / `Span` / `At` / `CellSpan` / `ByKind` は引き続き `g.labelled` で読むため、位置引数は未対応。今回は変更していない。
@@ -26,11 +28,15 @@
 
 ### F6 対象表
 
-Y1e の「値の出所の穴」27 行を Page file でまとめると 21 file。BRIEF の www 3 / muses 7 / console 11 と一致した。Page の `vars` は Page 自身の値。console の共通設定は Layout の `Var("idp_origin", AuthOrigin)` と `Var("www_origin", Origin("www"))` から Block の同名 `Arg` に流す。設定 env は `Origin(face)` → `PUBLIC_<FACE>_ORIGIN`、`AuthOrigin` → `PUBLIC_IDP_ORIGIN`。生成器 source の `gen/src/yumemi_gen/emit/front.gleam` と shell check を確認した。
+F6 対象表の元21 Pageに、HomeMetrics の Query Args 2行がある muses/src/pages/page.gleam を加えると22 file。指定の合計21とは1 fileずれるため、どの既存行をまとめるかは未決。
+
+区分数（実ファイル数）: 語彙12 / back の1行読み6 / back の Args の形4 / 合計22 / 未分類0。
 
 | Page file | Page `vars` | Block `Arg` | 割る Block | 要る back の Service | 区分 |
 |---|---|---|---|---|---|
-| `console/src/pages/rosters/arg_id/page.gleam` | `handle: Session(SubjectHandle)`, `id: Path("id")` | `roster_editor(id: String, www_origin: String)`; `console_header(idp_origin: String)` | `roster_editor(In: Option(store_roster_list.Row))` → `In = store_roster_read.Out` | `store_roster_read(id) → Out(roster: roster.Owned, phase: roster.Phase, photos: List(roster_photo.RosterPhoto))` | back の 1 行読み |
+
+
+| `console/src/pages/rosters/arg_id/page.gleam` | `handle: Session(SubjectHandle)`, `id: Path("id")` | `roster_editor(id: String, www_origin: String)`; `console_header(idp_origin: String)` | `roster_editor(In: Option(store_roster_list.Row))` → `In = store_roster_read.Out` | `store_roster_read(id) → Out(roster: roster.Owned, phase: roster.Phase, photos: List(roster_photo.RosterPhoto))` | back の1行読み |
 | `console/src/pages/rosters/arg_id/remove/page.gleam` | `id: Path("id")` | `roster_remove_confirm(id: String)`; header は `idp_origin` | `roster_remove_confirm(In: String)` → `In = Nil` | 無し | 語彙だけ |
 | `console/src/pages/rosters/arg_id/photos/arg_order/remove/page.gleam` | `id: Path("id")`, `order: Path("order")` | `roster_photo_remove_confirm(id: String, order: String)`; header は `idp_origin` | `roster_photo_remove_confirm(In: {id, order})` → `In = Nil` | 無し | 語彙だけ |
 | `console/src/pages/api_key/page.gleam` | `[]` | `console_header(idp_origin: String)`, `api_key_page(www_origin: String)` | 無し | 無し | 語彙だけ |
@@ -40,20 +46,31 @@ Y1e の「値の出所の穴」27 行を Page file でまとめると 21 file。
 | `console/src/pages/rosters/new/page.gleam` | `[]` | header は `idp_origin` | 無し | 無し | 語彙だけ |
 | `console/src/pages/rosters/page.gleam` | `handle: Session(SubjectHandle)` | `roster_list(handle: String)`; header は `idp_origin` | 無し | 無し | 語彙だけ |
 | `console/src/pages/schedule/page.gleam` | `handle: Session(SubjectHandle)` | header は `idp_origin` | 無し | 無し | 語彙だけ |
-| `console/src/pages/switch/page.gleam` | `[]` | `session_switch(idp_origin: String)`; header は `idp_origin` | `session_switch(In: {has_store: Bool, idp_origin: String})` → `In = subject_list.Out`; 空判定は `stores` の空/非空 | `subject_list() → Out(stores: List(Store))` | back の 1 行読み |
-| `muses/src/pages/articles/arg_id/page.gleam` | `handle: Session(SubjectHandle)`, `id: Path("id")` | `article_edit(handle: String, id: String)` | `article_form(Edit(...))` → `article_edit(In: article_read.Out)`、新規は `article_new(In: Nil)`。共通フォームは Component | 既存 `article_read(id, handle) → Out(article, phase, muse)`。`api/src/service/article_read.gleam` の AsMuse / AnyPhase により Draft も読める | back の 1 行読み |
-| `muses/src/pages/page/widget/arg_id/page.gleam` | `handle: Session(SubjectHandle)`, `id: Path("id")`, `selected: Query("space")` | `widget_form_edit(handle: String, id: String)` | `widget_form(Mode.Edit(...))` → `widget_form_edit(In: widget_read.Out)`; 新規フォームと編集フォームを分け、共通フォームは Component | `widget_read(handle, id) → Out(row: widget_list.Row)` | back の 1 行読み |
+| `console/src/pages/switch/page.gleam` | `[]` | `session_switch(idp_origin: String)`; header は `idp_origin` | `session_switch(In: {has_store: Bool, idp_origin: String})` → `In = subject_list.Out`; 空判定は `stores` の空/非空 | `subject_list() → Out(stores: List(Store))` | back の1行読み |
+| `muses/src/pages/articles/arg_id/page.gleam` | `handle: Session(SubjectHandle)`, `id: Path("id")` | `article_edit(handle: String, id: String)` | `article_form(Edit(...))` → `article_edit(In: article_read.Out)`、新規は `article_new(In: Nil)`。共通フォームは Component | 既存 `article_read(id, handle) → Out(article, phase, muse)`。`api/src/service/article_read.gleam` の AsMuse / AnyPhase により Draft も読める | back の1行読み |
+| `muses/src/pages/page/widget/arg_id/page.gleam` | `handle: Session(SubjectHandle)`, `id: Path("id")`, `selected: Query("space")` | `widget_form_edit(handle: String, id: String)` | `widget_form(Mode.Edit(...))` → `widget_form_edit(In: widget_read.Out)`; 新規フォームと編集フォームを分け、共通フォームは Component | `widget_read(handle, id) → Out(row: widget_list.Row)` | back の1行読み |
 | `muses/src/pages/articles/new/page.gleam` | `handle: Session(SubjectHandle)` | `article_new` は引数なしの view | `article_form(New)` → `article_new(In: Nil)`、共通フォームは Component | 無し | 語彙だけ |
 | `muses/src/pages/page/widget/new/page.gleam` | `handle: Session(SubjectHandle)`, `kind: Query("kind")`, `space: Query("space")`, `selected: Query("space")` | `widget_form(handle: String, kind: Option(String), space: Option(String))` | `widget_form` は new、`widget_form_edit` は edit。共通フォームは Component | 無し | 語彙だけ |
-| `muses/src/pages/page/page.gleam` | `handle: Session(SubjectHandle)`, `selected: Query("space")`, `space: Query("space")` | `space_selector(selected: Option(String))`; `widget_list(selected: Option(String))`; 他は無し | `widget_list(In: {widgets, spaces, selected})` → `widget_list(In: widget_list.Out)` + `widget_space(In: space_list.Out)` | 無し | 語彙だけ |
-| `muses/src/pages/settings/page.gleam` | `handle: Session(SubjectHandle)` | 設定の分割 Block は back Out を直接読む | `settings(In: {muse, rosters, subjects, consents})` → `settings_profile(In: muse_read.Out)`, `settings_rosters(In: roster_list_mine.Out)`, `settings_subjects(In: subject_settings_read.Out)`。同意表示と同意用 Block / Service は削除 | `subject_settings_read() → Out(subjects: List(#(String, String, Bool)))`。consents は含めない | back の 1 行読み |
-| `muses/src/pages/metrics/page.gleam` | `handle: Session(SubjectHandle)`, `from: Query("from")`, `to: Query("to")` | `metrics_dashboard(from: Option(String), to: Option(String))` | `metrics_dashboard(In: {metrics, from, to})` → `In = metrics_muse.Out` | 無し | 語彙だけ |
+| muses/src/pages/page/page.gleam | handle: Session(SubjectHandle), selected: Query(space), space: Query(space) | widget_list(space: Place) | widget_list(In: widget_list.Out) | widget_list.Args(space: Place) → back accepts space: Option(Place), default AllPlaces | back の Args の形を変える |
+| `muses/src/pages/settings/page.gleam` | `handle: Session(SubjectHandle)` | 設定の分割 Block は back Out を直接読む | `settings(In: {muse, rosters, subjects, consents})` → `settings_profile(In: muse_read.Out)`, `settings_rosters(In: roster_list_mine.Out)`, `settings_subjects(In: subject_settings_read.Out)`。同意表示と同意用 Block / Service は削除 | `subject_settings_read() → Out(subjects: List(#(String, String, Bool)))`。consents は含めない | back の1行読み |
+| muses/src/pages/metrics/page.gleam | handle: Session(SubjectHandle), from/to: Query | metrics_dashboard(from/to: Option(String)) | metrics_dashboard(In: metrics_muse.Out) | metrics_muse.Args(from: Date, to: Date) → both Option(Date), defaults DefaultMetricsFrom/DefaultMetricsTo held by back | back の Args の形を変える |
+| muses/src/pages/page.gleam | handle: Session(SubjectHandle), from/to: Query | home_metrics(from/to: Option(String)) | home_metrics(In: metrics_muse.Out) | metrics_muse.Args(from: Date, to: Date) → both Option(Date), same back period defaults | back の Args の形を変える |
 | `www/src/pages/claim/arg_code/page.gleam` | `code: Path("code")` | `claim_head(code: String)` | `claim_head(In: String)` → `In = Nil` | 無し | 語彙だけ |
-| `www/src/pages/muse/arg_handle/space/arg_id/page.gleam` | `handle: Path("handle")`, `id: Path("id")`, `space: Path("id")` | `space_title(handle: String, id: String)`; `SpaceMain` は `handle` / `space` を受ける | `space_title(In: space_list.FreeSpace)` → `In = space_read.Out`; `Widget(name: "space_main")` → `Fixed(SpaceMain)`, `In = space_widget_list.Out` | `space_read(handle, id) → Out(space: free_space.FreeSpace)`; `space_widget_list(handle, space) → Out(widgets: List(widget_list.Row))` | back の 1 行読み |
-| `www/src/pages/muse/arg_handle/page.gleam` | `handle: Path("handle")`, `space: Query("space")` | `muse_header(handle: String)`, `subscription_action(handle: String)`, widget renderer Blocks は `handle` / `space` | `muse_header(In: {page: muse_read.Out, subscription: Option(subscription_read.Out)})` → `muse_header(In: muse_read.Out)` + `subscription_action(In: subscription_read.Out)` | Widget は `Widget(area, of: widget_list, render)`。`widget_list(handle, space) → Out(widgets: List(Row))` は同名 Page Vars から取る。枠名由来の Service Arg は無い | 語彙だけ |
+| www/src/pages/muse/arg_handle/space/arg_id/page.gleam | handle/id/space: Path | space_title plus ByKind Widget | space_title(In: space_read.Out); Widget(of: SpaceWidgetList, render: ByKind), Blocks In widget_list.Row | space_read(handle,id); space_widget_list(handle,space) | back の1行読み |
+| www/src/pages/muse/arg_handle/page.gleam | current F6: handle Path, space Query; 22:30 target: muse=[handle] | widget_list.Args(handle: Handle, space: Place, widget: Option(WidgetKey)) | Widget(of: WidgetList, render: ByKind), slot name removed | proposed muse_widget_list.Args(muse: Handle), back default Top | back の Args の形を変える |
 
-記事編集 Page は保存済み Article を1件読む必要があるため「back の1行読み」に分類した。snapshot API の `api/src/service/article_read.gleam:22-54` には既存の `article_read(id, handle)` があり、Out は `article, phase, muse`。AsMuse + AnyPhase と owner handle check により所有者は Draft を読める。新しい Service module は要らない。表の back Service のうち、`store_roster_read` / `subject_list` / `subject_settings_read` / `widget_read` / `space_read` / `space_widget_list` は F6 が必要形を申し送る新規 Service。API はこの便で変更しない。
+記事編集 Page は保存済み Article を1件読むため back の1行読みに分類。既存 article_read(id, handle) があり、Out は article, phase, muse。
 
+Query Args 6行の要件。URL に値がなくても Page に既定値を書かず、欠落時の既定は back が持つ。
+
+| Page file | 現行 Service Args | Query / Page vars | back Args 案と欠落時の既定 |
+|---|---|---|---|
+| muses/src/pages/metrics/page.gleam | metrics_muse.Args(from: Date, to: Date) | MetricsDashboard from/to: Option(String); handle Session, from/to Query | from/to: Option(Date); DefaultMetricsFrom / DefaultMetricsTo |
+| muses/src/pages/page.gleam | metrics_muse.Args(from: Date, to: Date) | HomeMetrics from/to: Option(String); handle Session, from/to Query | from/to: Option(Date); 同じ期間既定を back が補う |
+| muses/src/pages/page/page.gleam | widget_list.Args(space: Place) | WidgetList space: Option(String); handle Session, selected/space Query(space) | space: Option(Place); 欠落時 AllPlaces |
+| www/src/pages/muse/arg_handle/page.gleam | widget_list.Args(handle: Handle, space: Place, widget: Option(WidgetKey)) | Widget space: Option(String); current handle Path + space Query; 22:30 target muse=[handle] | proposed muse_widget_list.Args(muse: Handle); handle alone returns Muse TOP widget, missing default Top in back |
+
+ByKind の実物走査: www は2 Page / 2 table、muses は0。5つの Widget renderer Block は widget_list.Row を受け、view(it, _arg) の2引数を保つ。space Page も Widget(of: SpaceWidgetList, render: ByKind) とし、Fixed(SpaceMain) は置かない。slot name は削除。
 Widget の裁定: `Placement.Widget` は `Widget(area, of, render)`。`www /muse/{handle}` の Widget Service Args は Page の `Var("handle", Path("handle"))` から渡す。`www /muse/{handle}/space/{id}` の `space_main` は `SpaceMain` Block と `space_widget_list` Service に分け、space id を渡す。`api/src/gen/http_runtime.mjs:152` の `widgetKeys`(枠名の列)は F6 で消える。
 
 `muses /settings` では同意の表示を扱わない。`settings_subjects` は subjects のみを表示し、表の Service Out にも consents を含めない。
@@ -216,42 +233,42 @@ file 数が減った3 file は、base にのみ存在する `console/src/gen/wid
 | # | 新規 exit 4 行 | 対応する表の行 |
 |---:|---|---|
 | 001 | `console/layout.gleam`: [変数 6] Block ConsoleHeader In In は Service.Out / Nil ではない | 追加予測行: `console/layout.gleam` |
-| 002 | `console/pages/api_key/page.gleam`: [変数 6] Block ApiKeyPage In In は Service.Out / Nil ではない | F6 表: `console/src/pages/api_key/page.gleam` |
-| 003 | `console/pages/consent/page.gleam`: [変数 6] Block ConsentPage In In は Service.Out / Nil ではない | F6 表: `console/src/pages/consent/page.gleam` |
-| 004 | `console/pages/page.gleam`: [変数 4] Block/Widget Block StoreSettings の Service.store_read Args.handle が Block Arg / Var に無い | F6 表: `console/src/pages/page.gleam` |
+| 002 | `console/pages/api_key/page.gleam`: [変数 6] Block ApiKeyPage In In は Service.Out / Nil ではない | 語彙だけ |
+| 003 | `console/pages/consent/page.gleam`: [変数 6] Block ConsentPage In In は Service.Out / Nil ではない | 語彙だけ |
+| 004 | `console/pages/page.gleam`: [変数 4] Block/Widget Block StoreSettings の Service.store_read Args.handle が Block Arg / Var に無い | 語彙だけ |
 | 005 | `console/pages/rosters/arg_id/page.gleam`: [変数 2] arg_id 段を指す Path Var が無い | 0.10 予測表: `console/rosters/arg_id/page.gleam` |
-| 006 | `console/pages/rosters/arg_id/page.gleam`: [変数 6] Block RosterEditor In In は Service.Out / Nil ではない | F6 表: `console/src/pages/rosters/arg_id/page.gleam` |
+| 006 | `console/pages/rosters/arg_id/page.gleam`: [変数 6] Block RosterEditor In In は Service.Out / Nil ではない | back の1行読み |
 | 007 | `console/pages/rosters/arg_id/photos/arg_order/remove/page.gleam`: [変数 2] arg_id 段を指す Path Var が無い | 0.10 予測表: `console/rosters/arg_id/photos/arg_order/remove/page.gleam` |
 | 008 | `console/pages/rosters/arg_id/photos/arg_order/remove/page.gleam`: [変数 2] arg_order 段を指す Path Var が無い | 0.10 予測表: `console/rosters/arg_id/photos/arg_order/remove/page.gleam` |
-| 009 | `console/pages/rosters/arg_id/photos/arg_order/remove/page.gleam`: [変数 6] Block RosterPhotoRemoveConfirm In In は Service.Out / Nil ではない | F6 表: `console/src/pages/rosters/arg_id/photos/arg_order/remove/page.gleam` |
+| 009 | `console/pages/rosters/arg_id/photos/arg_order/remove/page.gleam`: [変数 6] Block RosterPhotoRemoveConfirm In In は Service.Out / Nil ではない | 語彙だけ |
 | 010 | `console/pages/rosters/arg_id/remove/page.gleam`: [変数 2] arg_id 段を指す Path Var が無い | 0.10 予測表: `console/rosters/arg_id/remove/page.gleam` |
-| 011 | `console/pages/rosters/arg_id/remove/page.gleam`: [変数 6] Block RosterRemoveConfirm In String は Service.Out / Nil ではない | F6 表: `console/src/pages/rosters/arg_id/remove/page.gleam` |
-| 012 | `console/pages/schedule/page.gleam`: [変数 4] Block/Widget Block SchedulePage の Service.store_schedule_list Args.handle が Block Arg / Var に無い | F6 表: `console/src/pages/schedule/page.gleam` |
-| 013 | `console/pages/switch/page.gleam`: [変数 6] Block SessionSwitch In In は Service.Out / Nil ではない | F6 表: `console/src/pages/switch/page.gleam` |
+| 011 | `console/pages/rosters/arg_id/remove/page.gleam`: [変数 6] Block RosterRemoveConfirm In String は Service.Out / Nil ではない | 語彙だけ |
+| 012 | `console/pages/schedule/page.gleam`: [変数 4] Block/Widget Block SchedulePage の Service.store_schedule_list Args.handle が Block Arg / Var に無い | 語彙だけ |
+| 013 | `console/pages/switch/page.gleam`: [変数 6] Block SessionSwitch In In は Service.Out / Nil ではない | back の1行読み |
 | 014 | `muses/pages/articles/arg_id/page.gleam`: [変数 2] arg_id 段を指す Path Var が無い | 0.10 予測表: `muses/articles/arg_id/page.gleam` |
-| 015 | `muses/pages/articles/arg_id/page.gleam`: [変数 6] Block ArticleForm In In は Service.Out / Nil ではない | F6 表: `muses/src/pages/articles/arg_id/page.gleam` |
-| 016 | `muses/pages/articles/new/page.gleam`: [変数 6] Block ArticleForm In In は Service.Out / Nil ではない | F6 表: `muses/src/pages/articles/new/page.gleam` |
+| 015 | `muses/pages/articles/arg_id/page.gleam`: [変数 6] Block ArticleForm In In は Service.Out / Nil ではない | back の1行読み |
+| 016 | `muses/pages/articles/new/page.gleam`: [変数 6] Block ArticleForm In In は Service.Out / Nil ではない | 語彙だけ |
 | 017 | `muses/pages/heaven/page.gleam`: [変数 6] Block HeavenPanel In In は Service.Out / Nil ではない | 0.10 予測表: `muses/heaven/page.gleam` |
 | 018 | `muses/pages/heaven/page.gleam`: [変数 7] Page.of Service.MuseRead を描く Block が placements に無い | 0.10 予測表: `muses/heaven/page.gleam` |
 | 019 | `muses/pages/links/page.gleam`: [変数 6] Block LinkList In In は Service.Out / Nil ではない | 0.10 予測表: `muses/links/page.gleam` |
 | 020 | `muses/pages/links/page.gleam`: [変数 7] Page.of Service.MuseRead を描く Block が placements に無い | 0.10 予測表: `muses/links/page.gleam` |
-| 021 | `muses/pages/metrics/page.gleam`: [変数 6] Block MetricsDashboard In In は Service.Out / Nil ではない | F6 表: `muses/src/pages/metrics/page.gleam` |
+| muses/src/pages/metrics/page.gleam | handle: Session(SubjectHandle), from/to: Query | metrics_dashboard(from/to: Option(String)) | metrics_dashboard(In: metrics_muse.Out) | metrics_muse.Args(from: Date, to: Date) → both Option(Date), defaults DefaultMetricsFrom/DefaultMetricsTo held by back | back の Args の形を変える |
 | 022 | `muses/pages/page/page.gleam`: [変数 4] Block/Widget Block SpaceList の Service.space_list Args.handle が Block Arg / Var に無い | 0.10 予測表: `muses/page/page.gleam` |
 | 023 | `muses/pages/page/page.gleam`: [変数 4] Block/Widget Block ThemeForm の Service.muse_read Args.handle が Block Arg / Var に無い | 0.10 予測表: `muses/page/page.gleam` |
-| 024 | `muses/pages/page/page.gleam`: [変数 6] Block SpaceSelector In In は Service.Out / Nil ではない | F6 表: `muses/src/pages/page/page.gleam` |
-| 025 | `muses/pages/page/page.gleam`: [変数 6] Block WidgetList In In は Service.Out / Nil ではない | F6 表: `muses/src/pages/page/page.gleam` |
+| muses/src/pages/page/page.gleam | handle: Session(SubjectHandle), selected: Query(space), space: Query(space) | widget_list(space: Place) | widget_list(In: widget_list.Out) | widget_list.Args(space: Place) → back accepts space: Option(Place), default AllPlaces | back の Args の形を変える |
+| muses/src/pages/page/page.gleam | handle: Session(SubjectHandle), selected: Query(space), space: Query(space) | widget_list(space: Place) | widget_list(In: widget_list.Out) | widget_list.Args(space: Place) → back accepts space: Option(Place), default AllPlaces | back の Args の形を変える |
 | 026 | `muses/pages/page/widget/arg_id/page.gleam`: [変数 2] arg_id 段を指す Path Var が無い | 0.10 予測表: `muses/page/widget/arg_id/page.gleam` |
-| 027 | `muses/pages/page/widget/arg_id/page.gleam`: [変数 6] Block WidgetForm In In は Service.Out / Nil ではない | F6 表: `muses/src/pages/page/widget/arg_id/page.gleam` |
-| 028 | `muses/pages/page/widget/new/page.gleam`: [変数 6] Block WidgetForm In In は Service.Out / Nil ではない | F6 表: `muses/src/pages/page/widget/new/page.gleam` |
+| 027 | `muses/pages/page/widget/arg_id/page.gleam`: [変数 6] Block WidgetForm In In は Service.Out / Nil ではない | back の1行読み |
+| 028 | `muses/pages/page/widget/new/page.gleam`: [変数 6] Block WidgetForm In In は Service.Out / Nil ではない | 語彙だけ |
 | 029 | `muses/pages/page.gleam`: [変数 6] Block Home In In は Service.Out / Nil ではない | 0.10 予測表: `muses/page.gleam` |
 | 030 | `muses/pages/page.gleam`: [変数 7] Page.of Service.MuseRead を描く Block が placements に無い | 0.10 予測表: `muses/page.gleam` |
 | 031 | `muses/pages/settings/page.gleam`: [変数 4] Block/Widget Block ThemeForm の Service.muse_read Args.handle が Block Arg / Var に無い | 0.10 予測表: `muses/settings/page.gleam` |
-| 032 | `muses/pages/settings/page.gleam`: [変数 6] Block Settings In In は Service.Out / Nil ではない | F6 表: `muses/src/pages/settings/page.gleam` |
+| 032 | `muses/pages/settings/page.gleam`: [変数 6] Block Settings In In は Service.Out / Nil ではない | back の1行読み |
 | 033 | `muses/pages/settings/unclaim/arg_id/page.gleam`: [変数 2] arg_id 段を指す Path Var が無い | 0.10 予測表: `muses/settings/unclaim/arg_id/page.gleam` |
 | 034 | `muses/pages/settings/unclaim/arg_id/page.gleam`: [変数 6] Block UnclaimConfirm In In は Service.Out / Nil ではない | 0.10 予測表: `muses/settings/unclaim/arg_id/page.gleam` |
 | 035 | `muses/pages/settings/unclaim/arg_id/page.gleam`: [変数 7] Page.of Service.RosterListMine を描く Block が placements に無い | 0.10 予測表: `muses/settings/unclaim/arg_id/page.gleam` |
 | 036 | `www/pages/claim/arg_code/page.gleam`: [変数 2] arg_code 段を指す Path Var が無い | 0.10 予測表: `www/claim/arg_code/page.gleam` |
-| 037 | `www/pages/claim/arg_code/page.gleam`: [変数 6] Block ClaimHead In String は Service.Out / Nil ではない | F6 表: `www/src/pages/claim/arg_code/page.gleam` |
+| 037 | `www/pages/claim/arg_code/page.gleam`: [変数 6] Block ClaimHead In String は Service.Out / Nil ではない | 語彙だけ |
 | 038 | `www/pages/experiences/arg_id/page.gleam`: [変数 2] arg_id 段を指す Path Var が無い | 0.10 予測表: `www/experiences/arg_id/page.gleam` |
 | 039 | `www/pages/fan/arg_handle/page.gleam`: [変数 2] arg_handle 段を指す Path Var が無い | 0.10 予測表: `www/fan/arg_handle/page.gleam` |
 | 040 | `www/pages/me/chats/arg_id/page.gleam`: [変数 2] arg_id 段を指す Path Var が無い | 0.10 予測表: `www/me/chats/arg_id/page.gleam` |
@@ -275,7 +292,7 @@ file 数が減った3 file は、base にのみ存在する `console/src/gen/wid
 | 058 | `www/pages/muse/arg_handle/page.gleam`: [変数 4] Block/Widget Block StoreMemberships の Service.muse_read Args.handle が Block Arg / Var に無い | 0.10 予測表: `www/muse/arg_handle/page.gleam` |
 | 059 | `www/pages/muse/arg_handle/page.gleam`: [変数 4] Block/Widget Widget の Service.widget_list Args.handle が Block Arg / Var に無い | 0.10 予測表: `www/muse/arg_handle/page.gleam` |
 | 060 | `www/pages/muse/arg_handle/page.gleam`: [変数 4] Block/Widget Widget の Service.widget_list Args.space が Block Arg / Var に無い | 0.10 予測表: `www/muse/arg_handle/page.gleam` |
-| 061 | `www/pages/muse/arg_handle/page.gleam`: [変数 6] Block MuseHeader In In は Service.Out / Nil ではない | F6 表: `www/src/pages/muse/arg_handle/page.gleam` |
+| www/src/pages/muse/arg_handle/page.gleam | current F6: handle Path, space Query; 22:30 target: muse=[handle] | widget_list.Args(handle: Handle, space: Place, widget: Option(WidgetKey)) | Widget(of: WidgetList, render: ByKind), slot name removed | proposed muse_widget_list.Args(muse: Handle), back default Top | back の Args の形を変える |
 | 062 | `www/pages/muse/arg_handle/reserve/page.gleam`: [変数 2] arg_handle 段を指す Path Var が無い | 0.10 予測表: `www/muse/arg_handle/reserve/page.gleam` |
 | 063 | `www/pages/muse/arg_handle/reviews/page.gleam`: [変数 2] arg_handle 段を指す Path Var が無い | 0.10 予測表: `www/muse/arg_handle/reviews/page.gleam` |
 | 064 | `www/pages/muse/arg_handle/schedule/page.gleam`: [変数 2] arg_handle 段を指す Path Var が無い | 0.10 予測表: `www/muse/arg_handle/schedule/page.gleam` |
@@ -290,9 +307,9 @@ file 数が減った3 file は、base にのみ存在する `console/src/gen/wid
 | 073 | `www/pages/muse/arg_handle/space/arg_id/page.gleam`: [変数 4] Block/Widget Block StoreMemberships の Service.muse_read Args.handle が Block Arg / Var に無い | 0.10 予測表: `www/muse/arg_handle/space/arg_id/page.gleam` |
 | 074 | `www/pages/muse/arg_handle/space/arg_id/page.gleam`: [変数 4] Block/Widget Widget の Service.widget_list Args.handle が Block Arg / Var に無い | 0.10 予測表: `www/muse/arg_handle/space/arg_id/page.gleam` |
 | 075 | `www/pages/muse/arg_handle/space/arg_id/page.gleam`: [変数 4] Block/Widget Widget の Service.widget_list Args.space が Block Arg / Var に無い | 0.10 予測表: `www/muse/arg_handle/space/arg_id/page.gleam` |
-| 076 | `www/pages/muse/arg_handle/space/arg_id/page.gleam`: [変数 6] Block MuseHeader In In は Service.Out / Nil ではない | F6 表: `www/src/pages/muse/arg_handle/space/arg_id/page.gleam` |
-| 077 | `www/pages/muse/arg_handle/space/arg_id/page.gleam`: [変数 6] Block SpaceTitle In FreeSpace は Service.Out / Nil ではない | F6 表: `www/src/pages/muse/arg_handle/space/arg_id/page.gleam` |
-| 078 | `www/pages/muse/arg_handle/space/arg_id/page.gleam`: [変数 7] Page.of Service.SpaceList を描く Block が placements に無い | F6 表: `www/src/pages/muse/arg_handle/space/arg_id/page.gleam` |
+| www/src/pages/muse/arg_handle/space/arg_id/page.gleam | handle/id/space: Path | space_title plus ByKind Widget | space_title(In: space_read.Out); Widget(of: SpaceWidgetList, render: ByKind), Blocks In widget_list.Row | space_read(handle,id); space_widget_list(handle,space) | back の1行読み |
+| www/src/pages/muse/arg_handle/space/arg_id/page.gleam | handle/id/space: Path | space_title plus ByKind Widget | space_title(In: space_read.Out); Widget(of: SpaceWidgetList, render: ByKind), Blocks In widget_list.Row | space_read(handle,id); space_widget_list(handle,space) | back の1行読み |
+| www/src/pages/muse/arg_handle/space/arg_id/page.gleam | handle/id/space: Path | space_title plus ByKind Widget | space_title(In: space_read.Out); Widget(of: SpaceWidgetList, render: ByKind), Blocks In widget_list.Row | space_read(handle,id); space_widget_list(handle,space) | back の1行読み |
 | 079 | `www/pages/muse/arg_handle/tweets/page.gleam`: [変数 2] arg_handle 段を指す Path Var が無い | 0.10 予測表: `www/muse/arg_handle/tweets/page.gleam` |
 | 080 | `www/pages/search/page.gleam`: [変数 4] Block/Widget Block SearchResults の Service.article_search Args.q が Block Arg / Var に無い | 追加予測行: `www/search/page.gleam` |
 | 081 | `www/pages/store/arg_handle/cast/arg_id/page.gleam`: [変数 2] arg_handle 段を指す Path Var が無い | 0.10 予測表: `www/store/arg_handle/cast/arg_id/page.gleam` |
@@ -314,7 +331,7 @@ file 数が減った3 file は、base にのみ存在する `console/src/gen/wid
 | const file | `vars:` |
 |---|---|
 | `www/src/pages/about/external/page.gleam` | `[]` |
-| `www/src/pages/claim/arg_code/page.gleam` | `[Var("code", Path("code"))]` |
+| `www/src/pages/claim/arg_code/page.gleam` | 語彙だけ |
 | `www/src/pages/experiences/arg_id/page.gleam` | `[Var("id", Path("id"))]` |
 | `www/src/pages/fan/arg_handle/page.gleam` | `[Var("handle", Path("handle"))]` |
 | `www/src/pages/for_stores/api/v1/page.gleam` | `[]` |
@@ -331,11 +348,11 @@ file 数が減った3 file は、base にのみ存在する `console/src/gen/wid
 | `www/src/pages/me/subscriptions/page.gleam` | `[]` |
 | `www/src/pages/muse/arg_handle/article/arg_id/page.gleam` | `[Var("handle", Path("handle")), Var("id", Path("id"))]` |
 | `www/src/pages/muse/arg_handle/article/page.gleam` | `[Var("handle", Path("handle")), Var("cursor", Query("cursor"))]` |
-| `www/src/pages/muse/arg_handle/page.gleam` | `[Var("handle", Path("handle")), Var("space", Query("space"))]` |
+| www/src/pages/muse/arg_handle/page.gleam | current F6: handle Path, space Query; 22:30 target: muse=[handle] | widget_list.Args(handle: Handle, space: Place, widget: Option(WidgetKey)) | Widget(of: WidgetList, render: ByKind), slot name removed | proposed muse_widget_list.Args(muse: Handle), back default Top | back の Args の形を変える |
 | `www/src/pages/muse/arg_handle/reserve/page.gleam` | `[Var("handle", Path("handle"))]` |
 | `www/src/pages/muse/arg_handle/reviews/page.gleam` | `[Var("handle", Path("handle"))]` |
 | `www/src/pages/muse/arg_handle/schedule/page.gleam` | `[Var("handle", Path("handle")), Var("from", Query("from"))]` |
-| `www/src/pages/muse/arg_handle/space/arg_id/page.gleam` | `[Var("handle", Path("handle")), Var("id", Path("id")), Var("space", Path("id"))]` |
+| www/src/pages/muse/arg_handle/space/arg_id/page.gleam | handle/id/space: Path | space_title plus ByKind Widget | space_title(In: space_read.Out); Widget(of: SpaceWidgetList, render: ByKind), Blocks In widget_list.Row | space_read(handle,id); space_widget_list(handle,space) | back の1行読み |
 | `www/src/pages/muse/arg_handle/tweets/page.gleam` | `[Var("handle", Path("handle"))]` |
 | `www/src/pages/onboard/page.gleam` | `[]` |
 | `www/src/pages/page.gleam` | `[]` |
@@ -344,31 +361,31 @@ file 数が減った3 file は、base にのみ存在する `console/src/gen/wid
 | `www/src/pages/store/arg_handle/page.gleam` | `[Var("handle", Path("handle"))]` |
 | `www/src/pages/tl/page.gleam` | `[]` |
 | `www/src/pages/w1_preview/page.gleam` | `[]` |
-| `muses/src/pages/articles/arg_id/page.gleam` | `[Var("handle", Session(SubjectHandle)), Var("id", Path("id"))]` |
-| `muses/src/pages/articles/new/page.gleam` | `[Var("handle", Session(SubjectHandle))]` |
+| `muses/src/pages/articles/arg_id/page.gleam` | back の1行読み |
+| `muses/src/pages/articles/new/page.gleam` | 語彙だけ |
 | `muses/src/pages/articles/page.gleam` | `[Var("handle", Session(SubjectHandle)), Var("cursor", Query("cursor"))]` |
 | `muses/src/pages/heaven/page.gleam` | `[Var("handle", Session(SubjectHandle))]` |
 | `muses/src/pages/inbox/page.gleam` | `[Var("handle", Session(SubjectHandle)), Var("after", Query("after"))]` |
 | `muses/src/pages/links/page.gleam` | `[Var("handle", Session(SubjectHandle))]` |
-| `muses/src/pages/metrics/page.gleam` | `[Var("handle", Session(SubjectHandle)), Var("from", Query("from")), Var("to", Query("to"))]` |
+| muses/src/pages/metrics/page.gleam | handle: Session(SubjectHandle), from/to: Query | metrics_dashboard(from/to: Option(String)) | metrics_dashboard(In: metrics_muse.Out) | metrics_muse.Args(from: Date, to: Date) → both Option(Date), defaults DefaultMetricsFrom/DefaultMetricsTo held by back | back の Args の形を変える |
 | `muses/src/pages/onboard/page.gleam` | `[Var("handle", Session(SubjectHandle))]` |
-| `muses/src/pages/page/page.gleam` | `[Var("handle", Session(SubjectHandle)), Var("selected", Query("space")), Var("space", Query("space"))]` |
-| `muses/src/pages/page/widget/arg_id/page.gleam` | `[Var("handle", Session(SubjectHandle)), Var("id", Path("id")), Var("selected", Query("space"))]` |
-| `muses/src/pages/page/widget/new/page.gleam` | `[Var("handle", Session(SubjectHandle)), Var("kind", Query("kind")), Var("space", Query("space")), Var("selected", Query("space"))]` |
+| muses/src/pages/page/page.gleam | handle: Session(SubjectHandle), selected: Query(space), space: Query(space) | widget_list(space: Place) | widget_list(In: widget_list.Out) | widget_list.Args(space: Place) → back accepts space: Option(Place), default AllPlaces | back の Args の形を変える |
+| `muses/src/pages/page/widget/arg_id/page.gleam` | back の1行読み |
+| `muses/src/pages/page/widget/new/page.gleam` | 語彙だけ |
 | `muses/src/pages/page.gleam` | `[Var("handle", Session(SubjectHandle)), Var("from", Query("from")), Var("to", Query("to"))]` |
-| `muses/src/pages/settings/page.gleam` | `[Var("handle", Session(SubjectHandle))]` |
+| `muses/src/pages/settings/page.gleam` | back の1行読み |
 | `muses/src/pages/settings/unclaim/arg_id/page.gleam` | `[Var("handle", Session(SubjectHandle)), Var("id", Path("id"))]` |
-| `console/src/pages/api_key/page.gleam` | `[]` |
-| `console/src/pages/consent/page.gleam` | `[]` |
-| `console/src/pages/metrics/page.gleam` | `[Var("handle", Session(SubjectHandle)), Var("from", Query("from")), Var("to", Query("to"))]` |
-| `console/src/pages/page.gleam` | `[Var("handle", Session(SubjectHandle))]` |
-| `console/src/pages/rosters/arg_id/page.gleam` | `[Var("handle", Session(SubjectHandle)), Var("id", Path("id"))]` |
-| `console/src/pages/rosters/arg_id/photos/arg_order/remove/page.gleam` | `[Var("id", Path("id")), Var("order", Path("order"))]` |
-| `console/src/pages/rosters/arg_id/remove/page.gleam` | `[Var("id", Path("id"))]` |
-| `console/src/pages/rosters/new/page.gleam` | `[]` |
-| `console/src/pages/rosters/page.gleam` | `[Var("handle", Session(SubjectHandle))]` |
-| `console/src/pages/schedule/page.gleam` | `[Var("handle", Session(SubjectHandle))]` |
-| `console/src/pages/switch/page.gleam` | `[]` |
+| `console/src/pages/api_key/page.gleam` | 語彙だけ |
+| `console/src/pages/consent/page.gleam` | 語彙だけ |
+| `console/src/pages/metrics/page.gleam` | 語彙だけ |
+| `console/src/pages/page.gleam` | 語彙だけ |
+| `console/src/pages/rosters/arg_id/page.gleam` | back の1行読み |
+| `console/src/pages/rosters/arg_id/photos/arg_order/remove/page.gleam` | 語彙だけ |
+| `console/src/pages/rosters/arg_id/remove/page.gleam` | 語彙だけ |
+| `console/src/pages/rosters/new/page.gleam` | 語彙だけ |
+| `console/src/pages/rosters/page.gleam` | 語彙だけ |
+| `console/src/pages/schedule/page.gleam` | 語彙だけ |
+| `console/src/pages/switch/page.gleam` | back の1行読み |
 | `www/src/layout.gleam` | `[]` |
 | `muses/src/layout.gleam` | `[]` |
 | `console/src/layout.gleam` | `[Var("idp_origin", AuthOrigin), Var("www_origin", Origin("www"))]` |
@@ -386,28 +403,58 @@ file 数が減った3 file は、base にのみ存在する `console/src/gen/wid
 - `git diff --check 355a93a..HEAD`: exit 2、194 trailing whitespace findings。対象は patch artifact 内の空白行 (`+ `)。報告書の whitespace は0件。snapshot source patch の空行は整形していない。
 
 
-### snapshot (ii) の生成・3面 build 実測
+### snapshot (ii) の F6 再走
 
-| 段 | 生成 stop | 生成 file | exit 1 | exit 2 | exit 3 | exit 4 | warning |
+F5 最小 patch と F6 patch を fresh copy に順番に当てた。生成器は gen から、app dir は copy 内 api。生成物を API と各 face に配置して3面を build した。
+
+| 段 | 生成 stop | file | exit 1 | exit 2 | exit 3 | exit 4 | warning |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| F5 最小 patch | 4 | 1372 | 3 | 0 | 1 | 111 | 48 |
-| F6 patch | 4 | 1385 | 3 | 0 | 1 | 51 | 78 |
+| F5 最小 | 4 | 1372 | 3 | 0 | 1 | 111 | 48 |
+| F6 | 4 | 1384 | 3 | 0 | 1 | 51 | 78 |
 
-| 段 / face | `gleam build` stop | error 数 / file 数 | 内訳 |
-|---|---:|---:|---|
-| F5 最小 / www | 1 | 12 / 10 | Type mismatch 11、Unknown label 1 |
-| F5 最小 / muses | 1 | 13 / 12 | Type mismatch 12、Unknown label 1 |
-| F5 最小 / console | 1 | 18 / 12 | Type mismatch 17、Unknown label 1 |
-| F6 / www | 1 | 24 / 6 | `space_read` / `space_widget_list` 不在による Block / skeleton / Page の参照エラーと、Widget の Row / Out 不一致6件 |
-| F6 / muses | 1 | 16 / 4 | `subject_settings_read` / `widget_read` 不在による Block / skeleton の参照エラー |
-| F6 / console | 1 | 17 / 5 | `store_roster_read` / `subject_list` 不在による Block / skeleton の参照エラー |
+| 段 / face | build exit | error 数 / source file 数 |
+|---|---:|---:|---:|
+| F5 / www | 1 | 12 / 10 |
+| F5 / muses | 1 | 13 / 12 |
+| F5 / console | 1 | 18 / 12 |
+| F6 / www | 1 | 11 / 3 |
+| F6 / muses | 1 | 16 / 4 |
+| F6 / console | 1 | 16 / 4 |
 
-F5 patch は68 file、F6 patch は113 file。各段で `gen/build/y1f-snap-i-src` から写しを作り、F6 は F5 の後に適用した。両段の `api/` は基点との差分0。次の Service module 6本はいずれも無い: `store_roster_read`, `subject_list`, `subject_settings_read`, `widget_read`, `space_read`, `space_widget_list`。Service は追加していない。
+語彙だけの12 Page は SHA-256 header 付き12/12。F6 は F5 と比べ exit 4 が13行増え、73行消えた。新規13行は back の1行読み7行と Query Args の形6行で未分類0。3面 build の error は計43件、すべて back の1行読み Service 欠如 file に閉じ、syntax error は0。roster_row の In を store_roster_list.Row に戻し、Widget Row/Out 型不一致も0にした。
 
-F6 の「語彙だけ」15 Page は SHA-256 header 付き生成物で15/15。生成物に `vars[0]` は0、3面 build に syntax error は0。F5 と比べ、新たに出た exit 4 は13行で、うち7行は上記6 Service module の欠如に対応する。残る6行は `muses/pages/metrics/page` / `muses/pages/page` の `Option(String)` query と必須 Date / `Place` Service Args の型対応。WWW の `muse/arg_handle/page` でも `widget_list.Row` を `widget_list.Out` として渡す型不一致が6件残る。したがって到達線は未達で、Service 欠如だけには限定できていない。query 文字列から Date / Place への変換と Widget の Row / Out の受け渡しは設計判断が要るため、贄川さんへの確認事項として残す。
+#### F6 新規 exit 4 — file / 区分 / 行数
 
-生成ログ / build log / patch 証跡は `gen/build/y1f-r19-snap-ii-summary.txt` と `gen/build/y1f-r19-snap-ii-{f5min,f6-final2}-{generation,www-build,muses-build,console-build}.log`。F6 のエラー file 名一覧は summary に記載。
+| file | 区分 | 行数 |
+|---|---|---:|
+| console/pages/rosters/arg_id/page | back の1行読み | 1 |
+| console/pages/switch/page | back の1行読み | 1 |
+| muses/pages/page/widget/arg_id/page | back の1行読み | 1 |
+| muses/pages/settings/page | back の1行読み | 1 |
+| www/pages/muse/arg_handle/space/arg_id/page | back の1行読み | 2 |
+| www/service | back の1行読み | 1 |
+| muses/pages/metrics/page | back の Args の形 | 2 |
+| muses/pages/page | back の Args の形 | 2 |
+| muses/pages/page/page | back の Args の形 | 1 |
+| www/pages/muse/arg_handle/page | back の Args の形 | 1 |
 
+#### F6 3面 build errors — file / 区分 / 行数
+
+| file | 区分 | 行数 |
+|---|---|---:|
+| www/src/blocks/space_title.gleam | back の1行読み | 5 |
+| www/src/gen/skeleton/space_title.gleam | back の1行読み | 4 |
+| www/src/pages/muse/arg_handle/space/arg_id/page.gleam | back の1行読み | 2 |
+| muses/src/blocks/settings_subjects.gleam | back の1行読み | 4 |
+| muses/src/blocks/widget_form_edit.gleam | back の1行読み | 4 |
+| muses/src/gen/skeleton/settings_subjects.gleam | back の1行読み | 4 |
+| muses/src/gen/skeleton/widget_form_edit.gleam | back の1行読み | 4 |
+| console/src/blocks/roster_editor.gleam | back の1行読み | 4 |
+| console/src/blocks/session_switch.gleam | back の1行読み | 4 |
+| console/src/gen/skeleton/roster_editor.gleam | back の1行読み | 4 |
+| console/src/gen/skeleton/session_switch.gleam | back の1行読み | 4 |
+
+F6 の未実装 Service は store_roster_read, subject_list, subject_settings_read, widget_read, space_read, space_widget_list。API Service Args は変更していない。全数値と2表は gen/build/y1f-r20-snap-ii-summary.txt に保存。
 ## 51 v5 に足す文
 
 tech canon `/home/yumemism/canonical/tech/_drafts/gleam-framework/63-page-variables.v0.md` の「51 v5 で直す節」5項を反映する。
@@ -428,6 +475,6 @@ constructor 名は `Track.Auto` と `TrackSize.AutoSize`。Gleam の module name
 | `cd gen && gleam test` | 181 passed | 192 passed, no failures。`gen/build/y1f-r19-gen-test.txt` |
 | Article fixture | 92 file | fresh output 112 fileを2回、両 exit 0、diff 0行。`gen/build/y1f-r19-fixture-clean-{one,two}.log`、`...-diff.txt` |
 | snapshot (i) | exit 1=3 / 2=0 / 3=1 / 4=22 / warning=48 / 1375 file | fresh copy 2回とも stop 4 / exit 1=3 / 2=0 / 3=1 / 4=111 / warning=48 / 1372 file。前 run と exit4 set 同一111、追加0 / 消失0 / 未分類0。生成部分 diff0、diagnostics 込み全出力 diff0。`gen/build/y1f-r19-snap-i-summary.txt` |
-| snapshot (ii) F5 最小 | — | stop4、exit 1/2/3/4=3/0/1/111、warning48、1372 file。3面 build stop1、errors 12/13/18。`gen/build/y1f-r19-snap-ii-summary.txt` |
-| snapshot (ii) F6 | — | stop4、exit 1/2/3/4=3/0/1/51、warning78、1385 file。lexical-only SHA header 15/15、`vars[0]` 0。3面 build errors 24/16/17、syntax 0。到達線未達: query 型対応6行と Widget Row / Out 不一致6件が残る。`gen/build/y1f-r19-snap-ii-summary.txt` |
+| snapshot (ii) F5 最小 | — | fresh copy: stop4、exit 1/2/3/4=3/0/1/111、warning48、1372 file。3面 build exit1、errors 12/13/18。gen/build/y1f-r20-snap-ii-summary.txt |
+| snapshot (ii) F6 | — | fresh copy: stop4、exit 1/2/3/4=3/0/1/51、warning78、1384 file。語彙-only SHA header 12/12。3面 build exit1、errors 11/16/16、syntax 0。新規 exit4 13行は2区分、build errors 43件はback 1行読みに閉じる。gen/build/y1f-r20-snap-ii-summary.txt |
 | verify | — | SSR / isolate / given / file / overlay は ALL PASS。Block preview public 7 / admin 1 も PASS。`gen/build/y1f-r19-verify-{ssr,isolate,given,file,overlay,blocks}.txt` |

@@ -270,31 +270,6 @@ diff -ruN mid/console/src/blocks/roster_remove_confirm.gleam after/console/src/b
        el.text("やめる"),
      ]),
    ])
-diff -ruN mid/console/src/blocks/roster_row.gleam after/console/src/blocks/roster_row.gleam
---- mid/console/src/blocks/roster_row.gleam	2026-09-24 20:01:02.000000000 +0900
-+++ after/console/src/blocks/roster_row.gleam	2026-09-25 03:14:52.409025551 +0900
-@@ -9,7 +9,7 @@
- import style
- 
- pub type In =
--  store_roster_list.Row
-+  store_roster_list.Out
- 
- const shell: List(css.Style) = [
-   style.white,
-@@ -21,7 +21,11 @@
- 
- const title: List(css.Style) = [style.heading, style.ink]
- 
--pub fn view(row: In) -> el.Element(Nil) {
-+pub fn view(it: In) -> el.Element(Nil) {
-+  el.each(it.rosters, fn(row) { row_view(row) })
-+}
-+
-+fn row_view(row: store_roster_list.Row) -> el.Element(Nil) {
-   case row.phase {
-     store_roster_list.Active -> active_row(row.roster)
-     store_roster_list.Left -> left_row(row.roster)
 diff -ruN mid/console/src/blocks/session_switch.gleam after/console/src/blocks/session_switch.gleam
 --- mid/console/src/blocks/session_switch.gleam	2026-09-24 20:01:02.000000000 +0900
 +++ after/console/src/blocks/session_switch.gleam	2026-09-25 03:14:52.409125892 +0900
@@ -2344,53 +2319,6 @@ diff -ruN mid/www/src/blocks/search_results.gleam after/www/src/blocks/search_re
    ])
  }
  
-diff -ruN mid/www/src/blocks/space_main.gleam after/www/src/blocks/space_main.gleam
---- mid/www/src/blocks/space_main.gleam	1970-01-01 09:00:00.000000000 +0900
-+++ after/www/src/blocks/space_main.gleam	2026-09-25 03:27:16.548451533 +0900
-@@ -0,0 +1,43 @@
-+//// SpaceMain Block ── space id で読んだ widget を既存の種別 Block へ渡す。
-+
-+import blocks/widget_articles
-+import blocks/widget_heaven
-+import blocks/widget_image
-+import blocks/widget_links
-+import blocks/widget_text
-+import framework/front/el
-+import gen/out/space_widget_list
-+import gen/out/widget_list
-+import gleam/option.{Some}
-+import sketch/lustre/element/html
-+
-+pub type In =
-+  space_widget_list.Out
-+
-+pub type Arg {
-+  Arg(handle: String, space: String)
-+}
-+
-+pub fn view(it: In, arg: Arg) -> el.Element(Nil) {
-+  let widgets = widget_list.Out(widgets: it.widgets)
-+  let space = Some(arg.space)
-+  html.div_([], [
-+    widget_text.view(widgets, widget_text.Arg(handle: arg.handle, space: space)),
-+    widget_image.view(
-+      widgets,
-+      widget_image.Arg(handle: arg.handle, space: space),
-+    ),
-+    widget_articles.view(
-+      widgets,
-+      widget_articles.Arg(handle: arg.handle, space: space),
-+    ),
-+    widget_heaven.view(
-+      widgets,
-+      widget_heaven.Arg(handle: arg.handle, space: space),
-+    ),
-+    widget_links.view(
-+      widgets,
-+      widget_links.Arg(handle: arg.handle, space: space),
-+    ),
-+  ])
-+}
 diff -ruN mid/www/src/blocks/space_title.gleam after/www/src/blocks/space_title.gleam
 --- mid/www/src/blocks/space_title.gleam	2026-09-24 20:01:02.000000000 +0900
 +++ after/www/src/blocks/space_title.gleam	2026-09-25 03:14:52.401104985 +0900
@@ -2505,145 +2433,115 @@ diff -ruN mid/www/src/blocks/subscription_action.gleam after/www/src/blocks/subs
 diff -ruN mid/www/src/blocks/widget_articles.gleam after/www/src/blocks/widget_articles.gleam
 --- mid/www/src/blocks/widget_articles.gleam	2026-09-24 20:01:02.000000000 +0900
 +++ after/www/src/blocks/widget_articles.gleam	2026-09-25 03:14:52.401449718 +0900
-@@ -9,7 +9,11 @@
- import style
- 
+@@ -11,6 +11,10 @@
  pub type In =
--  widget_list.Row
-+  widget_list.Out
-+
+   widget_list.Row
+ 
 +pub type Arg {
 +  Arg(handle: String, space: Option(String))
 +}
- 
++
  const shell: List(css.Style) = [
    style.white,
-@@ -27,7 +31,11 @@
+   style.ink,
+@@ -27,7 +31,7 @@
    style.muted,
  ]
  
 -pub fn view(it: In) -> el.Element(Nil) {
 +pub fn view(it: In, _arg: Arg) -> el.Element(Nil) {
-+  el.each(it.widgets, row_view)
-+}
-+
-+fn row_view(it: widget_list.Row) -> el.Element(Nil) {
    case it {
      widget_list.Articles(title: title_value, articles: articles_value, ..) ->
        html.section(sketch_css.class(shell), [], [
 diff -ruN mid/www/src/blocks/widget_heaven.gleam after/www/src/blocks/widget_heaven.gleam
 --- mid/www/src/blocks/widget_heaven.gleam	2026-09-24 20:01:02.000000000 +0900
 +++ after/www/src/blocks/widget_heaven.gleam	2026-09-25 03:14:52.401551829 +0900
-@@ -9,7 +9,11 @@
- import style
- 
+@@ -11,6 +11,10 @@
  pub type In =
--  widget_list.Row
-+  widget_list.Out
-+
+   widget_list.Row
+ 
 +pub type Arg {
 +  Arg(handle: String, space: Option(String))
 +}
- 
++
  const shell: List(css.Style) = [
    style.white,
-@@ -27,7 +31,11 @@
+   style.ink,
+@@ -27,7 +31,7 @@
    style.muted,
  ]
  
 -pub fn view(it: In) -> el.Element(Nil) {
 +pub fn view(it: In, _arg: Arg) -> el.Element(Nil) {
-+  el.each(it.widgets, row_view)
-+}
-+
-+fn row_view(it: widget_list.Row) -> el.Element(Nil) {
    case it {
      widget_list.HeavenDiary(
        title: title_value,
 diff -ruN mid/www/src/blocks/widget_image.gleam after/www/src/blocks/widget_image.gleam
 --- mid/www/src/blocks/widget_image.gleam	2026-09-24 20:01:02.000000000 +0900
 +++ after/www/src/blocks/widget_image.gleam	2026-09-25 03:14:52.401694680 +0900
-@@ -12,7 +12,11 @@
- import style
- 
+@@ -14,6 +14,10 @@
  pub type In =
--  widget_list.Row
-+  widget_list.Out
-+
+   widget_list.Row
+ 
 +pub type Arg {
 +  Arg(handle: String, space: Option(String))
 +}
- 
++
  const shell: List(css.Style) = [
    style.white,
-@@ -30,7 +34,11 @@
+   style.ink,
+@@ -30,7 +34,7 @@
    style.muted,
  ]
  
 -pub fn view(it: In) -> el.Element(Nil) {
 +pub fn view(it: In, _arg: Arg) -> el.Element(Nil) {
-+  el.each(it.widgets, row_view)
-+}
-+
-+fn row_view(it: widget_list.Row) -> el.Element(Nil) {
    case it {
      widget_list.Image(
        title: title_value,
 diff -ruN mid/www/src/blocks/widget_links.gleam after/www/src/blocks/widget_links.gleam
 --- mid/www/src/blocks/widget_links.gleam	2026-09-24 20:01:02.000000000 +0900
 +++ after/www/src/blocks/widget_links.gleam	2026-09-25 03:14:52.401833971 +0900
-@@ -10,7 +10,11 @@
- import style
- 
+@@ -12,6 +12,10 @@
  pub type In =
--  widget_list.Row
-+  widget_list.Out
-+
+   widget_list.Row
+ 
 +pub type Arg {
 +  Arg(handle: String, space: Option(String))
 +}
- 
++
  const shell: List(css.Style) = [
    style.white,
-@@ -28,7 +32,11 @@
+   style.ink,
+@@ -28,7 +32,7 @@
    style.muted,
  ]
  
 -pub fn view(it: In) -> el.Element(Nil) {
 +pub fn view(it: In, _arg: Arg) -> el.Element(Nil) {
-+  el.each(it.widgets, row_view)
-+}
-+
-+fn row_view(it: widget_list.Row) -> el.Element(Nil) {
    case it {
      widget_list.Links(title: title_value, links: links_value, ..) ->
        html.section(sketch_css.class(shell), [], [
 diff -ruN mid/www/src/blocks/widget_text.gleam after/www/src/blocks/widget_text.gleam
 --- mid/www/src/blocks/widget_text.gleam	2026-09-24 20:01:02.000000000 +0900
 +++ after/www/src/blocks/widget_text.gleam	2026-09-25 03:14:52.401972903 +0900
-@@ -9,7 +9,11 @@
- import style
- 
+@@ -11,6 +11,10 @@
  pub type In =
--  widget_list.Row
-+  widget_list.Out
-+
+   widget_list.Row
+ 
 +pub type Arg {
 +  Arg(handle: String, space: Option(String))
 +}
- 
++
  const shell: List(css.Style) = [
    style.white,
-@@ -28,7 +32,11 @@
+   style.ink,
+@@ -28,7 +32,7 @@
    style.muted,
  ]
  
 -pub fn view(it: In) -> el.Element(Nil) {
 +pub fn view(it: In, _arg: Arg) -> el.Element(Nil) {
-+  el.each(it.widgets, row_view)
-+}
-+
-+fn row_view(it: widget_list.Row) -> el.Element(Nil) {
    case it {
      widget_list.Text(title: title_value, body: body_value, ..) ->
        html.section(sketch_css.class(shell), [], [
@@ -3159,8 +3057,8 @@ diff -ruN mid/www/src/pages/muse/arg_handle/space/arg_id/page.gleam after/www/sr
 @@ -1,4 +1,7 @@
 -import framework/front.{type Page, Area, ByKind, Fixed, Frame, Page, Widget, default_sp_cols, default_wide_cols, Flow}
 +import framework/front.{
-+  type Page, Area, Fixed, Flow, Frame, Page, Path, Query, Var, default_sp_cols,
-+  default_wide_cols,
++  type Page, Area, ByKind, Fixed, Flow, Frame, Page, Path, Var, Widget,
++  default_sp_cols, default_wide_cols,
 +}
  import framework/front/css
  import gen/blocks
@@ -3174,7 +3072,7 @@ diff -ruN mid/www/src/pages/muse/arg_handle/space/arg_id/page.gleam after/www/sr
    layout: layout.www,
    theme: Some("theme"),
    sp: Frame(
-@@ -21,26 +24,12 @@
+@@ -21,14 +24,14 @@
      ],
      placements: [
        Fixed(area: "page", block: blocks.MuseHeader, cell: Flow),
@@ -3183,27 +3081,15 @@ diff -ruN mid/www/src/pages/muse/arg_handle/space/arg_id/page.gleam after/www/sr
        Fixed(area: "page", block: blocks.MuseNav, cell: Flow),
        Fixed(area: "page", block: blocks.SpaceTitle, cell: Flow),
        Fixed(area: "page", block: blocks.PhF7FreePageContent, cell: Flow),
--      Widget(
--        area: "page",
+       Widget(
+         area: "page",
 -        name: "space_main",
 -        of: service.WidgetList,
--        render: ByKind(
--          by: "kind",
--          table: [
--            #("Text", blocks.WidgetText),
--            #("Image", blocks.WidgetImage),
--            #("Articles", blocks.WidgetArticles),
--            #("HeavenDiary", blocks.WidgetHeaven),
--            #("HeavenReview", blocks.WidgetHeaven),
--            #("Links", blocks.WidgetLinks),
--          ],
--        ),
--      ),
-+      Fixed(area: "page", block: blocks.SpaceMain, cell: Flow),
-     ],
-     cols: default_sp_cols,
-     rows: [],
-@@ -69,5 +58,9 @@
++        of: service.SpaceWidgetList,
+         render: ByKind(
+           by: "kind",
+           table: [
+@@ -69,5 +72,9 @@
      ),
    ),
    tablet: None,
