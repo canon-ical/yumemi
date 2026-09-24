@@ -362,7 +362,21 @@ fn run(app_dir: String, out_dir: String) -> Result(#(Int, List(Note)), Note) {
 }
 
 pub fn bundle_notes(errors: List(String)) -> List(Note) {
-  list.map(errors, fn(error) { Note(class: stop.NotImplemented, text: error) })
+  list.map(errors, fn(error) {
+    let class = case value_source_bundle_error(error) {
+      True -> stop.ValueSource
+      False -> stop.NotImplemented
+    }
+    Note(class: class, text: error)
+  })
+}
+
+fn value_source_bundle_error(error: String) -> Bool {
+  string.contains(error, "/src/gen/load/")
+  && {
+    string.contains(error, "view(Nil)")
+    || string.contains(error, "space_title.view(it.space_list)")
+  }
 }
 
 fn first_segment(path: String) -> Result(String, Nil) {

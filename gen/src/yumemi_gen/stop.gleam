@@ -4,7 +4,7 @@
 //// | exit | 分類 | 誰が直すか |
 //// |---|---|---|
 //// | 0 | 成功 | ── |
-//// | 1 | 生成器の内部エラー / 未実装 | 生成器の作者 |
+//// | 1 | 生成器の内部エラー / 未実装 / 値の出所 | 生成器または入力元の担当 |
 //// | 2 | 構文が読めない | 生成器の作者 |
 //// | 3 | 宣言の不足 | 書き手(Agent) |
 //// | 4 | 宣言の矛盾 | 書き手(Agent) |
@@ -20,6 +20,8 @@ pub type Class {
   Warning
   /// 1 ── 生成器がまだ書けない。★ からは導けるのに出せないものもここ。
   NotImplemented
+  /// 1 ── Page load に必要な値の出所がこの面に無い。
+  ValueSource
   /// 2 ── glance が parse できない。
   Syntax
   /// 3 ── 宣言が足りない(`key` が無い、`collection` が無い)。
@@ -40,6 +42,7 @@ pub fn code(class: Class) -> Int {
   case class {
     Warning -> 0
     NotImplemented -> 1
+    ValueSource -> 1
     Syntax -> 2
     Missing -> 3
     Conflict -> 4
@@ -52,6 +55,7 @@ pub fn label(class: Class) -> String {
   case class {
     Warning -> "警告"
     NotImplemented -> "生成器の不足"
+    ValueSource -> "値の出所"
     Syntax -> "構文が読めない"
     Missing -> "宣言の不足"
     Conflict -> "宣言の矛盾"

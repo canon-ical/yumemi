@@ -3175,14 +3175,22 @@ pub fn path_manifest_keeps_other_versions_test() {
 }
 
 pub fn client_bundle_failures_remain_per_face_notes_test() {
-  let notes = yumemi_gen.bundle_notes(["www: app が無い", "muses: app が無い"])
-  list.length(notes) |> should.equal(2)
-  let assert [www, muses] = notes
+  let notes =
+    yumemi_gen.bundle_notes([
+      "www: app が無い",
+      "muses: app が無い",
+      "www: <bundle-temp>/www/src/gen/load/muse/arg_handle/space/arg_id/page.gleam:204 [space_title.view(it.space_list)]",
+    ])
+  list.length(notes) |> should.equal(3)
+  let assert [www, muses, source] = notes
   www.class |> should.equal(stop.NotImplemented)
   muses.class |> should.equal(stop.NotImplemented)
+  source.class |> should.equal(stop.ValueSource)
   string.contains(stop.report(notes), "[exit 1 生成器の不足] www:")
   |> should.be_true
   string.contains(stop.report(notes), "[exit 1 生成器の不足] muses:")
+  |> should.be_true
+  string.contains(stop.report(notes), "[exit 1 値の出所] www:")
   |> should.be_true
 }
 

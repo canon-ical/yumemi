@@ -78,7 +78,7 @@ pub fn emit(
     |> list.flat_map(fn(page) {
       list.append(
         layout_sources(model_.layout, model_.blocks, app.services),
-        page_sources(page, model_.blocks, app.services),
+        page_sources(app, type_units, page, model_.blocks, app.services),
       )
       |> list.filter_map(fn(source) {
         case source.type_name == "Out" {
@@ -118,7 +118,7 @@ pub fn emit(
     ),
     File(
       path: face_name <> "/src/gen/shell.mjs",
-      text: shell_text(app, package, model_, hashes),
+      text: shell_text(app, type_units, package, model_, hashes),
     ),
     File(
       path: face_name <> "/src/gen/blocks_preview.gleam",
@@ -2740,7 +2740,7 @@ fn load_page_file(
   page: reader_front.Page,
 ) -> File {
   let layout_sources = layout_sources(front.layout, front.blocks, app.services)
-  let page_sources = page_sources(page, front.blocks, app.services)
+  let page_sources = page_sources(app, units, page, front.blocks, app.services)
   let source_hash =
     source_hash(package.units, fn(unit) { unit.path == page.module })
   File(
@@ -2781,6 +2781,8 @@ fn layout_sources(
 }
 
 fn page_sources(
+  app: model.App,
+  units: List(Unit),
   page: reader_front.Page,
   blocks: List(reader_front.Block),
   services: List(model.Service),
@@ -2805,7 +2807,8 @@ fn page_sources(
   let initial = add_load_sources(root, read_sources(page.reads, services))
   let sources = placement_sources(placements, blocks, services, initial)
   case page.theme, root_service {
-    Some(name), Some(module) ->
+    Some(name), Some(fallback_module) -> {
+      let module = page_theme_service(app, units, sources, fallback_module)
       list.append(sources, [
         LoadSource(
           key: "theme:" <> module <> ":" <> name,
@@ -2815,8 +2818,39 @@ fn page_sources(
           optional: True,
         ),
       ])
+    }
     _, _ -> sources
   }
+}
+
+fn page_theme_service(
+  app: model.App,
+  units: List(Unit),
+  sources: List(LoadSource),
+  fallback: String,
+) -> String {
+  case
+    list.find(sources, fn(source) {
+      source.type_name == "Out"
+      && output_has_custom_type(app, units, source.service, "PageTheme")
+    })
+  {
+    Ok(source) -> source.service
+    Error(_) -> fallback
+  }
+}
+
+fn output_has_custom_type(
+  app: model.App,
+  units: List(Unit),
+  service: String,
+  name: String,
+) -> Bool {
+  let #(state, _) = out_state(app, units, "service/" <> service)
+  list.any(state.custom, fn(declaration) {
+    let CustomDecl(definition: definition, ..) = declaration
+    definition.name == name
+  })
 }
 
 fn read_sources(
@@ -2871,11 +2905,17 @@ fn placement_sources(
     [] -> initial
     [placement, ..rest] -> {
       let next = case placement {
-        reader_front.Fixed(block: block_name, ..) ->
+        reader_front.Fixed(block: block_name, ..) -> {
+          let input_sources = case
+            list.find(blocks, fn(block) { block.name == block_name })
+          {
+            Ok(block) -> add_block_input_sources(initial, block)
+            Error(_) -> initial
+          }
           case block_source(blocks, block_name, services) {
             Some(module) ->
               add_load_source(
-                initial,
+                input_sources,
                 LoadSource(
                   key: "service:" <> module,
                   name: module,
@@ -2884,8 +2924,9 @@ fn placement_sources(
                   optional: True,
                 ),
               )
-            None -> initial
+            None -> input_sources
           }
+        }
         reader_front.Widget(name: name, service: service_name, ..) ->
           case service_module(services, service_name) {
             Some(module) ->
@@ -2904,6 +2945,51 @@ fn placement_sources(
       }
       placement_sources(rest, blocks, services, next)
     }
+  }
+}
+
+fn add_block_input_sources(
+  sources: List(LoadSource),
+  block: reader_front.Block,
+) -> List(LoadSource) {
+  case block.input_definition {
+    Some(definition) -> {
+      let scope = Scope(module: block.module, imports: block.input_imports)
+      let services =
+        definition.variants
+        |> list.flat_map(fn(variant) {
+          variant.fields
+          |> list.filter_map(fn(field) {
+            let type_ = g.variant_field_type(field)
+            case type_ {
+              glance.NamedType(name: "Out", parameters: [], ..) ->
+                case resolved_path(scope, type_) {
+                  Some(path) ->
+                    case out_service_path(path) {
+                      Some(service) -> Ok(service)
+                      None -> Error(Nil)
+                    }
+                  None -> Error(Nil)
+                }
+              _ -> Error(Nil)
+            }
+          })
+        })
+        |> list.unique
+      list.fold(services, sources, fn(acc, service) {
+        add_load_source(
+          acc,
+          LoadSource(
+            key: "service:" <> service,
+            name: service,
+            service: service,
+            type_name: "Out",
+            optional: False,
+          ),
+        )
+      })
+    }
+    None -> sources
   }
 }
 
@@ -3937,14 +4023,13 @@ fn block_page_input(
             list.try_map(variant.fields, fn(field) {
               case field {
                 glance.LabelledVariantField(label: label, item: item) ->
-                  case load_source_for_input(block, sources, item) {
-                    Some(source) ->
-                      Ok(label <> ": " <> access <> "." <> source.name)
+                  case block_input_expression(block, sources, access, item) {
+                    Some(value) -> Ok(label <> ": " <> value)
                     None -> Error(Nil)
                   }
                 glance.UnlabelledVariantField(item) ->
-                  case load_source_for_input(block, sources, item) {
-                    Some(source) -> Ok(access <> "." <> source.name)
+                  case block_input_expression(block, sources, access, item) {
+                    Some(value) -> Ok(value)
                     None -> Error(Nil)
                   }
               }
@@ -3973,6 +4058,40 @@ fn block_page_input(
   }
 }
 
+fn block_input_expression(
+  block: reader_front.Block,
+  sources: List(LoadSource),
+  access: String,
+  type_: glance.Type,
+) -> Option(String) {
+  case type_ {
+    glance.NamedType(name: "Option", parameters: [inner], ..) ->
+      case inner {
+        glance.NamedType(name: "Out", parameters: [], ..) ->
+          case load_source_for_input(block, sources, inner) {
+            Some(source) -> {
+              let value = access <> "." <> source.name
+              case source.optional {
+                True -> Some(value)
+                False -> Some("Some(" <> value <> ")")
+              }
+            }
+            None -> Some("None")
+          }
+        _ -> None
+      }
+    _ ->
+      case load_source_for_input(block, sources, type_) {
+        Some(source) ->
+          case source.optional {
+            True -> None
+            False -> Some(access <> "." <> source.name)
+          }
+        None -> None
+      }
+  }
+}
+
 fn load_source_for_input(
   block: reader_front.Block,
   sources: List(LoadSource),
@@ -3987,9 +4106,7 @@ fn load_source_for_input(
             Some(service) ->
               case
                 list.find(sources, fn(source) {
-                  source.service == service
-                  && source.type_name == "Out"
-                  && !source.optional
+                  source.service == service && source.type_name == "Out"
                 })
               {
                 Ok(source) -> Some(source)
@@ -4497,11 +4614,12 @@ fn attached_type_text(names: List(String)) -> String {
 
 fn shell_text(
   app: model.App,
+  units: List(Unit),
   package: face.Package,
   front: reader_front.Front,
   hashes: hash.Hashes,
 ) -> String {
-  let decoder_services = shell_services(app, front)
+  let decoder_services = shell_services(app, units, front)
   let source_hash =
     source_hash(package.units, fn(unit) {
       unit.path == "layout"
@@ -4516,7 +4634,7 @@ fn shell_text(
   <> "\n\n"
   <> shell_imports(decoder_services, front)
   <> "\n\n"
-  <> shell_page_tables(app, front)
+  <> shell_page_tables(app, units, front)
   <> "\n"
   <> shell_decoder_text(decoder_services)
   <> "\n"
@@ -4578,6 +4696,7 @@ fn shell_imports(
 
 fn shell_services(
   app: model.App,
+  units: List(Unit),
   front: reader_front.Front,
 ) -> List(model.Service) {
   let from_pages =
@@ -4585,7 +4704,7 @@ fn shell_services(
     |> list.flat_map(fn(page) {
       list.append(
         layout_sources(front.layout, front.blocks, app.services),
-        page_sources(page, front.blocks, app.services),
+        page_sources(app, units, page, front.blocks, app.services),
       )
       |> list.map(fn(source) { source.service })
     })
@@ -4608,7 +4727,11 @@ fn shell_services(
   |> list.filter(fn(service) { list.contains(names, service.module) })
 }
 
-fn shell_page_tables(app: model.App, front: reader_front.Front) -> String {
+fn shell_page_tables(
+  app: model.App,
+  units: List(Unit),
+  front: reader_front.Front,
+) -> String {
   let page_rows =
     front.pages
     |> list.index_map(fn(page, index) {
@@ -4625,7 +4748,7 @@ fn shell_page_tables(app: model.App, front: reader_front.Front) -> String {
       let sources =
         unique_load_sources(list.append(
           layout_sources(front.layout, front.blocks, app.services),
-          page_sources(page, front.blocks, app.services),
+          page_sources(app, units, page, front.blocks, app.services),
         ))
       "  ["
       <> quoted(reader_front.route_path(page.path))

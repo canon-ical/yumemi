@@ -1,28 +1,28 @@
-# yumemi-1e 巡 5 結果
+# yumemi-1e 巡 6 結果
 
 ## DDL
 
-無し。`git diff --stat 046cf9c -- db/ gen/fixtures/article/db/` は空。fresh fixture の generated `db/` は32 files、fresh1/fresh2 の差分は空。tracked face `public/src/gen` と `_yumemi` (client を含む) も fresh 出力と一致。証跡: `gen/build/y1e-m-ddl-diff.txt`、`gen/build/y1e-m-fixture-final-fresh-diff.txt`、`gen/build/y1e-m-fixture-tracked-diff.txt`。
+無し。`git diff --stat 2067902 -- db/ gen/fixtures/article/db/` は空。fresh fixture は各92 files、`db/queries` は32 files、2回生成の差分は空。tracked `public/src/gen` と `_yumemi` (client を含む) は fresh 出力と一致。証跡: `gen/build/y1e-n-ddl-diff.txt`、`gen/build/y1e-n-fixture-{a,b}.txt`、`gen/build/y1e-n-fixture-diff.txt`、`gen/build/y1e-n-fixture-tracked-public-{gen,assets}-diff.txt`。
 
 ## 鷹野宛
 
 - `impl/yumemi-1e-bp` を `impl/yumemi-1e` に merge。競合3件を解消し、merge commit は `763c7f6`。生成 Live の型は束 A の `Service.Error` と `Failure { Refused(Error) | Broke(String) }` を採った。Blob upload の失敗は `Broke("file upload failed")` となり、Service request より前に止まる。
 - API Markdown は fixture を `8875df6` の内容へ戻し、生成 helper と `gleam/list` import は実際に使う heading / paragraph / code / table / list に合わせる。未対応構文の停止試験は維持。
-- `gen/load/*` はページ本文と配置 Block の参照から import を組む。F5 写しで `src/gen/load` の unused-import 診断は www / muses / console 各0。
-- 生成 live の unused-import 診断も3面とも0。BRIEF が「unused 3件」とした `browser_adult` / `subscription_*` の各3件は、実際には使用中の module に対する `Transitive dependency imported` だった。元の F5 probe manifest は www に `gleam_json` / `lustre` が無く、muses / console は `gleam_json` があり `lustre` が無い。run_dir 内だけの別 probe に www `gleam_json` + `lustre`、muses / console `lustre` を直接依存として加えたところ、generated `gen/live` の unused / transitive import 警告は3面とも0。3 build は Page 型エラーで exit 1 のまま。snapshot と `src/framework/` は変更していない。証跡: `gen/build/y1e-m-f5-directdeps-{www,muses,console}.txt`。
-- `verify-front-file` は既存 key の upload skip、選択 File の BlobCopy→Service 順序、upload失敗時の Service 未呼び出し、Entry upload1回を確認。
+- PageTheme は `Out` がその型を持つ service module から参照する。Block `In` の必須 `Out` field をページ source に加え、`muse_header.In(page: muse_read, subscription: None)` を生成する。`Option(Out)` は source が無いとき `None` を構築する。
+- F5 の www 生成 load に残る型 error は route parameter `arg_code` / `arg_id` の2件だけ。`claim_head.String` と `space_title.FreeSpace` は値の出所として扱い、snapshot の既存生成例を `### 値の出所の穴` に追加した。
+- generated live の `gleam_json` / `lustre` transitive warning は、F5 面 manifest の直接依存を補った同じ probe で3面とも0。`sketch_lustre` の face-source warning は gen-6 P1-4 の追随事項に残す。
+- `musearch` は書いていない。開始 snapshot は `a109b47`、終了時 `git status --short` は空、HEAD は `8eed4d8`。
 - root `gleam.toml` と `gen/manifest.toml`、fixture manifest の `yumemi` lock はすべて 0.9.0。
-- `musearch` には書いていない。終了時 `git status --short` は空、HEAD `086c62e`。
 
 検証:
 
-- root `gleam build`: exit 0、warning 1件 (`src/framework/secret.gleam:5`)。`gen/build/y1e-m-root-final.txt`
-- `cd gen && gleam test`: **178 passed, no failures**。A の168試験と B′側の追加試験を保持。`gen/build/y1e-m-test-final.txt`
-- fixture 生成: final code で in-place 2回とも exit 0 / 92 files、保存した tracked diff は同一。fresh 出力2回も `diff -qr` 0行。fresh の face `public/src/gen` と client は tracked 生成物と一致。fresh `db/` は32 files。`gen/build/y1e-m-fixture-final-{a,b}.txt`、`gen/build/y1e-m-fixture-final-{fresh,fresh2}.txt`、`gen/build/y1e-m-fixture-final-fresh-diff.txt`、`gen/build/y1e-m-fixture-tracked-diff.txt`
-- `gleam format --check`: fixture fresh 56 `.gleam`、snapshot 951 `.gleam` とも exit 0。証跡 `gen/build/y1e-m-format-fixture-final.txt`、`gen/build/y1e-m-format-snapshot.txt`。
-- `verify-front-ssr`, `-isolate`, `-given`, `-file`, `-overlay`: ALL PASS。Block preview: `build-blocks.mjs` は `BLOCKS: PASS (6 blocks)`。証跡は `gen/build/y1e-m-verify-front-*.txt` と `gen/build/y1e-m-build-blocks.txt`。
-- snapshot `a109b47` を2回生成: 各 generator exit 4、file 1347、exit 0 warnings 43、exit 1 の残件3、exit 2 = 0、exit 3 = 1、exit 4 = 20。出力間 `diff -qr` は0行。exit 4 の行は本便前の生成結果と同一で、追加0 / 削除0。証跡 `gen/build/y1e-m-snapshot-final{3,4}.txt`、`gen/build/y1e-m-snapshot-final34-diff.txt`、`gen/build/y1e-m-snapshot-exit4-diff.txt`。
-- snapshot の generator exit 1 の残り3行は console `session_switch`, muses `settings`, www `space_title`。2件の `entity/visit.Source` decoder error は解消。
+- root `gleam build`: exit 0、warning 1件 (`src/framework/secret.gleam:5`)。`gen/build/y1e-n-root-build.txt`
+- `cd gen && gleam test`: **178 passed, no failures**。`gen/build/y1e-n-generator-test-tag.txt`
+- fixture 生成を2回: 各 exit 0 / 92 files、fresh 同士 diff 0行。tracked `public/src/gen` / `_yumemi` と fresh 出力の差分は各0行。`db/queries` は32 files。
+- `gleam format --check`: fixture 56 `.gleam`、snapshot 951 `.gleam` とも exit 0。`gen/build/y1e-n-format-{fixture,snapshot}.txt`
+- `verify-front-ssr`, `-isolate`, `-given`, `-file`, `-overlay`: ALL PASS。初回に SSR/isolate を並列実行したときは Wrangler の port bind が衝突し、順番に再実行して両方 ALL PASS。Block preview は `BLOCKS: PASS (6 blocks)`。各 `gen/build/y1e-n-verify-front-*.txt`、`gen/build/y1e-n-build-blocks.txt`
+- snapshot `a109b47` を2回生成: 各 exit 4 / 1347 files / exit 1=3 / exit 2=0 / exit 3=1 / exit 4=20 / warnings=43。生成先 diff は0行。`gen/build/y1e-n-snapshot-final{5,6}.txt`、`gen/build/y1e-n-snapshot-final56-diff.txt`
+- snapshot runtime の全診断は www=4、muses=9、console=18。Hex 0.7.0 の `framework/front.Target` 不在と、Page load の値不足に分け、F5 の face-side と `値の出所` の表に転記した。summary の3行はすべて `[exit 1 値の出所]`。
 
 ## 追随便への申し送り
 
@@ -39,12 +39,32 @@
 | 面のファイル:行 | 現在の不一致 | F5 での修正 |
 |---|---|---|
 | `www/gleam.toml:6`, `muses/gleam.toml:6`, `console/gleam.toml:6` | yumemi が `>= 0.7.0 and < 0.8.0` | `>= 0.9.0 and < 0.10.0` へ更新 |
-| `www/src/gen/api.gleam:42` | yumemi 0.7.0 に `framework/front.Target` が無い | 上記の版上げ |
-| `www/src/components/adult_declare.gleam:12`, `consent_give.gleam:16`, `fan_onboard.gleam:16` | `api.Entry` は生成 `api` module に無い | `framework/front as front` を import し `front.Entry(...)` にする |
+| `www/src/gen/api.gleam:42`, `muses/src/gen/api.gleam:40`, `console/src/gen/api.gleam:40` | snapshot の Hex yumemi 0.7.0 に `framework/front.Target` が無い | 上記の版上げ |
+| `www/src/components/adult_declare.gleam:12`, `consent_give.gleam:16`, `fan_onboard.gleam:16`; `muses/src/components/adult_declare.gleam:15`, `onboard_wizard.gleam:39` | `api.Entry` は生成 `api` module に無い | `framework/front as front` を import し `front.Entry(...)` にする |
 | `www/src/layout.gleam:8:56`, `muses/src/layout.gleam:8:58`, `console/src/layout.gleam:8:60` | `Layout` に `reads` が必要 | 各 `Layout(...)` に実際の reads を渡す。空なら `reads: []` |
 | `www/src/blocks/store_schedule.gleam:41` | `store_schedule_list.Out` に `grid: Option(Grid)` が加わった | `grid: _` を受けるか表示に使う |
 
-F5 写しは `www` 24 errors (generated 19 / ★ 5)、`muses` 14 (11 / 3)、`console` 18 (17 / 1)。warning はそれぞれ `www` 415 (generated 322 / ★ 78 / dependency・framework 15)、`muses` 452 (205 / 232 / 15)、`console` 250 (123 / 112 / 15)。各 `gleam build` は exit 1。証跡: `gen/build/y1e-m-f5-final3-{www,muses,console}.txt`、準備ログ `gen/build/y1e-m-f5-final3-prepare.txt`。`gleam build` が示した generated / ★ の warning 内訳を数え、残る15件は face source 以外の依存・framework warning。
+### generated live の直接依存
+
+F5 copy の `gleam.toml` に次を直接依存として置く。これで generated `gen/live` の `gleam_json` / `lustre` に対する `Transitive dependency imported` は3面とも0になった。`sketch_lustre` の face-source 警告は gen-6 P1-4 の追随事項として残す。
+
+| 面 | 追加する直接依存 |
+|---|---|
+| www | `gleam_json = ">= 3.0.0 and < 4.0.0"`; `lustre = ">= 5.7.1 and < 6.0.0"` |
+| muses | `lustre = ">= 5.7.1 and < 6.0.0"` (`gleam_json` は既に直接依存) |
+| console | `lustre = ">= 5.7.1 and < 6.0.0"` (`gleam_json` は既に直接依存) |
+
+### snapshot exit 1 の読み替え
+
+| 面 | raw exit 1 summary の行 | 札と `▲` の既存生成例 |
+|---|---|---|
+| www | `space_title.view(it.space_list)` (F5 output `space/arg_id/page.gleam:204`) | 値の出所: route `arg_id`; ▲ `www/src/gen/load/muse/arg_handle/space/arg_id/page.gleam:145` は `space_list.FreeSpace` を渡す |
+| muses | `settings.view(Nil)` (F5 output `settings/page.gleam:130`) | 値の出所: `subjects`, `consents`; ▲ の値不足行は下表 |
+| console | `session_switch.view(Nil)` (F5 output `switch/page.gleam:110`) | 値の出所: `has_store`, `idp_origin`; ▲ の値不足行は下表 |
+
+final5 では raw summary の3行をすべて `[exit 1 値の出所]` と出す。全 runtime diagnostic にある face-side は Hex 0.7.0 の `framework/front.Target` 不在 (Y1e output `www/src/gen/api.gleam:42`, `muses/src/gen/api.gleam:40`, `console/src/gen/api.gleam:40`) と www `src/blocks/store_schedule.gleam:41` の `grid` field 不足。残りは route / config / session / variant / period の値の出所で、下表に `▲` の file:line を付けた。生成器不足の行は残らない。
+
+各 `gleam build` は face-side と値の出所の不足で exit 1 のまま。F5 copy は www `0 生成器不足 / 2 値の出所 / 5 ★`、muses `0 / 8 / 3`、console `0 / 17 / 1`。warnings は www `246 generated / 47 ★ / 15 dependency・framework`、muses `93 / 58 / 15`、console `75 / 34 / 15`。前回値 (errors `24 / 14 / 18`, warnings `415 / 452 / 250`) より muses / console は悪化していない。証跡: `gen/build/y1e-n-f5-final5-{www,muses,console}.txt`、準備 `gen/build/y1e-n-f5-prepare-final.txt`、集計 `gen/build/y1e-n-final-counts.txt`。
 
 ### 値の出所の穴 (yumemi-1f と F5 の起点)
 
@@ -70,16 +90,18 @@ snapshot にある Block `In` と、生成 load が現在渡している式の�
 | config origin | `console/src/pages/consent/page.gleam` | `console/src/gen/load/consent/page.gleam:110` — `consent_page.view(Nil)` (`idp_origin`) |
 | session value | `console/src/pages/switch/page.gleam` | `console/src/gen/load/switch/page.gleam:110` — `session_switch.view(Nil)` (`has_store`, `idp_origin`) |
 | route parameter | `muses/src/pages/articles/arg_id/page.gleam` | `muses/src/gen/load/articles/arg_id/page.gleam:115` — `article_form.view(Nil)` (`Edit(article, phase)`) |
-| route parameter / variant | `muses/src/pages/page/widget/arg_id/page.gleam` | `muses/src/gen/load/page/widget/arg_id/page.gleam:115` — `widget_form.view(Nil)` (`Mode.Edit`, widget id) |
+| route parameter / variant | `muses/src/pages/page/widget/arg_id/page.gleam` | `muses/src/gen/load/page/widget/arg_id/page.gleam:128` — `widget_form.view(Nil)` (`Mode.Edit`, widget id) |
 | variant selection | `muses/src/pages/articles/new/page.gleam` | `muses/src/gen/load/articles/new/page.gleam:110` — `article_form.view(Nil)`; ★ は `article_form.New` を渡す |
-| variant selection | `muses/src/pages/page/widget/new/page.gleam` | `muses/src/gen/load/page/widget/new/page.gleam:115` — `widget_form.view(Nil)` (`Mode.New`) |
-| variant selection | `muses/src/pages/page/page.gleam` | `muses/src/gen/load/page/page.gleam:134`, `:145` — `space_selector.view(Nil)`, `widget_list.view(Nil)` (`selected`) |
-| session value | `muses/src/pages/settings/page.gleam` | `muses/src/gen/load/settings/page.gleam:118` — `settings.view(Nil)` (`subjects`, `consents`) |
-| period value | `muses/src/pages/metrics/page.gleam` | `muses/src/gen/load/metrics/page.gleam:110` — `metrics_dashboard.view(Nil)` (`from`, `to`) |
+| variant selection | `muses/src/pages/page/widget/new/page.gleam` | `muses/src/gen/load/page/widget/new/page.gleam:128` — `widget_form.view(Nil)` (`Mode.New`) |
+| variant selection | `muses/src/pages/page/page.gleam` | `muses/src/gen/load/page/page.gleam:141`, `:149` — `space_selector.view(Nil)`, `block_widget_list.view(Nil)` (`selected`) |
+| session value | `muses/src/pages/settings/page.gleam` | `muses/src/gen/load/settings/page.gleam:130` — `settings.view(Nil)` (`subjects`, `consents`) |
+| period value | `muses/src/pages/metrics/page.gleam` | `muses/src/gen/load/metrics/page.gleam:111` — `metrics_dashboard.view(Nil)` (`from`, `to`) |
+| route parameter | `www/src/pages/claim/arg_code/page.gleam` | ▲ `www/src/gen/load/claim/arg_code/page.gleam:66` — `claim_head.view(code)`; Y1e F5 output still passes `Nil` at `:125`, but `claim_head.In` is `String` |
+| route parameter | `www/src/pages/muse/arg_handle/space/arg_id/page.gleam` | ▲ `www/src/gen/load/muse/arg_handle/space/arg_id/page.gleam:145` — `space_title_block.view(space)` receives `space_list.FreeSpace`; Y1e F5 output passes `space_list.Out` at final `:204` (pre-fix probe `:210`), so `arg_id` must select the row |
 
 Console の snapshot は load Page が11本あり、共通 `console_header` の `idp_origin` が全11本で欠ける。BRIEF の「約9」より実ファイルでは2本多いため、上表に11本すべて載せた。
 
-`home`, `heaven`, `links`, `settings`, `page` の Block `In` には Page.of 以外の Service.Out もある。例: `muses/src/gen/load/page.gleam:111` (`home.view(Nil)`)、`muses/src/gen/load/heaven/page.gleam:111`、`muses/src/gen/load/links/page.gleam:111`。これは出所の新語彙を足さず、Y1f の Service 読み推論で扱う。
+Block `In` の必須 `Out` field からは service source を生成し、`home` は `home.In(...)` を渡す。値の出所が必要な残件は上表に記載した。
 
 Y1f には役員 人見 09-24 16:52 の裁定(A 案:Page が取りに行く Service は並んだ Block の In の型から生成器が導き、Page.reads は根治後に消す)も同居させる ── 同じ『Page と Block の間の読みの語彙』の問いである。
 
@@ -122,21 +144,25 @@ File input は Service の `Blob` / `Option(Blob)` field ごとに `<field>_file
 |---|---:|---:|
 | `cd gen && gleam test` | 159 | 178 passed |
 | fixture generated files | 88 | 92 |
-| snapshot exit 1 | 5 (decoder 2 + face 3) | 3 (face 3) |
+| snapshot exit 1 summary | 5 (decoder 2 + face 3) | 3 (console / muses / www; all three tagged `値の出所`) |
 | snapshot exit 2 | 0 | 0 |
 | snapshot exit 3 | 1 | 1 |
 | snapshot exit 4 | 20 | 20 (exit4 line diff 0) |
 | snapshot warnings (`exit 0 警告`) | 43 | 43 |
 | snapshot generated files | 1340 | 1347 |
 
-snapshot raw run log は face ごとの exit 1 summary を3行出す。基線 exit1=5 はその3 face errorsに decoder errors 2件を加えた数で、最終値から decoder 2件が消えた。
+snapshot raw run log は face ごとの exit 1 summary を3行出す。基線 exit1=5 はその3 face errorsに decoder errors 2件を加えた数で、decoder errors 2件は解消済み。final5 の full runtime diagnostics は www 4 / muses 9 / console 18 errors で、Hex 0.7.0 の面側と上表の値の出所に全行を分類した。
 
-F5 face build の診断内訳 (各 `gleam build` は既存型エラーで exit 1):
+F5 face build の診断内訳 (各 `gleam build` は face-side と値の出所の不足で exit 1):
 
-| 面 | errors: generated / ★ | warnings: generated / ★ / dependency・framework |
+| 面 | errors: 生成器不足 / 値の出所 / ★ (合計) | warnings: generated / ★ / dependency・framework (合計) |
 |---|---:|---:|
-| www | 19 / 5 | 322 / 78 / 15 |
-| muses | 11 / 3 | 205 / 232 / 15 |
-| console | 17 / 1 | 123 / 112 / 15 |
+| www | 0 / 2 / 5 (7) | 246 / 47 / 15 (308) |
+| muses | 0 / 8 / 3 (11) | 93 / 58 / 15 (166) |
+| console | 0 / 17 / 1 (18) | 75 / 34 / 15 (124) |
 
-F5 写しに `Unused imported*` として出る generated `gen/load` / `gen/live` の診断は各面0。指定された browser_adult / subscription_* の3件ずつは live が実際に使う transitive modules への警告なので、unused ではない。direct dependency は F5 の面 manifest で扱う。
+F5 写しの generated `gen/live` では `gleam_json` / `lustre` の `Transitive dependency imported` が各面0。`Unused imported*` も3面とも0。警告15件は依存・framework 側で同数。証跡の一覧は `gen/build/y1e-n-final-counts.txt`。
+
+確かめたこと: root build exit 0 / warning 1、gen test 178 passed、fixture 2回92 files / diff 0、SSR / isolate / given / file / overlay / block preview ALL PASS、format check 56 + 951 files、snapshot 2回 exit 4 / 1347 files / diff 0、F5 3面の errors / warnings は上表のとおり。
+
+確かめていないこと: F5 consumer manifest への直接依存追加は probe copy のみ。`musearch` への適用、Hex publish、staging / production build は未実施。
