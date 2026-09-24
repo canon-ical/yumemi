@@ -2217,7 +2217,7 @@ fn option_background_text(blob: Bool) -> String {
       <> "  case value {\n"
       <> "    Some(value) -> "
       <> quoted("url(\"")
-      <> " <> to_string(value) <> "
+      <> " <> media.url(value, media.W1600) <> "
       <> quoted("\")")
       <> "\n"
       <> "    None -> \"none\"\n"
@@ -2259,7 +2259,7 @@ fn load_imports(
     "style",
   ]
   let blob = case theme_background_blob {
-    True -> ["framework/blob.{type Blob, to_string}"]
+    True -> ["framework/blob.{type Blob}", "media"]
     False -> []
   }
   let layout = case include_layout {

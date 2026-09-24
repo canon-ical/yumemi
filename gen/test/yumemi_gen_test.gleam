@@ -11,6 +11,7 @@ import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
+import gleam/uri
 import gleeunit
 import gleeunit/should
 import simplifile
@@ -2158,9 +2159,30 @@ pub fn front_emit_blob_theme_wraps_image_in_quoted_css_url_test() {
     })
   string.contains(
     page,
-    "Some(value) -> \"url(\\\"\" <> to_string(value) <> \"\\\")\"",
+    "Some(value) -> \"url(\\\"\" <> media.url(value, media.W1600) <> \"\\\")\"",
   )
   |> should.be_true
+  string.contains(page, "import media") |> should.be_true
+  string.contains(page, "framework/blob.{type Blob}") |> should.be_true
+}
+
+pub fn front_blob_theme_media_url_matches_segment_encoding_test() {
+  let key = "season one+猫/夏祭り 2026+top.jpg"
+  let encoded =
+    key
+    |> string.split("/")
+    |> list.map(fn(segment) {
+      segment
+      |> uri.percent_encode
+      |> string.replace("+", "%2B")
+    })
+    |> string.join("/")
+
+  let url = "/media/" <> encoded <> "?v=w1600"
+  url
+  |> should.equal(
+    "/media/season%20one%2B%E7%8C%AB/%E5%A4%8F%E7%A5%AD%E3%82%8A%202026%2Btop.jpg?v=w1600",
+  )
 }
 
 pub fn missing_shell_is_exit_three_test() {
