@@ -10,7 +10,7 @@ pub type Track {
 }
 
 pub type TrackSize {
-  TrackSizeAuto
+  AutoSize
   FrSize(value: Int)
   RemSize(value: Float)
   PxSize(value: Float)
@@ -29,7 +29,7 @@ pub fn to_css(track: Track) -> String {
 
 fn size_to_css(size: TrackSize) -> String {
   case size {
-    TrackSizeAuto -> "auto"
+    AutoSize -> "auto"
     FrSize(value) -> int.to_string(value) <> "fr"
     RemSize(value) -> float.to_string(value) <> "rem"
     PxSize(value) -> float.to_string(value) <> "px"

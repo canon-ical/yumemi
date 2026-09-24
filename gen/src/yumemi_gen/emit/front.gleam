@@ -5085,7 +5085,7 @@ fn framework_track_size_of(
   size: reader_front.TrackSize,
 ) -> framework_track.TrackSize {
   case size {
-    reader_front.TrackSizeAuto -> framework_track.TrackSizeAuto
+    reader_front.AutoSize -> framework_track.AutoSize
     reader_front.FrSize(value) -> framework_track.FrSize(value)
     reader_front.RemSize(value) -> framework_track.RemSize(value)
     reader_front.PxSize(value) -> framework_track.PxSize(value)

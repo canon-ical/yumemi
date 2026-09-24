@@ -2539,7 +2539,7 @@ pub fn front_emit_grid_tracks_template_and_fixed_cells_test() {
       <> "      Fixed(area: \"hero\", block: blocks.Article, cell: Span(cols: 2, rows: 1)),\n"
       <> "      Fixed(area: \"rail\", block: blocks.Summary, cell: At(col: 1, row: 2, span: CellSpan(cols: 2, rows: 3))),\n"
       <> "    ],\n"
-      <> "    cols: [track.Fr(2), track.Minmax(min: track.RemSize(12.0), max: track.TrackSizeAuto)],\n"
+      <> "    cols: [track.Fr(2), track.Minmax(min: track.RemSize(12.0), max: track.AutoSize)],\n"
       <> "    rows: [track.Rem(10.0), track.Px(240.0), track.Auto],\n"
       <> "    template: [[\"hero\", \"hero\"], [\"rail\", \"rail\"]],\n"
       <> "  ),\n"

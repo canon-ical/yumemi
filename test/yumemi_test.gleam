@@ -215,10 +215,7 @@ fn fixed_cells_and_grid_tracks_are_typed() {
   assert_equal(track.to_css(track.Rem(1.5)), "1.5rem", "rem track CSS")
   assert_equal(track.to_css(track.Px(16.0)), "16.0px", "pixel track CSS")
   assert_equal(
-    track.to_css(track.Minmax(
-      min: track.RemSize(12.0),
-      max: track.TrackSizeAuto,
-    )),
+    track.to_css(track.Minmax(min: track.RemSize(12.0), max: track.AutoSize)),
     "minmax(12.0rem, auto)",
     "minmax track CSS",
   )

@@ -1150,7 +1150,7 @@ P1、back 側、musearch、DDL、Hex publish、push、main、push は触って�
 - priority 1: root vars test、commit `bbe39c2`。
 - priority 2: Widget 枠名 / 生成 `WidgetKey` を除去。Widget の全 Service Args を同名 Var から解決し、同一 Service の load source を統合。fixture の `widget_list` は `widget: Option(String)` を `Query("widget")` から読む。commit `7f36852`。
 - priority 3: 7検査の負ケースと未使用 Var の警告を検証。診断は対象 source path、検査番号、Block / Arg、1行性を assert。commit `cdaff6b`。
-- `Track.Auto` と `TrackSize` の auto CSS を実装。Gleam は同一 module に同名構成子を定義できず、`TrackSize.Auto` はコンパイル不可のため、`TrackSizeAuto` を置いた。CSS は `auto` を出力する。
+- `Track.Auto` と `TrackSize` の auto CSS を実装。Gleam は同一 module に同名構成子を定義できず、`TrackSize.Auto` はコンパイル不可のため、`AutoSize` を置いた(`FrSize` / `RemSize` / `PxSize` の流儀、贄川が P2 で改名)。CSS は `auto` を出力する。
 - AuthOrigin は public 面の Layout に置いた。Vars はページごとの `src/gen/load/<page>.gleam` に生成する。DDL 無し。
 
 ## 検証
@@ -1169,5 +1169,5 @@ P1、back 側、musearch、DDL、Hex publish、push、main、push は触って�
 ## 残り / 次巡
 
 - 殻の実値読み (`/api/session`、env、Path / Query / Service Args、`given`、401) は次巡。今回の `shell.mjs` は Vars を空値で作って load に渡す仮配線。
-- `TrackSize.Auto` と `Track.Auto` の別構成子名は Gleam の module namespace 制約に衝突する。確認待ち。現状は `TrackSizeAuto`。
+- `TrackSize.Auto` と `Track.Auto` の別構成子名は Gleam の module namespace 制約に衝突する。贄川が `AutoSize`(`<X>Size` の流儀)に決めた。
 - root / gen 全体の format check を通すための無関係な既存未整形ファイルは今回の作業域外。

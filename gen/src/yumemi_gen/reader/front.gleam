@@ -110,7 +110,7 @@ pub type Track {
 }
 
 pub type TrackSize {
-  TrackSizeAuto
+  AutoSize
   FrSize(Int)
   RemSize(Float)
   PxSize(Float)
@@ -1228,7 +1228,7 @@ fn parse_track(expression: glance.Expression) -> Result(Track, Nil) {
 
 fn parse_track_size(expression: glance.Expression) -> Result(TrackSize, Nil) {
   case g.ctor_name(expression) {
-    Some("TrackSizeAuto") -> Ok(TrackSizeAuto)
+    Some("AutoSize") -> Ok(AutoSize)
     Some("FrSize") ->
       case g.args(expression) {
         [value] ->
