@@ -22,7 +22,7 @@ const pageSpecs = new Map([
     loader: pageLoader0,
     layout: layoutDefinition.admin,
     vars: [
-      { name: "subject", optional: false },
+      { name: "subject", optional: false, from: { type: "session", name: "SubjectHandle" } },
     ],
     givens: [
     ],
@@ -115,9 +115,28 @@ function apiPathFor(serviceValue) {
   return entry.path;
 }
 
-async function readFromApp(app, request, serviceValue, params) {
-  const path = apiPathFor(serviceValue).replace(/:([A-Za-z0-9_]+)/g, (_, name) => encodeURIComponent(params[name] ?? ""));
+function argsFor(vars, mapping) {
+  return Object.fromEntries(mapping.map(([name, field, optional]) => {
+    const value = vars[field];
+    return [name, optional && typeof value === "string" ? new Some(value) : value];
+  }));
+}
+
+async function readFromApp(app, request, serviceValue, args) {
+  const used = new Set();
+  const path = apiPathFor(serviceValue).replace(/:([A-Za-z0-9_]+)/g, (_, name) => {
+    used.add(name);
+    const arg = args[name];
+    const value = arg instanceof Some ? arg[0] : arg;
+    if (typeof value !== "string") throw new Error("missing service path arg: " + name);
+    return encodeURIComponent(value);
+  });
   const target = new URL(path, request.url);
+  for (const [name, arg] of Object.entries(args)) {
+    if (used.has(name)) continue;
+    const value = arg instanceof Some ? arg[0] : arg;
+    if (typeof value === "string") target.searchParams.set(name, value);
+  }
   return app.fetch(new Request(target, request));
 }
 
@@ -131,7 +150,49 @@ function failure(status, body) {
 }
 
 async function renderPage(request, env, matched) {
-  const vars = Object.fromEntries(matched.spec.vars.map((field) => [field.name, field.optional ? Option$None$const : ""]));
+  const vars = {};
+  const query = new URL(request.url).searchParams;
+  let sessionLoaded = false;
+  let session = null;
+  for (const field of matched.spec.vars) {
+    const source = field.from;
+    let value;
+    if (source.type === "path") {
+      value = matched.params[source.name];
+    } else if (source.type === "query") {
+      const found = query.get(source.name);
+      value = found === null ? Option$None$const : new Some(found);
+    } else if (source.type === "origin") {
+      const envName = "PUBLIC_" + source.name.toUpperCase() + "_ORIGIN";
+      const origin = env[envName];
+      if (typeof origin !== "string" || origin.length === 0) return failure(500, envName);
+      value = origin;
+    } else if (source.type === "auth-origin") {
+      const envName = "PUBLIC_IDP_ORIGIN";
+      const origin = env[envName];
+      if (typeof origin !== "string" || origin.length === 0) return failure(500, envName);
+      value = origin;
+    } else if (source.type === "session") {
+      if (!sessionLoaded) {
+        sessionLoaded = true;
+        try {
+          const target = new URL("/api/session", request.url);
+          const response = await env.APP.fetch(new Request(target, request));
+          if (response.ok) session = await response.json();
+        } catch (_) {
+          session = null;
+        }
+      }
+      const subject = session?.anonymous === true ? undefined : session?.subject;
+      const found = source.name === "SubjectHandle" ? subject?.handle : subject?.id;
+      if (typeof found === "string") value = field.optional ? new Some(found) : found;
+      else if (field.optional) value = Option$None$const;
+      else return failure(401, "unauthorized");
+    } else {
+      return failure(500, "invalid variable source");
+    }
+    vars[field.name] = value;
+  }
   const values = [vars];
   let root = null;
   for (const source of matched.spec.sources) {
@@ -139,7 +200,7 @@ async function renderPage(request, env, matched) {
       values.push(pageTheme(matched.definition, root));
       continue;
     }
-    const response = await readFromApp(env.APP, request, source.service, matched.params);
+    const response = await readFromApp(env.APP, request, source.service, argsFor(vars, source.args));
     if (!response.ok) {
       if (response.status === 403) return failure(403, "adult declaration required");
       if (response.status === 404 && !source.root) { values.push(Option$None$const); continue; }
@@ -152,7 +213,7 @@ async function renderPage(request, env, matched) {
   }
   const givens = [];
   for (const given of matched.spec.givens) {
-    const response = await readFromApp(env.APP, request, matched.definition, given.service, matched.params, null);
+    const response = await readFromApp(env.APP, request, given.service, argsFor(vars, given.args));
     if (!response.ok) continue;
     const raw = await response.json();
     given.decoder(raw);

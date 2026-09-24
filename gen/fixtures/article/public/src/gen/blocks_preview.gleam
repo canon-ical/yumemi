@@ -1,4 +1,4 @@
-//// GENERATED from public/src/{layout.gleam,pages/**/page.gleam,blocks/*.gleam} [sha256:2f054172c3d1] — 手で編集しない
+//// GENERATED from public/src/{layout.gleam,pages/**/page.gleam,blocks/*.gleam} [sha256:b5e213793c66] — 手で編集しない
 
 import blocks/article
 import blocks/feed

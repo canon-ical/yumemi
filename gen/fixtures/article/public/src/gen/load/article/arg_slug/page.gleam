@@ -1,4 +1,4 @@
-//// GENERATED from public/src/pages/article/arg_slug/page.gleam [sha256:487960d3029e] — 手で編集しない
+//// GENERATED from public/src/pages/article/arg_slug/page.gleam [sha256:4ced8cac33da] — 手で編集しない
 
 import blocks/article
 import blocks/feed

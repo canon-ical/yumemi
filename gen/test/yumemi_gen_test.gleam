@@ -3531,6 +3531,19 @@ pub fn front_emit_load_deduplicates_widget_service_sources_test() {
   string.contains(shell, "widgetKeys") |> should.be_false
 }
 
+pub fn front_emit_shell_sends_every_non_path_arg_as_query_test() {
+  let shell = text("public/src/gen/shell.mjs")
+  string.contains(shell, "    if (used.has(name)) continue;\n")
+  |> should.be_true
+  string.contains(
+    shell,
+    "    if (typeof value === \"string\") target.searchParams.set(name, value);\n",
+  )
+  |> should.be_true
+  string.contains(shell, "value instanceof Some) target.searchParams.set")
+  |> should.be_false
+}
+
 pub fn front_emit_load_by_kind_matches_row_constructors_directly_test() {
   let page = text("public/src/gen/load/article/arg_slug/page.gleam")
   string.contains(page, "widget_list.ArticleRow(..)") |> should.be_true
@@ -3896,6 +3909,42 @@ pub fn unused_var_is_warning_only_test() {
   })
   |> should.be_true
   stop.worst(notes) |> should.equal(0)
+}
+
+pub fn page_of_does_not_bind_service_args_without_block_arg_test() {
+  let assert Ok(fixture_units) =
+    source.load(
+      front_overlay_negative_fixture <> "/required_service_arg_missing",
+    )
+  let blocks =
+    fixture_units
+    |> list.filter(fn(unit) { string.starts_with(unit.path, "blocks/") })
+  let page_path = "pages/example/arg_slug/page"
+  let page =
+    variable_page_of(
+      "Some(service.ArticleRead)",
+      "[Var(\"slug\", Path(\"slug\"))]",
+      "Fixed(area: \"page\", block: blocks.Card, cell: Flow)",
+    )
+  let units =
+    list.append(
+      [
+        layout_unit(empty_variable_layout()),
+        source_unit(page_path, page_source(page)),
+      ],
+      blocks,
+    )
+  let value = front_from_units(units, app().services)
+  let assert Ok(page_args) =
+    list.find(value.page_service_args, fn(item) { item.page == page_path })
+  page_args.services
+  |> should.equal([front.ServiceArgs(service: "article_read", args: [])])
+  assert_variable_note(
+    front_notes(units, app().services),
+    4,
+    page_path,
+    "Service.article_read Args.slug",
+  )
 }
 
 fn variable_negative_notes(

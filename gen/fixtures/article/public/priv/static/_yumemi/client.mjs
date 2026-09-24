@@ -1,4 +1,4 @@
-// GENERATED from public/src/components/*.gleam and src/entry.gleam [sha256:9453dc557363] — 手で編集しない
+// GENERATED from public/src/components/*.gleam and src/entry.gleam [sha256:a2db3813520e] — 手で編集しない
 // public/build/dev/javascript/prelude.mjs
 var CustomType = class {
   withFields(fields) {
@@ -5547,6 +5547,14 @@ function p_(attributes, children) {
 function select_(attributes, children) {
   return element_("select", attributes, children);
 }
+
+// public/build/dev/javascript/yumemi/framework/front/track.mjs
+var Auto = class extends CustomType {
+};
+var Track$Auto$const = new Auto();
+var AutoSize = class extends CustomType {
+};
+var TrackSize$AutoSize$const = new AutoSize();
 
 // public/build/dev/javascript/yumemi/framework/front/css.mjs
 var Margin = class extends CustomType {
