@@ -1,4 +1,4 @@
-// GENERATED from public/src/components/*.gleam and src/entry.gleam [sha256:8fde9ebb404a] — 手で編集しない
+// GENERATED from public/src/components/*.gleam and src/entry.gleam [sha256:9453dc557363] — 手で編集しない
 // public/build/dev/javascript/prelude.mjs
 var CustomType = class {
   withFields(fields) {
@@ -5632,6 +5632,15 @@ var Pulse = class extends CustomType {
 var Animation$Pulse$const = new Pulse();
 
 // public/build/dev/javascript/yumemi/framework/front.mjs
+var AuthOrigin = class extends CustomType {
+};
+var From$AuthOrigin$const = new AuthOrigin();
+var SubjectHandle = class extends CustomType {
+};
+var SessionKey$SubjectHandle$const = new SubjectHandle();
+var SubjectId = class extends CustomType {
+};
+var SessionKey$SubjectId$const = new SubjectId();
 var Flow = class extends CustomType {
 };
 var Cell$Flow$const = new Flow();

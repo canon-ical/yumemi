@@ -1,4 +1,4 @@
-// GENERATED from public/src/{gen/route.gleam,gen/load/**,pages/**,layout.gleam,shell.gleam} [sha256:130f5a3a8b39] — 手で編集しない
+// GENERATED from public/src/{gen/route.gleam,gen/load/**,pages/**,layout.gleam,shell.gleam} [sha256:a7017ffbea17] — 手で編集しない
 
 import * as api from "./api.mjs";
 import * as blocksPreview from "./blocks_preview.mjs";
@@ -27,13 +27,21 @@ const pageSpecs = new Map([
   ["/article/:slug", {
     loader: pageLoader0,
     layout: layoutDefinition.public$,
+    vars: [
+      { name: "widget", optional: true },
+      { name: "slug", optional: false },
+      { name: "view_only", optional: false },
+      { name: "term", optional: true },
+      { name: "subject_handle", optional: true },
+      { name: "www_origin", optional: false },
+      { name: "auth_origin", optional: false },
+    ],
     givens: [
       { tag: "pick-tag", service: service.Service$ArticleList$const, decoder: decodeArticleList },
     ],
     sources: [
-      { service: service.Service$WidgetList$const, decoder: decodeWidgetList, widget: "article_feed", optional: true, root: false },
+      { service: service.Service$WidgetList$const, decoder: decodeWidgetList, optional: true, root: false },
       { service: service.Service$ArticleRead$const, decoder: decodeArticleRead, optional: false, root: true },
-      { service: service.Service$WidgetList$const, decoder: decodeWidgetList, widget: "article_kinds", optional: true, root: false },
       { theme: true },
     ],
   }],
@@ -153,16 +161,9 @@ function apiPathFor(serviceValue) {
   return entry.path;
 }
 
-function widgetNameFor(definition, serviceValue) {
-  const placement = [...definition.sp.placements].find((candidate) => candidate.of === serviceValue && candidate.name !== undefined);
-  return placement?.name ?? null;
-}
-
-async function readFromApp(app, request, definition, serviceValue, params, sourceWidget) {
+async function readFromApp(app, request, serviceValue, params) {
   const path = apiPathFor(serviceValue).replace(/:([A-Za-z0-9_]+)/g, (_, name) => encodeURIComponent(params[name] ?? ""));
   const target = new URL(path, request.url);
-  const widgetName = sourceWidget ?? widgetNameFor(definition, serviceValue);
-  if (widgetName !== null) target.searchParams.set("widget", widgetName);
   return app.fetch(new Request(target, request));
 }
 
@@ -176,14 +177,15 @@ function failure(status, body) {
 }
 
 async function renderPage(request, env, matched) {
-  const values = [];
+  const vars = Object.fromEntries(matched.spec.vars.map((field) => [field.name, field.optional ? Option$None$const : ""]));
+  const values = [vars];
   let root = null;
   for (const source of matched.spec.sources) {
     if (source.theme) {
       values.push(pageTheme(matched.definition, root));
       continue;
     }
-    const response = await readFromApp(env.APP, request, matched.definition, source.service, matched.params, source.widget);
+    const response = await readFromApp(env.APP, request, source.service, matched.params);
     if (!response.ok) {
       if (response.status === 403) return failure(403, "adult declaration required");
       if (response.status === 404 && !source.root) { values.push(Option$None$const); continue; }

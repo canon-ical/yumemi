@@ -23,7 +23,7 @@ pub type Attached {
 }
 
 pub fn main() {
-  reads_are_typed_service_lists()
+  vars_are_typed_sources()
   calls_use_one_target_shape()
   frame_defaults_resolve_from_empty_fields()
   fixed_cells_and_grid_tracks_are_typed()
@@ -34,26 +34,50 @@ pub fn main() {
   io.println("Framework checks passed: 8 groups")
 }
 
-fn reads_are_typed_service_lists() {
+fn vars_are_typed_sources() {
   let layout: front.Layout(Service, Block) =
-    front.Layout(sp: empty_frame(), pc: None, tablet: None, reads: [
-      ArticleRead,
-      SubscriptionRead,
-    ])
+    front.Layout(
+      vars: [
+        front.Var(name: "idp_origin", from: front.AuthOrigin),
+        front.Var(name: "www_origin", from: front.Origin(face: "www")),
+      ],
+      sp: empty_frame(),
+      pc: None,
+      tablet: None,
+    )
   let page: front.Page(Service, Block) =
     front.Page(
       of: Some(ArticleRead),
       layout: layout,
       theme: None,
+      vars: [
+        front.Var(name: "muse", from: front.Path("muse")),
+        front.Var(name: "range", from: front.Query("range")),
+        front.Var(name: "subject", from: front.Session(front.SubjectHandle)),
+      ],
       sp: empty_frame(),
       pc: None,
       tablet: None,
-      reads: [ArticleRead, SubscriptionRead],
     )
-  let page_reads: List(Service) = page.reads
-  let layout_reads: List(Service) = layout.reads
-  assert_equal(page_reads, [ArticleRead, SubscriptionRead], "Page.reads")
-  assert_equal(layout_reads, [ArticleRead, SubscriptionRead], "Layout.reads")
+  let page_vars: List(front.Var) = page.vars
+  let layout_vars: List(front.Var) = layout.vars
+  assert_equal(
+    page_vars,
+    [
+      front.Var(name: "muse", from: front.Path("muse")),
+      front.Var(name: "range", from: front.Query("range")),
+      front.Var(name: "subject", from: front.Session(front.SubjectHandle)),
+    ],
+    "Page.vars",
+  )
+  assert_equal(
+    layout_vars,
+    [
+      front.Var(name: "idp_origin", from: front.AuthOrigin),
+      front.Var(name: "www_origin", from: front.Origin(face: "www")),
+    ],
+    "Layout.vars",
+  )
 }
 
 fn calls_use_one_target_shape() {
@@ -187,14 +211,15 @@ fn fixed_cells_and_grid_tracks_are_typed() {
   )
   assert_equal(old_grid, css.Grid(cols: 3, gap: css.Rem(1.0)), "legacy Grid")
   assert_equal(track.to_css(track.Fr(1)), "1fr", "fractional track CSS")
+  assert_equal(track.to_css(track.Auto), "auto", "automatic track CSS")
   assert_equal(track.to_css(track.Rem(1.5)), "1.5rem", "rem track CSS")
   assert_equal(track.to_css(track.Px(16.0)), "16.0px", "pixel track CSS")
   assert_equal(
     track.to_css(track.Minmax(
       min: track.RemSize(12.0),
-      max: track.RemSize(20.0),
+      max: track.TrackSizeAuto,
     )),
-    "minmax(12.0rem, 20.0rem)",
+    "minmax(12.0rem, auto)",
     "minmax track CSS",
   )
   assert_equal(list.length(rendered), 3, "GridTracks CSS styles")

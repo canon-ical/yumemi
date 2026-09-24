@@ -1,5 +1,6 @@
 import framework/front.{
-  type Layout, Area, Fixed, Flow, Frame, Layout, One, Widget,
+  type Layout, Area, AuthOrigin, Fixed, Flow, Frame, Layout, One, Origin, Var,
+  Widget,
 }
 import framework/front/css
 import gen/blocks
@@ -8,6 +9,10 @@ import gleam/option.{None, Some}
 import style
 
 pub const public: Layout(service.Service, blocks.Block) = Layout(
+  vars: [
+    Var(name: "www_origin", from: Origin(face: "public")),
+    Var(name: "auth_origin", from: AuthOrigin),
+  ],
   sp: Frame(
     areas: [
       Area(
@@ -31,12 +36,7 @@ pub const public: Layout(service.Service, blocks.Block) = Layout(
     ],
     placements: [
       Fixed(area: "header", block: blocks.SiteHeader, cell: Flow),
-      Widget(
-        area: "page",
-        name: "article_feed",
-        of: service.WidgetList,
-        render: One(blocks.Feed),
-      ),
+      Widget(area: "page", of: service.WidgetList, render: One(blocks.Feed)),
     ],
     cols: [],
     rows: [],
@@ -77,5 +77,4 @@ pub const public: Layout(service.Service, blocks.Block) = Layout(
     ),
   ),
   tablet: None,
-  reads: [],
 )

@@ -1142,3 +1142,32 @@ P1、back 側、musearch、DDL、Hex publish、push、main、push は触って�
 ## 確かめていないこと
 
 - 追加の build / test は未実行。今回の依頼に含まれる履歴・差分・untracked・DDL の検証を行う。
+
+# yumemi-1f 巡 2 束 A 続き (2026-09-25)
+
+## 状態
+
+- priority 1: root vars test、commit `bbe39c2`。
+- priority 2: Widget 枠名 / 生成 `WidgetKey` を除去。Widget の全 Service Args を同名 Var から解決し、同一 Service の load source を統合。fixture の `widget_list` は `widget: Option(String)` を `Query("widget")` から読む。commit `7f36852`。
+- priority 3: 7検査の負ケースと未使用 Var の警告を検証。診断は対象 source path、検査番号、Block / Arg、1行性を assert。commit `cdaff6b`。
+- `Track.Auto` と `TrackSize` の auto CSS を実装。Gleam は同一 module に同名構成子を定義できず、`TrackSize.Auto` はコンパイル不可のため、`TrackSizeAuto` を置いた。CSS は `auto` を出力する。
+- AuthOrigin は public 面の Layout に置いた。Vars はページごとの `src/gen/load/<page>.gleam` に生成する。DDL 無し。
+
+## 検証
+
+- root `gleam build`: exit 0、既存 warning 1 (`src/framework/secret.gleam:5`)。`gen/build/y1f-a-root-build.txt`。
+- root `gleam test`: exit 0、`Framework checks passed: 8 groups`。`gen/build/y1f-a-root-test.txt`。
+- `cd gen && gleam test`: **189 passed, no failures**。`gen/build/y1f-a-gen-test.txt`。
+- fixture generation を2回: 各 exit 0 / 111 files、`diff -qr` 空。`gen/build/y1f-a-fixture-final-{one,two}.txt` / `gen/build/y1f-a-fixture-final-diff.txt`。
+- 生成物を `gen/fixtures/article/{public,admin}/src/gen` に同期し、各 diff は空。public / admin face build は exit 0、warning 0。`gen/build/y1f-a-{public,admin}-build.txt` と `gen/build/y1f-a-fixture-{public,admin}-sync.txt`。
+- root と gen の変更対象 `gleam format --check` は exit 0。public / admin の `src/gen` format check も exit 0。44 generated `.gleam` の SHA-256 header 欠けは0。
+- 変数検査 1〜7 の CLI 負 fixture は各 exit 4、各ログに検査番号と file / Block / 欄が出た。`gen/build/y1f-a-neg-{arg_without_var,path_without_segment,query_to_string,required_service_arg_missing,layout_path_var,bundled_input,of_not_placed}.txt`。
+- snapshot `/home/yumemism/.codex-agents/runs/niekawa-20260924-220716-1228501-25668/ms-8eed4d8/api` は read-only 入力、out は `gen/build/y1f-a-ms1`。1,372 files。診断: exit 0 警告48、exit 1=3、exit 2=0、exit 3=1、exit 4=111。`gen/build/y1f-a-ms1.txt`。親 run directory を誤指定した最初の probe は `src/types.gleam` 不在で exit 3 になり、出力前に停止した。
+- repo 全体の `gleam format --check` は既存の未整形ファイルで exit 1。今回変更した範囲と生成物の targeted check は通過。証跡は `gen/build/y1f-a-root-format.txt` / `gen/build/y1f-a-gen-format.txt`。
+- `gen/fixtures/article/db/` と `gen/fixtures/article/src/gen/` は開始時から存在せず、差分も空。指示書記載の場当たり生成物として出力に含めていない。
+
+## 残り / 次巡
+
+- 殻の実値読み (`/api/session`、env、Path / Query / Service Args、`given`、401) は次巡。今回の `shell.mjs` は Vars を空値で作って load に渡す仮配線。
+- `TrackSize.Auto` と `Track.Auto` の別構成子名は Gleam の module namespace 制約に衝突する。確認待ち。現状は `TrackSizeAuto`。
+- root / gen 全体の format check を通すための無関係な既存未整形ファイルは今回の作業域外。

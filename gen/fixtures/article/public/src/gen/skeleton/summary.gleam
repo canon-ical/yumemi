@@ -1,4 +1,4 @@
-//// GENERATED from public/src/blocks/summary.gleam [sha256:445557a0840d] — 手で編集しない
+//// GENERATED from public/src/blocks/summary.gleam [sha256:77ed97afa9da] — 手で編集しない
 
 import framework/front/el
 import gen/out/article_read

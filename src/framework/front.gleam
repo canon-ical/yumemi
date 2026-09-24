@@ -156,7 +156,7 @@ pub type Area {
 
 pub type Placement(service, block) {
   Fixed(area: String, block: block, cell: Cell)
-  Widget(area: String, name: String, of: service, render: Render(block))
+  Widget(area: String, of: service, render: Render(block))
 }
 
 pub type Cell {

@@ -340,7 +340,7 @@ pub fn gen_types_value_prop_keeps_property_column_test() {
 
 pub fn fixture_gleam_files_parse_including_trailing_spread_test() {
   let assert Ok(units) = source.load(fixture)
-  list.length(units) |> should.equal(16)
+  list.length(units) |> should.equal(15)
   list.any(units, fn(unit) { unit.path == "trailing_spread" })
   |> should.be_true
 }
@@ -956,23 +956,26 @@ pub fn group_becomes_group_by_test() {
 
 pub fn every_file_carries_the_generated_header_test() {
   files()
-  |> list.each(fn(entry) {
+  |> list.filter_map(fn(entry) {
     let #(path, found) = entry
-    case string.ends_with(path, ".sql") {
-      True -> string.starts_with(found, "-- GENERATED ") |> should.be_true
+    let valid = case string.ends_with(path, ".sql") {
+      True -> string.starts_with(found, "-- GENERATED ")
       False ->
         case string.ends_with(path, ".mjs") {
-          True -> string.starts_with(found, "// GENERATED ") |> should.be_true
+          True -> string.starts_with(found, "// GENERATED ")
           False ->
             case string.ends_with(path, ".css") {
-              True ->
-                string.starts_with(found, "/* GENERATED ") |> should.be_true
-              False ->
-                string.starts_with(found, "//// GENERATED ") |> should.be_true
+              True -> string.starts_with(found, "/* GENERATED ")
+              False -> string.starts_with(found, "//// GENERATED ")
             }
         }
     }
+    case valid {
+      True -> Error(Nil)
+      False -> Ok(path)
+    }
   })
+  |> should.equal([])
 }
 
 // ── 名前の変換 ──────────────────────────────────────────────────────────────
@@ -1938,12 +1941,12 @@ pub fn front_model_reads_url_blocks_widgets_components_and_style_test() {
   |> should.equal([
     "Article",
     "Feed",
+    "Notice",
     "RowArticle",
     "RowSummary",
     "SiteHeader",
     "Summary",
   ])
-  value.widget_keys |> should.equal(["ArticleFeed", "ArticleKinds"])
   value.services
   |> should.equal([
     "WidgetList",
@@ -1952,6 +1955,22 @@ pub fn front_model_reads_url_blocks_widgets_components_and_style_test() {
     "ArticlePublish",
     "ArticleCreate",
     "ArticleList",
+  ])
+  let assert [page_args] = value.page_service_args
+  let assert Ok(widget_args) =
+    list.find(page_args.services, fn(service) {
+      service.service == "widget_list"
+    })
+  widget_args.args
+  |> should.equal([
+    front.ResolvedArg(
+      name: "widget",
+      source: front.VariableSource(name: "widget", from: front.Query("widget")),
+    ),
+    front.ResolvedArg(
+      name: "slug",
+      source: front.VariableSource(name: "slug", from: front.Path("slug")),
+    ),
   ])
   value.style.tokens
   |> should.equal([
@@ -1976,7 +1995,7 @@ pub fn front_model_reads_url_blocks_widgets_components_and_style_test() {
   media.1 |> should.equal(["Thumb", "W800", "W1600", "Cast"])
   value.blocks
   |> list.map(fn(block) { block.has_sample })
-  |> should.equal([True, True, True, True, False, True])
+  |> should.equal([True, True, False, True, True, False, True])
   value.components
   |> list.map(fn(component) { component.after_send })
   |> should.equal([None, None, Some("Stay"), Some("ReloadPage")])
@@ -2239,7 +2258,7 @@ pub fn front_emit_blocks_preview_places_layout_blocks_by_area_test() {
       <> "    template: [],\n"
       <> "  )),\n"
       <> "  tablet: None,\n"
-      <> "  reads: [],\n"
+      <> "  vars: [],\n"
       <> ")",
     )
   let assert Ok(#(_, preview)) =
@@ -2252,7 +2271,7 @@ pub fn front_emit_blocks_preview_places_layout_blocks_by_area_test() {
     "html.nav_([attribute.attribute(\"data-yumemi-area\", \"nav\")], [",
     "feed.view(feed.sample)",
     "html.footer_([attribute.attribute(\"data-yumemi-area\", \"footer\")], [",
-    "summary.view(summary.sample)",
+    "summary.view(summary.sample, summary.Arg(slug: \"preview\"))",
   ]
   |> list.each(fn(row) { string.contains(preview, row) |> should.be_true })
   ["el.text(\"header\")", "el.text(\"nav\")", "el.text(\"footer\")"]
@@ -2274,7 +2293,7 @@ pub fn front_emit_blocks_preview_defaults_imported_service_out_and_page_imports_
       source_unit(
         "layout",
         layout_source(
-          "Layout(sp: Frame(areas: [Area(name: \"page\", flow: css.Stack(gap: style.s0), pin: css.NoPin, style: [])], placements: [Fixed(area: \"page\", block: blocks.Article, cell: Flow)], cols: [], rows: [], template: []), pc: None, tablet: None, reads: [])",
+          "Layout(sp: Frame(areas: [Area(name: \"page\", flow: css.Stack(gap: style.s0), pin: css.NoPin, style: [])], placements: [Fixed(area: \"page\", block: blocks.Article, cell: Flow)], cols: [], rows: [], template: []), pc: None, tablet: None, vars: [])",
         ),
       ),
       source_unit(
@@ -2520,22 +2539,24 @@ pub fn front_emit_grid_tracks_template_and_fixed_cells_test() {
       <> "      Fixed(area: \"hero\", block: blocks.Article, cell: Span(cols: 2, rows: 1)),\n"
       <> "      Fixed(area: \"rail\", block: blocks.Summary, cell: At(col: 1, row: 2, span: CellSpan(cols: 2, rows: 3))),\n"
       <> "    ],\n"
-      <> "    cols: [track.Fr(2), track.Minmax(min: track.RemSize(12.0), max: track.PxSize(480.0))],\n"
-      <> "    rows: [track.Rem(10.0), track.Px(240.0)],\n"
+      <> "    cols: [track.Fr(2), track.Minmax(min: track.RemSize(12.0), max: track.TrackSizeAuto)],\n"
+      <> "    rows: [track.Rem(10.0), track.Px(240.0), track.Auto],\n"
       <> "    template: [[\"hero\", \"hero\"], [\"rail\", \"rail\"]],\n"
       <> "  ),\n"
       <> "  pc: None,\n"
       <> "  tablet: None,\n"
-      <> "  reads: [],\n"
+      <> "  vars: [],\n"
       <> ")",
     )
+  list.any(files, fn(file) { file.0 == "public/src/gen/widgets.gleam" })
+  |> should.be_false
   let assert Ok(#(_, css)) =
     list.find(files, fn(file) {
       file.0 == "public/priv/static/_yumemi/style.css"
     })
   [
-    "grid-template-columns: 2fr minmax(12rem, 480px);",
-    "grid-template-rows: 10rem 240px;",
+    "grid-template-columns: 2fr minmax(12rem, auto);",
+    "grid-template-rows: 10rem 240px auto;",
     "grid-template-areas: \"hero hero\" \"rail rail\";",
     "grid-template-columns: 2fr 1fr;",
     "gap: 0.5rem;",
@@ -2550,28 +2571,28 @@ pub fn front_emit_grid_tracks_template_and_fixed_cells_test() {
   |> should.be_true
   string.contains(page, "grid-column: 1 / 3; grid-row: 2 / 5;")
   |> should.be_true
-  string.contains(page, "layout: layout.load(Some(article_read))")
+  string.contains(page, "layout: layout.load(article_read)")
   |> should.be_true
 }
 
-pub fn front_emit_page_frame_grid_and_reads_test() {
+pub fn front_emit_page_frame_grid_and_widget_derived_sources_test() {
   let files =
     synthetic_front_files_with_layout_and_page(
-      "Layout(sp: Frame(areas: [], placements: [], cols: [], rows: [], template: []), pc: None, tablet: None, reads: [])",
+      "Layout(vars: [], sp: Frame(areas: [], placements: [], cols: [], rows: [], template: []), pc: None, tablet: None)",
       "Page(\n"
         <> "  of: Some(service.ArticleRead),\n"
         <> "  layout: layout.public,\n"
         <> "  theme: None,\n"
+        <> "  vars: [],\n"
         <> "  sp: Frame(\n"
         <> "    areas: [Area(name: \"feature\", flow: css.Stack(gap: style.s0), pin: css.NoPin, style: [])],\n"
-        <> "    placements: [Fixed(area: \"feature\", block: blocks.Article, cell: Span(cols: 2, rows: 1))],\n"
+        <> "    placements: [Fixed(area: \"feature\", block: blocks.Article, cell: Span(cols: 2, rows: 1)), Widget(area: \"feature\", of: service.WidgetList, render: One(blocks.Feed))],\n"
         <> "    cols: [track.Fr(1), track.Fr(2)],\n"
         <> "    rows: [],\n"
         <> "    template: [[\"feature\", \"feature\"]],\n"
         <> "  ),\n"
         <> "  pc: None,\n"
         <> "  tablet: None,\n"
-        <> "  reads: [service.WidgetList],\n"
         <> ")",
     )
   let assert Ok(#(_, css)) =
@@ -2596,63 +2617,58 @@ pub fn front_emit_page_frame_grid_and_reads_test() {
     "data-yumemi-grid\", \"page:pages/article/arg_slug/page\"",
   )
   |> should.be_true
-  string.contains(page, "widget_list: widget_list.Out") |> should.be_true
+  string.contains(page, "widget_list: Option(widget_list.Out)")
+  |> should.be_true
+  string.contains(page, "article_read: article_read.Out") |> should.be_true
   string.contains(page, "grid-column: span 2; grid-row: span 1;")
   |> should.be_true
 }
 
-pub fn front_reads_are_loaded_and_block_inputs_are_checked_test() {
+pub fn fixed_in_and_widget_of_services_are_derived_test() {
   let files =
     synthetic_front_files_with_layout(
       "Layout(\n"
-      <> "  sp: Frame(areas: [], placements: [], cols: [], rows: [], template: []),\n"
+      <> "  vars: [],\n"
+      <> "  sp: Frame(areas: [], placements: [Fixed(area: \"main\", block: blocks.Article, cell: Flow), Widget(area: \"main\", of: service.WidgetList, render: One(blocks.Feed))], cols: [], rows: [], template: []),\n"
       <> "  pc: None,\n"
       <> "  tablet: None,\n"
-      <> "  reads: [service.ArticleRead, service.WidgetList],\n"
       <> ")",
     )
   let assert Ok(#(_, layout)) =
     list.find(files, fn(file) { file.0 == "public/src/gen/load/layout.gleam" })
-  string.contains(layout, "article_read: article_read.Out") |> should.be_true
-  string.contains(layout, "widget_list: widget_list.Out") |> should.be_true
+  [
+    string.contains(layout, "article_read: article_read.Out"),
+    string.contains(layout, "widget_list: Option(widget_list.Out)"),
+  ]
+  |> should.equal([True, True])
 
   let assert Ok(#(_, page)) =
     list.find(files, fn(file) {
       file.0 == "public/src/gen/load/article/arg_slug/page.gleam"
     })
-  string.contains(page, "article_read: article_read.Out") |> should.be_true
-  string.contains(page, "widget_list: widget_list.Out") |> should.be_true
-  string.contains(page, "Option(widget_list.Out)") |> should.be_true
+  [
+    string.contains(page, "article_read: article_read.Out"),
+    string.contains(page, "widget_list: Option(widget_list.Out)"),
+    string.contains(page, "widget_list: Option(widget_list.Out)"),
+  ]
+  |> should.equal([True, True, True])
 
-  let assert Ok(face_units) = source.load("fixtures/article/public")
-  let face_units =
-    face_units
-    |> list.filter(fn(unit) {
-      unit.path != "layout" && unit.path != "blocks/article"
-    })
-    |> list.append([
-      source_unit(
-        "layout",
-        layout_source(
-          "Layout(sp: Frame(areas: [], placements: [Fixed(area: \"main\", block: blocks.Article, cell: Flow)], cols: [], rows: [], template: []), pc: None, tablet: None, reads: [service.ArticleRead])",
-        ),
-      ),
-      source_unit(
-        "blocks/article",
-        "import gen/out/article_read\n"
-          <> "pub type In = article_read.Args\n"
-          <> "pub fn view(it: In) -> el.Element(Nil) { it }",
-      ),
-    ])
-  let assert Ok(front_model) =
-    front.read_with_package("public", "public", face_units, app().services)
-  let notes = front.notes(front_model, app().services)
+  let face_units = [
+    layout_unit(
+      "Layout(vars: [], sp: Frame(areas: [], placements: [Fixed(area: \"main\", block: blocks.Article, cell: Flow)], cols: [], rows: [], template: []), pc: None, tablet: None)",
+    ),
+    source_unit(
+      "blocks/article",
+      "import gen/out/article_read\npub type In { In(article: article_read.Out) }\npub fn view(it: In) -> el.Element(Nil) { it }",
+    ),
+  ]
+  let notes = front_notes(face_units, app().services)
   stop.worst(notes) |> should.equal(4)
   notes
   |> list.any(fn(note) {
     note.class == stop.Conflict
-    && string.contains(note.text, "reads の article_read.Out")
-    && string.contains(note.text, "Block Article の In")
+    && string.contains(note.text, "[変数 6]")
+    && string.contains(note.text, "Block Article In In")
   })
   |> should.be_true
 }
@@ -2828,9 +2844,9 @@ pub fn widget_list_logic_builds_summary_for_article_kinds_test() {
     list.find(units, fn(unit) { unit.path == "service/widget_list" })
   [
     "case args.widget {",
-    "widget_key.ArticleFeed ->",
+    "Some(\"summary\") ->",
     "Article(kind: \"Article\", article: row.0)",
-    "widget_key.ArticleKinds ->",
+    "_ ->",
     "Summary(kind: \"Summary\", article: row.0)",
     "step.done(Out(rows: rows))",
   ]
@@ -3474,22 +3490,28 @@ pub fn front_emit_load_page_data_orders_root_fixed_and_widgets_test() {
   let page = text("public/src/gen/load/article/arg_slug/page.gleam")
   string.contains(
     page,
-    "Data(\n    layout: layout.Data,\n    article_read: article_read.Out,\n    article_kinds: Option(widget_list.Out),",
+    "Data(\n    layout: layout.Data,\n    vars: Vars,\n    article_read: article_read.Out,\n    widget_list: Option(widget_list.Out),",
   )
   |> should.be_true
   string.contains(
     page,
-    "article_feed: Option(widget_list.Out),\n  article_read: article_read.Out,\n  article_kinds: Option(widget_list.Out),",
+    "vars: Vars,\n  widget_list: Option(widget_list.Out),\n  article_read: article_read.Out,",
   )
   |> should.be_true
 }
 
-pub fn front_emit_load_separates_widget_names_into_sources_test() {
+pub fn front_emit_load_deduplicates_widget_service_sources_test() {
   let page = text("public/src/gen/load/article/arg_slug/page.gleam")
-  string.contains(page, "article_kinds: Option(widget_list.Out)")
+  string.contains(page, "widget_list: Option(widget_list.Out)")
   |> should.be_true
-  string.contains(page, "article_feed: Option(widget_list.Out)")
-  |> should.be_true
+  text_occurrences(page, "widget_list: Option(widget_list.Out)")
+  |> should.equal(2)
+  string.contains(page, "article_kinds") |> should.be_false
+  string.contains(page, "article_feed") |> should.be_false
+  string.contains(page, "vars: Vars") |> should.be_true
+  let shell = text("public/src/gen/shell.mjs")
+  string.contains(shell, "widgetNameFor") |> should.be_false
+  string.contains(shell, "widgetKeys") |> should.be_false
 }
 
 pub fn front_emit_load_by_kind_matches_row_constructors_directly_test() {
@@ -3539,11 +3561,11 @@ pub fn service_variant_references_are_collected_from_page_widget_and_component_t
     front_from_units(
       [
         layout_unit(
-          "Layout(sp: Frame(areas: [], placements: [Widget(area: \"main\", name: \"slot\", of: service.ArticleList, render: One(blocks.Article))]))",
+          "Layout(sp: Frame(areas: [], placements: [Widget(area: \"main\", of: service.ArticleList, render: One(blocks.Article))]))",
         ),
         source_unit(
           "pages/article/page",
-          "pub const page: Page(service.Service, blocks.Block) = Page(of: Some(service.ArticleRead), layout: layout.demo, sp: Frame(areas: [], placements: []))",
+          "pub const page: Page(service.Service, blocks.Block) = Page(of: None, layout: layout.demo, sp: Frame(areas: [], placements: []))",
         ),
         source_unit(
           "components/search",
@@ -3553,7 +3575,7 @@ pub fn service_variant_references_are_collected_from_page_widget_and_component_t
       [],
     )
   value.services
-  |> should.equal(["ArticleList", "ArticleRead", "ArticleCreate"])
+  |> should.equal(["ArticleList", "ArticleCreate", "ArticleRead"])
 }
 
 pub fn direct_attribute_class_is_exit_four_test() {
@@ -3622,27 +3644,213 @@ pub fn missing_page_arg_is_exit_four_test() {
         layout_unit("Layout(sp: Frame(areas: [], placements: []))"),
         source_unit(
           "pages/article/arg_missing/page",
-          "pub const page: Page(service.Service, blocks.Block) = Page(of: Some(service.ArticleRead), layout: layout.demo, sp: Frame(areas: [], placements: []))",
+          "pub const page: Page(service.Service, blocks.Block) = Page(of: None, layout: layout.demo, vars: [], sp: Frame(areas: [], placements: []))",
         ),
       ],
       app().services,
     )
-  assert_one_note(notes, stop.Conflict, "パス変数 missing")
+  assert_one_note(notes, stop.Conflict, "arg_missing 段を指す Path Var が無い")
   stop.worst(notes) |> should.equal(4)
 }
 
-pub fn widget_without_frame_arg_is_exit_four_test() {
+pub fn widget_service_args_are_resolved_from_same_name_vars_test() {
+  let value = article_front()
+  let assert [page_args] = value.page_service_args
+  let assert Ok(widget_args) =
+    list.find(page_args.services, fn(service) {
+      service.service == "widget_list"
+    })
+  widget_args.args
+  |> should.equal([
+    front.ResolvedArg(
+      name: "widget",
+      source: front.VariableSource(name: "widget", from: front.Query("widget")),
+    ),
+    front.ResolvedArg(
+      name: "slug",
+      source: front.VariableSource(name: "slug", from: front.Path("slug")),
+    ),
+  ])
+}
+
+pub fn block_arg_without_var_is_exit_four_test() {
   let notes =
-    front_notes(
-      [
-        layout_unit(
-          "Layout(sp: Frame(areas: [], placements: [Widget(area: \"main\", name: \"slot\", of: service.ArticleRead, render: One(blocks.Article))]))",
-        ),
-      ],
-      app().services,
+    variable_negative_notes(
+      "arg_without_var",
+      "pages/example/page",
+      empty_variable_layout(),
+      variable_page(
+        "[]",
+        "Fixed(area: \"page\", block: blocks.Card, cell: Flow)",
+      ),
     )
-  assert_one_note(notes, stop.Conflict, "枠の名前を Args に持たない")
+  assert_variable_note(notes, 1, "pages/example/page", "Block Card Arg.slug")
+}
+
+pub fn path_source_without_matching_route_segment_is_exit_four_test() {
+  let notes =
+    variable_negative_notes(
+      "path_without_segment",
+      "pages/example/page",
+      empty_variable_layout(),
+      variable_page(
+        "[Var(name: \"id\", from: Path(\"slug\"))]",
+        "Fixed(area: \"page\", block: blocks.Card, cell: Flow)",
+      ),
+    )
+  assert_variable_note(notes, 2, "pages/example/page", "Path(\"slug\")")
+}
+
+pub fn query_option_to_string_arg_is_exit_four_test() {
+  let notes =
+    variable_negative_notes(
+      "query_to_string",
+      "pages/example/page",
+      empty_variable_layout(),
+      variable_page(
+        "[Var(name: \"term\", from: Query(\"term\"))]",
+        "Fixed(area: \"page\", block: blocks.Card, cell: Flow)",
+      ),
+    )
+  assert_variable_note(notes, 3, "pages/example/page", "Block Card Arg.term")
+}
+
+pub fn required_service_arg_without_block_arg_is_exit_four_test() {
+  let notes =
+    variable_negative_notes(
+      "required_service_arg_missing",
+      "pages/example/arg_slug/page",
+      empty_variable_layout(),
+      variable_page(
+        "[Var(name: \"slug\", from: Path(\"slug\"))]",
+        "Fixed(area: \"page\", block: blocks.Card, cell: Flow)",
+      ),
+    )
+  assert_variable_note(
+    notes,
+    4,
+    "pages/example/arg_slug/page",
+    "Service.article_read Args.slug",
+  )
+}
+
+pub fn layout_path_var_is_exit_four_test() {
+  let notes =
+    variable_negative_notes(
+      "layout_path_var",
+      "pages/example/page",
+      "Layout(vars: [Var(name: \"id\", from: Path(\"id\"))], sp: Frame(areas: [], placements: [], cols: [], rows: [], template: []), pc: None, tablet: None)",
+      variable_page("[]", ""),
+    )
+  assert_variable_note(notes, 5, "layout", "Layout に Path を置けない")
+}
+
+pub fn bundled_block_input_is_exit_four_test() {
+  let notes =
+    variable_negative_notes(
+      "bundled_input",
+      "pages/example/page",
+      empty_variable_layout(),
+      variable_page(
+        "[]",
+        "Fixed(area: \"page\", block: blocks.Card, cell: Flow)",
+      ),
+    )
+  assert_variable_note(notes, 6, "pages/example/page", "Block Card In In")
+}
+
+pub fn page_of_service_without_placement_is_exit_four_test() {
+  let notes =
+    variable_negative_notes(
+      "of_not_placed",
+      "pages/example/page",
+      empty_variable_layout(),
+      variable_page_of("Some(service.ArticleRead)", "[]", ""),
+    )
+  assert_variable_note(
+    notes,
+    7,
+    "pages/example/page",
+    "Page.of Service.ArticleRead",
+  )
+}
+
+pub fn unused_var_is_warning_only_test() {
+  let notes =
+    variable_negative_notes(
+      "unused_var",
+      "pages/example/page",
+      empty_variable_layout(),
+      variable_page("[Var(name: \"unused\", from: Query(\"q\"))]", ""),
+    )
+  notes
+  |> list.any(fn(note) {
+    note.class == stop.Warning && string.contains(note.text, "Var.unused")
+  })
+  |> should.be_true
+  stop.worst(notes) |> should.equal(0)
+}
+
+fn variable_negative_notes(
+  fixture_name: String,
+  page_path: String,
+  layout: String,
+  page: String,
+) -> List(stop.Note) {
+  let assert Ok(fixture_units) =
+    source.load(front_overlay_negative_fixture <> "/" <> fixture_name)
+  let blocks =
+    fixture_units
+    |> list.filter(fn(unit) { string.starts_with(unit.path, "blocks/") })
+  let units =
+    list.append(
+      [
+        layout_unit(layout),
+        source_unit(page_path, page_source(page)),
+      ],
+      blocks,
+    )
+  front_notes(units, app().services)
+}
+
+fn empty_variable_layout() -> String {
+  "Layout(vars: [], sp: Frame(areas: [], placements: [], cols: [], rows: [], template: []), pc: None, tablet: None)"
+}
+
+fn variable_page(vars: String, placement: String) -> String {
+  variable_page_of("None", vars, placement)
+}
+
+fn variable_page_of(of: String, vars: String, placement: String) -> String {
+  let placements = case placement {
+    "" -> "[]"
+    _ -> "[" <> placement <> "]"
+  }
+  "Page(of: "
+  <> of
+  <> ", layout: layout.demo, theme: None, vars: "
+  <> vars
+  <> ", sp: Frame(areas: [], placements: "
+  <> placements
+  <> ", cols: [], rows: [], template: []), pc: None, tablet: None)"
+}
+
+fn assert_variable_note(
+  notes: List(stop.Note),
+  number: Int,
+  context: String,
+  detail: String,
+) -> Nil {
   stop.worst(notes) |> should.equal(4)
+  let conflicts = list.filter(notes, fn(note) { note.class == stop.Conflict })
+  list.length(conflicts) |> should.equal(1)
+  let assert [note] = conflicts
+  string.contains(note.text, "demo/" <> context <> ": [変数 ")
+  |> should.be_true
+  string.contains(note.text, "[変数 " <> int.to_string(number) <> "]")
+  |> should.be_true
+  string.contains(note.text, detail) |> should.be_true
+  string.contains(note.text, "\n") |> should.be_false
 }
 
 pub fn missing_sp_frame_is_exit_three_test() {
@@ -3703,7 +3911,7 @@ fn overlay_negative_layout() -> String {
   <> "  sp: Frame(areas: [], placements: [], cols: [], rows: [], template: []),\n"
   <> "  pc: None,\n"
   <> "  tablet: None,\n"
-  <> "  reads: [],\n"
+  <> "  vars: [],\n"
   <> ")\n"
 }
 
@@ -3735,7 +3943,7 @@ fn overlay_negative_page(
   <> "  ),\n"
   <> "  pc: None,\n"
   <> "  tablet: None,\n"
-  <> "  reads: [],\n"
+  <> "  vars: [],\n"
   <> ")\n"
 }
 

@@ -30,7 +30,6 @@ pub type Front {
     blocks: List(Block),
     components: List(Component),
     style: Style,
-    widget_keys: List(String),
     services: List(String),
     http_entries: List(HttpEntry),
     page_service_args: List(PageServiceArgs),
@@ -103,6 +102,7 @@ pub type Frame {
 }
 
 pub type Track {
+  Auto
   Fr(Int)
   Rem(Float)
   Px(Float)
@@ -110,6 +110,7 @@ pub type Track {
 }
 
 pub type TrackSize {
+  TrackSizeAuto
   FrSize(Int)
   RemSize(Float)
   PxSize(Float)
@@ -146,7 +147,7 @@ pub type Area {
 
 pub type Placement {
   Fixed(area: String, block: String, cell: Cell)
-  Widget(area: String, name: String, service: String, render: Render)
+  Widget(area: String, service: String, render: Render)
 }
 
 pub type Render {
@@ -208,7 +209,6 @@ pub type ResolvedArg {
 
 pub type ResolvedArgSource {
   VariableSource(name: String, from: From)
-  WidgetNameSource(String)
 }
 
 pub type Component {
@@ -299,7 +299,6 @@ fn read_with_package_and_warning(
     |> result.map(parse_style)
     |> option_from_result
     |> option.unwrap(Style(tokens: [], media_variants: []))
-  let widget_keys = widget_keys(layout, pages)
   let services_used = service_references(layout, pages, blocks, components)
   let page_service_args =
     list.map(pages, fn(page) {
@@ -322,7 +321,6 @@ fn read_with_package_and_warning(
     blocks: blocks,
     components: components,
     style: style,
-    widget_keys: widget_keys,
     services: services_used,
     http_entries: http_entries(units, entries),
     page_service_args: page_service_args,
@@ -1181,7 +1179,6 @@ fn parse_placement(expression: glance.Expression) -> Option(Placement) {
     Some("Widget") ->
       Some(Widget(
         area: string_label(expression, "area") |> option.unwrap(""),
-        name: string_label(expression, "name") |> option.unwrap(""),
         service: labelled_constructor(expression, "of") |> option.unwrap(""),
         render: render_of(expression),
       ))
@@ -1208,6 +1205,7 @@ fn parse_tracks(expression: glance.Expression) -> Option(List(Track)) {
 
 fn parse_track(expression: glance.Expression) -> Result(Track, Nil) {
   case g.ctor_name(expression) {
+    Some("Auto") -> Ok(Auto)
     Some("Fr") ->
       case g.args(expression) {
         [value] -> parse_int(value) |> option.map(Fr) |> option.to_result(Nil)
@@ -1230,6 +1228,7 @@ fn parse_track(expression: glance.Expression) -> Result(Track, Nil) {
 
 fn parse_track_size(expression: glance.Expression) -> Result(TrackSize, Nil) {
   case g.ctor_name(expression) {
+    Some("TrackSizeAuto") -> Ok(TrackSizeAuto)
     Some("FrSize") ->
       case g.args(expression) {
         [value] ->
@@ -1387,30 +1386,6 @@ fn tuple_table(
   }
 }
 
-fn widget_keys(layout: Layout, pages: List(Page)) -> List(String) {
-  let layout_keys = placement_widget_names(layout_frames(layout))
-  let page_keys =
-    pages
-    |> list.flat_map(fn(page) { placement_widget_names(page_frames(page)) })
-  layout_keys
-  |> list.append(page_keys)
-  |> list.unique
-  |> list.map(naming.pascal)
-}
-
-fn placement_widget_names(frames: List(Frame)) -> List(String) {
-  frames
-  |> list.flat_map(fn(frame) {
-    frame.placements
-    |> list.filter_map(fn(placement) {
-      case placement {
-        Widget(name: name, ..) -> Ok(name)
-        Fixed(..) -> Error(Nil)
-      }
-    })
-  })
-}
-
 fn service_references(
   layout: Layout,
   pages: List(Page),
@@ -1521,28 +1496,20 @@ fn placement_service_args(
           }
         _ -> []
       }
-    Widget(name: name, service: service_name, ..) ->
+    Widget(service: service_name, ..) ->
       case find_service(services, Some(service_name)) {
         Some(service) -> [
           ServiceArgs(
             service: service.module,
             args: service.args
               |> list.filter_map(fn(arg) {
-                case arg.name {
-                  "widget" ->
+                case list.find(vars, fn(var) { var.name == arg.name }) {
+                  Ok(var) ->
                     Ok(ResolvedArg(
                       name: arg.name,
-                      source: WidgetNameSource(name),
+                      source: VariableSource(name: var.name, from: var.from),
                     ))
-                  _ ->
-                    case list.find(vars, fn(var) { var.name == arg.name }) {
-                      Ok(var) ->
-                        Ok(ResolvedArg(
-                          name: arg.name,
-                          source: VariableSource(name: var.name, from: var.from),
-                        ))
-                      Error(_) -> Error(Nil)
-                    }
+                  Error(_) -> Error(Nil)
                 }
               }),
           ),
@@ -2085,20 +2052,18 @@ fn context_service_notes(
   |> list.flat_map(fn(frame) {
     frame.placements
     |> list.flat_map(fn(placement) {
-      let #(service, block_args, widget_name) = case placement {
+      let #(service, block_args) = case placement {
         Fixed(block: name, ..) ->
           case list.find(front.blocks, fn(block) { block.name == name }) {
             Ok(Block(input_kind: ServiceOut(module), args: args, ..)) -> #(
               service_by_module(services, module),
               args,
-              None,
             )
-            _ -> #(None, [], None)
+            _ -> #(None, [])
           }
-        Widget(name: name, service: service_name, ..) -> #(
+        Widget(service: service_name, ..) -> #(
           find_service(services, Some(service_name)),
           [],
-          Some(name),
         )
       }
       case service {
@@ -2108,8 +2073,6 @@ fn context_service_notes(
             let block_arg =
               list.find(block_args, fn(arg) { arg.name == service_arg.name })
             let var = var_by_name(vars, service_arg.name)
-            let is_widget_field =
-              widget_name != None && service_arg.name == "widget"
             let has_binding = case placement {
               Fixed(..) ->
                 case block_arg {
@@ -2122,7 +2085,7 @@ fn context_service_notes(
                   None -> False
                 }
             }
-            let missing = !is_widget_field && !has_binding
+            let missing = !has_binding
             let required = !service_arg_optional(service_arg)
             let missing_note = case missing && required {
               True -> [
@@ -2299,7 +2262,7 @@ fn variable_note(
 fn placement_name(placement: Placement) -> String {
   case placement {
     Fixed(block: name, ..) -> "Block " <> name
-    Widget(name: name, ..) -> "Widget " <> name
+    Widget(..) -> "Widget"
   }
 }
 
@@ -2396,18 +2359,14 @@ fn placement_used_var_names(
           })
         Error(_) -> []
       }
-    Widget(name: _, service: service_name, render: render, ..) -> {
+    Widget(service: service_name, render: render, ..) -> {
       let service_names = case find_service(services, Some(service_name)) {
         Some(service) ->
           service.args
           |> list.filter_map(fn(arg) {
-            case arg.name == "widget" {
-              True -> Error(Nil)
-              False ->
-                case var_by_name(vars, arg.name) {
-                  Some(var) -> Ok(var.name)
-                  None -> Error(Nil)
-                }
+            case var_by_name(vars, arg.name) {
+              Some(var) -> Ok(var.name)
+              None -> Error(Nil)
             }
           })
         None -> []

@@ -1,5 +1,6 @@
 import framework/front.{
-  type Page, Area, ByKind, Fixed, Flow, Frame, Page, Widget,
+  type Page, Area, ByKind, Fixed, Flow, Frame, Page, Path, Query, Session,
+  SubjectHandle, Var, Widget,
 }
 import framework/front/css
 import gen/blocks
@@ -12,6 +13,13 @@ pub const page: Page(service.Service, blocks.Block) = Page(
   of: Some(service.ArticleRead),
   layout: layout.public,
   theme: Some("theme"),
+  vars: [
+    Var(name: "widget", from: Query("widget")),
+    Var(name: "slug", from: Path("slug")),
+    Var(name: "view_only", from: Path("slug")),
+    Var(name: "term", from: Query("term")),
+    Var(name: "subject_handle", from: Session(SubjectHandle)),
+  ],
   sp: Frame(
     areas: [
       Area(
@@ -36,9 +44,9 @@ pub const page: Page(service.Service, blocks.Block) = Page(
     placements: [
       Fixed(area: "page", block: blocks.Article, cell: Flow),
       Fixed(area: "article-dialog", block: blocks.Summary, cell: Flow),
+      Fixed(area: "page", block: blocks.Notice, cell: Flow),
       Widget(
         area: "rail",
-        name: "article_kinds",
         of: service.WidgetList,
         render: ByKind(
           by: "kind",
@@ -88,5 +96,4 @@ pub const page: Page(service.Service, blocks.Block) = Page(
     ),
   ),
   tablet: None,
-  reads: [service.ArticleRead],
 )

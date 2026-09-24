@@ -10,14 +10,14 @@ import gen/query as q
 import gen/reads/widget_list as reads
 import gen/root/widget_list.{type Actor, type Root, type Service, Service}
 import gleam/list
-import widget_key.{type WidgetKey}
+import gleam/option.{type Option}
 
 pub const effect: Effect = Read
 
 pub const faces: List(Face) = [Public, Admin]
 
 pub type Args {
-  Args(widget: WidgetKey)
+  Args(widget: Option(String), slug: Option(String))
 }
 
 pub type Out {
@@ -63,10 +63,9 @@ pub const service: Service(Args, Out, Error) = Service(
 pub fn logic(_by: Actor, _it: Root, args: Args) -> Step(Out, Error, Start) {
   use rows <- reads.items()
   let rows = case args.widget {
-    widget_key.ArticleFeed ->
-      list.map(rows, fn(row) { Article(kind: "Article", article: row.0) })
-    widget_key.ArticleKinds ->
+    Some("summary") ->
       list.map(rows, fn(row) { Summary(kind: "Summary", article: row.0) })
+    _ -> list.map(rows, fn(row) { Article(kind: "Article", article: row.0) })
   }
   step.done(Out(rows: rows))
 }

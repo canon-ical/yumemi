@@ -1,12 +1,14 @@
-//// GENERATED from public/src/{layout.gleam,pages/**/page.gleam,blocks/*.gleam} [sha256:ed05f1e58ff3] — 手で編集しない
+//// GENERATED from public/src/{layout.gleam,pages/**/page.gleam,blocks/*.gleam} [sha256:2f054172c3d1] — 手で編集しない
 
 import blocks/article
 import blocks/feed
+import blocks/notice
 import blocks/row_article
 import blocks/row_summary
 import blocks/site_header
 import blocks/summary
 import framework/front/el
+import gleam/option.{None}
 import lustre/attribute
 import lustre/element/html as raw_html
 import sketch/lustre as sketch_lustre
@@ -24,11 +26,25 @@ pub fn view() -> element.Element(Nil) {
     html.div_([attribute.attribute("data-yumemi-area", "page")], [
       html.div_([], [
         el.text("blocks/article | of ArticleRead | article_read.Out"),
-        article.view(article.sample),
+        article.view(
+          article.sample,
+          article.Arg(
+            slug: "preview",
+            term: None,
+            subject_handle: None,
+            www_origin: "preview",
+            auth_origin: "preview",
+            view_only: "preview",
+          ),
+        ),
       ]),
       html.div_([], [
         el.text("blocks/feed | of WidgetList | widget_list.Out"),
         feed.view(feed.sample),
+      ]),
+      html.div_([], [
+        el.text("blocks/notice | of Nil | Nil"),
+        notice.view(Nil, notice.Arg(slug: "preview")),
       ]),
       html.div_([], [
         el.text("blocks/row_article | of WidgetList | widget_list.Out"),
@@ -44,7 +60,7 @@ pub fn view() -> element.Element(Nil) {
       ]),
       html.div_([], [
         el.text("blocks/summary | of ArticleRead | article_read.Out"),
-        summary.view(summary.sample),
+        summary.view(summary.sample, summary.Arg(slug: "preview")),
       ]),
     ]),
     html.div_([attribute.attribute("data-yumemi-area", "aside")], [

@@ -21,6 +21,7 @@ try {
   assert(html.includes("blocks/row_summary"), "row_summary block is missing");
   assert(html.includes("blocks/site_header"), "site_header block is missing");
   assert(html.includes("blocks/summary"), "summary block is missing");
+  assert(html.includes("blocks/notice"), "notice block is missing");
   assert(html.includes("<style>"), "preview style is missing");
   assert(html.includes('/_yumemi/client.mjs'), "preview client reference is missing");
 
@@ -35,7 +36,7 @@ try {
   );
   fs.mkdirSync(path.dirname(output), { recursive: true });
   fs.writeFileSync(output, html);
-  console.log(`BLOCKS: PASS (6 blocks) -> ${output}`);
+  console.log(`BLOCKS: PASS (7 blocks) -> ${output}`);
 } finally {
   if (worker) await worker.stop();
 }
