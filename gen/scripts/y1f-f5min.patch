@@ -1,0 +1,2058 @@
+# Apply to the untouched snapshot: patch -p1 -d <snapshot> < y1f-f5min.patch
+diff -ruN before/console/gleam.toml mid/console/gleam.toml
+--- before/console/gleam.toml	2026-09-24 20:01:02.000000000 +0900
++++ mid/console/gleam.toml	2026-09-24 22:30:40.257454943 +0900
+@@ -3,6 +3,7 @@
+ target = "javascript"
+ 
+ [dependencies]
+-yumemi = ">= 0.7.0 and < 0.8.0"
++yumemi = { path = "/home/yumemism/yumemism_repo/yumemi-1f" }
++lustre = ">= 5.7.1 and < 6.0.0"
+ gleam_stdlib = ">= 0.34.0 and < 2.0.0"
+ gleam_json = ">= 3.1.0 and < 4.0.0"
+diff -ruN before/console/src/layout.gleam mid/console/src/layout.gleam
+--- before/console/src/layout.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/console/src/layout.gleam	2026-09-24 22:30:40.251849169 +0900
+@@ -1,4 +1,4 @@
+-import framework/front.{type Layout, Area, Fixed, Frame, Layout}
++import framework/front.{type Layout, Area, Fixed, Frame, Layout, default_sp_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -21,8 +21,12 @@
+         style: style.page,
+       ),
+     ],
+-    placements: [Fixed(area: "header", block: blocks.ConsoleHeader)],
++    placements: [Fixed(area: "header", block: blocks.ConsoleHeader, cell: Flow)],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: None,
+   tablet: None,
++  reads: [],
+ )
+diff -ruN before/console/src/pages/api_key/page.gleam mid/console/src/pages/api_key/page.gleam
+--- before/console/src/pages/api_key/page.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/console/src/pages/api_key/page.gleam	2026-09-24 22:30:40.249903054 +0900
+@@ -1,4 +1,4 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page}
++import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -19,8 +19,12 @@
+         style: style.page,
+       ),
+     ],
+-    placements: [Fixed(area: "page", block: blocks.ApiKeyPage)],
++    placements: [Fixed(area: "page", block: blocks.ApiKeyPage, cell: Flow)],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: None,
+   tablet: None,
++  reads: [],
+ )
+diff -ruN before/console/src/pages/consent/page.gleam mid/console/src/pages/consent/page.gleam
+--- before/console/src/pages/consent/page.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/console/src/pages/consent/page.gleam	2026-09-24 22:30:40.250736096 +0900
+@@ -1,4 +1,4 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page}
++import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -19,8 +19,12 @@
+         style: style.page,
+       ),
+     ],
+-    placements: [Fixed(area: "page", block: blocks.ConsentPage)],
++    placements: [Fixed(area: "page", block: blocks.ConsentPage, cell: Flow)],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: None,
+   tablet: None,
++  reads: [],
+ )
+diff -ruN before/console/src/pages/metrics/page.gleam mid/console/src/pages/metrics/page.gleam
+--- before/console/src/pages/metrics/page.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/console/src/pages/metrics/page.gleam	2026-09-24 22:30:40.250381725 +0900
+@@ -1,4 +1,4 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page}
++import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -19,8 +19,12 @@
+         style: style.page,
+       ),
+     ],
+-    placements: [Fixed(area: "page", block: blocks.MetricsPage)],
++    placements: [Fixed(area: "page", block: blocks.MetricsPage, cell: Flow)],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: None,
+   tablet: None,
++  reads: [],
+ )
+diff -ruN before/console/src/pages/page.gleam mid/console/src/pages/page.gleam
+--- before/console/src/pages/page.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/console/src/pages/page.gleam	2026-09-24 22:30:40.249539513 +0900
+@@ -1,4 +1,4 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page}
++import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -19,8 +19,12 @@
+         style: style.page,
+       ),
+     ],
+-    placements: [Fixed(area: "page", block: blocks.StoreSettings)],
++    placements: [Fixed(area: "page", block: blocks.StoreSettings, cell: Flow)],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: None,
+   tablet: None,
++  reads: [],
+ )
+diff -ruN before/console/src/pages/rosters/arg_id/page.gleam mid/console/src/pages/rosters/arg_id/page.gleam
+--- before/console/src/pages/rosters/arg_id/page.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/console/src/pages/rosters/arg_id/page.gleam	2026-09-24 22:30:40.251258757 +0900
+@@ -1,4 +1,4 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page}
++import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -19,8 +19,12 @@
+         style: style.page,
+       ),
+     ],
+-    placements: [Fixed(area: "page", block: blocks.RosterEditor)],
++    placements: [Fixed(area: "page", block: blocks.RosterEditor, cell: Flow)],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: None,
+   tablet: None,
++  reads: [],
+ )
+diff -ruN before/console/src/pages/rosters/arg_id/photos/arg_order/remove/page.gleam mid/console/src/pages/rosters/arg_id/photos/arg_order/remove/page.gleam
+--- before/console/src/pages/rosters/arg_id/photos/arg_order/remove/page.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/console/src/pages/rosters/arg_id/photos/arg_order/remove/page.gleam	2026-09-24 22:30:40.251611358 +0900
+@@ -1,4 +1,4 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page}
++import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -19,8 +19,12 @@
+         style: style.page,
+       ),
+     ],
+-    placements: [Fixed(area: "page", block: blocks.RosterPhotoRemoveConfirm)],
++    placements: [Fixed(area: "page", block: blocks.RosterPhotoRemoveConfirm, cell: Flow)],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: None,
+   tablet: None,
++  reads: [],
+ )
+diff -ruN before/console/src/pages/rosters/arg_id/remove/page.gleam mid/console/src/pages/rosters/arg_id/remove/page.gleam
+--- before/console/src/pages/rosters/arg_id/remove/page.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/console/src/pages/rosters/arg_id/remove/page.gleam	2026-09-24 22:30:40.251433328 +0900
+@@ -1,4 +1,4 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page}
++import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -19,8 +19,12 @@
+         style: style.page,
+       ),
+     ],
+-    placements: [Fixed(area: "page", block: blocks.RosterRemoveConfirm)],
++    placements: [Fixed(area: "page", block: blocks.RosterRemoveConfirm, cell: Flow)],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: None,
+   tablet: None,
++  reads: [],
+ )
+diff -ruN before/console/src/pages/rosters/new/page.gleam mid/console/src/pages/rosters/new/page.gleam
+--- before/console/src/pages/rosters/new/page.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/console/src/pages/rosters/new/page.gleam	2026-09-24 22:30:40.251090107 +0900
+@@ -1,4 +1,4 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page}
++import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -19,8 +19,12 @@
+         style: style.page,
+       ),
+     ],
+-    placements: [Fixed(area: "page", block: blocks.RosterNew)],
++    placements: [Fixed(area: "page", block: blocks.RosterNew, cell: Flow)],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: None,
+   tablet: None,
++  reads: [],
+ )
+diff -ruN before/console/src/pages/rosters/page.gleam mid/console/src/pages/rosters/page.gleam
+--- before/console/src/pages/rosters/page.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/console/src/pages/rosters/page.gleam	2026-09-24 22:30:40.250562416 +0900
+@@ -1,4 +1,4 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page}
++import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -19,8 +19,12 @@
+         style: style.page,
+       ),
+     ],
+-    placements: [Fixed(area: "page", block: blocks.RosterList)],
++    placements: [Fixed(area: "page", block: blocks.RosterList, cell: Flow)],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: None,
+   tablet: None,
++  reads: [],
+ )
+diff -ruN before/console/src/pages/schedule/page.gleam mid/console/src/pages/schedule/page.gleam
+--- before/console/src/pages/schedule/page.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/console/src/pages/schedule/page.gleam	2026-09-24 22:30:40.250188425 +0900
+@@ -1,4 +1,4 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page}
++import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -19,8 +19,12 @@
+         style: style.page,
+       ),
+     ],
+-    placements: [Fixed(area: "page", block: blocks.SchedulePage)],
++    placements: [Fixed(area: "page", block: blocks.SchedulePage, cell: Flow)],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: None,
+   tablet: None,
++  reads: [],
+ )
+diff -ruN before/console/src/pages/switch/page.gleam mid/console/src/pages/switch/page.gleam
+--- before/console/src/pages/switch/page.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/console/src/pages/switch/page.gleam	2026-09-24 22:30:40.250910437 +0900
+@@ -1,4 +1,4 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page}
++import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -19,8 +19,12 @@
+         style: style.page,
+       ),
+     ],
+-    placements: [Fixed(area: "page", block: blocks.SessionSwitch)],
++    placements: [Fixed(area: "page", block: blocks.SessionSwitch, cell: Flow)],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: None,
+   tablet: None,
++  reads: [],
+ )
+diff -ruN before/muses/gleam.toml mid/muses/gleam.toml
+--- before/muses/gleam.toml	2026-09-24 20:01:02.000000000 +0900
++++ mid/muses/gleam.toml	2026-09-24 22:30:40.257382353 +0900
+@@ -3,6 +3,7 @@
+ target = "javascript"
+ 
+ [dependencies]
+-yumemi = ">= 0.7.0 and < 0.8.0"
++yumemi = { path = "/home/yumemism/yumemism_repo/yumemi-1f" }
++lustre = ">= 5.7.1 and < 6.0.0"
+ gleam_stdlib = ">= 0.34.0 and < 2.0.0"
+ gleam_json = ">= 3.1.0 and < 4.0.0"
+diff -ruN before/muses/src/components/adult_declare.gleam mid/muses/src/components/adult_declare.gleam
+--- before/muses/src/components/adult_declare.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/muses/src/components/adult_declare.gleam	2026-09-24 22:30:40.242099864 +0900
+@@ -1,4 +1,5 @@
+ //// AdultDeclare island ── attached BrowserAdult を呼ぶ。
++import framework/front as front
+ 
+ import framework/front/el
+ import framework/front/live
+@@ -12,7 +13,7 @@
+ import sketch/lustre/element/html
+ 
+ /// 付属入口は Service ではないので Target を明示する。
+-pub const target: api.Target = api.Entry(api.BrowserAdult)
++pub const target: api.Target = front.Entry(api.BrowserAdult)
+ 
+ pub const after_send: live.After = live.ReloadPage
+ 
+diff -ruN before/muses/src/components/onboard_wizard.gleam mid/muses/src/components/onboard_wizard.gleam
+--- before/muses/src/components/onboard_wizard.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/muses/src/components/onboard_wizard.gleam	2026-09-24 22:30:40.244321240 +0900
+@@ -1,4 +1,5 @@
+ //// OnboardWizard island ── 成人確認・名義登録・同意を1つの島の State で進める(読みを持たない)。
++import framework/front as front
+ 
+ import framework/front/el
+ import framework/front/live
+@@ -36,7 +37,7 @@
+   live.Event(Field, Nil, Nil, Nil)
+ 
+ /// 付属入口は Service ではないので Target を明示する(adult_declare が先例)。
+-pub const target: api.Target = api.Entry(api.BrowserAdult)
++pub const target: api.Target = front.Entry(api.BrowserAdult)
+ 
+ pub const calls: List(service.Service) = [
+   service.MuseOnboard,
+diff -ruN before/muses/src/layout.gleam mid/muses/src/layout.gleam
+--- before/muses/src/layout.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/muses/src/layout.gleam	2026-09-24 22:30:40.235282507 +0900
+@@ -1,4 +1,4 @@
+-import framework/front.{type Layout, Area, Fixed, Frame, Layout}
++import framework/front.{type Layout, Area, Fixed, Frame, Layout, default_sp_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -22,9 +22,13 @@
+       ),
+     ],
+     placements: [
+-      Fixed(area: "header", block: blocks.ConsoleHeader),
++      Fixed(area: "header", block: blocks.ConsoleHeader, cell: Flow),
+     ],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: None,
+   tablet: None,
++  reads: [],
+ )
+diff -ruN before/muses/src/pages/articles/arg_id/page.gleam mid/muses/src/pages/articles/arg_id/page.gleam
+--- before/muses/src/pages/articles/arg_id/page.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/muses/src/pages/articles/arg_id/page.gleam	2026-09-24 22:30:40.234733736 +0900
+@@ -1,4 +1,4 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page}
++import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -19,8 +19,12 @@
+         style: style.page,
+       ),
+     ],
+-    placements: [Fixed(area: "page", block: blocks.ArticleForm)],
++    placements: [Fixed(area: "page", block: blocks.ArticleForm, cell: Flow)],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: None,
+   tablet: None,
++  reads: [],
+ )
+diff -ruN before/muses/src/pages/articles/new/page.gleam mid/muses/src/pages/articles/new/page.gleam
+--- before/muses/src/pages/articles/new/page.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/muses/src/pages/articles/new/page.gleam	2026-09-24 22:30:40.234569856 +0900
+@@ -1,4 +1,4 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page}
++import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -19,8 +19,12 @@
+         style: style.page,
+       ),
+     ],
+-    placements: [Fixed(area: "page", block: blocks.ArticleForm)],
++    placements: [Fixed(area: "page", block: blocks.ArticleForm, cell: Flow)],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: None,
+   tablet: None,
++  reads: [],
+ )
+diff -ruN before/muses/src/pages/articles/page.gleam mid/muses/src/pages/articles/page.gleam
+--- before/muses/src/pages/articles/page.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/muses/src/pages/articles/page.gleam	2026-09-24 22:30:40.233798684 +0900
+@@ -1,4 +1,4 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page}
++import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -19,8 +19,12 @@
+         style: style.page,
+       ),
+     ],
+-    placements: [Fixed(area: "page", block: blocks.ArticleList)],
++    placements: [Fixed(area: "page", block: blocks.ArticleList, cell: Flow)],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: None,
+   tablet: None,
++  reads: [],
+ )
+diff -ruN before/muses/src/pages/heaven/page.gleam mid/muses/src/pages/heaven/page.gleam
+--- before/muses/src/pages/heaven/page.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/muses/src/pages/heaven/page.gleam	2026-09-24 22:30:40.232887352 +0900
+@@ -1,4 +1,4 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page}
++import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -19,8 +19,12 @@
+         style: style.page,
+       ),
+     ],
+-    placements: [Fixed(area: "page", block: blocks.HeavenPanel)],
++    placements: [Fixed(area: "page", block: blocks.HeavenPanel, cell: Flow)],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: None,
+   tablet: None,
++  reads: [],
+ )
+diff -ruN before/muses/src/pages/inbox/page.gleam mid/muses/src/pages/inbox/page.gleam
+--- before/muses/src/pages/inbox/page.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/muses/src/pages/inbox/page.gleam	2026-09-24 22:30:40.233255442 +0900
+@@ -1,4 +1,4 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page}
++import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -19,8 +19,12 @@
+         style: style.page,
+       ),
+     ],
+-    placements: [Fixed(area: "page", block: blocks.InboxList)],
++    placements: [Fixed(area: "page", block: blocks.InboxList, cell: Flow)],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: None,
+   tablet: None,
++  reads: [],
+ )
+diff -ruN before/muses/src/pages/links/page.gleam mid/muses/src/pages/links/page.gleam
+--- before/muses/src/pages/links/page.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/muses/src/pages/links/page.gleam	2026-09-24 22:30:40.233426743 +0900
+@@ -1,4 +1,4 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page}
++import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -19,8 +19,12 @@
+         style: style.page,
+       ),
+     ],
+-    placements: [Fixed(area: "page", block: blocks.LinkList)],
++    placements: [Fixed(area: "page", block: blocks.LinkList, cell: Flow)],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: None,
+   tablet: None,
++  reads: [],
+ )
+diff -ruN before/muses/src/pages/metrics/page.gleam mid/muses/src/pages/metrics/page.gleam
+--- before/muses/src/pages/metrics/page.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/muses/src/pages/metrics/page.gleam	2026-09-24 22:30:40.232999197 +0900
+@@ -1,4 +1,4 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page}
++import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -19,8 +19,12 @@
+         style: style.page,
+       ),
+     ],
+-    placements: [Fixed(area: "page", block: blocks.MetricsDashboard)],
++    placements: [Fixed(area: "page", block: blocks.MetricsDashboard, cell: Flow)],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: None,
+   tablet: None,
++  reads: [],
+ )
+diff -ruN before/muses/src/pages/onboard/page.gleam mid/muses/src/pages/onboard/page.gleam
+--- before/muses/src/pages/onboard/page.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/muses/src/pages/onboard/page.gleam	2026-09-24 22:30:40.234224205 +0900
+@@ -1,4 +1,4 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page}
++import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -19,8 +19,12 @@
+         style: style.page,
+       ),
+     ],
+-    placements: [Fixed(area: "page", block: blocks.OnboardWizard)],
++    placements: [Fixed(area: "page", block: blocks.OnboardWizard, cell: Flow)],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: None,
+   tablet: None,
++  reads: [],
+ )
+diff -ruN before/muses/src/pages/page/page.gleam mid/muses/src/pages/page/page.gleam
+--- before/muses/src/pages/page/page.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/muses/src/pages/page/page.gleam	2026-09-24 22:30:40.234042584 +0900
+@@ -1,4 +1,4 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page}
++import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -20,12 +20,16 @@
+       ),
+     ],
+     placements: [
+-      Fixed(area: "page", block: blocks.SpaceSelector),
+-      Fixed(area: "page", block: blocks.SpaceList),
+-      Fixed(area: "page", block: blocks.WidgetList),
+-      Fixed(area: "page", block: blocks.ThemeForm),
++      Fixed(area: "page", block: blocks.SpaceSelector, cell: Flow),
++      Fixed(area: "page", block: blocks.SpaceList, cell: Flow),
++      Fixed(area: "page", block: blocks.WidgetList, cell: Flow),
++      Fixed(area: "page", block: blocks.ThemeForm, cell: Flow),
+     ],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: None,
+   tablet: None,
++  reads: [],
+ )
+diff -ruN before/muses/src/pages/page/widget/arg_id/page.gleam mid/muses/src/pages/page/widget/arg_id/page.gleam
+--- before/muses/src/pages/page/widget/arg_id/page.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/muses/src/pages/page/widget/arg_id/page.gleam	2026-09-24 22:30:40.234999221 +0900
+@@ -1,4 +1,4 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page}
++import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -19,8 +19,12 @@
+         style: style.page,
+       ),
+     ],
+-    placements: [Fixed(area: "page", block: blocks.WidgetForm)],
++    placements: [Fixed(area: "page", block: blocks.WidgetForm, cell: Flow)],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: None,
+   tablet: None,
++  reads: [],
+ )
+diff -ruN before/muses/src/pages/page/widget/new/page.gleam mid/muses/src/pages/page/widget/new/page.gleam
+--- before/muses/src/pages/page/widget/new/page.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/muses/src/pages/page/widget/new/page.gleam	2026-09-24 22:30:40.234897577 +0900
+@@ -1,4 +1,4 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page}
++import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -19,8 +19,12 @@
+         style: style.page,
+       ),
+     ],
+-    placements: [Fixed(area: "page", block: blocks.WidgetForm)],
++    placements: [Fixed(area: "page", block: blocks.WidgetForm, cell: Flow)],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: None,
+   tablet: None,
++  reads: [],
+ )
+diff -ruN before/muses/src/pages/page.gleam mid/muses/src/pages/page.gleam
+--- before/muses/src/pages/page.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/muses/src/pages/page.gleam	2026-09-24 22:30:40.232697021 +0900
+@@ -1,4 +1,4 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page}
++import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -19,8 +19,12 @@
+         style: style.page,
+       ),
+     ],
+-    placements: [Fixed(area: "page", block: blocks.Home)],
++    placements: [Fixed(area: "page", block: blocks.Home, cell: Flow)],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: None,
+   tablet: None,
++  reads: [],
+ )
+diff -ruN before/muses/src/pages/settings/page.gleam mid/muses/src/pages/settings/page.gleam
+--- before/muses/src/pages/settings/page.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/muses/src/pages/settings/page.gleam	2026-09-24 22:30:40.233624243 +0900
+@@ -1,4 +1,4 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page}
++import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -20,10 +20,14 @@
+       ),
+     ],
+     placements: [
+-      Fixed(area: "page", block: blocks.Settings),
+-      Fixed(area: "page", block: blocks.ThemeForm),
++      Fixed(area: "page", block: blocks.Settings, cell: Flow),
++      Fixed(area: "page", block: blocks.ThemeForm, cell: Flow),
+     ],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: None,
+   tablet: None,
++  reads: [],
+ )
+diff -ruN before/muses/src/pages/settings/unclaim/arg_id/page.gleam mid/muses/src/pages/settings/unclaim/arg_id/page.gleam
+--- before/muses/src/pages/settings/unclaim/arg_id/page.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/muses/src/pages/settings/unclaim/arg_id/page.gleam	2026-09-24 22:30:40.234404495 +0900
+@@ -1,4 +1,4 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page}
++import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -19,8 +19,12 @@
+         style: style.page,
+       ),
+     ],
+-    placements: [Fixed(area: "page", block: blocks.UnclaimConfirm)],
++    placements: [Fixed(area: "page", block: blocks.UnclaimConfirm, cell: Flow)],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: None,
+   tablet: None,
++  reads: [],
+ )
+diff -ruN before/www/gleam.toml mid/www/gleam.toml
+--- before/www/gleam.toml	2026-09-24 20:01:02.000000000 +0900
++++ mid/www/gleam.toml	2026-09-24 22:30:40.257294693 +0900
+@@ -3,5 +3,7 @@
+ target = "javascript"
+ 
+ [dependencies]
+-yumemi = ">= 0.7.0 and < 0.8.0"
++yumemi = { path = "/home/yumemism/yumemism_repo/yumemi-1f" }
++gleam_json = ">= 3.0.0 and < 4.0.0"
++lustre = ">= 5.7.1 and < 6.0.0"
+ gleam_stdlib = ">= 0.34.0 and < 2.0.0"
+diff -ruN before/www/src/blocks/store_schedule.gleam mid/www/src/blocks/store_schedule.gleam
+--- before/www/src/blocks/store_schedule.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/www/src/blocks/store_schedule.gleam	2026-09-24 22:30:40.227716439 +0900
+@@ -38,7 +38,7 @@
+ pub fn view(it: In) -> el.Element(Nil) {
+   let In(
+     title: title_value,
+-    page: store_schedule_list.Out(schedules: schedules),
++    page: store_schedule_list.Out(schedules: schedules, grid: _),
+   ) = it
+   let body = case schedules {
+     [] -> html.p(sketch_css.class(muted), [], [el.text("これからの出勤はありません。")])
+diff -ruN before/www/src/components/adult_declare.gleam mid/www/src/components/adult_declare.gleam
+--- before/www/src/components/adult_declare.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/www/src/components/adult_declare.gleam	2026-09-24 22:30:40.231192237 +0900
+@@ -1,4 +1,5 @@
+ import framework/front/el
++import framework/front as front
+ import framework/front/live
+ import framework/front/sketch_css
+ import gen/api
+@@ -9,7 +10,7 @@
+ import sketch/lustre/element/html
+ import style
+ 
+-pub const calls: List(api.Target) = [api.Entry(api.BrowserAdult)]
++pub const calls: List(api.Target) = [front.Entry(api.BrowserAdult)]
+ 
+ pub const after_send: live.After = live.ReloadPage
+ 
+diff -ruN before/www/src/components/consent_give.gleam mid/www/src/components/consent_give.gleam
+--- before/www/src/components/consent_give.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/www/src/components/consent_give.gleam	2026-09-24 22:30:40.231590968 +0900
+@@ -1,4 +1,5 @@
+ import framework/front/el
++import framework/front as front
+ import framework/front/live
+ import framework/front/sketch_css
+ import gen/api
+@@ -13,7 +14,7 @@
+ 
+ pub type Event = live_consent_give.Event
+ 
+-pub const calls: List(api.Target) = [api.Entry(api.ConsentGive)]
++pub const calls: List(api.Target) = [front.Entry(api.ConsentGive)]
+ 
+ pub const after_send: live.After = live.Stay
+ 
+diff -ruN before/www/src/components/fan_onboard.gleam mid/www/src/components/fan_onboard.gleam
+--- before/www/src/components/fan_onboard.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/www/src/components/fan_onboard.gleam	2026-09-24 22:30:40.231454768 +0900
+@@ -1,4 +1,5 @@
+ import framework/front/el
++import framework/front as front
+ import framework/front/live
+ import framework/front/sketch_css
+ import gen/api
+@@ -13,7 +14,7 @@
+ 
+ pub type Event = live_fan_onboard.Event
+ 
+-pub const calls: List(api.Target) = [api.Entry(api.FanOnboard)]
++pub const calls: List(api.Target) = [front.Entry(api.FanOnboard)]
+ 
+ pub const after_send: live.After = live.Stay
+ 
+diff -ruN before/www/src/layout.gleam mid/www/src/layout.gleam
+--- before/www/src/layout.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/www/src/layout.gleam	2026-09-24 22:30:40.222777836 +0900
+@@ -1,4 +1,4 @@
+-import framework/front.{type Layout, Area, Fixed, Frame, Layout}
++import framework/front.{type Layout, Area, Fixed, Frame, Layout, default_sp_cols, default_wide_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -28,10 +28,13 @@
+       ),
+     ],
+     placements: [
+-      Fixed(area: "header", block: blocks.SiteHeader),
+-      Fixed(area: "footer", block: blocks.SiteFooter),
+-      Fixed(area: "footer", block: blocks.CommonNav),
++      Fixed(area: "header", block: blocks.SiteHeader, cell: Flow),
++      Fixed(area: "footer", block: blocks.SiteFooter, cell: Flow),
++      Fixed(area: "footer", block: blocks.CommonNav, cell: Flow),
+     ],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: Some(
+     Frame(
+@@ -62,7 +65,11 @@
+         ),
+       ],
+       placements: [],
++      cols: default_wide_cols,
++      rows: [],
++      template: [],
+     ),
+   ),
+   tablet: None,
++  reads: [],
+ )
+diff -ruN before/www/src/pages/about/external/page.gleam mid/www/src/pages/about/external/page.gleam
+--- before/www/src/pages/about/external/page.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/www/src/pages/about/external/page.gleam	2026-09-24 22:30:40.218670266 +0900
+@@ -1,4 +1,4 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page}
++import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, default_wide_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -20,10 +20,13 @@
+       ),
+     ],
+     placements: [
+-      Fixed(area: "page", block: blocks.ExternalHosts),
+-      Fixed(area: "page", block: blocks.PhF14Url),
+-      Fixed(area: "page", block: blocks.PhF14ExternalDisclosure),
++      Fixed(area: "page", block: blocks.ExternalHosts, cell: Flow),
++      Fixed(area: "page", block: blocks.PhF14Url, cell: Flow),
++      Fixed(area: "page", block: blocks.PhF14ExternalDisclosure, cell: Flow),
+     ],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: Some(
+     Frame(
+@@ -42,7 +45,11 @@
+         ),
+       ],
+       placements: [],
++      cols: default_wide_cols,
++      rows: [],
++      template: [],
+     ),
+   ),
+   tablet: None,
++  reads: [],
+ )
+diff -ruN before/www/src/pages/claim/arg_code/page.gleam mid/www/src/pages/claim/arg_code/page.gleam
+--- before/www/src/pages/claim/arg_code/page.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/www/src/pages/claim/arg_code/page.gleam	2026-09-24 22:30:40.217649803 +0900
+@@ -1,4 +1,4 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page}
++import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, default_wide_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -19,7 +19,10 @@
+         style: style.page,
+       ),
+     ],
+-    placements: [Fixed(area: "page", block: blocks.ClaimHead)],
++    placements: [Fixed(area: "page", block: blocks.ClaimHead, cell: Flow)],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: Some(
+     Frame(
+@@ -38,7 +41,11 @@
+         ),
+       ],
+       placements: [],
++      cols: default_wide_cols,
++      rows: [],
++      template: [],
+     ),
+   ),
+   tablet: None,
++  reads: [],
+ )
+diff -ruN before/www/src/pages/experiences/arg_id/page.gleam mid/www/src/pages/experiences/arg_id/page.gleam
+--- before/www/src/pages/experiences/arg_id/page.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/www/src/pages/experiences/arg_id/page.gleam	2026-09-24 22:30:40.218336635 +0900
+@@ -1,6 +1,6 @@
+ //// Page definition for the svelte-out-1 route.
+ 
+-import framework/front.{type Page, Area, Fixed, Frame, Page}
++import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, default_wide_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -22,10 +22,13 @@
+       ),
+     ],
+     placements: [
+-      Fixed(area: "page", block: blocks.PhF13Experience),
+-      Fixed(area: "page", block: blocks.PhF13ExperienceBody),
+-      Fixed(area: "page", block: blocks.PhF13ExperienceImage),
++      Fixed(area: "page", block: blocks.PhF13Experience, cell: Flow),
++      Fixed(area: "page", block: blocks.PhF13ExperienceBody, cell: Flow),
++      Fixed(area: "page", block: blocks.PhF13ExperienceImage, cell: Flow),
+     ],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: Some(
+     Frame(
+@@ -44,7 +47,11 @@
+         ),
+       ],
+       placements: [],
++      cols: default_wide_cols,
++      rows: [],
++      template: [],
+     ),
+   ),
+   tablet: None,
++  reads: [],
+ )
+diff -ruN before/www/src/pages/fan/arg_handle/page.gleam mid/www/src/pages/fan/arg_handle/page.gleam
+--- before/www/src/pages/fan/arg_handle/page.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/www/src/pages/fan/arg_handle/page.gleam	2026-09-24 22:30:40.217987834 +0900
+@@ -1,6 +1,6 @@
+ //// Page definition for the svelte-out-1 route.
+ 
+-import framework/front.{type Page, Area, Fixed, Frame, Page}
++import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, default_wide_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -22,10 +22,13 @@
+       ),
+     ],
+     placements: [
+-      Fixed(area: "page", block: blocks.PhF12FollowState),
+-      Fixed(area: "page", block: blocks.PhF12FanAndExperiences),
+-      Fixed(area: "page", block: blocks.PhF12FanPage),
++      Fixed(area: "page", block: blocks.PhF12FollowState, cell: Flow),
++      Fixed(area: "page", block: blocks.PhF12FanAndExperiences, cell: Flow),
++      Fixed(area: "page", block: blocks.PhF12FanPage, cell: Flow),
+     ],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: Some(
+     Frame(
+@@ -44,7 +47,11 @@
+         ),
+       ],
+       placements: [],
++      cols: default_wide_cols,
++      rows: [],
++      template: [],
+     ),
+   ),
+   tablet: None,
++  reads: [],
+ )
+diff -ruN before/www/src/pages/for_stores/api/v1/page.gleam mid/www/src/pages/for_stores/api/v1/page.gleam
+--- before/www/src/pages/for_stores/api/v1/page.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/www/src/pages/for_stores/api/v1/page.gleam	2026-09-24 22:30:40.222273605 +0900
+@@ -1,4 +1,4 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page}
++import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, default_wide_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -19,7 +19,10 @@
+         style: style.page,
+       ),
+     ],
+-    placements: [Fixed(area: "page", block: blocks.ApiDoc)],
++    placements: [Fixed(area: "page", block: blocks.ApiDoc, cell: Flow)],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: Some(
+     Frame(
+@@ -38,7 +41,11 @@
+         ),
+       ],
+       placements: [],
++      cols: default_wide_cols,
++      rows: [],
++      template: [],
+     ),
+   ),
+   tablet: None,
++  reads: [],
+ )
+diff -ruN before/www/src/pages/me/chats/arg_id/page.gleam mid/www/src/pages/me/chats/arg_id/page.gleam
+--- before/www/src/pages/me/chats/arg_id/page.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/www/src/pages/me/chats/arg_id/page.gleam	2026-09-24 22:30:40.221404043 +0900
+@@ -1,6 +1,6 @@
+ //// Page definition for the svelte-out-1 route.
+ 
+-import framework/front.{type Page, Area, Fixed, Frame, Page}
++import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, default_wide_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -22,10 +22,13 @@
+       ),
+     ],
+     placements: [
+-      Fixed(area: "page", block: blocks.PhF22Image),
+-      Fixed(area: "page", block: blocks.PhF22HistoryMedia),
+-      Fixed(area: "page", block: blocks.PhF22SendEligibility),
++      Fixed(area: "page", block: blocks.PhF22Image, cell: Flow),
++      Fixed(area: "page", block: blocks.PhF22HistoryMedia, cell: Flow),
++      Fixed(area: "page", block: blocks.PhF22SendEligibility, cell: Flow),
+     ],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: Some(
+     Frame(
+@@ -44,7 +47,11 @@
+         ),
+       ],
+       placements: [],
++      cols: default_wide_cols,
++      rows: [],
++      template: [],
+     ),
+   ),
+   tablet: None,
++  reads: [],
+ )
+diff -ruN before/www/src/pages/me/chats/page.gleam mid/www/src/pages/me/chats/page.gleam
+--- before/www/src/pages/me/chats/page.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/www/src/pages/me/chats/page.gleam	2026-09-24 22:30:40.218978097 +0900
+@@ -1,6 +1,6 @@
+ //// Page definition for the svelte-out-1 route.
+ 
+-import framework/front.{type Page, Area, Fixed, Frame, Page}
++import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, default_wide_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -22,9 +22,12 @@
+       ),
+     ],
+     placements: [
+-      Fixed(area: "page", block: blocks.PhF21Chats),
+-      Fixed(area: "page", block: blocks.PhF21Unread),
++      Fixed(area: "page", block: blocks.PhF21Chats, cell: Flow),
++      Fixed(area: "page", block: blocks.PhF21Unread, cell: Flow),
+     ],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: Some(
+     Frame(
+@@ -43,7 +46,11 @@
+         ),
+       ],
+       placements: [],
++      cols: default_wide_cols,
++      rows: [],
++      template: [],
+     ),
+   ),
+   tablet: None,
++  reads: [],
+ )
+diff -ruN before/www/src/pages/me/experiences/arg_id/page.gleam mid/www/src/pages/me/experiences/arg_id/page.gleam
+--- before/www/src/pages/me/experiences/arg_id/page.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/www/src/pages/me/experiences/arg_id/page.gleam	2026-09-24 22:30:40.221994494 +0900
+@@ -1,6 +1,6 @@
+ //// Page definition for the svelte-out-1 route.
+ 
+-import framework/front.{type Page, Area, Fixed, Frame, Page}
++import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, default_wide_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -22,9 +22,12 @@
+       ),
+     ],
+     placements: [
+-      Fixed(area: "page", block: blocks.PhF24PublishRetract),
+-      Fixed(area: "page", block: blocks.PhF24ListEdit),
++      Fixed(area: "page", block: blocks.PhF24PublishRetract, cell: Flow),
++      Fixed(area: "page", block: blocks.PhF24ListEdit, cell: Flow),
+     ],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: Some(
+     Frame(
+@@ -43,7 +46,11 @@
+         ),
+       ],
+       placements: [],
++      cols: default_wide_cols,
++      rows: [],
++      template: [],
+     ),
+   ),
+   tablet: None,
++  reads: [],
+ )
+diff -ruN before/www/src/pages/me/experiences/page.gleam mid/www/src/pages/me/experiences/page.gleam
+--- before/www/src/pages/me/experiences/page.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/www/src/pages/me/experiences/page.gleam	2026-09-24 22:30:40.220379360 +0900
+@@ -1,6 +1,6 @@
+ //// Page definition for the svelte-out-1 route.
+ 
+-import framework/front.{type Page, Area, Fixed, Frame, Page}
++import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, default_wide_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -22,9 +22,12 @@
+       ),
+     ],
+     placements: [
+-      Fixed(area: "page", block: blocks.PhF24AllStates),
+-      Fixed(area: "page", block: blocks.PhF24ListEdit),
++      Fixed(area: "page", block: blocks.PhF24AllStates, cell: Flow),
++      Fixed(area: "page", block: blocks.PhF24ListEdit, cell: Flow),
+     ],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: Some(
+     Frame(
+@@ -43,7 +46,11 @@
+         ),
+       ],
+       placements: [],
++      cols: default_wide_cols,
++      rows: [],
++      template: [],
+     ),
+   ),
+   tablet: None,
++  reads: [],
+ )
+diff -ruN before/www/src/pages/me/feed/page.gleam mid/www/src/pages/me/feed/page.gleam
+--- before/www/src/pages/me/feed/page.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/www/src/pages/me/feed/page.gleam	2026-09-24 22:30:40.219284638 +0900
+@@ -1,6 +1,6 @@
+ //// Page definition for the svelte-out-1 route.
+ 
+-import framework/front.{type Page, Area, Fixed, Frame, Page}
++import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, default_wide_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -22,8 +22,11 @@
+       ),
+     ],
+     placements: [
+-      Fixed(area: "page", block: blocks.PhTlAnonymous),
++      Fixed(area: "page", block: blocks.PhTlAnonymous, cell: Flow),
+     ],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: Some(
+     Frame(
+@@ -42,7 +45,11 @@
+         ),
+       ],
+       placements: [],
++      cols: default_wide_cols,
++      rows: [],
++      template: [],
+     ),
+   ),
+   tablet: None,
++  reads: [],
+ )
+diff -ruN before/www/src/pages/me/inbox/page.gleam mid/www/src/pages/me/inbox/page.gleam
+--- before/www/src/pages/me/inbox/page.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/www/src/pages/me/inbox/page.gleam	2026-09-24 22:30:40.219565378 +0900
+@@ -1,4 +1,4 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page}
++import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, default_wide_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -19,7 +19,10 @@
+         style: style.page,
+       ),
+     ],
+-    placements: [Fixed(area: "page", block: blocks.InboxList)],
++    placements: [Fixed(area: "page", block: blocks.InboxList, cell: Flow)],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: Some(
+     Frame(
+@@ -38,7 +41,11 @@
+         ),
+       ],
+       placements: [],
++      cols: default_wide_cols,
++      rows: [],
++      template: [],
+     ),
+   ),
+   tablet: None,
++  reads: [],
+ )
+diff -ruN before/www/src/pages/me/page.gleam mid/www/src/pages/me/page.gleam
+--- before/www/src/pages/me/page.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/www/src/pages/me/page.gleam	2026-09-24 22:30:40.212667191 +0900
+@@ -1,4 +1,4 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page}
++import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, default_wide_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -20,10 +20,13 @@
+       ),
+     ],
+     placements: [
+-      Fixed(area: "page", block: blocks.MeNextReservation),
+-      Fixed(area: "page", block: blocks.MeLatest),
+-      Fixed(area: "page", block: blocks.HomeErrands),
++      Fixed(area: "page", block: blocks.MeNextReservation, cell: Flow),
++      Fixed(area: "page", block: blocks.MeLatest, cell: Flow),
++      Fixed(area: "page", block: blocks.HomeErrands, cell: Flow),
+     ],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: Some(
+     Frame(
+@@ -42,7 +45,11 @@
+         ),
+       ],
+       placements: [],
++      cols: default_wide_cols,
++      rows: [],
++      template: [],
+     ),
+   ),
+   tablet: None,
++  reads: [],
+ )
+diff -ruN before/www/src/pages/me/reservations/page.gleam mid/www/src/pages/me/reservations/page.gleam
+--- before/www/src/pages/me/reservations/page.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/www/src/pages/me/reservations/page.gleam	2026-09-24 22:30:40.220999054 +0900
+@@ -1,6 +1,6 @@
+ //// Page definition for the svelte-out-1 route.
+ 
+-import framework/front.{type Page, Area, Fixed, Frame, Page}
++import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, default_wide_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -22,9 +22,12 @@
+       ),
+     ],
+     placements: [
+-      Fixed(area: "page", block: blocks.PhF20Reservations),
+-      Fixed(area: "page", block: blocks.PhF20ChatStart),
++      Fixed(area: "page", block: blocks.PhF20Reservations, cell: Flow),
++      Fixed(area: "page", block: blocks.PhF20ChatStart, cell: Flow),
+     ],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: Some(
+     Frame(
+@@ -43,7 +46,11 @@
+         ),
+       ],
+       placements: [],
++      cols: default_wide_cols,
++      rows: [],
++      template: [],
+     ),
+   ),
+   tablet: None,
++  reads: [],
+ )
+diff -ruN before/www/src/pages/me/reviews/new/page.gleam mid/www/src/pages/me/reviews/new/page.gleam
+--- before/www/src/pages/me/reviews/new/page.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/www/src/pages/me/reviews/new/page.gleam	2026-09-24 22:30:40.221688884 +0900
+@@ -1,6 +1,6 @@
+ //// Page definition for the svelte-out-1 route.
+ 
+-import framework/front.{type Page, Area, Fixed, Frame, Page}
++import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, default_wide_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -22,8 +22,11 @@
+       ),
+     ],
+     placements: [
+-      Fixed(area: "page", block: blocks.PhF25ReviewReceipt),
++      Fixed(area: "page", block: blocks.PhF25ReviewReceipt, cell: Flow),
+     ],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: Some(
+     Frame(
+@@ -42,7 +45,11 @@
+         ),
+       ],
+       placements: [],
++      cols: default_wide_cols,
++      rows: [],
++      template: [],
+     ),
+   ),
+   tablet: None,
++  reads: [],
+ )
+diff -ruN before/www/src/pages/me/settings/page.gleam mid/www/src/pages/me/settings/page.gleam
+--- before/www/src/pages/me/settings/page.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/www/src/pages/me/settings/page.gleam	2026-09-24 22:30:40.219958269 +0900
+@@ -1,6 +1,6 @@
+ //// Page definition for the svelte-out-1 route.
+ 
+-import framework/front.{type Page, Area, Fixed, Frame, Page}
++import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, default_wide_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -22,10 +22,13 @@
+       ),
+     ],
+     placements: [
+-      Fixed(area: "page", block: blocks.PhF26NameSave),
+-      Fixed(area: "page", block: blocks.ConsentGive),
+-      Fixed(area: "page", block: blocks.PhF26ConsentRetire),
++      Fixed(area: "page", block: blocks.PhF26NameSave, cell: Flow),
++      Fixed(area: "page", block: blocks.ConsentGive, cell: Flow),
++      Fixed(area: "page", block: blocks.PhF26ConsentRetire, cell: Flow),
+     ],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: Some(
+     Frame(
+@@ -44,7 +47,11 @@
+         ),
+       ],
+       placements: [],
++      cols: default_wide_cols,
++      rows: [],
++      template: [],
+     ),
+   ),
+   tablet: None,
++  reads: [],
+ )
+diff -ruN before/www/src/pages/me/subscriptions/page.gleam mid/www/src/pages/me/subscriptions/page.gleam
+--- before/www/src/pages/me/subscriptions/page.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/www/src/pages/me/subscriptions/page.gleam	2026-09-24 22:30:40.220743361 +0900
+@@ -1,6 +1,6 @@
+ //// Page definition for the svelte-out-1 route.
+ 
+-import framework/front.{type Page, Area, Fixed, Frame, Page}
++import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, default_wide_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -22,8 +22,11 @@
+       ),
+     ],
+     placements: [
+-      Fixed(area: "page", block: blocks.PhF26SubscriptionFollow),
++      Fixed(area: "page", block: blocks.PhF26SubscriptionFollow, cell: Flow),
+     ],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: Some(
+     Frame(
+@@ -42,7 +45,11 @@
+         ),
+       ],
+       placements: [],
++      cols: default_wide_cols,
++      rows: [],
++      template: [],
+     ),
+   ),
+   tablet: None,
++  reads: [],
+ )
+diff -ruN before/www/src/pages/muse/arg_handle/article/arg_id/page.gleam mid/www/src/pages/muse/arg_handle/article/arg_id/page.gleam
+--- before/www/src/pages/muse/arg_handle/article/arg_id/page.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/www/src/pages/muse/arg_handle/article/arg_id/page.gleam	2026-09-24 22:30:40.216830252 +0900
+@@ -1,4 +1,4 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page}
++import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, default_wide_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -20,14 +20,17 @@
+       ),
+     ],
+     placements: [
+-      Fixed(area: "page", block: blocks.MuseHeader),
+-      Fixed(area: "page", block: blocks.StoreMemberships),
+-      Fixed(area: "page", block: blocks.MuseNav),
+-      Fixed(area: "page", block: blocks.ArticleHead),
+-      Fixed(area: "page", block: blocks.ArticleBody),
+-      Fixed(area: "page", block: blocks.PhF5PostedDate),
+-      Fixed(area: "page", block: blocks.PhF5ArticleImage),
++      Fixed(area: "page", block: blocks.MuseHeader, cell: Flow),
++      Fixed(area: "page", block: blocks.StoreMemberships, cell: Flow),
++      Fixed(area: "page", block: blocks.MuseNav, cell: Flow),
++      Fixed(area: "page", block: blocks.ArticleHead, cell: Flow),
++      Fixed(area: "page", block: blocks.ArticleBody, cell: Flow),
++      Fixed(area: "page", block: blocks.PhF5PostedDate, cell: Flow),
++      Fixed(area: "page", block: blocks.PhF5ArticleImage, cell: Flow),
+     ],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: Some(
+     Frame(
+@@ -46,7 +49,11 @@
+         ),
+       ],
+       placements: [],
++      cols: default_wide_cols,
++      rows: [],
++      template: [],
+     ),
+   ),
+   tablet: None,
++  reads: [],
+ )
+diff -ruN before/www/src/pages/muse/arg_handle/article/page.gleam mid/www/src/pages/muse/arg_handle/article/page.gleam
+--- before/www/src/pages/muse/arg_handle/article/page.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/www/src/pages/muse/arg_handle/article/page.gleam	2026-09-24 22:30:40.216015899 +0900
+@@ -1,4 +1,4 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page}
++import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, default_wide_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -20,12 +20,15 @@
+       ),
+     ],
+     placements: [
+-      Fixed(area: "page", block: blocks.MuseHeader),
+-      Fixed(area: "page", block: blocks.StoreMemberships),
+-      Fixed(area: "page", block: blocks.MuseNav),
+-      Fixed(area: "page", block: blocks.ArticleList),
+-      Fixed(area: "page", block: blocks.PhF4PostedDate),
++      Fixed(area: "page", block: blocks.MuseHeader, cell: Flow),
++      Fixed(area: "page", block: blocks.StoreMemberships, cell: Flow),
++      Fixed(area: "page", block: blocks.MuseNav, cell: Flow),
++      Fixed(area: "page", block: blocks.ArticleList, cell: Flow),
++      Fixed(area: "page", block: blocks.PhF4PostedDate, cell: Flow),
+     ],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: Some(
+     Frame(
+@@ -44,7 +47,11 @@
+         ),
+       ],
+       placements: [],
++      cols: default_wide_cols,
++      rows: [],
++      template: [],
+     ),
+   ),
+   tablet: None,
++  reads: [],
+ )
+diff -ruN before/www/src/pages/muse/arg_handle/page.gleam mid/www/src/pages/muse/arg_handle/page.gleam
+--- before/www/src/pages/muse/arg_handle/page.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/www/src/pages/muse/arg_handle/page.gleam	2026-09-24 22:30:40.214510856 +0900
+@@ -1,4 +1,4 @@
+-import framework/front.{type Page, Area, ByKind, Fixed, Frame, Page, Widget}
++import framework/front.{type Page, Area, ByKind, Fixed, Frame, Page, Widget, default_sp_cols, default_wide_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -20,23 +20,23 @@
+       ),
+     ],
+     placements: [
+-      Fixed(area: "page", block: blocks.MuseHeader),
+-      Fixed(area: "page", block: blocks.StoreMemberships),
+-      Fixed(area: "page", block: blocks.MuseNav),
+-      Fixed(area: "page", block: blocks.PhF2BackgroundImage),
+-      Fixed(area: "page", block: blocks.PhF2StoryRing),
+-      Fixed(area: "page", block: blocks.PhF2WidgetBody),
+-      Fixed(area: "page", block: blocks.PhF2WidgetImage),
+-      Fixed(area: "page", block: blocks.PhF2HeavenReviews),
+-      Fixed(area: "page", block: blocks.PhF2HeavenDiary),
+-      Fixed(area: "page", block: blocks.PhF2HeavenIntegration),
+-      Fixed(area: "page", block: blocks.PhF2PublicContent),
+-      Fixed(area: "page", block: blocks.PhF2FixedArticleThumbnail),
+-      Fixed(area: "page", block: blocks.PhF9StoryPlayback),
+-      Fixed(area: "page", block: blocks.PhF9Reply),
+-      Fixed(area: "page", block: blocks.PhCommonReport),
+-      Fixed(area: "page", block: blocks.PhCommonReportReceipt),
+-      Fixed(area: "page", block: blocks.PhCommonReportTargetReason),
++      Fixed(area: "page", block: blocks.MuseHeader, cell: Flow),
++      Fixed(area: "page", block: blocks.StoreMemberships, cell: Flow),
++      Fixed(area: "page", block: blocks.MuseNav, cell: Flow),
++      Fixed(area: "page", block: blocks.PhF2BackgroundImage, cell: Flow),
++      Fixed(area: "page", block: blocks.PhF2StoryRing, cell: Flow),
++      Fixed(area: "page", block: blocks.PhF2WidgetBody, cell: Flow),
++      Fixed(area: "page", block: blocks.PhF2WidgetImage, cell: Flow),
++      Fixed(area: "page", block: blocks.PhF2HeavenReviews, cell: Flow),
++      Fixed(area: "page", block: blocks.PhF2HeavenDiary, cell: Flow),
++      Fixed(area: "page", block: blocks.PhF2HeavenIntegration, cell: Flow),
++      Fixed(area: "page", block: blocks.PhF2PublicContent, cell: Flow),
++      Fixed(area: "page", block: blocks.PhF2FixedArticleThumbnail, cell: Flow),
++      Fixed(area: "page", block: blocks.PhF9StoryPlayback, cell: Flow),
++      Fixed(area: "page", block: blocks.PhF9Reply, cell: Flow),
++      Fixed(area: "page", block: blocks.PhCommonReport, cell: Flow),
++      Fixed(area: "page", block: blocks.PhCommonReportReceipt, cell: Flow),
++      Fixed(area: "page", block: blocks.PhCommonReportTargetReason, cell: Flow),
+       Widget(
+         area: "page",
+         name: "muse_top_main",
+@@ -54,6 +54,9 @@
+         ),
+       ),
+     ],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: Some(
+     Frame(
+@@ -72,7 +75,11 @@
+         ),
+       ],
+       placements: [],
++      cols: default_wide_cols,
++      rows: [],
++      template: [],
+     ),
+   ),
+   tablet: None,
++  reads: [],
+ )
+diff -ruN before/www/src/pages/muse/arg_handle/reserve/page.gleam mid/www/src/pages/muse/arg_handle/reserve/page.gleam
+--- before/www/src/pages/muse/arg_handle/reserve/page.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/www/src/pages/muse/arg_handle/reserve/page.gleam	2026-09-24 22:30:40.216407650 +0900
+@@ -1,6 +1,6 @@
+ //// Page definition for the svelte-out-1 route.
+ 
+-import framework/front.{type Page, Area, Fixed, Frame, Page}
++import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, default_wide_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -22,12 +22,15 @@
+       ),
+     ],
+     placements: [
+-      Fixed(area: "page", block: blocks.PhF19ReservationContext),
+-      Fixed(area: "page", block: blocks.PhF19SlotsCourses),
+-      Fixed(area: "page", block: blocks.PhF19OpenSlots),
+-      Fixed(area: "page", block: blocks.PhF19Url),
+-      Fixed(area: "page", block: blocks.PhF19Result),
++      Fixed(area: "page", block: blocks.PhF19ReservationContext, cell: Flow),
++      Fixed(area: "page", block: blocks.PhF19SlotsCourses, cell: Flow),
++      Fixed(area: "page", block: blocks.PhF19OpenSlots, cell: Flow),
++      Fixed(area: "page", block: blocks.PhF19Url, cell: Flow),
++      Fixed(area: "page", block: blocks.PhF19Result, cell: Flow),
+     ],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: Some(
+     Frame(
+@@ -46,7 +49,11 @@
+         ),
+       ],
+       placements: [],
++      cols: default_wide_cols,
++      rows: [],
++      template: [],
+     ),
+   ),
+   tablet: None,
++  reads: [],
+ )
+diff -ruN before/www/src/pages/muse/arg_handle/reviews/page.gleam mid/www/src/pages/muse/arg_handle/reviews/page.gleam
+--- before/www/src/pages/muse/arg_handle/reviews/page.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/www/src/pages/muse/arg_handle/reviews/page.gleam	2026-09-24 22:30:40.215270208 +0900
+@@ -1,6 +1,6 @@
+ //// Page definition for the svelte-out-1 route.
+ 
+-import framework/front.{type Page, Area, Fixed, Frame, Page}
++import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, default_wide_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -22,10 +22,13 @@
+       ),
+     ],
+     placements: [
+-      Fixed(area: "page", block: blocks.PhF6Reviews),
+-      Fixed(area: "page", block: blocks.PhF6AnonymousExperience),
+-      Fixed(area: "page", block: blocks.PhF6Experiences),
++      Fixed(area: "page", block: blocks.PhF6Reviews, cell: Flow),
++      Fixed(area: "page", block: blocks.PhF6AnonymousExperience, cell: Flow),
++      Fixed(area: "page", block: blocks.PhF6Experiences, cell: Flow),
+     ],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: Some(
+     Frame(
+@@ -44,7 +47,11 @@
+         ),
+       ],
+       placements: [],
++      cols: default_wide_cols,
++      rows: [],
++      template: [],
+     ),
+   ),
+   tablet: None,
++  reads: [],
+ )
+diff -ruN before/www/src/pages/muse/arg_handle/schedule/page.gleam mid/www/src/pages/muse/arg_handle/schedule/page.gleam
+--- before/www/src/pages/muse/arg_handle/schedule/page.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/www/src/pages/muse/arg_handle/schedule/page.gleam	2026-09-24 22:30:40.214920477 +0900
+@@ -1,4 +1,4 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page}
++import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, default_wide_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -20,13 +20,16 @@
+       ),
+     ],
+     placements: [
+-      Fixed(area: "page", block: blocks.MuseHeader),
+-      Fixed(area: "page", block: blocks.StoreMemberships),
+-      Fixed(area: "page", block: blocks.MuseNav),
+-      Fixed(area: "page", block: blocks.ScheduleList),
+-      Fixed(area: "page", block: blocks.ScheduleNote),
+-      Fixed(area: "page", block: blocks.PhF3OpenSlots),
++      Fixed(area: "page", block: blocks.MuseHeader, cell: Flow),
++      Fixed(area: "page", block: blocks.StoreMemberships, cell: Flow),
++      Fixed(area: "page", block: blocks.MuseNav, cell: Flow),
++      Fixed(area: "page", block: blocks.ScheduleList, cell: Flow),
++      Fixed(area: "page", block: blocks.ScheduleNote, cell: Flow),
++      Fixed(area: "page", block: blocks.PhF3OpenSlots, cell: Flow),
+     ],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: Some(
+     Frame(
+@@ -45,7 +48,11 @@
+         ),
+       ],
+       placements: [],
++      cols: default_wide_cols,
++      rows: [],
++      template: [],
+     ),
+   ),
+   tablet: None,
++  reads: [],
+ )
+diff -ruN before/www/src/pages/muse/arg_handle/space/arg_id/page.gleam mid/www/src/pages/muse/arg_handle/space/arg_id/page.gleam
+--- before/www/src/pages/muse/arg_handle/space/arg_id/page.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/www/src/pages/muse/arg_handle/space/arg_id/page.gleam	2026-09-24 22:30:40.217366213 +0900
+@@ -1,4 +1,4 @@
+-import framework/front.{type Page, Area, ByKind, Fixed, Frame, Page, Widget}
++import framework/front.{type Page, Area, ByKind, Fixed, Frame, Page, Widget, default_sp_cols, default_wide_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -20,11 +20,11 @@
+       ),
+     ],
+     placements: [
+-      Fixed(area: "page", block: blocks.MuseHeader),
+-      Fixed(area: "page", block: blocks.StoreMemberships),
+-      Fixed(area: "page", block: blocks.MuseNav),
+-      Fixed(area: "page", block: blocks.SpaceTitle),
+-      Fixed(area: "page", block: blocks.PhF7FreePageContent),
++      Fixed(area: "page", block: blocks.MuseHeader, cell: Flow),
++      Fixed(area: "page", block: blocks.StoreMemberships, cell: Flow),
++      Fixed(area: "page", block: blocks.MuseNav, cell: Flow),
++      Fixed(area: "page", block: blocks.SpaceTitle, cell: Flow),
++      Fixed(area: "page", block: blocks.PhF7FreePageContent, cell: Flow),
+       Widget(
+         area: "page",
+         name: "space_main",
+@@ -42,6 +42,9 @@
+         ),
+       ),
+     ],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: Some(
+     Frame(
+@@ -60,7 +63,11 @@
+         ),
+       ],
+       placements: [],
++      cols: default_wide_cols,
++      rows: [],
++      template: [],
+     ),
+   ),
+   tablet: None,
++  reads: [],
+ )
+diff -ruN before/www/src/pages/muse/arg_handle/tweets/page.gleam mid/www/src/pages/muse/arg_handle/tweets/page.gleam
+--- before/www/src/pages/muse/arg_handle/tweets/page.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/www/src/pages/muse/arg_handle/tweets/page.gleam	2026-09-24 22:30:40.215634858 +0900
+@@ -1,6 +1,6 @@
+ //// Page definition for the svelte-out-1 route.
+ 
+-import framework/front.{type Page, Area, Fixed, Frame, Page}
++import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, default_wide_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -22,11 +22,14 @@
+       ),
+     ],
+     placements: [
+-      Fixed(area: "page", block: blocks.PhF8TweetsReplies),
+-      Fixed(area: "page", block: blocks.PhF8Url),
+-      Fixed(area: "page", block: blocks.PhF8PostedTime),
+-      Fixed(area: "page", block: blocks.PhF8ReplyResult),
++      Fixed(area: "page", block: blocks.PhF8TweetsReplies, cell: Flow),
++      Fixed(area: "page", block: blocks.PhF8Url, cell: Flow),
++      Fixed(area: "page", block: blocks.PhF8PostedTime, cell: Flow),
++      Fixed(area: "page", block: blocks.PhF8ReplyResult, cell: Flow),
+     ],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: Some(
+     Frame(
+@@ -45,7 +48,11 @@
+         ),
+       ],
+       placements: [],
++      cols: default_wide_cols,
++      rows: [],
++      template: [],
+     ),
+   ),
+   tablet: None,
++  reads: [],
+ )
+diff -ruN before/www/src/pages/onboard/page.gleam mid/www/src/pages/onboard/page.gleam
+--- before/www/src/pages/onboard/page.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/www/src/pages/onboard/page.gleam	2026-09-24 22:30:40.213034802 +0900
+@@ -1,6 +1,6 @@
+ //// Page definition for the svelte-out-1 route.
+ 
+-import framework/front.{type Page, Area, Fixed, Frame, Page}
++import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, default_wide_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -22,11 +22,14 @@
+       ),
+     ],
+     placements: [
+-      Fixed(area: "page", block: blocks.PhF16FanOnboard),
+-      Fixed(area: "page", block: blocks.FanOnboard),
+-      Fixed(area: "page", block: blocks.PhF16Url),
+-      Fixed(area: "page", block: blocks.PhF16ConsentBody),
++      Fixed(area: "page", block: blocks.PhF16FanOnboard, cell: Flow),
++      Fixed(area: "page", block: blocks.FanOnboard, cell: Flow),
++      Fixed(area: "page", block: blocks.PhF16Url, cell: Flow),
++      Fixed(area: "page", block: blocks.PhF16ConsentBody, cell: Flow),
+     ],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: Some(
+     Frame(
+@@ -45,7 +48,11 @@
+         ),
+       ],
+       placements: [],
++      cols: default_wide_cols,
++      rows: [],
++      template: [],
+     ),
+   ),
+   tablet: None,
++  reads: [],
+ )
+diff -ruN before/www/src/pages/page.gleam mid/www/src/pages/page.gleam
+--- before/www/src/pages/page.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/www/src/pages/page.gleam	2026-09-24 22:30:40.211240368 +0900
+@@ -1,4 +1,4 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page}
++import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, default_wide_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -20,12 +20,15 @@
+       ),
+     ],
+     placements: [
+-      Fixed(area: "page", block: blocks.BrandLanding),
+-      Fixed(area: "page", block: blocks.PhF1TopContent),
+-      Fixed(area: "page", block: blocks.PhF1EntryExplanation),
+-      Fixed(area: "page", block: blocks.PhF1AdultRecord),
+-      Fixed(area: "page", block: blocks.PhCommonSecondBatchScreen),
++      Fixed(area: "page", block: blocks.BrandLanding, cell: Flow),
++      Fixed(area: "page", block: blocks.PhF1TopContent, cell: Flow),
++      Fixed(area: "page", block: blocks.PhF1EntryExplanation, cell: Flow),
++      Fixed(area: "page", block: blocks.PhF1AdultRecord, cell: Flow),
++      Fixed(area: "page", block: blocks.PhCommonSecondBatchScreen, cell: Flow),
+     ],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: Some(
+     Frame(
+@@ -43,8 +46,12 @@
+           style: [],
+         ),
+       ],
+-      placements: [Fixed(area: "aside", block: blocks.PhCommonPcAdRail)],
++      placements: [Fixed(area: "aside", block: blocks.PhCommonPcAdRail, cell: Flow)],
++      cols: default_wide_cols,
++      rows: [],
++      template: [],
+     ),
+   ),
+   tablet: None,
++  reads: [],
+ )
+diff -ruN before/www/src/pages/search/page.gleam mid/www/src/pages/search/page.gleam
+--- before/www/src/pages/search/page.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/www/src/pages/search/page.gleam	2026-09-24 22:30:40.211964620 +0900
+@@ -1,4 +1,4 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page}
++import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, default_wide_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -20,9 +20,12 @@
+       ),
+     ],
+     placements: [
+-      Fixed(area: "page", block: blocks.SearchResults),
+-      Fixed(area: "page", block: blocks.PhF10SearchPlacement),
++      Fixed(area: "page", block: blocks.SearchResults, cell: Flow),
++      Fixed(area: "page", block: blocks.PhF10SearchPlacement, cell: Flow),
+     ],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: Some(
+     Frame(
+@@ -41,7 +44,11 @@
+         ),
+       ],
+       placements: [],
++      cols: default_wide_cols,
++      rows: [],
++      template: [],
+     ),
+   ),
+   tablet: None,
++  reads: [],
+ )
+diff -ruN before/www/src/pages/store/arg_handle/cast/arg_id/page.gleam mid/www/src/pages/store/arg_handle/cast/arg_id/page.gleam
+--- before/www/src/pages/store/arg_handle/cast/arg_id/page.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/www/src/pages/store/arg_handle/cast/arg_id/page.gleam	2026-09-24 22:30:40.213686593 +0900
+@@ -1,4 +1,4 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page}
++import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, default_wide_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -20,9 +20,12 @@
+       ),
+     ],
+     placements: [
+-      Fixed(area: "page", block: blocks.CastProfile),
+-      Fixed(area: "page", block: blocks.StoreSchedule),
++      Fixed(area: "page", block: blocks.CastProfile, cell: Flow),
++      Fixed(area: "page", block: blocks.StoreSchedule, cell: Flow),
+     ],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: Some(
+     Frame(
+@@ -41,7 +44,11 @@
+         ),
+       ],
+       placements: [],
++      cols: default_wide_cols,
++      rows: [],
++      template: [],
+     ),
+   ),
+   tablet: None,
++  reads: [],
+ )
+diff -ruN before/www/src/pages/store/arg_handle/page.gleam mid/www/src/pages/store/arg_handle/page.gleam
+--- before/www/src/pages/store/arg_handle/page.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/www/src/pages/store/arg_handle/page.gleam	2026-09-24 22:30:40.213374643 +0900
+@@ -1,4 +1,4 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page}
++import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, default_wide_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -20,10 +20,13 @@
+       ),
+     ],
+     placements: [
+-      Fixed(area: "page", block: blocks.StoreHead),
+-      Fixed(area: "page", block: blocks.RosterList),
+-      Fixed(area: "page", block: blocks.StoreSchedule),
++      Fixed(area: "page", block: blocks.StoreHead, cell: Flow),
++      Fixed(area: "page", block: blocks.RosterList, cell: Flow),
++      Fixed(area: "page", block: blocks.StoreSchedule, cell: Flow),
+     ],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: Some(
+     Frame(
+@@ -42,7 +45,11 @@
+         ),
+       ],
+       placements: [],
++      cols: default_wide_cols,
++      rows: [],
++      template: [],
+     ),
+   ),
+   tablet: None,
++  reads: [],
+ )
+diff -ruN before/www/src/pages/tl/page.gleam mid/www/src/pages/tl/page.gleam
+--- before/www/src/pages/tl/page.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/www/src/pages/tl/page.gleam	2026-09-24 22:30:40.211633139 +0900
+@@ -1,6 +1,6 @@
+ //// Page definition for the svelte-out-1 route.
+ 
+-import framework/front.{type Page, Area, Fixed, Frame, Page}
++import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, default_wide_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -22,10 +22,13 @@
+       ),
+     ],
+     placements: [
+-      Fixed(area: "page", block: blocks.PhTlAnonymous),
+-      Fixed(area: "page", block: blocks.PhF18Feed),
+-      Fixed(area: "page", block: blocks.PhF18StoryMix),
++      Fixed(area: "page", block: blocks.PhTlAnonymous, cell: Flow),
++      Fixed(area: "page", block: blocks.PhF18Feed, cell: Flow),
++      Fixed(area: "page", block: blocks.PhF18StoryMix, cell: Flow),
+     ],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: Some(
+     Frame(
+@@ -44,7 +47,11 @@
+         ),
+       ],
+       placements: [],
++      cols: default_wide_cols,
++      rows: [],
++      template: [],
+     ),
+   ),
+   tablet: None,
++  reads: [],
+ )
+diff -ruN before/www/src/pages/w1_preview/page.gleam mid/www/src/pages/w1_preview/page.gleam
+--- before/www/src/pages/w1_preview/page.gleam	2026-09-24 20:01:02.000000000 +0900
++++ mid/www/src/pages/w1_preview/page.gleam	2026-09-24 22:30:40.212320260 +0900
+@@ -1,6 +1,6 @@
+ //// Page definition for the svelte-out-1 route.
+ 
+-import framework/front.{type Page, Area, Fixed, Frame, Page}
++import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, default_wide_cols, Flow}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -22,10 +22,13 @@
+       ),
+     ],
+     placements: [
+-      Fixed(area: "page", block: blocks.PhF2Icon),
+-      Fixed(area: "page", block: blocks.PhCommonConsentText),
+-      Fixed(area: "page", block: blocks.PhCommonPublicReply),
++      Fixed(area: "page", block: blocks.PhF2Icon, cell: Flow),
++      Fixed(area: "page", block: blocks.PhCommonConsentText, cell: Flow),
++      Fixed(area: "page", block: blocks.PhCommonPublicReply, cell: Flow),
+     ],
++    cols: default_sp_cols,
++    rows: [],
++    template: [],
+   ),
+   pc: Some(
+     Frame(
+@@ -44,7 +47,11 @@
+         ),
+       ],
+       placements: [],
++      cols: default_wide_cols,
++      rows: [],
++      template: [],
+     ),
+   ),
+   tablet: None,
++  reads: [],
+ )
