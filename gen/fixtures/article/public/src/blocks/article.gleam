@@ -68,6 +68,12 @@ pub fn view(it: In) -> el.Element(Nil) {
         attribute.attribute("tags", "fixture,gleam,cloudflare"),
         attribute.attribute("selected", "fixture"),
       ]),
+      el.island("blob-save", [
+        attribute.attribute("slug", it.article.slug),
+        attribute.attribute("blob", "stored-image-key"),
+        attribute.attribute("existing", "stored-optional-key"),
+      ]),
+      el.island("article-blob-copy", []),
     ]),
   ])
 }

@@ -20,6 +20,17 @@ characters>`. The v1 host accepts API keys only. It does not use a session
 cookie or require an `Origin` header. The normal App host accepts session
 cookies only; it does not accept a Bearer key.
 
+### Credentials by host
+
+#### API v1
+
+##### Bearer key
+
+###### Normal App
+
+- API v1 requests use a Bearer key.
+- Normal App requests use a session cookie.
+
 The plaintext key is `msa_` followed by 32 random bytes encoded as 64
 lowercase hexadecimal characters. It is never stored or logged. The database
 stores only an HMAC-SHA256 value under the `store.api_key:` purpose label.

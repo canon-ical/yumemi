@@ -65,6 +65,13 @@ fn render_view(
   raw_html.html([attribute.attribute("lang", "ja")], [
     raw_html.head([], [
       raw_html.meta([attribute.attribute("charset", "utf-8")]),
+      raw_html.meta([
+        attribute.attribute("name", "viewport"),
+        attribute.attribute(
+          "content",
+          "width=device-width, initial-scale=1, viewport-fit=cover",
+        ),
+      ]),
       raw_html.title([], "yumemi front fixture"),
     ]),
     raw_html.body([], [styled_body]),

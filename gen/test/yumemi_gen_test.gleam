@@ -336,7 +336,7 @@ pub fn gen_types_value_prop_keeps_property_column_test() {
 
 pub fn fixture_gleam_files_parse_including_trailing_spread_test() {
   let assert Ok(units) = source.load(fixture)
-  list.length(units) |> should.equal(15)
+  list.length(units) |> should.equal(16)
   list.any(units, fn(unit) { unit.path == "trailing_spread" })
   |> should.be_true
 }
@@ -345,7 +345,7 @@ pub fn types_entities_services_counted_test() {
   let loaded = app()
   list.length(loaded.value_types) |> should.equal(5)
   list.length(loaded.entities) |> should.equal(4)
-  list.length(loaded.services) |> should.equal(6)
+  list.length(loaded.services) |> should.equal(7)
 }
 
 pub fn lifecycle_read_from_edges_test() {
@@ -356,13 +356,14 @@ pub fn lifecycle_read_from_edges_test() {
   article.collection |> should.equal("articles")
 }
 
-pub fn article_http_route_table_has_nine_rows_test() {
+pub fn article_http_route_table_has_twelve_rows_test() {
   let face = text("src/gen/face.gleam")
   string.contains(face, "pub type Face {\n  Public\n  Admin\n}")
   |> should.be_true
   let http = text("src/gen/entry/http.gleam")
   [
     "Route(face: \"public\", method: \"POST\", path: \"/api/articles\", service: \"article_create\", path_keys: [], credential: Session),",
+    "Route(face: \"public\", method: \"POST\", path: \"/api/articles/{slug}/blob_save\", service: \"article_blob_save\", path_keys: [\"slug\"], credential: Session),",
     "Route(face: \"admin\", method: \"POST\", path: \"/api/admin/articles\", service: \"article_create\", path_keys: [], credential: Session),",
     "Route(face: \"public\", method: \"GET\", path: \"/api/articles\", service: \"article_list\", path_keys: [], credential: Session),",
     "Route(face: \"admin\", method: \"GET\", path: \"/api/admin/articles\", service: \"article_list\", path_keys: [], credential: Session),",
@@ -382,7 +383,7 @@ pub fn article_http_route_table_has_nine_rows_test() {
     && string.contains(line, "path: \"")
   })
   |> list.length
-  |> should.equal(11)
+  |> should.equal(12)
 }
 
 pub fn entry_prefix_is_required_named_and_one_word_test() {
@@ -1943,6 +1944,7 @@ pub fn front_model_reads_url_blocks_widgets_components_and_style_test() {
   |> should.equal([
     "WidgetList",
     "ArticleRead",
+    "ArticleBlobSave",
     "ArticlePublish",
     "ArticleCreate",
     "ArticleList",
@@ -1973,7 +1975,7 @@ pub fn front_model_reads_url_blocks_widgets_components_and_style_test() {
   |> should.equal([True, True, True, True, False, True])
   value.components
   |> list.map(fn(component) { component.after_send })
-  |> should.equal([Some("Stay"), Some("ReloadPage")])
+  |> should.equal([None, None, Some("Stay"), Some("ReloadPage")])
 }
 
 pub fn front_emit_route_uses_page_only_and_colon_arguments_test() {
@@ -2003,7 +2005,8 @@ pub fn front_emit_api_is_filtered_by_face_services_test() {
   ["service.ArticleCreate", "service.ArticlePublish", "service.ArticleRetract"]
   |> list.each(fn(row) { string.contains(api, row) |> should.be_false })
   string.contains(api, "import framework/front as front") |> should.be_true
-  string.contains(api, "pub type Attached = Nil") |> should.be_true
+  string.contains(api, "pub type Attached {") |> should.be_true
+  string.contains(api, "  BlobCopy") |> should.be_true
   string.contains(
     api,
     "pub type Target = front.Target(service.Service, Attached)",
@@ -2024,14 +2027,16 @@ pub fn attached_runtime_table_matches_generated_face_api_test() {
     runtime |> string.split("name:'") |> list.length |> int.subtract(1)
   let face_rows =
     api
-    |> string.split("AttachedRoute(entry: Fixture")
+    |> string.split("AttachedRoute(entry:")
     |> list.length
     |> int.subtract(1)
-  runtime_rows |> should.equal(2)
+    |> int.subtract(1)
+  runtime_rows |> should.equal(3)
   face_rows |> should.equal(runtime_rows)
   [
     "AttachedRoute(entry: FixtureBrowser, method: Get, path: \"/fixture/browser\")",
     "AttachedRoute(entry: FixtureSync, method: Post, path: \"/fixture/sync\")",
+    "AttachedRoute(entry: BlobCopy, method: Post, path: \"/api/blobs\")",
   ]
   |> list.each(fn(route) { string.contains(api, route) |> should.be_true })
 }
@@ -2274,14 +2279,14 @@ pub fn static_material_copy_keeps_front_four_names_and_markdown_structure_test()
   string.contains(document, "html.table(") |> should.be_true
   string.contains(document, "html.pre(") |> should.be_true
   string.contains(document, string.inspect(sources.api_v1)) |> should.be_false
-  text_occurrences(document, "\n    heading") |> should.equal(3)
+  text_occurrences(document, "\n    heading") |> should.equal(7)
   text_occurrences(document, "html.table(") |> should.equal(2)
   text_occurrences(document, "table_row([") |> should.equal(11)
   let inline_code_count = text_occurrences(document, "inline_code(") - 1
   inline_code_count |> should.equal(67)
   text_occurrences(document, "html.pre(") |> should.equal(1)
   let list_count = text_occurrences(document, "unordered_list(") - 1
-  list_count |> should.equal(0)
+  list_count |> should.equal(1)
 }
 
 pub fn static_api_v1_source_change_changes_generated_structure_test() {
@@ -2515,7 +2520,7 @@ pub fn front_calls_parse_framework_target_of_and_entry_test() {
   let assert Ok(#(_, generated_api)) =
     synthetic_front_files(face_units)
     |> list.find(fn(file) { file.0 == "public/src/gen/api.gleam" })
-  string.contains(generated_api, "pub type Attached {\n  BrowserAdult\n}")
+  string.contains(generated_api, "  BrowserAdult\n")
   |> should.be_true
   string.contains(
     generated_api,
@@ -2789,7 +2794,7 @@ pub fn front_emit_transport_and_client_are_generic_and_given_safe_test() {
   let transport = text("public/src/gen/live/transport_ffi.mjs")
   string.contains(
     transport,
-    "export function send(method, path, body, onOk, onError)",
+    "export function send(method, path, body, blobFields, onOk, onError)",
   )
   |> should.be_true
   string.contains(transport, "ArticlePublish") |> should.be_false
@@ -2799,6 +2804,62 @@ pub fn front_emit_transport_and_client_are_generic_and_given_safe_test() {
   string.contains(client, "data-yumemi-given") |> should.be_true
   string.contains(client, "pick-tag") |> should.be_true
   string.contains(client, "__YUMEMI_BUILD__") |> should.be_true
+}
+
+pub fn front_emit_blob_fields_issue_tokens_and_upload_only_registered_tokens_test() {
+  let live = text("public/src/gen/live/article_blob_save.gleam")
+  [
+    "pub fn blob_file_input() -> List(attribute.Attribute(Event))",
+    "event.on(\"change\", file_input_event(field))",
+    "fn file_token(event: Dynamic) -> String",
+    "live.Set(field, file_token(event))",
+    "blob_fields: List(String)",
+    "[\"blob\", \"existing\"]",
+    "case args.existing",
+    "\"\" -> json.null()",
+  ]
+  |> list.each(fn(row) { string.contains(live, row) |> should.be_true })
+
+  let transport = text("public/src/gen/live/transport_ffi.mjs")
+  [
+    "const selectedFiles = new Map()",
+    "const uploadedFiles = new Map()",
+    "export function file_token(event)",
+    "selectedFiles.set(token, file)",
+    "selectedFiles.has(value) || uploadedFiles.has(value)",
+  ]
+  |> list.each(fn(row) { string.contains(transport, row) |> should.be_true })
+  string.contains(transport, "document.addEventListener") |> should.be_false
+}
+
+pub fn front_emit_blob_upload_failure_precedes_and_skips_service_request_test() {
+  let transport = text("public/src/gen/live/transport_ffi.mjs")
+  string.contains(
+    transport,
+    "if (!response.ok) throw new Error(\"blob upload failed\")",
+  )
+  |> should.be_true
+  let assert [_, after_upload] =
+    string.split(transport, "await uploadToken(value)")
+  string.contains(after_upload, "const response = await fetch(path")
+  |> should.be_true
+  string.contains(transport, "}).catch(() => onError(undefined))")
+  |> should.be_true
+}
+
+pub fn front_emit_blob_copy_entry_uses_attached_target_route_test() {
+  let api = text("public/src/gen/api.gleam")
+  string.contains(api, "  BlobCopy\n") |> should.be_true
+  string.contains(
+    api,
+    "AttachedRoute(entry: BlobCopy, method: Post, path: \"/api/blobs\")",
+  )
+  |> should.be_true
+
+  let live = text("public/src/gen/live/blob_copy.gleam")
+  string.contains(live, "upload_file") |> should.be_true
+  string.contains(live, "\"POST\",\n      \"/api/blobs\"") |> should.be_true
+  string.contains(live, "live.Done(Ok(key))") |> should.be_true
 }
 
 pub fn client_bundle_uses_generated_output_over_input_test() {
@@ -3005,7 +3066,7 @@ pub fn front_emit_writes_one_out_file_per_service_test() {
   |> list.map(fn(entry) { entry.0 })
   |> list.filter(string.starts_with(_, "public/src/gen/out/"))
   |> list.length
-  |> should.equal(6)
+  |> should.equal(7)
 }
 
 pub fn front_emit_load_layout_without_sources_uses_empty_data_test() {
