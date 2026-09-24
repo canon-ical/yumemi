@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { toList } from "./gleam.mjs";
 
@@ -56,12 +57,61 @@ function repositoryRoot(faceDir, toml) {
   return dependency ? path.resolve(faceDir, dependency[1]) : null;
 }
 
-function manifestWithoutPackage(manifest, packageName) {
+function dependencyCacheDirectory(sourceFace, face) {
+  const toml = fs.readFileSync(path.join(sourceFace, "gleam.toml"), "utf8");
+  const root = repositoryRoot(sourceFace, toml);
+  if (root === null) return null;
+  const sourceManifest = path.join(sourceFace, "manifest.toml");
+  const manifest = fs.existsSync(sourceManifest)
+    ? fs.readFileSync(sourceManifest, "utf8")
+    : "";
+  const rootToml = fs.readFileSync(path.join(root, "gleam.toml"), "utf8");
+  const key = createHash("sha256")
+    .update(path.resolve(sourceFace))
+    .update("\n")
+    .update(toml)
+    .update("\n")
+    .update(manifest)
+    .update("\n")
+    .update(rootToml)
+    .digest("hex");
+  const safeFace = face.replace(/[^A-Za-z0-9_.-]/g, "_");
+  return path.join(process.cwd(), "build/yumemi-gen-front-cache", safeFace, key);
+}
+
+function restoreDependencyCache(tempFace, cacheDir) {
+  if (cacheDir === null) return;
+  const cachedPackages = path.join(cacheDir, "packages");
+  if (!fs.existsSync(cachedPackages)) return;
+  fs.cpSync(
+    cachedPackages,
+    path.join(tempFace, "build/packages"),
+    { recursive: true, force: true },
+  );
+}
+
+function persistDependencyCache(tempFace, cacheDir) {
+  if (cacheDir === null) return;
+  const builtPackages = path.join(tempFace, "build/packages");
+  if (!fs.existsSync(builtPackages)) return;
+  const cachedPackages = path.join(cacheDir, "packages");
+  fs.mkdirSync(cacheDir, { recursive: true });
+  fs.cpSync(builtPackages, cachedPackages, { recursive: true, force: true });
+}
+
+function manifestForPathDependency(manifest, root) {
   const newline = manifest.includes("\r\n") ? "\r\n" : "\n";
   const lines = manifest.split(/\r?\n/);
   const kept = [];
   let inPackages = false;
-  const packageNameField = new RegExp("\\bname\\s*=\\s*\"" + packageName + "\"");
+  const packageVersion =
+    fs.readFileSync(path.join(root, "gleam.toml"), "utf8")
+      .match(/^version\s*=\s*"([^"]+)"/m)?.[1];
+  if (!packageVersion) {
+    throw new Error("yumemi path dependency has no package version");
+  }
+  const localPath = root.replaceAll("\\", "\\\\");
+  const packageNameField = /\bname\s*=\s*"yumemi"/;
   for (const line of lines) {
     if (/^\s*packages\s*=\s*\[/.test(line)) {
       inPackages = !/]\s*$/.test(line);
@@ -78,6 +128,28 @@ function manifestWithoutPackage(manifest, packageName) {
       && /^\s*\{/.test(line)
       && packageNameField.test(line)
     ) {
+      let localPackage = line
+        .replace(/version\s*=\s*"[^"]+"/, 'version = "' + packageVersion + '"')
+        .replace(/,\s*otp_app\s*=\s*"[^"]+"/, "")
+        .replace(/source\s*=\s*"[^"]+"/, 'source = "local"')
+        .replace(/,\s*outer_checksum\s*=\s*"[^"]+"/, "");
+      if (/path\s*=\s*"[^"]+"/.test(localPackage)) {
+        localPackage = localPackage.replace(
+          /path\s*=\s*"[^"]+"/,
+          'path = "' + localPath + '"',
+        );
+      } else {
+        localPackage = localPackage.replace(
+          /\s*}\s*,?\s*$/,
+          ', path = "' + localPath + '" },',
+        );
+      }
+      kept.push(localPackage);
+      continue;
+    }
+    if (!inPackages && /^\s*yumemi\s*=\s*\{/.test(line)) {
+      const indentation = line.match(/^\s*/)?.[0] ?? "";
+      kept.push(indentation + 'yumemi = { path = "' + localPath + '" }');
       continue;
     }
     kept.push(line);
@@ -94,9 +166,8 @@ export function prepareTemporaryPackage(sourceFace, tempFace) {
     : toml.replace(
         /yumemi\s*=\s*\{\s*path\s*=\s*"[^"]+"\s*\}/,
         `yumemi = { path = "${root.replaceAll('\\', '\\\\')}" }`,
-      );
+  );
   fs.writeFileSync(tomlPath, rewritten);
-  fs.rmSync(path.join(tempFace, "build"), { recursive: true, force: true });
   const sourceManifest = path.join(sourceFace, "manifest.toml");
   const tempManifest = path.join(tempFace, "manifest.toml");
   if (root === null && fs.existsSync(sourceManifest)) {
@@ -104,7 +175,10 @@ export function prepareTemporaryPackage(sourceFace, tempFace) {
   } else if (root !== null && fs.existsSync(sourceManifest)) {
     fs.writeFileSync(
       tempManifest,
-      manifestWithoutPackage(fs.readFileSync(sourceManifest, "utf8"), "yumemi"),
+      manifestForPathDependency(
+        fs.readFileSync(sourceManifest, "utf8"),
+        root,
+      ),
     );
   } else {
     fs.rmSync(tempManifest, { force: true });
@@ -142,6 +216,19 @@ function diagnosticDetail(processResult, tempRoot, outputFace, face, stage) {
   return detail + "; 全文=" + relativePath;
 }
 
+function retainPackageContext(outputFace, face, stage, tempFace) {
+  const diagnosticDir = path.join(outputFace, "_diagnostics");
+  fs.mkdirSync(diagnosticDir, { recursive: true });
+  for (const name of ["gleam.toml", "manifest.toml"]) {
+    const source = path.join(tempFace, name);
+    if (!fs.existsSync(source)) continue;
+    fs.copyFileSync(
+      source,
+      path.join(diagnosticDir, face + "-" + stage + "-" + name),
+    );
+  }
+}
+
 function compileCurrentOutDecoders(sourceFace, outputFace, tempRoot, face) {
   const outDir = path.join(outputFace, "src/gen/out");
   if (!fs.existsSync(outDir)) return { error: null, modules: 0 };
@@ -170,12 +257,16 @@ function compileCurrentOutDecoders(sourceFace, outputFace, tempRoot, face) {
     .join("\n");
   const probe = `${imports}\n\npub fn check() -> Nil {\n${calls}\n  Nil\n}\n`;
   fs.writeFileSync(path.join(tempFace, "src/client_probe.gleam"), probe);
+  const dependencyCache = dependencyCacheDirectory(sourceFace, face);
   const toml = prepareTemporaryPackage(sourceFace, tempFace);
+  restoreDependencyCache(tempFace, dependencyCache);
   const build = spawnSync("gleam", ["build", "--target", "javascript"], {
     cwd: tempFace,
     encoding: "utf8",
   });
+  persistDependencyCache(tempFace, dependencyCache);
   if (build.status !== 0) {
+    retainPackageContext(outputFace, face, "out-decoder", tempFace);
     const detail = diagnosticDetail(build, tempRoot, outputFace, face, "out-decoder");
     return {
       error: `${face}: client Out decoder 用 Gleam build に失敗した (status=${build.status}): ${detail}`,
@@ -211,12 +302,15 @@ function bundleOne(outDir, appDir, face) {
     copyDirectoryContents(sourceFace, tempFace);
     copyDirectoryContents(outputFace, tempFace);
     const rewritten = prepareTemporaryPackage(sourceFace, tempFace);
+    const dependencyCache = dependencyCacheDirectory(sourceFace, face);
+    restoreDependencyCache(tempFace, dependencyCache);
     const name = packageName(rewritten);
     const source = fs.readFileSync(sourcePath, "utf8");
     const runtimeBuild = spawnSync("gleam", ["build", "--target", "javascript"], {
       cwd: tempFace,
       encoding: "utf8",
     });
+    persistDependencyCache(tempFace, dependencyCache);
     if (runtimeBuild.status !== 0) {
       fs.rmSync(sourcePath, { force: true });
       const detail = diagnosticDetail(
