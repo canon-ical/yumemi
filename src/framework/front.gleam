@@ -3,12 +3,29 @@ import framework/front/track
 import gleam/list
 import gleam/option.{type Option}
 
+pub type Var {
+  Var(name: String, from: From)
+}
+
+pub type From {
+  Path(String)
+  Query(String)
+  Session(SessionKey)
+  Origin(face: String)
+  AuthOrigin
+}
+
+pub type SessionKey {
+  SubjectHandle
+  SubjectId
+}
+
 pub type Layout(service, block) {
   Layout(
+    vars: List(Var),
     sp: Frame(service, block),
     pc: Option(Frame(service, block)),
     tablet: Option(Frame(service, block)),
-    reads: List(service),
   )
 }
 
@@ -17,10 +34,10 @@ pub type Page(service, block) {
     of: Option(service),
     layout: Layout(service, block),
     theme: Option(String),
+    vars: List(Var),
     sp: Frame(service, block),
     pc: Option(Frame(service, block)),
     tablet: Option(Frame(service, block)),
-    reads: List(service),
   )
 }
 

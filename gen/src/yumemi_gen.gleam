@@ -104,11 +104,12 @@ pub fn generate(
   ))
   use front_models <- result.try(
     list.try_map(discovered.packages, fn(package) {
-      front.read_with_package(
+      front.read_with_package_and_entries(
         package.name,
         face.package_name(package.path),
         package.units,
         app.services,
+        app.entries,
       )
       |> result.map(fn(model) { #(package, model) })
       |> result.map_error(front_note)
