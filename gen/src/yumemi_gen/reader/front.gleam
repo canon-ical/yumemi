@@ -812,11 +812,13 @@ fn vars_field(expression: glance.Expression) -> List(Var) {
 }
 
 fn parse_var(expression: glance.Expression, index: Int) -> Var {
-  let fallback = "vars[" <> int.to_string(index) <> "]"
+  let fallback = "invalid_var_" <> int.to_string(index)
   case g.ctor_name(expression) {
     Some("Var") -> {
-      let name = g.labelled(expression, "name") |> option.then(g.string_value)
-      let from = g.labelled(expression, "from")
+      let name =
+        constructor_field(expression, "name", ["name", "from"])
+        |> option.then(g.string_value)
+      let from = constructor_field(expression, "from", ["name", "from"])
       Var(name: option.unwrap(name, fallback), from: case name, from {
         Some(_), Some(value) -> parse_from(value)
         None, _ -> InvalidFrom("Var の name は文字列リテラルではない")
@@ -842,7 +844,10 @@ fn parse_from(expression: glance.Expression) -> From {
         _ -> InvalidFrom("Session のキーが無い")
       }
     Some("Origin") ->
-      case g.labelled(expression, "face") |> option.then(g.string_value) {
+      case
+        constructor_field(expression, "face", ["face"])
+        |> option.then(g.string_value)
+      {
         Some(face) -> Origin(face)
         None -> InvalidFrom("Origin の face は文字列リテラルではない")
       }
@@ -855,6 +860,75 @@ fn parse_from(expression: glance.Expression) -> From {
       InvalidFrom(
         "from は Path / Query / Session / Origin / AuthOrigin のリテラルではない",
       )
+  }
+}
+
+/// 構成子の named field は名前で読み、positional field は未指定の field
+/// の宣言順へ割り当てる。混在した呼び出しでも named field は位置を消費しない。
+fn constructor_field(
+  expression: glance.Expression,
+  name: String,
+  fields: List(String),
+) -> Option(glance.Expression) {
+  case expression {
+    glance.Call(arguments: arguments, ..) -> {
+      let named =
+        arguments
+        |> list.find_map(fn(argument) {
+          case argument {
+            glance.LabelledField(label, _, value) if label == name -> Ok(value)
+            _ -> Error(Nil)
+          }
+        })
+      case named {
+        Ok(value) -> Some(value)
+        Error(_) -> {
+          let supplied =
+            arguments
+            |> list.filter_map(fn(argument) {
+              case argument {
+                glance.LabelledField(label, _, _) -> Ok(label)
+                glance.ShorthandField(label, _) -> Ok(label)
+                _ -> Error(Nil)
+              }
+            })
+          let positional_names =
+            fields
+            |> list.filter(fn(field) { !list.contains(supplied, field) })
+          let position = field_position(positional_names, name)
+          let positional_values =
+            arguments
+            |> list.filter_map(fn(argument) {
+              case argument {
+                glance.UnlabelledField(value) -> Ok(value)
+                _ -> Error(Nil)
+              }
+            })
+          case position {
+            Some(index) -> list_at(positional_values, index)
+            None -> None
+          }
+        }
+      }
+    }
+    _ -> None
+  }
+}
+
+fn field_position(fields: List(String), wanted: String) -> Option(Int) {
+  case fields {
+    [field, ..] if field == wanted -> Some(0)
+    [_, ..rest] ->
+      option.map(field_position(rest, wanted), fn(index) { index + 1 })
+    [] -> None
+  }
+}
+
+fn list_at(values: List(a), index: Int) -> Option(a) {
+  case values {
+    [value, ..] if index == 0 -> Some(value)
+    [_, ..rest] if index > 0 -> list_at(rest, index - 1)
+    _ -> None
   }
 }
 

@@ -3693,6 +3693,93 @@ pub fn widget_service_args_are_resolved_from_same_name_vars_test() {
   ])
 }
 
+pub fn positional_and_mixed_var_arguments_and_origin_are_read_test() {
+  let value = article_front()
+  let assert Ok(page) =
+    list.find(value.pages, fn(page) {
+      page.module == "pages/article/arg_slug/page"
+    })
+  page.vars
+  |> list.map(fn(var) { #(var.name, var.from) })
+  |> should.equal([
+    #("widget", front.Query("widget")),
+    #("slug", front.Path("slug")),
+    #("view_only", front.Path("slug")),
+    #("term", front.Query("term")),
+    #("subject_handle", front.Session("SubjectHandle")),
+  ])
+  value.layout.vars
+  |> list.map(fn(var) { #(var.name, var.from) })
+  |> should.equal([
+    #("www_origin", front.Origin("public")),
+    #("auth_origin", front.AuthOrigin),
+  ])
+}
+
+pub fn labelled_origin_argument_is_read_test() {
+  let assert Ok(units) = source.load("fixtures/article/public")
+  let units =
+    units
+    |> list.map(fn(unit) {
+      case unit.path == "layout" {
+        True ->
+          source_unit(
+            unit.path,
+            string.replace(
+              unit.text,
+              "Origin(\"public\")",
+              "Origin(face: \"public\")",
+            ),
+          )
+        False -> unit
+      }
+    })
+  let value = front_from_units_named("public", units, app().services)
+  value.layout.vars
+  |> list.map(fn(var) { #(var.name, var.from) })
+  |> should.equal([
+    #("www_origin", front.Origin("public")),
+    #("auth_origin", front.AuthOrigin),
+  ])
+}
+
+pub fn unreadable_var_name_is_exit_four_and_emits_safe_field_test() {
+  let page =
+    "Page(of: None, layout: layout.public, theme: None, "
+    <> "vars: [Var(name: dynamic_name, from: Query(\"q\"))], "
+    <> "sp: Frame(areas: [], placements: [], cols: [], rows: [], template: []), "
+    <> "pc: None, tablet: None)"
+  let files =
+    synthetic_front_files_with_layout_and_page(empty_variable_layout(), page)
+  let assert Ok(#(_, generated)) =
+    list.find(files, fn(file) {
+      file.0 == "public/src/gen/load/article/arg_slug/page.gleam"
+    })
+  string.contains(generated, "invalid_var_0: String") |> should.be_true
+  string.contains(generated, "vars[0]") |> should.be_false
+
+  let notes =
+    front_notes(
+      [
+        layout_unit(empty_variable_layout()),
+        source_unit(
+          "pages/example/page",
+          page_source(variable_page(
+            "[Var(name: dynamic_name, from: Query(\"q\"))]",
+            "",
+          )),
+        ),
+      ],
+      app().services,
+    )
+  assert_variable_note(
+    notes,
+    2,
+    "pages/example/page",
+    "Var の name は文字列リテラルではない",
+  )
+}
+
 pub fn block_arg_without_var_is_exit_four_test() {
   let notes =
     variable_negative_notes(

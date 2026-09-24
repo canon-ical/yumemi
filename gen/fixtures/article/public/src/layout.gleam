@@ -10,7 +10,7 @@ import style
 
 pub const public: Layout(service.Service, blocks.Block) = Layout(
   vars: [
-    Var(name: "www_origin", from: Origin(face: "public")),
+    Var("www_origin", Origin("public")),
     Var(name: "auth_origin", from: AuthOrigin),
   ],
   sp: Frame(

@@ -4,6 +4,10 @@
 
 ## 鷹野宛
 
+### P0
+
+- **R19-P0-1:** 63 の `Var("handle", Path("muse"))` / `Origin("www")` を reader が読めず、F6 で `Vars(vars[0]: String)` を出した。巡4で贄川さんが検収時に拾い差し戻し。reader を位置引数・ラベル付き・合法な混在形に対応させ、非リテラル名は安全な `invalid_var_<n>` に置き換えた。位置引数の `Var` / `Origin`、ラベル付き `Origin`、exit 4 の負例を test で確認。`Page` / `Layout`、`Frame` / `Area` / `Fixed` / `Widget`、`Minmax` / `GridTracks` / `Span` / `At` / `CellSpan` / `ByKind` は引き続き `g.labelled` で読むため、位置引数は未対応。今回は変更していない。
+
 ### P1
 
 - **G1-P1-1:** `reads:` を消した後、reader が未知欄を黙って読み飛ばす。
@@ -387,20 +391,22 @@ file 数が減った3 file は、base にのみ存在する `console/src/gen/wid
 | 段 | 生成 stop | 生成 file | exit 1 | exit 2 | exit 3 | exit 4 | warning |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | F5 最小 patch | 4 | 1372 | 3 | 0 | 1 | 111 | 48 |
-| F6 patch | 1 | 1380 | 0 | 0 | 1 | 222 | 115 |
+| F6 patch | 4 | 1385 | 3 | 0 | 1 | 51 | 78 |
 
 | 段 / face | `gleam build` stop | error 数 / file 数 | 内訳 |
 |---|---:|---:|---|
 | F5 最小 / www | 1 | 12 / 10 | Type mismatch 11、Unknown label 1 |
 | F5 最小 / muses | 1 | 13 / 12 | Type mismatch 12、Unknown label 1 |
 | F5 最小 / console | 1 | 18 / 12 | Type mismatch 17、Unknown label 1 |
-| F6 / www | 1 | 1 / 1 | Syntax error: `www/src/gen/load/search/page.gleam` |
-| F6 / muses | 1 | 1 / 1 | Syntax error: `muses/src/gen/load/page.gleam` |
-| F6 / console | 1 | 1 / 1 | Syntax error: `console/src/gen/load/page.gleam` |
+| F6 / www | 1 | 24 / 6 | `space_read` / `space_widget_list` 不在による Block / skeleton / Page の参照エラーと、Widget の Row / Out 不一致6件 |
+| F6 / muses | 1 | 16 / 4 | `subject_settings_read` / `widget_read` 不在による Block / skeleton の参照エラー |
+| F6 / console | 1 | 17 / 5 | `store_roster_read` / `subject_list` 不在による Block / skeleton の参照エラー |
 
-F5 最小 patch の全 error file 名と件数、F6 の3面ログは `gen/build/y1f-snap-ii-summary.txt` と `gen/build/y1f-snap-ii-{f5min,f6}-{www,muses,console}-build.log`。生成ログは `gen/build/y1f-snap-ii-{f5min,f6}-generation.log`。F5 patch は68 file、F6 patch は113 file に適用した。両写しの `api/` は元 snapshot と diff 0。新規 Service は足していない。
+F5 patch は68 file、F6 patch は113 file。各段で `gen/build/y1f-snap-i-src` から写しを作り、F6 は F5 の後に適用した。両段の `api/` は基点との差分0。次の Service module 6本はいずれも無い: `store_roster_read`, `subject_list`, `subject_settings_read`, `widget_read`, `space_read`, `space_widget_list`。Service は追加していない。
 
-F6 表の「語彙だけ」15 Page はすべて `src/gen/load/...` の SHA-256 header 付き生成物として出た(15/15)。ただし生成器が書いた `Vars` の field が `vars[0]: String` のようになり、Gleam の constructor field 構文として不正。`console/src/gen/load/page.gleam:21` で実物を確認し、F6 の3面 build も上表の syntax error で止まった。生成器の `gleam format` 自体も `vars[0]` の `[` を constructor field 名として読めず stop 1。F6 の内部 diagnostics は exit 4 が222行で、6つの未実装 back Service だけには限られない。よって到達線は未達。F6 patch の追加修正では解消できない生成器側の穴として記録し、生成器/framework/API は変更しなかった。6本の Service module の有無は `api/src/service` で確認: `store_roster_read`, `subject_list`, `subject_settings_read`, `widget_read`, `space_read`, `space_widget_list` はいずれも無し。今回の build は先に formatter 構文で停止したため、それらだけの build 結果とは判定できない。
+F6 の「語彙だけ」15 Page は SHA-256 header 付き生成物で15/15。生成物に `vars[0]` は0、3面 build に syntax error は0。F5 と比べ、新たに出た exit 4 は13行で、うち7行は上記6 Service module の欠如に対応する。残る6行は `muses/pages/metrics/page` / `muses/pages/page` の `Option(String)` query と必須 Date / `Place` Service Args の型対応。WWW の `muse/arg_handle/page` でも `widget_list.Row` を `widget_list.Out` として渡す型不一致が6件残る。したがって到達線は未達で、Service 欠如だけには限定できていない。query 文字列から Date / Place への変換と Widget の Row / Out の受け渡しは設計判断が要るため、贄川さんへの確認事項として残す。
+
+生成ログ / build log / patch 証跡は `gen/build/y1f-r19-snap-ii-summary.txt` と `gen/build/y1f-r19-snap-ii-{f5min,f6-final2}-{generation,www-build,muses-build,console-build}.log`。F6 のエラー file 名一覧は summary に記載。
 
 ## 51 v5 に足す文
 
@@ -418,10 +424,10 @@ constructor 名は `Track.Auto` と `TrackSize.AutoSize`。Gleam の module name
 
 | 項目 | 基線 | 最終実測 |
 |---|---|---|
-| root `gleam build` | exit 0 / warning 1 | exit 0 / warning 1。`build/y1f-r13-root-build.txt` |
-| `cd gen && gleam test` | 181 passed | 189 passed。`gen/build/y1f-r13-gen-test.txt` |
-| Article fixture | 92 file | 112 fileを2回、両 exit 0、`diff -r` 0行。`gen/build/y1f-r13-fixture-{one,two}.log`、`...-diff.txt` |
-| snapshot (i) | exit 1=3 / 2=0 / 3=1 / 4=22 / warning=48 / 1375 file | 2回とも stop 4 / exit 1=3 / 2=0 / 3=1 / 4=111 / warning=48 / 1372 file。新規 exit 4 は89行、消失0、未分類0。elapsed 表示をそろえた後 `diff -r` 空。`gen/build/y1f-snap-i-compare.txt` |
-| snapshot (ii) F5 最小 | — | generator stop4、exit 1/2/3/4=3/0/1/111、warning48、1372 file。3面 build は stop1、error 12/13/18。file別一覧は `gen/build/y1f-snap-ii-summary.txt` |
-| snapshot (ii) F6 | — | generator stop1、exit 1/2/3/4=0/0/1/222、warning115、1380 file。語彙だけ15 fileは SHA-256 header 15/15。3面 build は各 stop1、`vars[0]` に起因する syntax error 各1。到達線は未達。`gen/build/y1f-snap-ii-summary.txt` |
-| verify | — | SSR / isolate / given / file / overlay は ALL PASS。Block preview は public 7 / admin 1 とも PASS。Hex API rate limit 時は前回の `build/packages` をseedして同じ script を再実行。`gen/build/y1f-r13-verify-*.txt` |
+| root `gleam build` | exit 0 / warning 1 | exit 0 / warning 1。`build/y1f-r19-root-build.txt` |
+| `cd gen && gleam test` | 181 passed | 192 passed, no failures。`gen/build/y1f-r19-gen-test.txt` |
+| Article fixture | 92 file | fresh output 112 fileを2回、両 exit 0、diff 0行。`gen/build/y1f-r19-fixture-clean-{one,two}.log`、`...-diff.txt` |
+| snapshot (i) | exit 1=3 / 2=0 / 3=1 / 4=22 / warning=48 / 1375 file | fresh copy 2回とも stop 4 / exit 1=3 / 2=0 / 3=1 / 4=111 / warning=48 / 1372 file。前 run と exit4 set 同一111、追加0 / 消失0 / 未分類0。生成部分 diff0、diagnostics 込み全出力 diff0。`gen/build/y1f-r19-snap-i-summary.txt` |
+| snapshot (ii) F5 最小 | — | stop4、exit 1/2/3/4=3/0/1/111、warning48、1372 file。3面 build stop1、errors 12/13/18。`gen/build/y1f-r19-snap-ii-summary.txt` |
+| snapshot (ii) F6 | — | stop4、exit 1/2/3/4=3/0/1/51、warning78、1385 file。lexical-only SHA header 15/15、`vars[0]` 0。3面 build errors 24/16/17、syntax 0。到達線未達: query 型対応6行と Widget Row / Out 不一致6件が残る。`gen/build/y1f-r19-snap-ii-summary.txt` |
+| verify | — | SSR / isolate / given / file / overlay は ALL PASS。Block preview public 7 / admin 1 も PASS。`gen/build/y1f-r19-verify-{ssr,isolate,given,file,overlay,blocks}.txt` |

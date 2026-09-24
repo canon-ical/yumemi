@@ -14,11 +14,11 @@ pub const page: Page(service.Service, blocks.Block) = Page(
   layout: layout.public,
   theme: Some("theme"),
   vars: [
-    Var(name: "widget", from: Query("widget")),
-    Var(name: "slug", from: Path("slug")),
-    Var(name: "view_only", from: Path("slug")),
+    Var("widget", Query("widget")),
+    Var("slug", from: Path("slug")),
+    Var("view_only", from: Path("slug")),
     Var(name: "term", from: Query("term")),
-    Var(name: "subject_handle", from: Session(SubjectHandle)),
+    Var("subject_handle", Session(SubjectHandle)),
   ],
   sp: Frame(
     areas: [
