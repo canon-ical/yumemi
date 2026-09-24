@@ -2044,6 +2044,10 @@ fn page_render_text(
   <> ")], [\n"
   <> "    raw_html.head([], [\n"
   <> "      raw_html.meta([attribute.attribute(\"charset\", \"utf-8\")]),\n"
+  <> "      raw_html.meta([\n"
+  <> "        attribute.attribute(\"name\", \"viewport\"),\n"
+  <> "        attribute.attribute(\"content\", \"width=device-width, initial-scale=1, viewport-fit=cover\"),\n"
+  <> "      ]),\n"
   <> "      raw_html.title([], "
   <> quoted(front.shell.title)
   <> "),\n"

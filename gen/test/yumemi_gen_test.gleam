@@ -2091,6 +2091,20 @@ pub fn front_emit_shell_carries_language_title_and_theme_test() {
   |> list.each(fn(row) { string.contains(page, row) |> should.be_true })
 }
 
+pub fn front_emit_shell_includes_viewport_meta_test() {
+  let page = text("public/src/gen/load/article/arg_slug/page.gleam")
+  string.contains(
+    page,
+    "attribute.attribute(\"name\", \"viewport\")",
+  )
+  |> should.be_true
+  string.contains(
+    page,
+    "attribute.attribute(\"content\", \"width=device-width, initial-scale=1, viewport-fit=cover\")",
+  )
+  |> should.be_true
+}
+
 pub fn front_emit_blocks_preview_places_layout_blocks_by_area_test() {
   let files =
     synthetic_front_files_with_layout(
