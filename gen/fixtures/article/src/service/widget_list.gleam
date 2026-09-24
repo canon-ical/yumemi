@@ -60,9 +60,13 @@ pub const service: Service(Args, Out, Error) = Service(
   logic: logic,
 )
 
-pub fn logic(_by: Actor, _it: Root, _args: Args) -> Step(Out, Error, Start) {
+pub fn logic(_by: Actor, _it: Root, args: Args) -> Step(Out, Error, Start) {
   use rows <- reads.items()
-  step.done(Out(rows: list.map(rows, fn(row) {
-    Article(kind: "Article", article: row.0)
-  })))
+  let rows = case args.widget {
+    widget_key.ArticleFeed ->
+      list.map(rows, fn(row) { Article(kind: "Article", article: row.0) })
+    widget_key.ArticleKinds ->
+      list.map(rows, fn(row) { Summary(kind: "Summary", article: row.0) })
+  }
+  step.done(Out(rows: rows))
 }

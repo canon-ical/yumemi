@@ -1,4 +1,4 @@
-//// GENERATED from public/src/pages/article/arg_slug/page.gleam [sha256:37acb1946f42] — 手で編集しない
+//// GENERATED from public/src/pages/article/arg_slug/page.gleam [sha256:82c83adc55b4] — 手で編集しない
 
 import blocks/article
 import blocks/feed
@@ -107,7 +107,11 @@ fn option_background(value: Option(String)) -> String {
 pub fn view(it: Data) -> element.Element(Nil) {
   html.div_([attribute.attribute("data-yumemi-grid", "layout")], [
     styled_area("header", style.bar, layout_placement_0(it)),
-    styled_area("page", style.page, list.flatten([layout_placement_1(it), page_children(it)])),
+    styled_area(
+      "page",
+      style.page,
+      list.flatten([layout_placement_1(it), page_children(it)]),
+    ),
     styled_area("footer", style.bar, []),
   ])
 }
@@ -149,6 +153,7 @@ fn layout_placement_1(it: Data) -> List(element.Element(Nil)) {
     None -> []
   }
 }
+
 fn page_placement_0(it: Data) -> List(element.Element(Nil)) {
   [summary.view(it.article_read)]
 }
@@ -164,18 +169,20 @@ fn page_placement_2(it: Data) -> List(element.Element(Nil)) {
   }
 }
 
-fn render_page_placement_2(rows: List(widget_list.Row)) -> List(element.Element(Nil)) {
+fn render_page_placement_2(
+  rows: List(widget_list.Row),
+) -> List(element.Element(Nil)) {
   case rows {
     [] -> []
     [row, ..rest] ->
       case row {
         widget_list.ArticleRow(..) -> [
           row_article.view(row),
-          ..render_page_placement_2(rest),
+          ..render_page_placement_2(rest)
         ]
         widget_list.Summary(..) -> [
           row_summary.view(row),
-          ..render_page_placement_2(rest),
+          ..render_page_placement_2(rest)
         ]
       }
   }

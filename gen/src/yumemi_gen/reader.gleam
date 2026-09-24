@@ -223,11 +223,13 @@ fn collection_of(unit: Unit) -> Result(Option(model.Collection), Error) {
                 module,
                 unit.path,
               ))
-              Ok(Some(model.Collection(
-                module: unit.path,
-                collection: collection,
-                handwritten_verbs: handwritten_verbs,
-              )))
+              Ok(
+                Some(model.Collection(
+                  module: unit.path,
+                  collection: collection,
+                  handwritten_verbs: handwritten_verbs,
+                )),
+              )
             }
             _ -> Error(Unsupported(unit.path, "collection が String でない"))
           }
@@ -781,9 +783,11 @@ fn parse_order(
         where,
         "ordered_by.within",
       ))
-      use within <- result.try(list.try_map(within_expressions, fn(item) {
-        string_expression(item, where, "ordered_by.within の Property")
-      }))
+      use within <- result.try(
+        list.try_map(within_expressions, fn(item) {
+          string_expression(item, where, "ordered_by.within の Property")
+        }),
+      )
       use _ <- result.try(case within {
         [] -> Error(Unsupported(where, "ordered_by.within が空"))
         _ -> validate_order(field, within, props, where)
@@ -873,25 +877,23 @@ fn validate_order(
   case is_relation(order_prop) {
     True -> Error(Unsupported(where, "ordered_by.field が親の関係列: " <> field))
     False -> {
-      use _ <- result.try(list.try_each(within, fn(name) {
-        use prop <- result.try(
-          list.find(props, fn(prop) { prop.name == name })
-          |> result.map_error(fn(_) {
-            Unsupported(where, "ordered_by.within の Property が無い: " <> name)
-          }),
-        )
-        case is_relation(prop), prop.repeated {
-          True, False -> Ok(Nil)
-          True, True -> Error(Unsupported(
-            where,
-            "ordered_by.within が複数の関係列: " <> name,
-          ))
-          False, _ -> Error(Unsupported(
-            where,
-            "ordered_by.within が範囲の関係列でない: " <> name,
-          ))
-        }
-      }))
+      use _ <- result.try(
+        list.try_each(within, fn(name) {
+          use prop <- result.try(
+            list.find(props, fn(prop) { prop.name == name })
+            |> result.map_error(fn(_) {
+              Unsupported(where, "ordered_by.within の Property が無い: " <> name)
+            }),
+          )
+          case is_relation(prop), prop.repeated {
+            True, False -> Ok(Nil)
+            True, True ->
+              Error(Unsupported(where, "ordered_by.within が複数の関係列: " <> name))
+            False, _ ->
+              Error(Unsupported(where, "ordered_by.within が範囲の関係列でない: " <> name))
+          }
+        }),
+      )
       Ok(Nil)
     }
   }
@@ -1196,14 +1198,15 @@ fn verb_fields_of(
     case prop.kind {
       model.ValueProp(reference) ->
         case reference.name, reference.parameters {
-          "Sealed", [_, key] -> Ok(model.FieldDef(
-            name: entity_name <> naming.pascal(prop.name) <> "KeyId",
-            entity_name: entity_name,
-            column: prop.name <> "_key_id",
-            optional: prop.optional,
-            repeated: False,
-            value: model.TypeValue(type_ref_of_shape(key)),
-          ))
+          "Sealed", [_, key] ->
+            Ok(model.FieldDef(
+              name: entity_name <> naming.pascal(prop.name) <> "KeyId",
+              entity_name: entity_name,
+              column: prop.name <> "_key_id",
+              optional: prop.optional,
+              repeated: False,
+              value: model.TypeValue(type_ref_of_shape(key)),
+            ))
           _, _ -> Error(Nil)
         }
       _ -> Error(Nil)
@@ -1214,17 +1217,9 @@ fn verb_fields_of(
 fn type_ref_of_shape(shape: model.TypeShape) -> model.TypeRef {
   case shape {
     model.NamedShape(module: module, name: name, parameters: parameters) ->
-      model.TypeRef(
-        module: module,
-        name: name,
-        parameters: parameters,
-      )
+      model.TypeRef(module: module, name: name, parameters: parameters)
     model.TupleShape(items) ->
-      model.TypeRef(
-        module: None,
-        name: "Tuple",
-        parameters: items,
-      )
+      model.TypeRef(module: None, name: "Tuple", parameters: items)
   }
 }
 
@@ -1492,6 +1487,7 @@ fn service_of(unit: Unit) -> Result(model.Service, Error) {
   )
   Ok(model.Service(
     module: last_segment(unit.path),
+    out_type: service_out_type(module, unit.path),
     params: params,
     queries: queries,
     args: args,
@@ -1501,6 +1497,34 @@ fn service_of(unit: Unit) -> Result(model.Service, Error) {
     faces: faces,
     faces_declared: faces_declared,
   ))
+}
+
+fn service_out_type(
+  module: glance.Module,
+  unit_path: String,
+) -> Option(model.TypeRef) {
+  case g.find_constant(module, "service") {
+    Some(constant) ->
+      case constant.annotation {
+        Some(glance.NamedType(name: "Service", parameters: [_, out, _], ..)) ->
+          case out {
+            glance.NamedType(name: name, parameters: parameters, ..) -> {
+              let imports = imports_of(module)
+              let path =
+                module_of_type(out, imports)
+                |> option.unwrap(unit_path)
+              Some(model.TypeRef(
+                module: Some(path),
+                name: name,
+                parameters: list.map(parameters, type_shape(_, imports)),
+              ))
+            }
+            _ -> None
+          }
+        _ -> None
+      }
+    None -> None
+  }
 }
 
 fn effect_of(
@@ -2104,6 +2128,7 @@ pub fn read(units: List(Unit)) -> Result(App, Error) {
     services: service_list,
     arrows: arrows(entity_list),
     entries: entry_list,
+    attached: [],
     handwritten_verbs: external_handwritten,
   ))
 }
@@ -2115,8 +2140,7 @@ fn external_handwritten_verbs(
   let entity_names = list.map(entities, fn(entity) { entity.module })
   units
   |> list.filter(fn(unit) {
-    !string.contains(unit.path, "/")
-    && !list.contains(entity_names, unit.path)
+    !string.contains(unit.path, "/") && !list.contains(entity_names, unit.path)
   })
   |> list.try_map(fn(unit) {
     let module = g.in_order(unit.module)

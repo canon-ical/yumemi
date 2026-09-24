@@ -2,6 +2,7 @@
 //// 個体を指さない集合レベルの Service なので、Root に root 個体は入らない。
 
 // ★ src/service/article_create.gleam
+import entity/article
 import entity/category
 import entity/staff
 import entity/tag
@@ -33,11 +34,15 @@ pub type Args {
   )
 }
 
+pub type Out {
+  Out(slug: Slug, phase: article.Phase)
+}
+
 /// slug の重複と Category の不在は ER の規則(一意制約・RESTRICT)なので、ここには書かない ──
 /// writes が落とし、生成器が `article_slug_taken` / `article_category_missing` を付ける。
 pub type Error
 
-pub const service: Service(Args, Slug, Error) = Service(
+pub const service: Service(Args, Out, Error) = Service(
   allow: [allow.staff],
   logic: logic,
 )
@@ -47,7 +52,7 @@ pub fn logic(
   _by: staff.Staff,
   _it: Root,
   args: Args,
-) -> Step(Slug, Error, Start) {
+) -> Step(Out, Error, Start) {
   use article <- step.apply(
     verb.create_article(ArticleDraft(
       slug: args.slug,
@@ -57,5 +62,5 @@ pub fn logic(
       tags: args.tags,
     )),
   )
-  step.done(article.slug)
+  step.done(Out(slug: article.slug, phase: article.Draft))
 }

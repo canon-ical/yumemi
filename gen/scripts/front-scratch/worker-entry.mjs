@@ -53,7 +53,7 @@ const app = {
       return json(article(likeCount));
     }
     if (request.method === "POST" && url.pathname === "/api/articles") {
-      return json("article");
+      return json({ slug: "article", phase: "Draft" });
     }
     return new Response("not found", { status: 404 });
   },

@@ -1,4 +1,6 @@
-import framework/front.{type Layout, Area, Fixed, Frame, Layout, One, Widget}
+import framework/front.{
+  type Layout, Area, Fixed, Flow, Frame, Layout, One, Widget,
+}
 import framework/front/css
 import gen/blocks
 import gen/service
@@ -28,7 +30,7 @@ pub const public: Layout(service.Service, blocks.Block) = Layout(
       ),
     ],
     placements: [
-      Fixed(area: "header", block: blocks.SiteHeader),
+      Fixed(area: "header", block: blocks.SiteHeader, cell: Flow),
       Widget(
         area: "page",
         name: "article_feed",
@@ -36,35 +38,44 @@ pub const public: Layout(service.Service, blocks.Block) = Layout(
         render: One(blocks.Feed),
       ),
     ],
+    cols: [],
+    rows: [],
+    template: [],
   ),
-  pc: Some(Frame(
-    areas: [
-      Area(
-        name: "header",
-        flow: css.Stack(gap: style.s0),
-        pin: css.Top,
-        style: style.bar,
-      ),
-      Area(
-        name: "page",
-        flow: css.Stack(gap: style.s2),
-        pin: css.NoPin,
-        style: style.page,
-      ),
-      Area(
-        name: "aside",
-        flow: css.Stack(gap: style.s1),
-        pin: css.NoPin,
-        style: [],
-      ),
-      Area(
-        name: "footer",
-        flow: css.Row(gap: style.s0, wrap: False),
-        pin: css.Bottom,
-        style: style.bar,
-      ),
-    ],
-    placements: [],
-  )),
+  pc: Some(
+    Frame(
+      areas: [
+        Area(
+          name: "header",
+          flow: css.Stack(gap: style.s0),
+          pin: css.Top,
+          style: style.bar,
+        ),
+        Area(
+          name: "page",
+          flow: css.Stack(gap: style.s2),
+          pin: css.NoPin,
+          style: style.page,
+        ),
+        Area(
+          name: "aside",
+          flow: css.Stack(gap: style.s1),
+          pin: css.NoPin,
+          style: [],
+        ),
+        Area(
+          name: "footer",
+          flow: css.Row(gap: style.s0, wrap: False),
+          pin: css.Bottom,
+          style: style.bar,
+        ),
+      ],
+      placements: [],
+      cols: [],
+      rows: [],
+      template: [],
+    ),
+  ),
   tablet: None,
+  reads: [],
 )

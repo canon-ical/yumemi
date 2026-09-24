@@ -5,7 +5,8 @@ import gen/out/widget_list
 import gleam/string
 import sketch/lustre/element/html
 
-pub type In = widget_list.Out
+pub type In =
+  widget_list.Out
 
 pub fn view(it: In) -> el.Element(Nil) {
   html.div_([], [

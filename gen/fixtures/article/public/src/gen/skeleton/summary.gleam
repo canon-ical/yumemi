@@ -5,7 +5,8 @@ import gen/out/article_read
 import gleam/string
 import sketch/lustre/element/html
 
-pub type In = article_read.Out
+pub type In =
+  article_read.Out
 
 pub fn view(it: In) -> el.Element(Nil) {
   html.div_([], [

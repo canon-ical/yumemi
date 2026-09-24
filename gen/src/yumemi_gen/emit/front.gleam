@@ -1,7 +1,11 @@
 //// 面の束 ── route / blocks / widgets / API / Service / Out の写し。
 //// 面側へ back の module を再輸出せず、面 package が単独で型を持てる形にする。
 
+import framework/front as framework_front
+import framework/front/css as framework_css
+import framework/front/track as framework_track
 import glance
+import gleam/float
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -108,7 +112,7 @@ pub fn emit(
     ),
     File(
       path: face_name <> "/src/gen/api.gleam",
-      text: api_text(face_name, app, hashes),
+      text: api_text(face_name, app, hashes, model_),
     ),
     File(
       path: face_name <> "/src/gen/shell.mjs",
@@ -385,13 +389,32 @@ fn blocks_preview_text(
     None ->
       case front.layout.sp {
         Some(value) -> value
-        None -> reader_front.Frame(media: "pc", areas: [], placements: [])
+        None ->
+          reader_front.Frame(
+            media: "pc",
+            areas: [],
+            placements: [],
+            cols: [],
+            rows: [],
+            template: [],
+          )
       }
   }
+  let layout_placements =
+    list.append(
+      frame_placements(front.layout.pc),
+      list.append(
+        frame_placements(front.layout.tablet),
+        frame_placements(front.layout.sp),
+      ),
+    )
+    |> list.unique
   let block_imports = list.map(blocks, fn(block) { "import " <> block.module })
   let area_children =
     frame.areas
-    |> list.map(fn(area) { preview_area_text(area.name, app, units, blocks) })
+    |> list.map(fn(area) {
+      preview_area_text(area.name, layout_placements, app, units, blocks)
+    })
     |> string.join(",\n    ")
   let out_imports =
     blocks
@@ -486,6 +509,7 @@ fn blocks_preview_text(
 
 fn preview_area_text(
   name: String,
+  layout_placements: List(reader_front.Placement),
   app: model.App,
   units: List(Unit),
   blocks: List(reader_front.Block),
@@ -493,7 +517,14 @@ fn preview_area_text(
   let children = case name {
     "page" ->
       list.map(blocks, fn(block) { preview_block_text(app, units, block) })
-    _ -> ["el.text(" <> quoted(name) <> ")"]
+    _ -> {
+      let placed =
+        preview_layout_blocks(name, layout_placements, app, units, blocks)
+      case placed {
+        [] -> ["el.text(" <> quoted(name) <> ")"]
+        _ -> placed
+      }
+    }
   }
   let children_text =
     "[\n"
@@ -509,6 +540,48 @@ fn preview_area_text(
     "footer" -> "html.footer_(" <> attributes <> ", " <> children_text <> ")"
     _ -> "html.div_(" <> attributes <> ", " <> children_text <> ")"
   }
+}
+
+fn frame_placements(
+  frame: Option(reader_front.Frame),
+) -> List(reader_front.Placement) {
+  case frame {
+    Some(value) -> value.placements
+    None -> []
+  }
+}
+
+fn preview_layout_blocks(
+  area: String,
+  placements: List(reader_front.Placement),
+  app: model.App,
+  units: List(Unit),
+  blocks: List(reader_front.Block),
+) -> List(String) {
+  let names =
+    placements
+    |> list.flat_map(fn(placement) {
+      case placement {
+        reader_front.Fixed(area: placement_area, block: block, ..) ->
+          case placement_area == area {
+            True -> [block]
+            False -> []
+          }
+        reader_front.Widget(area: placement_area, render: render, ..) ->
+          case placement_area == area {
+            True -> render_block_names(render)
+            False -> []
+          }
+      }
+    })
+    |> list.unique
+  names
+  |> list.filter_map(fn(name) {
+    case list.find(blocks, fn(block) { block.name == name }) {
+      Ok(block) -> Ok(preview_block_text(app, units, block))
+      Error(_) -> Error(Nil)
+    }
+  })
 }
 
 fn preview_block_text(
@@ -817,7 +890,7 @@ fn live_targets(
   let empty: List(#(model.Service, reader_front.Component)) = []
   components
   |> list.fold(empty, fn(targets, component) {
-    component.calls
+    component_services(component)
     |> list.fold(targets, fn(acc, variant) {
       case service_for(services, variant) {
         Some(service) ->
@@ -844,6 +917,16 @@ fn service_for(
     Ok(service) -> Some(service)
     Error(_) -> None
   }
+}
+
+fn component_services(component: reader_front.Component) -> List(String) {
+  component.calls
+  |> list.filter_map(fn(target) {
+    case target {
+      reader_front.ServiceCall(service) -> Ok(service)
+      reader_front.AttachedCall(_) -> Error(Nil)
+    }
+  })
 }
 
 fn island_components(
@@ -1251,7 +1334,7 @@ fn done_success(component: reader_front.Component) -> String {
   }
 }
 
-fn validate_text(validations: List(#(String, String))) -> String {
+fn validate_text(validations: List(#(String, String, String))) -> String {
   case validations {
     [] ->
       "pub fn validate(model: State) -> Result(Args, List(#(Field, String))) {\n"
@@ -1261,13 +1344,15 @@ fn validate_text(validations: List(#(String, String))) -> String {
       <> "  let errors = list.flatten([\n"
       <> string.concat(
         list.map(validations, fn(validation) {
-          let #(field, spec) = validation
+          let #(field, spec, message) = validation
           "    validate_field("
           <> field
           <> ", model.args."
           <> field_name(field)
           <> ", "
           <> spec
+          <> ", "
+          <> quoted(message)
           <> "),\n"
         }),
       )
@@ -1280,10 +1365,11 @@ fn validate_text(validations: List(#(String, String))) -> String {
       <> "  field: Field,\n"
       <> "  raw: String,\n"
       <> "  constraint: spec.Spec,\n"
+      <> "  message: String,\n"
       <> ") -> List(#(Field, String)) {\n"
       <> "  case spec.validate(raw, constraint) {\n"
       <> "    Ok(_) -> []\n"
-      <> "    Error(_) -> [#(field, \"invalid\")]\n"
+      <> "    Error(_) -> [#(field, message)]\n"
       <> "  }\n}\n\n"
   }
 }
@@ -1376,15 +1462,89 @@ fn validation_specs(
   app: model.App,
   units: List(Unit),
   args: List(model.Arg),
-) -> List(#(String, String)) {
+) -> List(#(String, String, String)) {
   args
   |> list.filter_map(fn(arg) {
     case value_type_for_arg(app.value_types, arg.type_) {
       Some(value) ->
-        Ok(#(naming.pascal(arg.name), spec_expression(units, value)))
+        Ok(#(
+          naming.pascal(arg.name),
+          spec_expression(units, value),
+          spec_error_message(units, value),
+        ))
       None -> Error(Nil)
     }
   })
+}
+
+fn spec_error_message(units: List(Unit), value: model.ValueType) -> String {
+  case list.find(units, fn(unit) { unit.path == "types" }) {
+    Ok(unit) -> {
+      let module = g.in_order(unit.module)
+      case g.find_constant(module, value.name) {
+        Some(constant) -> spec_error_message_text(constant.value, value)
+        None -> fallback_validation_message(value)
+      }
+    }
+    Error(_) -> fallback_validation_message(value)
+  }
+}
+
+fn spec_error_message_text(
+  expression: glance.Expression,
+  value: model.ValueType,
+) -> String {
+  case g.ctor_name(expression) {
+    Some("Pattern") ->
+      case
+        spec_bounds(expression),
+        g.labelled(expression, "regex") |> option.then(g.string_value)
+      {
+        Some(#(min, max)), Some(regex) ->
+          "must contain "
+          <> min
+          <> " to "
+          <> max
+          <> " characters and match /"
+          <> regex
+          <> "/"
+        _, _ -> fallback_validation_message(value)
+      }
+    Some("Text") | Some("MarkdownText") ->
+      case spec_bounds(expression) {
+        Some(#(min, max)) ->
+          "must contain " <> min <> " to " <> max <> " characters"
+        None -> fallback_validation_message(value)
+      }
+    Some("Range") ->
+      case spec_bounds(expression) {
+        Some(#(min, max)) ->
+          "must be an integer from " <> min <> " through " <> max
+        None -> fallback_validation_message(value)
+      }
+    Some("Uuid") -> "must be a UUID"
+    Some("Markdown") -> "must be valid Markdown"
+    Some("Url") -> "must be a valid URL"
+    Some(_) | None -> fallback_validation_message(value)
+  }
+}
+
+fn fallback_validation_message(value: model.ValueType) -> String {
+  case value.spec, value.range {
+    "Pattern", _ -> "must match the configured pattern"
+    "Text", _ -> "must satisfy the configured length"
+    "MarkdownText", _ -> "must satisfy the configured Markdown length"
+    "Range", Some(#(min, max)) ->
+      "must be an integer from "
+      <> int.to_string(min)
+      <> " through "
+      <> int.to_string(max)
+    "Range", None -> "must satisfy the configured integer range"
+    "Uuid", _ -> "must be a UUID"
+    "Markdown", _ -> "must be valid Markdown"
+    "Url", _ -> "must be a valid URL"
+    _, _ -> "does not satisfy the configured constraint"
+  }
 }
 
 fn value_type_for_arg(
@@ -1558,9 +1718,10 @@ fn layout_sources(
   blocks: List(reader_front.Block),
   services: List(model.Service),
 ) -> List(LoadSource) {
+  let reads = read_sources(layout.reads, services)
   case layout.sp {
-    Some(frame) -> placement_sources(frame.placements, blocks, services, [])
-    None -> []
+    Some(frame) -> placement_sources(frame.placements, blocks, services, reads)
+    None -> reads
   }
 }
 
@@ -1586,7 +1747,8 @@ fn page_sources(
     Some(frame) -> frame.placements
     None -> []
   }
-  let sources = placement_sources(placements, blocks, services, root)
+  let initial = add_load_sources(root, read_sources(page.reads, services))
+  let sources = placement_sources(placements, blocks, services, initial)
   case page.theme, root_service {
     Some(name), Some(module) ->
       list.append(sources, [
@@ -1600,6 +1762,38 @@ fn page_sources(
       ])
     _, _ -> sources
   }
+}
+
+fn read_sources(
+  reads: List(String),
+  services: List(model.Service),
+) -> List(LoadSource) {
+  reads
+  |> list.filter_map(fn(variant) {
+    case service_for(services, variant) {
+      Some(service) ->
+        Ok(LoadSource(
+          key: "service:" <> service.module,
+          name: service.module,
+          service: service.module,
+          type_name: "Out",
+          optional: False,
+        ))
+      None -> Error(Nil)
+    }
+  })
+  |> list.fold([], add_load_source)
+}
+
+fn add_load_sources(
+  sources: List(LoadSource),
+  additions: List(LoadSource),
+) -> List(LoadSource) {
+  list.fold(additions, sources, add_load_source)
+}
+
+fn unique_load_sources(sources: List(LoadSource)) -> List(LoadSource) {
+  list.fold(sources, [], add_load_source)
 }
 
 fn page_root_service(
@@ -2017,7 +2211,11 @@ fn option_background_text(blob: Bool) -> String {
     True ->
       "fn option_background(value: Option(Blob)) -> String {\n"
       <> "  case value {\n"
-      <> "    Some(value) -> to_string(value)\n"
+      <> "    Some(value) -> "
+      <> quoted("url(\"")
+      <> " <> to_string(value) <> "
+      <> quoted("\")")
+      <> "\n"
       <> "    None -> \"none\"\n"
       <> "  }\n}\n"
     False ->
@@ -2100,7 +2298,7 @@ fn page_load_function_text(
   layout_sources: List(LoadSource),
   page_sources: List(LoadSource),
 ) -> String {
-  let fields = list.append(layout_sources, page_sources)
+  let fields = unique_load_sources(list.append(layout_sources, page_sources))
   case fields {
     [] -> "pub fn load() -> Data {\n  Data(layout: layout.load())\n}\n"
     _ ->
@@ -2111,14 +2309,33 @@ fn page_load_function_text(
         }),
       )
       <> ") -> Data {\n  Data(\n    layout: layout.load("
-      <> string.join(list.map(layout_sources, fn(source) { source.name }), ", ")
+      <> string.join(
+        list.map(layout_sources, fn(source) {
+          page_load_source_argument(source, fields)
+        }),
+        ", ",
+      )
       <> "),\n"
       <> string.concat(
         list.map(page_sources, fn(source) {
-          "    " <> source.name <> ": " <> source.name <> ",\n"
+          "    "
+          <> source.name
+          <> ": "
+          <> page_load_source_argument(source, fields)
+          <> ",\n"
         }),
       )
       <> "  )\n}\n"
+  }
+}
+
+fn page_load_source_argument(
+  source: LoadSource,
+  parameters: List(LoadSource),
+) -> String {
+  case source.optional, load_source(parameters, source.key) {
+    True, Some(parameter) if !parameter.optional -> "Some(" <> source.name <> ")"
+    _, _ -> source.name
   }
 }
 
@@ -2152,7 +2369,7 @@ fn page_view_text(
         layout_area_text(area, layout_placements)
       }),
     )
-  let page_children = page_children_text(page_areas, page_placements)
+  let page_children = page_children_text(page, page_areas, page_placements)
   let page_helpers =
     placement_helpers_text(
       app,
@@ -2217,6 +2434,7 @@ fn layout_area_text(
 }
 
 fn page_children_text(
+  page: reader_front.Page,
   areas: List(reader_front.Area),
   placements: List(reader_front.Placement),
 ) -> String {
@@ -2224,23 +2442,40 @@ fn page_children_text(
     list.flat_map(areas, fn(area) {
       let children =
         placement_children_expressions("page_placement", placements, area.name)
-      case area.name {
-        "page" -> children
-        _ -> [
+      case page_has_explicit_grid(page) {
+        True -> [
           "["
           <> page_area_text(area, children_expression(children, None))
           <> "]",
         ]
+        False ->
+          case area.name {
+            "page" -> children
+            _ -> [
+              "["
+              <> page_area_text(area, children_expression(children, None))
+              <> "]",
+            ]
+          }
       }
     })
-  case expressions {
-    [] -> "  []\n"
+  let children = case expressions {
+    [] -> "[]"
     _ ->
-      "  list.flatten([\n"
+      "list.flatten([\n"
       <> string.concat(
         list.map(expressions, fn(expression) { "    " <> expression <> ",\n" }),
       )
-      <> "  ])\n"
+      <> "  ])"
+  }
+  case page_has_explicit_grid(page) {
+    True ->
+      "  [html.div_([attribute.attribute(\"data-yumemi-grid\", \""
+      <> page_grid_name(page)
+      <> "\")], "
+      <> children
+      <> ")]\n"
+    False -> "  " <> children <> "\n"
   }
 }
 
@@ -2390,8 +2625,15 @@ fn placement_helper_text(
 ) -> String {
   let helper = prefix <> "_" <> int.to_string(index)
   let body = case placement {
-    reader_front.Fixed(block: block_name, ..) ->
-      fixed_placement_body(front, block_name, app.services, sources, access)
+    reader_front.Fixed(block: block_name, cell: cell, ..) ->
+      fixed_placement_body(
+        front,
+        block_name,
+        cell,
+        app.services,
+        sources,
+        access,
+      )
     reader_front.Widget(name: name, service: service_name, render: render, ..) ->
       widget_placement_body(
         app,
@@ -2446,20 +2688,62 @@ fn placement_uses_data(
 fn fixed_placement_body(
   front: reader_front.Front,
   block_name: String,
+  cell: reader_front.Cell,
   services: List(model.Service),
   sources: List(LoadSource),
   access: String,
 ) -> String {
   let block = block_module(front, block_name)
   let view = module_ref(block) <> ".view"
-  case block_source(front.blocks, block_name, services) {
-    None -> "  [" <> view <> "(Nil)]"
+  let children = case block_source(front.blocks, block_name, services) {
+    None -> "[" <> view <> "(Nil)]"
     Some(service) ->
       case load_source(sources, "service:" <> service) {
         Some(source) -> source_view_list(source, access, view)
-        None -> "  []"
+        None -> "[]"
       }
   }
+  case cell {
+    reader_front.Flow -> "  " <> children
+    reader_front.Span(cols:, rows:) ->
+      fixed_cell_wrapper(
+        children,
+        "grid-column: span "
+          <> int.to_string(cols)
+          <> "; grid-row: span "
+          <> int.to_string(rows)
+          <> ";",
+      )
+    reader_front.At(col:, row:, span: reader_front.CellSpan(cols:, rows:)) ->
+      fixed_cell_wrapper(
+        children,
+        "grid-column: "
+          <> int.to_string(col)
+          <> " / "
+          <> int.to_string(col + cols)
+          <> "; grid-row: "
+          <> int.to_string(row)
+          <> " / "
+          <> int.to_string(row + rows)
+          <> ";",
+      )
+  }
+}
+
+fn fixed_cell_wrapper(children: String, style: String) -> String {
+  "  list.map(\n"
+  <> indent_expression(children, "    ")
+  <> ",\n"
+  <> "    fn(child) {\n"
+  <> "      html.div_([attribute.attribute(\"style\", "
+  <> quoted(style)
+  <> ")], [child])\n"
+  <> "    },\n"
+  <> "  )"
+}
+
+fn indent_expression(expression: String, indent: String) -> String {
+  indent <> string.replace(expression, "\n", "\n" <> indent)
 }
 
 fn widget_placement_body(
@@ -2544,12 +2828,12 @@ fn source_view_list(
   let value = access <> "." <> source.name
   case source.optional {
     True ->
-      "  case "
+      "case "
       <> value
       <> " {\n    Some(out) -> ["
       <> view
       <> "(out)]\n    None -> []\n  }"
-    False -> "  [" <> view <> "(" <> value <> ")]"
+    False -> "[" <> view <> "(" <> value <> ")]"
   }
 }
 
@@ -2802,26 +3086,92 @@ fn enum_body(name: String, variants: String) -> String {
   }
 }
 
-fn api_text(face_name: String, app: model.App, hashes: hash.Hashes) -> String {
+fn api_text(
+  face_name: String,
+  app: model.App,
+  hashes: hash.Hashes,
+  front: reader_front.Front,
+) -> String {
   let routes = api_routes(app, hashes, face_name)
-  let methods =
-    routes
+  let attached_names = attached_names(front, app.attached)
+  let attached_methods =
+    app.attached
     |> list.map(fn(route) { method_variant(route.method) })
+  let methods =
+    list.append(
+      routes |> list.map(fn(route) { method_variant(route.method) }),
+      attached_methods,
+    )
     |> list.unique
     |> list.sort(string.compare)
   let method_rows =
     string.join(list.map(methods, fn(name) { "  " <> name }), "\n")
   let rows = routes |> list.map(api_route_text) |> string.join("\n")
-  header("src/entry.gleam", hash.entry(hashes))
-  <> "\nimport gen/service\n\n"
+  let attached_rows =
+    app.attached |> list.map(attached_route_text) |> string.join("\n")
+  let api_hash = case app.attached {
+    [] -> hash.entry(hashes)
+    _ -> digest.short(hash.entry(hashes) <> string.inspect(app.attached))
+  }
+  header("src/entry.gleam", api_hash)
+  <> "\nimport framework/front as front\nimport gen/service\n\n"
   <> enum_body("Method", method_rows)
   <> "\n"
+  <> attached_type_text(attached_names)
+  <> "pub type AttachedRoute {\n"
+  <> "  AttachedRoute(entry: Attached, method: Method, path: String)\n"
+  <> "}\n\n"
+  <> "pub const attached: List(AttachedRoute) = [\n"
+  <> attached_rows
+  <> "\n]\n\n"
+  <> "pub type Target = front.Target(service.Service, Attached)\n\n"
   <> "pub type Route {\n"
   <> "  Route(service: service.Service, method: Method, path: String)\n"
   <> "}\n\n"
   <> "pub const routes: List(Route) = [\n"
   <> rows
   <> "\n]\n"
+}
+
+fn attached_names(
+  front: reader_front.Front,
+  attached: List(model.AttachedRoute),
+) -> List(String) {
+  list.append(
+    list.map(attached, fn(route) { route.name }),
+    front.components
+      |> list.flat_map(fn(component) {
+        component.calls
+        |> list.filter_map(fn(target) {
+          case target {
+            reader_front.AttachedCall(name) -> Ok(name)
+            reader_front.ServiceCall(_) -> Error(Nil)
+          }
+        })
+      }),
+  )
+  |> list.unique
+  |> list.sort(string.compare)
+}
+
+fn attached_route_text(route: model.AttachedRoute) -> String {
+  "  AttachedRoute(entry: "
+  <> route.name
+  <> ", method: "
+  <> method_variant(route.method)
+  <> ", path: "
+  <> quoted(route.path)
+  <> "),"
+}
+
+fn attached_type_text(names: List(String)) -> String {
+  case names {
+    [] -> "pub type Attached = Nil\n\n"
+    _ ->
+      "pub type Attached {\n"
+      <> string.concat(list.map(names, fn(name) { "  " <> name <> "\n" }))
+      <> "}\n\n"
+  }
 }
 
 fn shell_text(
@@ -2849,7 +3199,10 @@ fn shell_text(
   <> "\n"
   <> shell_decoder_text(decoder_services)
   <> "\n"
-  <> shell_runtime_text(front.components != [])
+  <> shell_runtime_text(
+    front.components != [],
+    static_grid_css(front.layout) <> static_pages_grid_css(front.pages),
+  )
 }
 
 fn shell_imports(
@@ -2917,7 +3270,7 @@ fn shell_services(
     front.components
     |> list.flat_map(fn(component) {
       list.append(
-        component.calls,
+        component_services(component),
         list.map(component.reloads, fn(reload) { reload.1 }),
       )
       |> list.filter_map(fn(variant) {
@@ -2947,10 +3300,10 @@ fn shell_page_tables(app: model.App, front: reader_front.Front) -> String {
     front.pages
     |> list.index_map(fn(page, index) {
       let sources =
-        list.append(
+        unique_load_sources(list.append(
           layout_sources(front.layout, front.blocks, app.services),
           page_sources(page, front.blocks, app.services),
-        )
+        ))
       "  ["
       <> quoted(reader_front.route_path(page.path))
       <> ", {\n"
@@ -3053,12 +3406,42 @@ fn style_text(package: face.Package, front: reader_front.Front) -> String {
   <> input_hash
   <> "] — 手で編集しない */\n"
   <> static_grid_css(front.layout)
+  <> static_pages_grid_css(front.pages)
 }
 
 fn static_grid_css(layout: reader_front.Layout) -> String {
-  let sp_areas = frame_areas(layout.sp, [])
-  let pc_areas = frame_areas(layout.pc, sp_areas)
-  let tablet_areas = frame_areas(layout.tablet, sp_areas)
+  static_frames_grid_css(
+    "[data-yumemi-grid=\"layout\"]",
+    layout.sp,
+    layout.pc,
+    layout.tablet,
+  )
+}
+
+fn static_pages_grid_css(pages: List(reader_front.Page)) -> String {
+  pages
+  |> list.filter(page_has_explicit_grid)
+  |> list.map(fn(page) {
+    static_frames_grid_css(
+      "[data-yumemi-grid=\"" <> page_grid_name(page) <> "\"]",
+      page.sp,
+      page.pc,
+      page.tablet,
+    )
+  })
+  |> string.concat
+}
+
+fn static_frames_grid_css(
+  selector: String,
+  sp: Option(reader_front.Frame),
+  pc: Option(reader_front.Frame),
+  tablet: Option(reader_front.Frame),
+) -> String {
+  let sp_frame = option.unwrap(sp, empty_frame("sp"))
+  let sp_areas = sp_frame.areas
+  let pc_areas = frame_areas(pc, sp_areas)
+  let tablet_areas = frame_areas(tablet, sp_areas)
   let extras =
     list.append(
       list.map(pc_areas, fn(area) { area.name }),
@@ -3070,13 +3453,13 @@ fn static_grid_css(layout: reader_front.Layout) -> String {
     })
   let base_rules =
     list.append(
-      list.map(sp_areas, fn(area) { static_area_rule(area, "normal") }),
+      list.map(sp_areas, fn(area) { static_area_rule(selector, area, "normal") }),
       list.filter_map(extras, fn(name) {
         case list.find(pc_areas, fn(area) { area.name == name }) {
-          Ok(area) -> Ok(static_area_rule(area, "hidden"))
+          Ok(area) -> Ok(static_area_rule(selector, area, "hidden"))
           Error(_) ->
             case list.find(tablet_areas, fn(area) { area.name == name }) {
-              Ok(area) -> Ok(static_area_rule(area, "hidden"))
+              Ok(area) -> Ok(static_area_rule(selector, area, "hidden"))
               Error(_) -> Error(Nil)
             }
         }
@@ -3084,40 +3467,203 @@ fn static_grid_css(layout: reader_front.Layout) -> String {
     )
     |> string.join("\n")
   let base =
-    "\n[data-yumemi-grid=\"layout\"] {\n"
+    "\n"
+    <> selector
+    <> " {\n"
     <> "  display: grid;\n"
-    <> "  grid-template-columns: minmax(0, 1fr);\n"
+    <> "  grid-template-columns: "
+    <> frame_columns_css(sp_frame, framework_css.SP)
+    <> ";\n"
+    <> frame_rows_css(sp_frame, "  ")
     <> "  grid-template-areas: "
-    <> static_grid_template_areas(sp_areas)
+    <> frame_template_css(sp_frame, sp_frame, framework_css.SP)
     <> ";\n"
     <> "  gap: 0;\n}\n"
     <> base_rules
     <> "\n"
-  let tablet = case layout.tablet {
-    Some(_) ->
+  let tablet = case tablet {
+    Some(frame) ->
       static_media_block(
         "tablet",
         static_frame_body(
+          selector,
+          frame,
           tablet_areas,
           sp_areas,
-          static_grid_template_areas(tablet_areas),
+          frame_template_css(sp_frame, frame, framework_css.Tablet),
+          framework_css.Tablet,
         ),
       )
     None -> ""
   }
-  let pc = case layout.pc {
-    Some(_) ->
+  let pc = case pc {
+    Some(frame) ->
       static_media_block(
         "pc",
         static_frame_body(
+          selector,
+          frame,
           pc_areas,
           sp_areas,
-          static_pc_grid_template_areas(sp_areas, pc_areas),
+          frame_template_css(sp_frame, frame, framework_css.PC),
+          framework_css.PC,
         ),
       )
     None -> ""
   }
   base <> tablet <> pc
+}
+
+fn empty_frame(media: String) -> reader_front.Frame {
+  reader_front.Frame(
+    media: media,
+    areas: [],
+    placements: [],
+    cols: [],
+    rows: [],
+    template: [],
+  )
+}
+
+fn frame_columns_css(
+  frame: reader_front.Frame,
+  at: framework_css.Breakpoint,
+) -> String {
+  let resolved = framework_front.resolved_cols(framework_frame(frame), at)
+  case frame.cols {
+    [] ->
+      case at {
+        framework_css.SP -> "minmax(0, 1fr)"
+        _ ->
+          case resolved {
+            [_, ..rest] -> {
+              let rest_css =
+                rest |> list.map(framework_track_css) |> string.join(" ")
+              "minmax(0, 1fr) " <> rest_css
+            }
+            [] -> "minmax(0, 1fr)"
+          }
+      }
+    _ -> resolved |> list.map(framework_track_css) |> string.join(" ")
+  }
+}
+
+fn frame_rows_css(frame: reader_front.Frame, indent: String) -> String {
+  case frame.rows {
+    [] -> ""
+    rows -> {
+      let row_css = rows |> list.map(track_css) |> string.join(" ")
+      indent <> "grid-template-rows: " <> row_css <> ";\n"
+    }
+  }
+}
+
+fn frame_template_css(
+  sp: reader_front.Frame,
+  frame: reader_front.Frame,
+  at: framework_css.Breakpoint,
+) -> String {
+  framework_front.resolved_template(
+    framework_frame(sp),
+    framework_frame(frame),
+    at,
+  )
+  |> list.map(fn(row) { "\"" <> string.join(row, " ") <> "\"" })
+  |> string.join(" ")
+}
+
+fn framework_frame(
+  frame: reader_front.Frame,
+) -> framework_front.Frame(Nil, Nil) {
+  framework_front.Frame(
+    areas: list.map(frame.areas, fn(area) {
+      framework_front.Area(
+        name: area.name,
+        flow: framework_css.Stack(gap: framework_css.Px(0.0)),
+        pin: framework_css.NoPin,
+        style: [],
+      )
+    }),
+    placements: [],
+    cols: list.map(frame.cols, framework_track_of),
+    rows: list.map(frame.rows, framework_track_of),
+    template: frame.template,
+  )
+}
+
+fn framework_track_of(track: reader_front.Track) -> framework_track.Track {
+  case track {
+    reader_front.Fr(value) -> framework_track.Fr(value)
+    reader_front.Rem(value) -> framework_track.Rem(value)
+    reader_front.Px(value) -> framework_track.Px(value)
+    reader_front.Minmax(min:, max:) ->
+      framework_track.Minmax(
+        min: framework_track_size_of(min),
+        max: framework_track_size_of(max),
+      )
+  }
+}
+
+fn framework_track_size_of(
+  size: reader_front.TrackSize,
+) -> framework_track.TrackSize {
+  case size {
+    reader_front.FrSize(value) -> framework_track.FrSize(value)
+    reader_front.RemSize(value) -> framework_track.RemSize(value)
+    reader_front.PxSize(value) -> framework_track.PxSize(value)
+  }
+}
+
+fn track_css(track: reader_front.Track) -> String {
+  framework_track_css(framework_track_of(track))
+}
+
+fn framework_track_css(track: framework_track.Track) -> String {
+  framework_track.to_css(track)
+  |> string.replace(".0rem", "rem")
+  |> string.replace(".0px", "px")
+}
+
+fn length_css(length: reader_front.Length) -> String {
+  case length {
+    reader_front.RemLength(value) -> float.to_string(value) <> "rem"
+    reader_front.PxLength(value) -> float.to_string(value) <> "px"
+  }
+}
+
+fn page_grid_name(page: reader_front.Page) -> String {
+  "page:" <> page.module
+}
+
+fn page_has_explicit_grid(page: reader_front.Page) -> Bool {
+  list.any(
+    list.append(
+      option_frame_list(page.sp),
+      list.append(option_frame_list(page.pc), option_frame_list(page.tablet)),
+    ),
+    fn(frame) {
+      frame.cols != []
+      || frame.rows != []
+      || frame.template != []
+      || list.any(frame.areas, fn(area) { area.grid_tracks != None })
+      || list.any(frame.placements, fn(placement) {
+        case placement {
+          reader_front.Fixed(cell: reader_front.Flow, ..) -> False
+          reader_front.Fixed(..) -> True
+          reader_front.Widget(..) -> False
+        }
+      })
+    },
+  )
+}
+
+fn option_frame_list(
+  value: Option(reader_front.Frame),
+) -> List(reader_front.Frame) {
+  case value {
+    Some(frame) -> [frame]
+    None -> []
+  }
 }
 
 fn frame_areas(
@@ -3130,83 +3676,13 @@ fn frame_areas(
   }
 }
 
-fn static_grid_template_areas(areas: List(reader_front.Area)) -> String {
-  areas
-  |> list.map(fn(area) { "\"" <> area.name <> "\"" })
-  |> string.join(" ")
-}
-
-fn static_pc_grid_template_areas(
-  sp_areas: List(reader_front.Area),
-  pc_areas: List(reader_front.Area),
-) -> String {
-  let pc_only =
-    pc_areas
-    |> list.filter(fn(area) {
-      !list.any(sp_areas, fn(candidate) { candidate.name == area.name })
-    })
-    |> list.map(fn(area) { area.name })
-    |> list.unique
-  let columns = list.length(pc_only) + 1
-  sp_areas
-  |> list.index_map(fn(area, _index) {
-    let pc_index = static_area_index(pc_areas, area.name, 0)
-    let following = static_pc_following(pc_areas, pc_index + 1, pc_only)
-    let names = static_pad_names([area.name, ..following], columns, area.name)
-    "\"" <> string.join(names, " ") <> "\""
-  })
-  |> string.join(" ")
-}
-
-fn static_area_index(
-  areas: List(reader_front.Area),
-  wanted: String,
-  index: Int,
-) -> Int {
-  case areas {
-    [] -> -1
-    [area, ..rest] ->
-      case area.name == wanted {
-        True -> index
-        False -> static_area_index(rest, wanted, index + 1)
-      }
-  }
-}
-
-fn static_pc_following(
-  areas: List(reader_front.Area),
-  index: Int,
-  pc_only: List(String),
-) -> List(String) {
-  case areas {
-    [] -> []
-    [area, ..rest] ->
-      case index {
-        0 ->
-          case list.contains(pc_only, area.name) {
-            True -> [area.name, ..static_pc_following(rest, 0, pc_only)]
-            False -> []
-          }
-        _ -> static_pc_following(rest, index - 1, pc_only)
-      }
-  }
-}
-
-fn static_pad_names(
-  names: List(String),
-  wanted: Int,
-  fill: String,
-) -> List(String) {
-  case list.length(names) >= wanted {
-    True -> names
-    False -> static_pad_names(list.append(names, [fill]), wanted, fill)
-  }
-}
-
 fn static_frame_body(
+  selector: String,
+  frame: reader_front.Frame,
   areas: List(reader_front.Area),
   base_areas: List(reader_front.Area),
   template: String,
+  at: framework_css.Breakpoint,
 ) -> String {
   let rules =
     areas
@@ -3217,11 +3693,16 @@ fn static_frame_body(
         True -> "normal"
         False -> "visible"
       }
-      static_area_rule(area, visibility)
+      static_area_rule(selector, area, visibility)
     })
     |> string.join("\n")
-  "  [data-yumemi-grid=\"layout\"] {\n"
-  <> "    grid-template-columns: minmax(0, 1fr) minmax(12rem, 20rem);\n"
+  "  "
+  <> selector
+  <> " {\n"
+  <> "    grid-template-columns: "
+  <> frame_columns_css(frame, at)
+  <> ";\n"
+  <> frame_rows_css(frame, "    ")
   <> "    grid-template-areas: "
   <> template
   <> ";\n"
@@ -3237,13 +3718,25 @@ fn static_media_block(media: String, body: String) -> String {
   query <> " {\n" <> body <> "\n}\n"
 }
 
-fn static_area_rule(area: reader_front.Area, visibility: String) -> String {
+fn static_area_rule(
+  selector: String,
+  area: reader_front.Area,
+  visibility: String,
+) -> String {
   let base = [
-    "[data-yumemi-grid=\"layout\"] > [data-yumemi-area=\""
-      <> area.name
-      <> "\"] {",
+    selector <> " > [data-yumemi-area=\"" <> area.name <> "\"] {",
     "  grid-area: " <> area.name <> ";",
   ]
+  let grid_tracks = case area.grid_tracks {
+    Some(reader_front.GridTracks(cols:, gap: gap)) -> [
+      "  display: grid;",
+      "  grid-template-columns: "
+        <> string.join(list.map(cols, track_css), " ")
+        <> ";",
+      "  gap: " <> length_css(gap) <> ";",
+    ]
+    None -> []
+  }
   let visible = case visibility {
     "hidden" -> ["  display: none;"]
     "visible" -> ["  display: block;"]
@@ -3263,7 +3756,10 @@ fn static_area_rule(area: reader_front.Area, visibility: String) -> String {
     _ -> []
   }
   string.join(
-    list.append(base, list.append(visible, list.append(pin, ["}"]))),
+    list.append(
+      base,
+      list.append(grid_tracks, list.append(visible, list.append(pin, ["}"]))),
+    ),
     "\n",
   )
 }
@@ -3287,7 +3783,7 @@ fn shell_decoder_text(services: List(model.Service)) -> String {
   |> string.concat
 }
 
-fn shell_runtime_text(include_client: Bool) -> String {
+fn shell_runtime_text(include_client: Bool, grid_css: String) -> String {
   "function areaNames(areas) {\n"
   <> "  return areas.map((area) => area.name);\n"
   <> "}\n\n"
@@ -3335,41 +3831,10 @@ fn shell_runtime_text(include_client: Bool) -> String {
   <> "    : \"@media (min-width: 1024px)\";\n"
   <> "  return query + \" {\\n\" + body + \"\\n}\\n\";\n"
   <> "}\n\n"
-  <> "function gridCssFromLayout(layout) {\n"
-  <> "  const spAreas = [...layout.sp.areas];\n"
-  <> "  const pcFrame = frameValue(layout.pc, {areas: spAreas});\n"
-  <> "  const tabletFrame = frameValue(layout.tablet, {areas: spAreas});\n"
-  <> "  const pcAreas = [...pcFrame.areas];\n"
-  <> "  const tabletAreas = [...tabletFrame.areas];\n"
-  <> "  const extras = [...pcAreas, ...tabletAreas].filter((area, index, all) =>\n"
-  <> "    all.findIndex((candidate) => candidate.name === area.name) === index &&\n"
-  <> "    !spAreas.some((candidate) => candidate.name === area.name),\n"
-  <> "  );\n"
-  <> "  const baseRules = [\n"
-  <> "    ...spAreas.map((area) => areaRule(area, \"normal\")),\n"
-  <> "    ...extras.map((area) => areaRule(area, \"hidden\")),\n"
-  <> "  ].join(\"\\n\");\n"
-  <> "  let css = \"\\n[data-yumemi-grid=\\\"layout\\\"] {\\n\"\n"
-  <> "    + \"  display: grid;\\n\"\n"
-  <> "    + \"  grid-template-columns: minmax(0, 1fr);\\n\"\n"
-  <> "    + \"  grid-template-areas: \" + gridTemplateAreas(spAreas) + \";\\n\"\n"
-  <> "    + \"  gap: 0;\\n}\\n\"\n"
-  <> "    + baseRules + \"\\n\";\n"
-  <> "  if (layout.tablet instanceof Some) {\n"
-  <> "    const tabletRules = tabletAreas.map((area) => areaRule(area, spAreas.some((candidate) => candidate.name === area.name) ? \"normal\" : \"visible\")).join(\"\\n\");\n"
-  <> "    css += mediaBlock(\"tablet\", \"  [data-yumemi-grid=\\\"layout\\\"] {\\n\"\n"
-  <> "      + \"    grid-template-columns: minmax(0, 1fr) minmax(12rem, 20rem);\\n\"\n"
-  <> "      + \"    grid-template-areas: \" + gridTemplateAreas(tabletAreas) + \";\\n  }\\n\"\n"
-  <> "      + tabletRules);\n"
-  <> "  }\n"
-  <> "  if (layout.pc instanceof Some) {\n"
-  <> "    const pcRules = pcAreas.map((area) => areaRule(area, spAreas.some((candidate) => candidate.name === area.name) ? \"normal\" : \"visible\")).join(\"\\n\");\n"
-  <> "    css += mediaBlock(\"pc\", \"  [data-yumemi-grid=\\\"layout\\\"] {\\n\"\n"
-  <> "      + \"    grid-template-columns: minmax(0, 1fr) minmax(12rem, 20rem);\\n\"\n"
-  <> "      + \"    grid-template-areas: \" + pcGridTemplateAreas(spAreas, pcAreas) + \";\\n  }\\n\"\n"
-  <> "      + pcRules);\n"
-  <> "  }\n"
-  <> "  return css;\n"
+  <> "function gridCssFromLayout(_layout) {\n"
+  <> "  return "
+  <> quoted(grid_css)
+  <> ";\n"
   <> "}\n\n"
   <> "function matchPage(pathname) {\n"
   <> "  for (const pageRoute of pageRoutes) {\n"
@@ -3542,7 +4007,7 @@ pub fn route_notes(
   front.components
   |> list.flat_map(fn(component) {
     list.append(
-      component.calls,
+      component_services(component),
       list.map(component.reloads, fn(reload) { reload.1 }),
     )
     |> list.unique
@@ -3725,12 +4190,23 @@ fn out_file(
   let scope = scope_for(units, service_path)
   let #(state, output) = out_state(app, units, service_path)
   let out_alias = case output {
-    Some(type_) ->
-      case has_local_decl(units, scope, type_) {
+    Some(type_) -> {
+      let already_out =
+        type_name(type_) == "Out" && has_local_decl(units, scope, type_)
+      case already_out {
         True -> None
         False -> Some(OutAlias(scope: scope, type_: type_))
       }
+    }
     None -> None
+  }
+  let decoder = case with_decoder, output {
+    True, Some(type_) -> "\n" <> decoder_text(app, units, state, scope, type_)
+    _, _ -> ""
+  }
+  let state = case string.contains(decoder, "classify(value)") {
+    True -> add_function_import(state, "gleam/dynamic", "classify")
+    False -> state
   }
   let declarations = case output {
     None -> "pub type Out\n"
@@ -3772,10 +4248,7 @@ fn out_file(
       None -> ""
       Some(alias) -> "\n" <> out_alias_text(state, alias)
     }
-    <> case with_decoder, output {
-      True, Some(type_) -> "\n" <> decoder_text(app, units, state, scope, type_)
-      _, _ -> ""
-    }
+    <> decoder
   File(
     path: face_name <> "/src/gen/out/" <> service.module <> ".gleam",
     text: body,
@@ -3805,7 +4278,7 @@ fn decoder_for_type(
   case type_ {
     glance.NamedType(name: name, parameters: parameters, ..) -> {
       case name {
-        "String" | "Int" | "Bool" | "Float" | "List" | "Option" ->
+        "String" | "Int" | "Bool" | "Float" | "List" | "Option" | "Nil" ->
           builtin_decoder(name, parameters, app, units, state, scope)
         _ -> {
           let path = resolved_path(scope, type_)
@@ -3851,6 +4324,7 @@ fn builtin_decoder(
       "decode.optional("
       <> decoder_for_type(app, units, state, scope, inner)
       <> ")"
+    "Nil", [] -> nil_decoder()
     _, _ -> "decode.dynamic"
   }
 }
@@ -3870,6 +4344,7 @@ fn named_decoder(
       case path {
         "framework/time" -> opaque_model_decoder(name)
         "framework/blob" -> opaque_model_decoder("Blob")
+        "framework/party" -> opaque_model_decoder(name)
         _ ->
           case string.starts_with(path, "entity/") {
             True ->
@@ -3933,13 +4408,30 @@ fn custom_or_alias_decoder(
           case alias {
             SourceAlias(scope: alias_scope, definition: definition) ->
               alias_scope.module == path && definition.name == name
-            _ -> False
+            AliasRedirect(path: alias_path, source_name: source_name) ->
+              alias_path == path && source_name == name
+            ValueAlias(path: alias_path, source_name: source_name, ..) ->
+              alias_path == path && source_name == name
           }
         })
       {
         Ok(SourceAlias(scope: alias_scope, definition: definition)) ->
           decoder_for_type(app, units, state, alias_scope, definition.aliased)
-        Ok(_) | Error(_) -> "decode.dynamic"
+        Ok(AliasRedirect(path: alias_path, source_name: source_name)) ->
+          case alias_for(units, alias_path, source_name) {
+            Some(definition) ->
+              decoder_for_type(
+                app,
+                units,
+                state,
+                scope_for(units, alias_path),
+                definition.aliased,
+              )
+            None -> "decode.dynamic"
+          }
+        Ok(ValueAlias(backing: model.IntValue, ..)) -> "decode.int"
+        Ok(ValueAlias(backing: model.StringValue, ..)) -> "decode.string"
+        Error(_) -> "decode.dynamic"
       }
   }
 }
@@ -3964,20 +4456,299 @@ fn custom_decoder(
           case list.all(variants, fn(variant) { variant.fields == [] }) {
             True -> enum_decoder(state, scope, definition)
             False ->
-              case variants {
-                [first, ..] ->
-                  variant_decoder(
+              case discriminator_field(state, scope, variants) {
+                Some(label) ->
+                  tagged_union_decoder(
                     app,
                     units,
                     state,
                     scope,
-                    definition.name,
-                    first,
+                    definition,
+                    variants,
+                    label,
                   )
-                [] -> "decode.dynamic"
+                None ->
+                  untagged_union_decoder(
+                    app,
+                    units,
+                    state,
+                    scope,
+                    definition,
+                    variants,
+                  )
               }
           }
       }
+  }
+}
+
+fn untagged_union_decoder(
+  app: model.App,
+  units: List(Unit),
+  state: State,
+  scope: Scope,
+  definition: glance.CustomType,
+  variants: List(glance.Variant),
+) -> String {
+  let decoders =
+    variants
+    |> list.map(fn(variant) {
+      let constructor =
+        variant_constructor(state, scope, definition.name, variant.name)
+      case variant.fields {
+        [] ->
+          untagged_nullary_variant_decoder(
+            definition.name,
+            variant.name,
+            constructor,
+          )
+        [glance.UnlabelledVariantField(item)] ->
+          "decode.map("
+          <> decoder_for_type(app, units, state, scope, item)
+          <> ", fn(value) { "
+          <> constructor
+          <> "(value) })"
+        _ -> variant_decoder(app, units, state, scope, definition.name, variant)
+      }
+    })
+  case decoders {
+    [first, ..rest] ->
+      "decode.one_of(\n  "
+      <> first
+      <> ",\n  or: ["
+      <> string.join(rest, ", ")
+      <> "],\n)"
+    [] -> "decode.dynamic"
+  }
+}
+
+fn untagged_nullary_variant_decoder(
+  type_name: String,
+  variant: String,
+  constructor: String,
+) -> String {
+  "decode.then(decode.string, fn(value) {\n"
+  <> "  case value {\n"
+  <> "    "
+  <> string.inspect(variant)
+  <> " -> decode.success("
+  <> constructor
+  <> ")\n"
+  <> "    _ -> decode.failure("
+  <> constructor
+  <> ", expected: "
+  <> string.inspect(type_name)
+  <> ")\n"
+  <> "  }\n"
+  <> "})"
+}
+
+fn tagged_union_decoder(
+  app: model.App,
+  units: List(Unit),
+  state: State,
+  scope: Scope,
+  definition: glance.CustomType,
+  variants: List(glance.Variant),
+  discriminator: String,
+) -> String {
+  let branches =
+    variants
+    |> list.map(fn(variant) {
+      "      "
+      <> string.inspect(variant.name)
+      <> " ->\n        "
+      <> tagged_variant_decoder(
+        app,
+        units,
+        state,
+        scope,
+        definition.name,
+        variant,
+        discriminator,
+      )
+      <> "\n"
+    })
+    |> string.concat
+  let fallback = case variants {
+    [first, ..] ->
+      "      _ ->\n        decode.then(\n          "
+      <> variant_decoder(app, units, state, scope, definition.name, first)
+      <> ", fn(value) {\n            decode.failure(\n              value,\n              expected: \""
+      <> definition.name
+      <> "."
+      <> discriminator
+      <> "\",\n            )\n          })\n"
+    [] -> ""
+  }
+  "decode.then(\n"
+  <> "    decode.field(\""
+  <> discriminator
+  <> "\", decode.string, fn(value) { decode.success(value) }),\n"
+  <> "    fn("
+  <> discriminator
+  <> ") {\n"
+  <> "      case "
+  <> discriminator
+  <> " {\n"
+  <> branches
+  <> fallback
+  <> "      }\n"
+  <> "    },\n"
+  <> "  )"
+}
+
+fn tagged_variant_decoder(
+  app: model.App,
+  units: List(Unit),
+  state: State,
+  scope: Scope,
+  type_name: String,
+  variant: glance.Variant,
+  discriminator: String,
+) -> String {
+  let constructor = variant_constructor(state, scope, type_name, variant.name)
+  case variant.fields {
+    [] -> "decode.success(" <> constructor <> ")"
+    fields -> {
+      let all =
+        list.map(fields, fn(field) {
+          case field {
+            glance.LabelledVariantField(label: label, item: item) -> #(
+              label,
+              label,
+              decoder_for_type(app, units, state, scope, item),
+            )
+            glance.UnlabelledVariantField(item) -> #(
+              "value",
+              "value",
+              decoder_for_type(app, units, state, scope, item),
+            )
+          }
+        })
+        |> list.map(fn(field) {
+          case field.0 == discriminator {
+            True -> #(field.0, field.0, field.2)
+            False -> field
+          }
+        })
+      let remaining = list.filter(all, fn(field) { field.0 != discriminator })
+      field_decoder_chain_from(remaining, all, constructor)
+    }
+  }
+}
+
+fn discriminator_field(
+  state: State,
+  scope: Scope,
+  variants: List(glance.Variant),
+) -> Option(String) {
+  case variants {
+    [first, ..] -> {
+      let candidates =
+        first.fields
+        |> list.filter_map(fn(field) {
+          case field {
+            glance.LabelledVariantField(label: label, item: item) ->
+              case string_field_type(state, scope, item) {
+                True -> Ok(label)
+                False -> Error(Nil)
+              }
+            glance.UnlabelledVariantField(_) -> Error(Nil)
+          }
+        })
+        |> list.filter(fn(label) {
+          list.all(variants, fn(variant) {
+            case
+              list.find(variant.fields, fn(field) {
+                case field {
+                  glance.LabelledVariantField(label: found, ..) ->
+                    found == label
+                  glance.UnlabelledVariantField(_) -> False
+                }
+              })
+            {
+              Ok(glance.LabelledVariantField(item: item, ..)) ->
+                string_field_type(state, scope, item)
+              _ -> False
+            }
+          })
+        })
+      case list.contains(candidates, "kind") {
+        True -> Some("kind")
+        False ->
+          case candidates {
+            [only] -> Some(only)
+            _ -> None
+          }
+      }
+    }
+    [] -> None
+  }
+}
+
+fn string_field_type(state: State, scope: Scope, type_: glance.Type) -> Bool {
+  string_field_type_seen(state, scope, type_, [])
+}
+
+fn string_field_type_seen(
+  state: State,
+  scope: Scope,
+  type_: glance.Type,
+  seen: List(String),
+) -> Bool {
+  case type_ {
+    glance.NamedType(name: "String", parameters: [], ..) -> True
+    glance.NamedType(name: name, parameters: [], ..) ->
+      case resolved_path(scope, type_) {
+        Some(path) -> {
+          let key = path <> ":" <> name
+          case list.contains(seen, key) {
+            True -> False
+            False ->
+              case list.contains(state.enum_aliases, key) {
+                True -> True
+                False ->
+                  case
+                    list.find(state.aliases, fn(alias) {
+                      case alias {
+                        SourceAlias(alias_scope, definition) ->
+                          alias_scope.module == path && definition.name == name
+                        ValueAlias(alias_path, source_name, ..) ->
+                          alias_path == path && source_name == name
+                        AliasRedirect(alias_path, source_name) ->
+                          alias_path == path && source_name == name
+                      }
+                    })
+                  {
+                    Ok(SourceAlias(alias_scope, definition)) ->
+                      string_field_type_seen(
+                        state,
+                        alias_scope,
+                        definition.aliased,
+                        [key, ..seen],
+                      )
+                    Ok(ValueAlias(backing: model.StringValue, ..)) -> True
+                    Ok(_) | Error(_) -> False
+                  }
+              }
+          }
+        }
+        None -> False
+      }
+    _ -> False
+  }
+}
+
+fn variant_constructor(
+  state: State,
+  scope: Scope,
+  type_name: String,
+  variant: String,
+) -> String {
+  case type_name {
+    "Row" -> row_constructor_name(state, last_segment(scope.module), variant)
+    _ -> mapped_constructor(state, scope.module, type_name, variant)
   }
 }
 
@@ -3989,11 +4760,7 @@ fn variant_decoder(
   type_name: String,
   variant: glance.Variant,
 ) -> String {
-  let constructor = case type_name {
-    "Row" ->
-      row_constructor_name(state, last_segment(scope.module), variant.name)
-    _ -> mapped_constructor(state, scope.module, type_name, variant.name)
-  }
+  let constructor = variant_constructor(state, scope, type_name, variant.name)
   case variant.fields {
     [] -> "decode.success(" <> constructor <> ")"
     [glance.UnlabelledVariantField(item)] ->
@@ -4142,8 +4909,10 @@ fn page_decoder(
 
 fn relation_decoder(name: String) -> String {
   case name {
+    "Key" -> key_decoder()
     "Has" -> has_decoder()
     "Held" -> held_decoder()
+    "Link" -> "decode.optional(" <> key_decoder() <> ")"
     "Multi" -> multi_decoder()
     _ -> "decode.dynamic"
   }
@@ -4196,15 +4965,15 @@ fn relation_property_decoder(kind: model.RelKind) -> String {
     model.Has -> has_decoder()
     model.Held -> held_decoder()
     model.Multi -> multi_decoder()
-    model.Link -> "decode.optional(decode.string)"
+    model.Link -> "decode.optional(" <> key_decoder() <> ")"
   }
 }
 
 fn model_ref_decoder(
   app: model.App,
-  _units: List(Unit),
-  _state: State,
-  _scope: Scope,
+  units: List(Unit),
+  state: State,
+  scope: Scope,
   reference: model.TypeRef,
 ) -> String {
   case reference.module, reference.name {
@@ -4212,6 +4981,8 @@ fn model_ref_decoder(
     None, "Int" -> "decode.int"
     None, "Bool" -> "decode.bool"
     None, "Float" -> "decode.float"
+    None, "Nil" -> nil_decoder()
+    None, name -> unqualified_model_ref_decoder(app, units, state, name)
     Some(path), name ->
       case string.starts_with(path, "gen/types/") {
         True -> value_decoder(app, name)
@@ -4219,11 +4990,108 @@ fn model_ref_decoder(
           case path {
             "framework/time" -> opaque_model_decoder(name)
             "framework/blob" -> opaque_model_decoder("Blob")
-            _ -> "decode.dynamic"
+            "framework/party" -> opaque_model_decoder(name)
+            "framework/er" -> relation_decoder(name)
+            _ ->
+              case string.starts_with(path, "entity/") {
+                True ->
+                  case
+                    model.entity_by_module(
+                      app.entities,
+                      string.drop_start(path, 7),
+                    )
+                  {
+                    Some(entity) ->
+                      case entity.type_name == name {
+                        True -> entity_decoder(app, units, state, scope, entity)
+                        False ->
+                          custom_or_alias_decoder(
+                            app,
+                            units,
+                            state,
+                            Scope(module: path, imports: []),
+                            path,
+                            name,
+                          )
+                      }
+                    None ->
+                      custom_or_alias_decoder(
+                        app,
+                        units,
+                        state,
+                        Scope(module: path, imports: []),
+                        path,
+                        name,
+                      )
+                  }
+                False ->
+                  custom_or_alias_decoder(
+                    app,
+                    units,
+                    state,
+                    Scope(module: path, imports: []),
+                    path,
+                    name,
+                  )
+              }
           }
       }
-    _, _ -> "decode.dynamic"
   }
+}
+
+fn unqualified_model_ref_decoder(
+  app: model.App,
+  units: List(Unit),
+  state: State,
+  name: String,
+) -> String {
+  case
+    list.find(state.custom, fn(declaration) {
+      let CustomDecl(definition: definition, ..) = declaration
+      definition.name == name
+    })
+  {
+    Ok(CustomDecl(scope: declaration_scope, definition: definition)) ->
+      custom_decoder(app, units, state, declaration_scope, definition)
+    Error(_) ->
+      case
+        list.find(state.aliases, fn(alias) {
+          case alias {
+            SourceAlias(_, definition) -> definition.name == name
+            AliasRedirect(_, source_name) | ValueAlias(_, source_name, ..) ->
+              source_name == name
+          }
+        })
+      {
+        Ok(SourceAlias(alias_scope, definition)) ->
+          decoder_for_type(app, units, state, alias_scope, definition.aliased)
+        Ok(AliasRedirect(path, source_name)) ->
+          custom_or_alias_decoder(
+            app,
+            units,
+            state,
+            Scope(module: path, imports: []),
+            path,
+            source_name,
+          )
+        Ok(ValueAlias(backing: model.IntValue, ..)) -> "decode.int"
+        Ok(ValueAlias(backing: model.StringValue, ..)) -> "decode.string"
+        Error(_) -> value_decoder(app, name)
+      }
+  }
+}
+
+fn key_decoder() -> String {
+  "decode.then(decode.string, fn(raw) { decode.success(key(raw)) })"
+}
+
+fn nil_decoder() -> String {
+  "decode.new_primitive_decoder(\"Nil\", fn(value) {\n"
+  <> "    case classify(value) {\n"
+  <> "      \"Nil\" -> Ok(Nil)\n"
+  <> "      _ -> Error(Nil)\n"
+  <> "    }\n"
+  <> "  })"
 }
 
 fn opaque_model_decoder(name: String) -> String {
@@ -4233,6 +5101,7 @@ fn opaque_model_decoder(name: String) -> String {
     "Datetime" ->
       opaque_parser_decoder("datetime", "2000-01-01T00:00:00Z", "Datetime")
     "Time" -> opaque_parser_decoder("time", "00:00", "Time")
+    "PartyId" -> opaque_parser_decoder("party.parse", "placeholder", "PartyId")
     _ -> "decode.dynamic"
   }
 }
@@ -4242,19 +5111,29 @@ fn opaque_parser_decoder(
   default_raw: String,
   expected: String,
 ) -> String {
-  "decode.then(decode.string, fn(raw) {\n"
-  <> "    let assert Ok(default_value) = "
+  "decode.new_primitive_decoder(\""
+  <> expected
+  <> "\", fn(value) {\n"
+  <> "    let parsed = case decode.run(value, decode.string) {\n"
+  <> "      Ok(raw) -> "
+  <> parser
+  <> "(raw)\n"
+  <> "      Error(_) -> Error(Nil)\n"
+  <> "    }\n"
+  <> "    case parsed {\n"
+  <> "      Ok(value) -> Ok(value)\n"
+  <> "      Error(_) -> Error(\n"
+  <> "        case "
   <> parser
   <> "(\""
   <> default_raw
-  <> "\")\n"
-  <> "    case "
-  <> parser
-  <> "(raw) {\n"
-  <> "      Ok(value) -> decode.success(value)\n"
-  <> "      Error(_) -> decode.failure(default_value, expected: \""
+  <> "\") {\n"
+  <> "          Ok(default_value) -> default_value\n"
+  <> "          Error(_) -> panic as \"valid built-in "
   <> expected
-  <> "\")\n"
+  <> " decoder placeholder\"\n"
+  <> "        },\n"
+  <> "      )\n"
   <> "    }\n"
   <> "  })"
 }
@@ -4412,6 +5291,7 @@ fn collect_named(
         "framework/time" -> add_time_decoder_import(state, path, name)
         "framework/blob" ->
           add_function_import(add_import(state, path, name), path, "parse")
+        "framework/party" -> add_import(state, path, name)
         _ -> collect_back_named(state, app, units, scope, path, name)
       }
   }
@@ -4588,6 +5468,7 @@ fn collect_model_named(
     "framework/time" -> add_time_decoder_import(state, path, name)
     "framework/blob" ->
       add_function_import(add_import(state, path, name), path, "parse")
+    "framework/party" -> add_import(state, path, name)
     _ ->
       case string.starts_with(path, "gen/types/") {
         True -> ensure_value_alias(state, app, path, name)
@@ -4892,6 +5773,45 @@ fn finalize_state(state: State) -> State {
   let state = State(..state, enum_aliases: enum_aliases)
   let constructors = constructor_names(state)
   State(..state, constructors: constructors)
+}
+
+/// Stop before writing a lossy decoder when a multi-variant output type has no
+/// common string field that can distinguish its variants.
+pub fn decoder_notes(app: model.App, units: List(Unit)) -> List(stop.Note) {
+  units
+  |> list.filter(fn(unit) { string.starts_with(unit.path, "service/") })
+  |> list.flat_map(fn(unit) {
+    let #(state, output) = out_state(app, units, unit.path)
+    case output {
+      None -> []
+      Some(_) ->
+        state.custom
+        |> list.filter_map(fn(declaration) {
+          let CustomDecl(scope: scope, definition: definition) = declaration
+          let needs_discriminator =
+            list.length(definition.variants) > 1
+            && !list.all(definition.variants, fn(variant) {
+              variant.fields == []
+            })
+          case
+            needs_discriminator
+            && discriminator_field(state, scope, definition.variants) == None
+          {
+            True ->
+              Ok(stop.Note(
+                class: stop.NotImplemented,
+                text: unit.path
+                  <> ": "
+                  <> scope.module
+                  <> "."
+                  <> definition.name
+                  <> " の複数 variant を判別できない。全 variant に共通する String 欄 kind(または唯一の候補欄)を宣言する",
+              ))
+            False -> Error(Nil)
+          }
+        })
+    }
+  })
 }
 
 fn row_enum_aliases(declarations: List(CustomDecl)) -> List(String) {
@@ -5387,7 +6307,13 @@ fn relation_type(state: State, name: String) -> State {
     True ->
       case list.contains(["Has", "Held", "Multi"], name) {
         True -> add_opaque(state, name)
-        False -> add_import(state, "framework/er", name)
+        False -> {
+          let state = add_import(state, "framework/er", name)
+          case name {
+            "Key" | "Link" -> add_function_import(state, "framework/er", "key")
+            _ -> state
+          }
+        }
       }
     False -> state
   }
