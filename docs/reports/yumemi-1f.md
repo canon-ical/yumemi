@@ -4,7 +4,7 @@
 
 ## 鷹野宛
 
-- Query を必須 Args へ流す6行(4 Page)は既定を Page に書けないため back の Args の形の区分へ移した(贄川の当てはめ、巡 5)。
+- Query を必須 Args へ流す6 行(4 Page = ▲ の 3 Page + ▲ の外の muses home 1 Page)は既定を Page に書けないため back の Args の形の区分へ移した(贄川の当てはめ、巡 5)。
 
 ### P0
 
@@ -28,9 +28,7 @@
 
 ### F6 対象表
 
-F6 対象表の元21 Pageに、HomeMetrics の Query Args 2行がある muses/src/pages/page.gleam を加えると22 file。指定の合計21とは1 fileずれるため、どの既存行をまとめるかは未決。
-
-区分数（実ファイル数）: 語彙12 / back の1行読み6 / back の Args の形4 / 合計22 / 未分類0。
+区分数:▲ `値の出所 → Y1f` の 21 file = 語彙だけ 12 / back の 1 行読み 6 / back の Args の形 3、未分類 0。**▲ の外の 1 file**(`muses/src/pages/page.gleam`、嬢の面の home)は ▲ ではないが、F6 で `home` の束ねた `In` を割ると `HomeMetrics` の Query `from` / `to` が必須の Args に流れるので、back の Args の形の区分に足す(F6 が触る file は 22、▲ を消す file は 21)。
 
 | Page file | Page `vars` | Block `Arg` | 割る Block | 要る back の Service | 区分 |
 |---|---|---|---|---|---|
