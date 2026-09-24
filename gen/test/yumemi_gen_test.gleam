@@ -2263,7 +2263,7 @@ pub fn front_emit_blocks_preview_places_layout_blocks_by_area_test() {
   string.contains(fixture_preview, "el.text(\"header\")") |> should.be_false
 }
 
-pub fn front_emit_blocks_preview_defaults_imported_service_out_test() {
+pub fn front_emit_blocks_preview_defaults_imported_service_out_and_page_imports_only_referenced_blocks_test() {
   let assert Ok(face_units) = source.load("fixtures/article/public")
   let face_units =
     face_units
@@ -2285,6 +2285,12 @@ pub fn front_emit_blocks_preview_defaults_imported_service_out_test() {
           <> "pub fn view(it: In) -> el.Element(Nil) {\n"
           <> "  el.text(it.article.slug)\n}",
       ),
+      source_unit(
+        "blocks/orphan",
+        "import framework/front/el\n"
+          <> "pub type In = Nil\n"
+          <> "pub fn view(_it: In) -> el.Element(Nil) { el.text(\"orphan\") }",
+      ),
     ])
   let assert Ok(#(_, preview)) =
     synthetic_front_files(face_units)
@@ -2292,6 +2298,14 @@ pub fn front_emit_blocks_preview_defaults_imported_service_out_test() {
   string.contains(preview, "article.view(article_read.Out(")
   |> should.be_true
   string.contains(preview, "article.view(Nil)") |> should.be_false
+  let assert Ok(#(_, page)) =
+    synthetic_front_files(face_units)
+    |> list.find(fn(file) {
+      file.0 == "public/src/gen/load/article/arg_slug/page.gleam"
+    })
+  string.contains(page, "import blocks/article") |> should.be_true
+  string.contains(page, "import blocks/orphan") |> should.be_false
+  string.contains(page, "import framework/front/el") |> should.be_true
 }
 
 pub fn front_emit_blob_theme_wraps_image_in_quoted_css_url_test() {
@@ -2416,6 +2430,7 @@ pub fn static_material_copy_keeps_front_four_names_and_markdown_structure_test()
   string.contains(document, "html.table(") |> should.be_true
   string.contains(document, "html.pre(") |> should.be_false
   string.contains(document, string.inspect(sources.api_v1)) |> should.be_false
+  string.contains(document, "import gleam/list") |> should.be_false
   text_occurrences(document, "\n    heading") |> should.equal(3)
   text_occurrences(document, "html.table(") |> should.equal(2)
   text_occurrences(document, "table_row([") |> should.equal(4)
@@ -2434,6 +2449,11 @@ pub fn static_material_copy_keeps_front_four_names_and_markdown_structure_test()
     string.contains(document, "fn " <> name <> "(") |> should.be_false
   })
   text_occurrences(document, "unordered_list(") |> should.equal(0)
+
+  let list_document =
+    static_emit.api_v1_text("# Fixture API\n\n- one item", "same-hash")
+  string.contains(list_document, "import gleam/list") |> should.be_true
+  string.contains(list_document, "fn unordered_list(") |> should.be_true
 }
 
 pub fn static_api_v1_source_change_changes_generated_structure_test() {

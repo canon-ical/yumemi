@@ -51,19 +51,24 @@ pub fn api_v1_text(source: String, input_hash: String) -> String {
     Ok(value) -> value
     Error(_) -> panic as "docs/api-v1.md contains unsupported Markdown syntax"
   }
+  let helpers = markdown.helpers(document)
+  let list_import = case string.contains(helpers, "list.map") {
+    True -> "import gleam/list\n"
+    False -> ""
+  }
   "//// GENERATED from docs/api-v1.md [sha256:"
   <> input_hash
   <> "] — 手で編集しない\n\n"
   <> "import framework/front/el\n"
   <> "import framework/front/sketch_css\n"
-  <> "import gleam/list\n"
+  <> list_import
   <> "import sketch/lustre/element/html\n"
   <> "import style\n\n"
   <> "pub fn nodes() -> List(el.Element(Nil)) {\n"
   <> "  [\n"
   <> string.join(list.map(document.nodes, fn(node) { "    " <> node }), ",\n")
   <> "\n  ]\n}\n\n"
-  <> markdown.helpers(document)
+  <> helpers
   <> "\n"
   <> string.join(document.tables, "\n\n")
 }

@@ -3040,29 +3040,33 @@ fn load_page_text(
 ) -> String {
   let theme = theme_source(page_sources)
   let theme_background_blob = theme_background_is_blob(units, theme)
-  let imports =
-    load_imports(
-      front,
-      list.append(layout_sources, page_sources),
-      True,
-      theme_background_blob,
-    )
   let data_fields =
     ["    layout: layout.Data,\n"]
     |> list.append(list.map(page_sources, load_data_field_text))
   let page_path = face_name <> "/src/" <> page.module <> ".gleam"
-  let source_body =
-    header(page_path, input_hash)
-    <> "\n"
-    <> imports
-    <> import_gap(imports)
-    <> load_data_text("Data", data_fields)
+  let body =
+    load_data_text("Data", data_fields)
     <> "\n"
     <> page_load_function_text(layout_sources, page_sources)
     <> "\n"
     <> page_render_text(front, page_sources, theme_background_blob)
     <> "\n"
     <> page_view_text(app, units, front, page, layout_sources, page_sources)
+  let imports =
+    load_imports(
+      front,
+      page,
+      list.append(layout_sources, page_sources),
+      True,
+      theme_background_blob,
+      body,
+    )
+  let source_body =
+    header(page_path, input_hash)
+    <> "\n"
+    <> imports
+    <> import_gap(imports)
+    <> body
   source_body
 }
 
@@ -3295,25 +3299,57 @@ fn import_gap(imports: String) -> String {
 
 fn load_imports(
   front: reader_front.Front,
+  page: reader_front.Page,
   sources: List(LoadSource),
   include_layout: Bool,
   theme_background_blob: Bool,
+  body: String,
 ) -> String {
-  let base = [
-    "framework/front/css",
-    "framework/front/el as el",
-    "framework/front/sketch_css",
-    "gleam/list",
-    "gleam/option.{type Option, None, Some}",
-    "lustre/attribute",
-    "lustre/element/html as raw_html",
-    "sketch",
-    "sketch/css as raw_css",
-    "sketch/lustre as sketch_lustre",
-    "sketch/lustre/element",
-    "sketch/lustre/element/html",
-    "style",
-  ]
+  let html_body = string.replace(body, "raw_html.", "")
+  let base =
+    [
+      #("css", "framework/front/css"),
+      #("el", "framework/front/el as el"),
+      #("sketch_css", "framework/front/sketch_css"),
+      #("list", "gleam/list"),
+      #("attribute", "lustre/attribute"),
+      #("raw_html", "lustre/element/html as raw_html"),
+      #("sketch", "sketch"),
+      #("raw_css", "sketch/css as raw_css"),
+      #("sketch_lustre", "sketch/lustre as sketch_lustre"),
+      #("element", "sketch/lustre/element"),
+      #("html", "sketch/lustre/element/html"),
+      #("style", "style"),
+    ]
+    |> list.filter_map(fn(item) {
+      let #(reference, path) = item
+      let rendered = case path == "sketch/lustre/element/html" {
+        True -> html_body
+        False -> body
+      }
+      case module_alias_used(rendered, reference) {
+        True -> Ok(path)
+        False -> Error(Nil)
+      }
+    })
+  let option_items =
+    [
+      #("type Option", "Option("),
+      #("None", "None"),
+      #("Some", "Some"),
+    ]
+    |> list.filter_map(fn(item) {
+      let #(name, reference) = item
+      case string.contains(body, reference) {
+        True -> Ok(name)
+        False -> Error(Nil)
+      }
+    })
+  let option = case option_items {
+    [] -> []
+    _ -> ["gleam/option.{" <> string.join(option_items, ", ") <> "}"]
+  }
+  let base = list.append(base, option)
   let blob = case theme_background_blob {
     True -> ["framework/blob.{type Blob}", "media"]
     False -> []
@@ -3323,10 +3359,23 @@ fn load_imports(
     False -> []
   }
   let blocks = case include_layout {
-    True ->
-      list.map(front.blocks, fn(block) {
-        block_import_path(block.module, load_source_service_names(sources))
+    True -> {
+      let layout_placements = case front.layout.sp {
+        Some(frame) -> frame.placements
+        None -> []
+      }
+      let page_placements = case page.sp {
+        Some(frame) -> frame.placements
+        None -> []
+      }
+      placement_block_modules(
+        front,
+        list.append(layout_placements, page_placements),
+      )
+      |> list.map(fn(path) {
+        block_import_path(path, load_source_service_names(sources))
       })
+    }
     False -> []
   }
   let outs = list.map(sources, fn(source) { "gen/out/" <> source.service })
@@ -3342,6 +3391,31 @@ fn load_imports(
     }
   })
   |> string.join("\n")
+}
+
+fn module_alias_used(body: String, alias: String) -> Bool {
+  [" ", "\n", "(", "[", "{", ",", "=", ":", "->", "=>"]
+  |> list.any(fn(prefix) { string.contains(body, prefix <> alias <> ".") })
+}
+
+fn placement_block_modules(
+  front: reader_front.Front,
+  placements: List(reader_front.Placement),
+) -> List(String) {
+  placements
+  |> list.flat_map(fn(placement) {
+    case placement {
+      reader_front.Fixed(block: name, ..) -> [block_module(front, name)]
+      reader_front.Widget(render: render, ..) ->
+        case render {
+          reader_front.One(name) -> [block_module(front, name)]
+          reader_front.ByKind(table: table, ..) ->
+            list.map(table, fn(row) { block_module(front, row.1) })
+          reader_front.UnknownRender -> []
+        }
+    }
+  })
+  |> list.unique
 }
 
 fn layout_imports(sources: List(LoadSource)) -> String {

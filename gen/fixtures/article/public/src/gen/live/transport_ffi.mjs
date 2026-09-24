@@ -32,7 +32,8 @@ async function uploadToken(token, method = "POST", path = "/api/blobs") {
     selectedFiles.delete(token);
     uploadedFiles.set(token, result.key);
     return result.key;
-  }).finally(() => pendingUploads.delete(token));
+  }).catch(() => { throw new Error("file upload failed"); })
+    .finally(() => pendingUploads.delete(token));
   pendingUploads.set(token, upload);
   return upload;
 }
@@ -50,9 +51,14 @@ export function send(method, path, body, blobFields, onOk, onError) {
       headers: { "content-type": "application/json" },
       body: method === "GET" ? undefined : JSON.stringify(nextBody),
     });
-    if (!response.ok) throw new Error("service request failed");
-    onOk(await response.json());
-  }).catch(() => onError(undefined));
+    return response;
+  }).then((response) => {
+    if (response.ok) {
+      response.json().then(onOk).catch(() => onError({ code: "invalid_response" }));
+    } else {
+      response.json().then(onError).catch(() => onError({ code: "request_failed" }));
+    }
+  }).catch((error) => onError({ code: error?.message ?? "network_error" }));
   return undefined;
 }
 

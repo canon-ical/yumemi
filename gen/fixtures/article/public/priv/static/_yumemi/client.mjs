@@ -1034,6 +1034,31 @@ function concat_loop(loop$strings, loop$accumulator) {
 function concat2(strings) {
   return concat_loop(strings, "");
 }
+function join_loop(loop$strings, loop$separator, loop$accumulator) {
+  while (true) {
+    let strings = loop$strings;
+    let separator = loop$separator;
+    let accumulator = loop$accumulator;
+    if (strings instanceof Empty) {
+      return accumulator;
+    } else {
+      let string5 = strings.head;
+      let strings$1 = strings.tail;
+      loop$strings = strings$1;
+      loop$separator = separator;
+      loop$accumulator = accumulator + separator + string5;
+    }
+  }
+}
+function join(strings, separator) {
+  if (strings instanceof Empty) {
+    return "";
+  } else {
+    let first$1 = strings.head;
+    let rest = strings.tail;
+    return join_loop(rest, separator, first$1);
+  }
+}
 
 // public/build/dev/javascript/gleam_stdlib/gleam/dynamic/decode.mjs
 var DecodeError = class extends CustomType {
@@ -1298,6 +1323,41 @@ function decode_error(expected, found) {
 }
 function field(field_name, field_decoder, next) {
   return subfield(toList([field_name]), field_decoder, next);
+}
+function optional_field(key, default$, field_decoder, next) {
+  return new Decoder(
+    (data) => {
+      let _block;
+      let _block$1;
+      let $1 = index2(data, key);
+      if ($1 instanceof Ok) {
+        let $22 = $1[0];
+        if ($22 instanceof Some) {
+          let data$1 = $22[0];
+          _block$1 = field_decoder.function(data$1);
+        } else {
+          _block$1 = [default$, List$Empty$const];
+        }
+      } else {
+        let kind = $1[0];
+        _block$1 = [
+          default$,
+          toList([
+            new DecodeError(kind, classify_dynamic(data), List$Empty$const)
+          ])
+        ];
+      }
+      let _pipe = _block$1;
+      _block = push_path(_pipe, toList([key]));
+      let $ = _block;
+      let out = $[0];
+      let errors1 = $[1];
+      let $2 = next(out).function(data);
+      let out$1 = $2[0];
+      let errors2 = $2[1];
+      return [out$1, append(errors1, errors2)];
+    }
+  );
 }
 function decode_bool(data) {
   let $ = isEqual(identity(true), data);
@@ -5696,6 +5756,8 @@ async function uploadToken(token, method = "POST", path = "/api/blobs") {
     selectedFiles.delete(token);
     uploadedFiles.set(token, result.key);
     return result.key;
+  }).catch(() => {
+    throw new Error("file upload failed");
   }).finally(() => pendingUploads.delete(token));
   pendingUploads.set(token, upload);
   return upload;
@@ -5713,9 +5775,14 @@ function send2(method, path, body, blobFields, onOk, onError) {
       headers: { "content-type": "application/json" },
       body: method === "GET" ? void 0 : JSON.stringify(nextBody)
     });
-    if (!response.ok) throw new Error("service request failed");
-    onOk(await response.json());
-  }).catch(() => onError(void 0));
+    return response;
+  }).then((response) => {
+    if (response.ok) {
+      response.json().then(onOk).catch(() => onError({ code: "invalid_response" }));
+    } else {
+      response.json().then(onError).catch(() => onError({ code: "request_failed" }));
+    }
+  }).catch((error) => onError({ code: error?.message ?? "network_error" }));
   return void 0;
 }
 function upload_file(method, path, token, onOk, onError) {
@@ -5989,20 +6056,65 @@ var Field$Blob$const = new Blob();
 var Existing = class extends CustomType {
 };
 var Field$Existing$const = new Existing();
-var Invalid2 = class extends CustomType {
+var Broke = class extends CustomType {
   constructor($0) {
     super();
     this[0] = $0;
   }
 };
-var Failed = class extends CustomType {
-};
-var Error$Failed$const = new Failed();
 function init2(given) {
   return [
     new State(new Args2("", "", ""), given, Option$None$const, false),
     none()
   ];
+}
+function error_field_decoder(field2) {
+  return optional_field(
+    field2,
+    "",
+    string2,
+    (value2) => {
+      return success(value2);
+    }
+  );
+}
+function error_text(value2) {
+  let $ = run(value2, error_field_decoder("code"));
+  if ($ instanceof Ok) {
+    let code = $[0];
+    if (code !== "") {
+      return code;
+    } else {
+      let $1 = run(value2, error_field_decoder("message"));
+      if ($1 instanceof Ok) {
+        let message = $1[0];
+        if (message !== "") {
+          return message;
+        } else {
+          return "invalid error payload";
+        }
+      } else {
+        return "invalid error payload";
+      }
+    }
+  } else {
+    let $1 = run(value2, error_field_decoder("message"));
+    if ($1 instanceof Ok) {
+      let message = $1[0];
+      if (message !== "") {
+        return message;
+      } else {
+        return "invalid error payload";
+      }
+    } else {
+      return "invalid error payload";
+    }
+  }
+}
+function error_failure(value2) {
+  let $ = error_text(value2);
+  let code = $;
+  return new Broke(code);
 }
 function send4(args) {
   return from2(
@@ -6035,15 +6147,24 @@ function send4(args) {
             let out = $[0];
             return dispatch2(new Done(new Ok(out)));
           } else {
-            return dispatch2(new Done(new Error2(Error$Failed$const)));
+            return dispatch2(
+              new Done(new Error2(new Broke("invalid response")))
+            );
           }
         },
-        (_) => {
-          return dispatch2(new Done(new Error2(Error$Failed$const)));
+        (value2) => {
+          return dispatch2(new Done(new Error2(error_failure(value2))));
         }
       );
     }
   );
+}
+function validation_error_text(errors) {
+  let _pipe = errors;
+  let _pipe$1 = map2(_pipe, (error) => {
+    return error[1];
+  });
+  return join(_pipe$1, "; ");
 }
 function validate_field(field2, raw, constraint, message) {
   let $ = validate(raw, constraint);
@@ -6134,7 +6255,7 @@ function update3(model, msg) {
           new State(
             model.args,
             model.given,
-            new Some(new Error2(new Invalid2(errors))),
+            new Some(new Error2(new Broke(validation_error_text(errors)))),
             model.waiting
           ),
           none()
@@ -6342,20 +6463,83 @@ var Args3 = class extends CustomType {
 var Slug2 = class extends CustomType {
 };
 var Field$Slug$const2 = new Slug2();
-var Invalid3 = class extends CustomType {
+var AlreadyPublished = class extends CustomType {
+};
+var Error$AlreadyPublished$const = new AlreadyPublished();
+var AlreadyRetracted = class extends CustomType {
+};
+var Error$AlreadyRetracted$const = new AlreadyRetracted();
+var Refused = class extends CustomType {
   constructor($0) {
     super();
     this[0] = $0;
   }
 };
-var Failed2 = class extends CustomType {
+var Broke2 = class extends CustomType {
+  constructor($0) {
+    super();
+    this[0] = $0;
+  }
 };
-var Error$Failed$const2 = new Failed2();
 function init3(given) {
   return [
     new State(new Args3(""), given, Option$None$const, false),
     none()
   ];
+}
+function error_field_decoder2(field2) {
+  return optional_field(
+    field2,
+    "",
+    string2,
+    (value2) => {
+      return success(value2);
+    }
+  );
+}
+function error_text2(value2) {
+  let $ = run(value2, error_field_decoder2("code"));
+  if ($ instanceof Ok) {
+    let code = $[0];
+    if (code !== "") {
+      return code;
+    } else {
+      let $1 = run(value2, error_field_decoder2("message"));
+      if ($1 instanceof Ok) {
+        let message = $1[0];
+        if (message !== "") {
+          return message;
+        } else {
+          return "invalid error payload";
+        }
+      } else {
+        return "invalid error payload";
+      }
+    }
+  } else {
+    let $1 = run(value2, error_field_decoder2("message"));
+    if ($1 instanceof Ok) {
+      let message = $1[0];
+      if (message !== "") {
+        return message;
+      } else {
+        return "invalid error payload";
+      }
+    } else {
+      return "invalid error payload";
+    }
+  }
+}
+function error_failure2(value2) {
+  let $ = error_text2(value2);
+  if ($ === "already_published") {
+    return new Refused(Error$AlreadyPublished$const);
+  } else if ($ === "already_retracted") {
+    return new Refused(Error$AlreadyRetracted$const);
+  } else {
+    let code = $;
+    return new Broke2(code);
+  }
 }
 function send5(args) {
   return from2(
@@ -6371,15 +6555,24 @@ function send5(args) {
             let out = $[0];
             return dispatch2(new Done(new Ok(out)));
           } else {
-            return dispatch2(new Done(new Error2(Error$Failed$const2)));
+            return dispatch2(
+              new Done(new Error2(new Broke2("invalid response")))
+            );
           }
         },
-        (_) => {
-          return dispatch2(new Done(new Error2(Error$Failed$const2)));
+        (value2) => {
+          return dispatch2(new Done(new Error2(error_failure2(value2))));
         }
       );
     }
   );
+}
+function validation_error_text2(errors) {
+  let _pipe = errors;
+  let _pipe$1 = map2(_pipe, (error) => {
+    return error[1];
+  });
+  return join(_pipe$1, "; ");
 }
 function validate_field2(field2, raw, constraint, message) {
   let $ = validate(raw, constraint);
@@ -6431,7 +6624,7 @@ function update4(model, msg) {
           new State(
             model.args,
             model.given,
-            new Some(new Error2(new Invalid3(errors))),
+            new Some(new Error2(new Broke2(validation_error_text2(errors)))),
             model.waiting
           ),
           none()
@@ -6778,15 +6971,12 @@ var Field$Category$const = new Category2();
 var Tags = class extends CustomType {
 };
 var Field$Tags$const = new Tags();
-var Invalid4 = class extends CustomType {
+var Broke3 = class extends CustomType {
   constructor($0) {
     super();
     this[0] = $0;
   }
 };
-var Failed3 = class extends CustomType {
-};
-var Error$Failed$const3 = new Failed3();
 function init4(given) {
   return [
     new State(
@@ -6800,6 +6990,54 @@ function init4(given) {
 }
 function reload_page() {
   return emit2("yumemi-done", null$());
+}
+function error_field_decoder3(field2) {
+  return optional_field(
+    field2,
+    "",
+    string2,
+    (value2) => {
+      return success(value2);
+    }
+  );
+}
+function error_text3(value2) {
+  let $ = run(value2, error_field_decoder3("code"));
+  if ($ instanceof Ok) {
+    let code = $[0];
+    if (code !== "") {
+      return code;
+    } else {
+      let $1 = run(value2, error_field_decoder3("message"));
+      if ($1 instanceof Ok) {
+        let message = $1[0];
+        if (message !== "") {
+          return message;
+        } else {
+          return "invalid error payload";
+        }
+      } else {
+        return "invalid error payload";
+      }
+    }
+  } else {
+    let $1 = run(value2, error_field_decoder3("message"));
+    if ($1 instanceof Ok) {
+      let message = $1[0];
+      if (message !== "") {
+        return message;
+      } else {
+        return "invalid error payload";
+      }
+    } else {
+      return "invalid error payload";
+    }
+  }
+}
+function error_failure3(value2) {
+  let $ = error_text3(value2);
+  let code = $;
+  return new Broke3(code);
 }
 function send6(args) {
   return from2(
@@ -6823,15 +7061,24 @@ function send6(args) {
             let out = $[0];
             return dispatch2(new Done(new Ok(out)));
           } else {
-            return dispatch2(new Done(new Error2(Error$Failed$const3)));
+            return dispatch2(
+              new Done(new Error2(new Broke3("invalid response")))
+            );
           }
         },
-        (_) => {
-          return dispatch2(new Done(new Error2(Error$Failed$const3)));
+        (value2) => {
+          return dispatch2(new Done(new Error2(error_failure3(value2))));
         }
       );
     }
   );
+}
+function validation_error_text3(errors) {
+  let _pipe = errors;
+  let _pipe$1 = map2(_pipe, (error) => {
+    return error[1];
+  });
+  return join(_pipe$1, "; ");
 }
 function validate_field3(field2, raw, constraint, message) {
   let $ = validate(raw, constraint);
@@ -6992,7 +7239,7 @@ function update5(model, msg) {
           new State(
             model.args,
             model.given,
-            new Some(new Error2(new Invalid4(errors))),
+            new Some(new Error2(new Broke3(validation_error_text3(errors)))),
             model.waiting
           ),
           none()
