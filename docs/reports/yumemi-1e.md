@@ -98,6 +98,7 @@ snapshot にある Block `In` と、生成 load が現在渡している式の�
 | period value | `muses/src/pages/metrics/page.gleam` | `muses/src/gen/load/metrics/page.gleam:111` — `metrics_dashboard.view(Nil)` (`from`, `to`) |
 | route parameter | `www/src/pages/claim/arg_code/page.gleam` | ▲ `www/src/gen/load/claim/arg_code/page.gleam:66` — `claim_head.view(code)`; Y1e F5 output still passes `Nil` at `:125`, but `claim_head.In` is `String` |
 | route parameter | `www/src/pages/muse/arg_handle/space/arg_id/page.gleam` | ▲ `www/src/gen/load/muse/arg_handle/space/arg_id/page.gleam:145` — `space_title_block.view(space)` receives `space_list.FreeSpace`; Y1e F5 output passes `space_list.Out` at final `:204` (pre-fix probe `:210`), so `arg_id` must select the row |
+| session value (optional read) | `www/src/pages/muse/arg_handle/page.gleam` | ▲ `www/src/gen/load/muse/arg_handle/page.gleam:154` — `muse_header.In(page: muse, subscription: subscription)` (`load` の引数 `subscription: Option(subscription_read.Out)`, `:60-62`); Y1e output passes `subscription: None` at `:212`。`Option(Out)` の source が無いと生成器は `None` で埋めるので exit 1 に出ない(残る 4 Page は ▲ も `None`) |
 
 Console の snapshot は load Page が11本あり、共通 `console_header` の `idp_origin` が全11本で欠ける。BRIEF の「約9」より実ファイルでは2本多いため、上表に11本すべて載せた。
 
@@ -134,7 +135,7 @@ Y1f には役員 人見 09-24 16:52 の裁定(A 案:Page が取りに行く Serv
 
 ## 51 v5 に足す文
 
-`Pin.Overlay` は popover top layer の `<div popover>` / `::backdrop`。overlay area は `resolved_template` に渡す Frame から生成器が除くため grid template に現れず、`z-index` / `position` は ★ に出ない。`el.opener` / `el.closer` は `popovertarget` / `popovertargetaction` を生成し、JS・島 state を使わない。`el.badge(count: Option(Int), child)` は None / 0 をCSSで隠し、正数だけ表示する。`el.each_modal(scope, row_key, ...)` の `row_key` は Out の安定した key を渡し、id に不適合な字はescapeしない。
+`Pin.Overlay` は popover top layer の `<div popover>` / `::backdrop`。overlay area は `resolved_template` に渡す Frame から生成器が除くため grid template に現れず、`z-index` / `position` は ★ に出ない。`el.opener` / `el.closer` は `popovertarget` / `popovertargetaction` を生成し、JS・島 state を使わない。`el.badge(count: Option(Int), child)` は None / 0 をCSSで隠す(負の数は隠さない)。数字は `data-count` に載るだけで、表示する中身は `child`。`el.each_modal(scope, row_key, ...)` の `row_key` は Out の安定した key を渡し、id に不適合な字はescapeしない。
 
 File input は Service の `Blob` / `Option(Blob)` field ごとに `<field>_file_input()` を生成する。選択 File はruntime内で札(String)にし、`Send` 時に `/api/blobs` へ上げて返った key を Blob field に入れてからServiceを呼ぶ。上げ失敗は `Failure.Broke`、Service は呼ばない。`Target.Entry(api.BlobCopy)` は直接Entryとして同じruntimeを使う。shell `<head>` には `width=device-width, initial-scale=1, viewport-fit=cover` を固定で出す。「書けないもの」の重なりで残るのはドロワー / tooltip / 浮くボタン。
 
