@@ -2,7 +2,7 @@
 
 便: yumemi-1f
 
-**前提は 3 つ。**(a) **Y1e の承認と Hex 0.9.0 の publish** ── yumemi main `4f43a9f`(tag `v0.9.0`)。`docs/reports/yumemi-1e.md` の `### 値の出所の穴` と `## 追随便への申し送り` が本便の穴の一覧、**型の正は tech `_drafts/gleam-framework/63-page-variables.v0.md`**(役員 人見 09-24 の裁定 2 回と鷹野の裁定 6 点)、(b) **musearch は snapshot で読む** ── **基点の snapshot は musearch main `8eed4d8`**(F5 の基点と同じ木。`b84ee21` との差は BRIEF 1 本で src は同一)。**run_dir に写して読み、走行中に musearch main が動いても追わない**(F5 が並走する ── 裁定待ち 1)。**`~/yumemism_repo/musearch` は一度も書かない**(`git status --short` 0 行を証跡に)、(c) **`~/yumemism_repo/yumemi` の作業木(main)は触らない** ── musearch の便は生成器を `~/yumemism_repo/yumemi/gen` から呼ぶ(`BRIEF-yumemi-5.md:35` ほか)。**基点は yumemi main `<本 BRIEF の commit>`**(`4f43a9f` の上に本 BRIEF の commit だけ)。作業木は `~/yumemism_repo/yumemi-1f`(branch `impl/yumemi-1f`、贄川が作る)。plan は贄川の run_dir、記録は `docs/reports/yumemi-1f.md`(**`## DDL` 必須、本便は「無し」**)、証跡は `gen/build/y1f-*`。commit は `git-as <役>`、`main` に触らない、push と **Hex publish は鷹野**。1 巡 = 1 session、ゲートは 1 も 2 も便に 1 回、ゲート 2 の P0 を直す巡は真壁を sol で。配役は起動前に `harness-route` で引く(tech `61-stage-baton-7.md` の段 9 の行、柏木は経路 C)。**`gleam.toml` は 0.10.0。****見積 5:30(推定** ── 末尾「見積」)。
+**前提は 3 つ。**(a) **Y1e の承認と Hex 0.9.0 の publish** ── yumemi main `4f43a9f`(tag `v0.9.0`)。`docs/reports/yumemi-1e.md` の `### 値の出所の穴` と `## 追随便への申し送り` が本便の穴の一覧、**型の正は tech `_drafts/gleam-framework/63-page-variables.v0.md`**(役員 人見 09-24 の裁定 2 回と鷹野の裁定 6 点)、(b) **musearch は snapshot で読む** ── **基点の snapshot は musearch main `8eed4d8`**(F5 の基点と同じ木。`b84ee21` との差は BRIEF 1 本で src は同一)。**run_dir に写して読み、走行中に musearch main が動いても追わない**(F5 が並走する ── 裁定待ち 1)。**`~/yumemism_repo/musearch` は一度も書かない**(`git status --short` 0 行を証跡に)、(c) **`~/yumemism_repo/yumemi` の作業木(main)は触らない** ── musearch の便は生成器を `~/yumemism_repo/yumemi/gen` から呼ぶ(`BRIEF-yumemi-5.md:35` ほか)。**基点は yumemi main `9817972`(`4f43a9f` の上に本 BRIEF と鷹野の裁定の commit だけ)**(`4f43a9f` の上に本 BRIEF の commit だけ)。作業木は `~/yumemism_repo/yumemi-1f`(branch `impl/yumemi-1f`、贄川が作る)。plan は贄川の run_dir、記録は `docs/reports/yumemi-1f.md`(**`## DDL` 必須、本便は「無し」**)、証跡は `gen/build/y1f-*`。commit は `git-as <役>`、`main` に触らない、push と **Hex publish は鷹野**。1 巡 = 1 session、ゲートは 1 も 2 も便に 1 回、ゲート 2 の P0 を直す巡は真壁を sol で。配役は起動前に `harness-route` で引く(tech `61-stage-baton-7.md` の段 9 の行、柏木は経路 C)。**`gleam.toml` は 0.10.0。****見積 5:30(推定** ── 末尾「見積」)。
 
 **親ゴール:** Page は変数だけを持ち画面を描かない形を、生成器と front の型で成立させ、F5 が ▲ 例外で残した「値の出所の穴」21 file(www 3 / muses 7 / console 11)を生成物に戻せる版(Hex 0.10.0)を出す。
 
@@ -106,3 +106,15 @@ tech `63-page-variables.v0.md` 全文(末尾の裁定 3 つが正)、yumemi `doc
 1. **Widget の枠の名(`muse_top_main` / `space_main`、Page の `Widget(name:)`)は「Page が書く定数」ではなく area と同じ配置の名として残してよいか** ── 既定:残す(嬢が widget を置く枠の名で、値の出所ではない)
 2. **嬢の面の `/settings` の「同意」の表示も、09-24 16:35 の裁定(同意は画面に見えない)で消すか** ── 既定:消す(F6 の back の Service が 1 つ減る。本便の形は変わらない)
 3. **報告 1 点:**58 v4 に無い便が 2 本増える ── 本便(中央 5:30、段 9 の F5 の裏なら長柱は伸びない)と F6(中央 4:00 前後、推定。2b-7 / 2b-8 の後なら 58 v4 のゴールの後ろに付く)
+
+## 鷹野の裁定(2026-09-24 22:10、窓「段9」)
+
+1. **段 9 で F5 と並走する。**snapshot は musearch `8eed4d8` に固定、走行中に musearch main を追わない。`~/yumemism_repo/musearch` と `~/yumemism_repo/yumemi` の作業木(main)は一度も書かない
+2. **対案を採る ── 本便の merge を段 10(2b-7 / 2b-8)の merge 後まで止める。**承認後は `impl/yumemi-1f` に置いたまま、段 10 の 2 便の merge を終えてから鷹野が merge と Hex 0.10.0 の publish を同じ手で行い、その後に F6 を起こす。worktree の固定は置かない ── 走行中の F5 と段 10 の BRIEF の生成器の置き場を書き換えない方が安い
+3. **推奨どおり 401 だけ。**門の生成は射程外
+4. **推奨どおり `PUBLIC_<FACE>_ORIGIN` / `PUBLIC_IDP_ORIGIN`。**wrangler を改名しない
+5. **推奨どおり。**語彙で戻る分は写しで生成物に戻し、back の 1 行読みが要る分は F6 の表に Service の形で書くまで。写しの `api/` に Service を置かない
+6. **F6 は段 11(2b-7 / 2b-8 の後)。**58 v4 のゴールを動かさない。F6 の BRIEF は鷹野(材料は本便の results の F6 の表)
+7. **予算 495 分。**生成器の便は 2 本続けて見積の 1.5 倍に振れた実測に合わせる
+
+人見に聞く点 1〜3 は既定で走る。答えが来たら箱(`to-niekawa`)で渡す。
