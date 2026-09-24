@@ -1,7 +1,10 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { bundle_front } from "./yumemi_gen_ffi.mjs";
+import {
+  bundle_front,
+  prepareTemporaryPackage,
+} from "./yumemi_gen_ffi.mjs";
 
 function write(file, value) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -58,4 +61,46 @@ export function bundle_rejects_undefined_import() {
       return "PASS";
     },
   );
+}
+
+export function path_manifest_keeps_other_versions() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "yumemi-gen-manifest-test-"));
+  try {
+    const sourceFace = path.join(root, "source");
+    const tempFace = path.join(root, "temp");
+    fs.mkdirSync(sourceFace, { recursive: true });
+    fs.mkdirSync(tempFace, { recursive: true });
+    write(
+      path.join(sourceFace, "gleam.toml"),
+      'name = "public"\nversion = "0.1.0"\ntarget = "javascript"\n'
+        + '[dependencies]\nyumemi = { path = "../yumemi" }\n',
+    );
+    const manifest = [
+      "packages = [",
+      '  { name = "exception", version = "2.1.1", source = "hex", outer_checksum = "EXCEPTION" },',
+      '  { name = "yumemi", version = "0.7.0", source = "hex", outer_checksum = "OLD_YUMEMI" },',
+      '  { name = "gleam_stdlib", version = "1.0.5", source = "hex", outer_checksum = "STDLIB" },',
+      "]",
+      "",
+    ].join("\n");
+    write(path.join(sourceFace, "manifest.toml"), manifest);
+
+    const rewritten = prepareTemporaryPackage(sourceFace, tempFace);
+    const actual = fs.readFileSync(path.join(tempFace, "manifest.toml"), "utf8");
+    const expected = manifest
+      .split("\n")
+      .filter((line) => !line.includes('name = "yumemi"'))
+      .join("\n");
+    if (actual !== expected) return "FAIL: manifest changed outside the yumemi package row";
+    const expectedPath =
+      'yumemi = { path = "' + path.resolve(sourceFace, "../yumemi") + '" }';
+    if (!rewritten.includes(expectedPath)) {
+      return "FAIL: yumemi path dependency was not resolved";
+    }
+    return "PASS";
+  } catch (error) {
+    return "FAIL: " + (error instanceof Error ? error.stack : String(error));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 }

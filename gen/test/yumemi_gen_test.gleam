@@ -39,6 +39,9 @@ fn bundle_uses_generated_module() -> String
 @external(javascript, "./yumemi_gen_test_ffi.mjs", "bundle_rejects_undefined_import")
 fn bundle_rejects_undefined_import() -> String
 
+@external(javascript, "./yumemi_gen_test_ffi.mjs", "path_manifest_keeps_other_versions")
+fn path_manifest_keeps_other_versions() -> String
+
 /// 本便(gen-2)で置いた fixture ── 20 の写しではない。
 const flag_fixture = "fixtures/flag"
 
@@ -2804,6 +2807,10 @@ pub fn client_bundle_uses_generated_output_over_input_test() {
 
 pub fn client_bundle_stops_on_undefined_import_test() {
   bundle_rejects_undefined_import() |> should.equal("PASS")
+}
+
+pub fn path_manifest_keeps_other_versions_test() {
+  path_manifest_keeps_other_versions() |> should.equal("PASS")
 }
 
 pub fn client_bundle_failures_remain_per_face_notes_test() {

@@ -56,7 +56,36 @@ function repositoryRoot(faceDir, toml) {
   return dependency ? path.resolve(faceDir, dependency[1]) : null;
 }
 
-function prepareTemporaryPackage(sourceFace, tempFace) {
+function manifestWithoutPackage(manifest, packageName) {
+  const newline = manifest.includes("\r\n") ? "\r\n" : "\n";
+  const lines = manifest.split(/\r?\n/);
+  const kept = [];
+  let inPackages = false;
+  const packageNameField = new RegExp("\\bname\\s*=\\s*\"" + packageName + "\"");
+  for (const line of lines) {
+    if (/^\s*packages\s*=\s*\[/.test(line)) {
+      inPackages = !/]\s*$/.test(line);
+      kept.push(line);
+      continue;
+    }
+    if (inPackages && /^\s*\]\s*,?\s*$/.test(line)) {
+      inPackages = false;
+      kept.push(line);
+      continue;
+    }
+    if (
+      inPackages
+      && /^\s*\{/.test(line)
+      && packageNameField.test(line)
+    ) {
+      continue;
+    }
+    kept.push(line);
+  }
+  return kept.join(newline);
+}
+
+export function prepareTemporaryPackage(sourceFace, tempFace) {
   const tomlPath = path.join(tempFace, "gleam.toml");
   const toml = fs.readFileSync(path.join(sourceFace, "gleam.toml"), "utf8");
   const root = repositoryRoot(sourceFace, toml);
@@ -72,20 +101,45 @@ function prepareTemporaryPackage(sourceFace, tempFace) {
   const tempManifest = path.join(tempFace, "manifest.toml");
   if (root === null && fs.existsSync(sourceManifest)) {
     fs.copyFileSync(sourceManifest, tempManifest);
+  } else if (root !== null && fs.existsSync(sourceManifest)) {
+    fs.writeFileSync(
+      tempManifest,
+      manifestWithoutPackage(fs.readFileSync(sourceManifest, "utf8"), "yumemi"),
+    );
   } else {
     fs.rmSync(tempManifest, { force: true });
   }
   return rewritten;
 }
 
-function diagnosticDetail(processResult, tempRoot) {
-  return (processResult.error?.message || processResult.stderr || processResult.stdout || "")
-    .trim()
+function diagnosticOutput(processResult, tempRoot) {
+  const parts = [];
+  if (processResult.error) {
+    parts.push(processResult.error.message || String(processResult.error));
+  }
+  if (processResult.stdout) parts.push(processResult.stdout);
+  if (processResult.stderr) parts.push(processResult.stderr);
+  return parts
+    .join("\n")
+    .replaceAll(tempRoot, "<bundle-temp>")
+    .trimEnd();
+}
+
+function diagnosticDetail(processResult, tempRoot, outputFace, face, stage) {
+  const output = diagnosticOutput(processResult, tempRoot);
+  const detail = output
     .split("\n")
     .slice(-12)
     .join(" ")
-    .replaceAll(tempRoot, "<bundle-temp>")
     .replace(/\s+/g, " ");
+  const fileName = face + "-" + stage + ".txt";
+  const relativePath = "_diagnostics/" + fileName;
+  fs.mkdirSync(path.join(outputFace, "_diagnostics"), { recursive: true });
+  fs.writeFileSync(
+    path.join(outputFace, relativePath),
+    (output || "No diagnostic output was produced.") + "\n",
+  );
+  return detail + "; 全文=" + relativePath;
 }
 
 function compileCurrentOutDecoders(sourceFace, outputFace, tempRoot, face) {
@@ -122,7 +176,7 @@ function compileCurrentOutDecoders(sourceFace, outputFace, tempRoot, face) {
     encoding: "utf8",
   });
   if (build.status !== 0) {
-    const detail = diagnosticDetail(build, tempRoot);
+    const detail = diagnosticDetail(build, tempRoot, outputFace, face, "out-decoder");
     return {
       error: `${face}: client Out decoder 用 Gleam build に失敗した (status=${build.status}): ${detail}`,
       modules: modules.length,
@@ -165,7 +219,13 @@ function bundleOne(outDir, appDir, face) {
     });
     if (runtimeBuild.status !== 0) {
       fs.rmSync(sourcePath, { force: true });
-      const detail = diagnosticDetail(runtimeBuild, tempRoot);
+      const detail = diagnosticDetail(
+        runtimeBuild,
+        tempRoot,
+        outputFace,
+        face,
+        "runtime",
+      );
       return `${face}: client runtime 用 Gleam build に失敗した (status=${runtimeBuild.status}): ${detail}`;
     }
 
@@ -191,7 +251,13 @@ function bundleOne(outDir, appDir, face) {
     );
     if (esbuild.status !== 0 || !fs.existsSync(bundled)) {
       fs.rmSync(sourcePath, { force: true });
-      const detail = diagnosticDetail(esbuild, tempRoot);
+      const detail = diagnosticDetail(
+        esbuild,
+        tempRoot,
+        outputFace,
+        face,
+        "esbuild",
+      );
       return `${face}: client bundle 用 esbuild に失敗した (status=${esbuild.status}): ${detail || "bundle output missing"}`;
     }
 
