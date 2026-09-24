@@ -1,4 +1,4 @@
-//// GENERATED from src/components/pick_tag.gleam [sha256:d914ac89b73a] — 手で編集しない
+//// GENERATED from src/components/pick_tag.gleam [sha256:3ffb93fe5090] — 手で編集しない
 
 import framework/front/live
 import framework/spec
@@ -35,20 +35,16 @@ pub type Error {
   Failed
 }
 
-pub type State = live.State(Args, article_list.Out, article_create.Out, Error)
+pub type State =
+  live.State(Args, article_list.Out, article_create.Out, Error)
 
-pub type Event = live.Event(Field, article_list.Out, article_create.Out, Error)
+pub type Event =
+  live.Event(Field, article_list.Out, article_create.Out, Error)
 
 pub fn init(given: article_list.Out) -> #(State, Effect(Event)) {
   #(
     live.State(
-      args: Args(
-        slug: "",
-        title: "",
-        body: "",
-        category: "",
-        tags: "",
-      ),
+      args: Args(slug: "", title: "", body: "", category: "", tags: ""),
       given: given,
       last: None,
       waiting: False,
@@ -91,10 +87,7 @@ pub fn update(model: State, msg: Event) -> #(State, Effect(Event)) {
             Ok(args) -> #(live.State(..model, waiting: True), send(args))
           }
       }
-    live.Given(given) -> #(
-      live.State(..model, given: given),
-      effect.none(),
-    )
+    live.Given(given) -> #(live.State(..model, given: given), effect.none())
     live.Done(result) -> {
       let next = live.State(..model, last: Some(result), waiting: False)
       case result {
@@ -106,11 +99,27 @@ pub fn update(model: State, msg: Event) -> #(State, Effect(Event)) {
 }
 
 pub fn validate(model: State) -> Result(Args, List(#(Field, String))) {
-  let errors = list.flatten([
-    validate_field(Slug, model.args.slug, spec.Pattern(min: 1, max: 64, regex: "^[a-z0-9]+(-[a-z0-9]+)*$")),
-    validate_field(Title, model.args.title, spec.Text(min: 1, max: 120)),
-    validate_field(Body, model.args.body, spec.Markdown),
-  ])
+  let errors =
+    list.flatten([
+      validate_field(
+        Slug,
+        model.args.slug,
+        spec.Pattern(min: 1, max: 64, regex: "^[a-z0-9]+(-[a-z0-9]+)*$"),
+        "must contain 1 to 64 characters and match /^[a-z0-9]+(-[a-z0-9]+)*$/",
+      ),
+      validate_field(
+        Title,
+        model.args.title,
+        spec.Text(min: 1, max: 120),
+        "must contain 1 to 120 characters",
+      ),
+      validate_field(
+        Body,
+        model.args.body,
+        spec.Markdown,
+        "must be valid Markdown",
+      ),
+    ])
   case errors {
     [] -> Ok(model.args)
     _ -> Error(errors)
@@ -121,10 +130,11 @@ fn validate_field(
   field: Field,
   raw: String,
   constraint: spec.Spec,
+  message: String,
 ) -> List(#(Field, String)) {
   case spec.validate(raw, constraint) {
     Ok(_) -> []
-    Error(_) -> [#(field, "invalid")]
+    Error(_) -> [#(field, message)]
   }
 }
 
@@ -143,12 +153,12 @@ fn send(args: Args) -> Effect(Event) {
       "POST",
       "/api/articles",
       json.object([
-    #("slug", json.string(args.slug)),
-    #("title", json.string(args.title)),
-    #("body", json.string(args.body)),
-    #("category", json.string(args.category)),
-    #("tags", json.string(args.tags)),
-  ]),
+        #("slug", json.string(args.slug)),
+        #("title", json.string(args.title)),
+        #("body", json.string(args.body)),
+        #("category", json.string(args.category)),
+        #("tags", json.string(args.tags)),
+      ]),
       fn(value) {
         case decode.run(value, article_create.decoder()) {
           Ok(out) -> dispatch(live.Done(Ok(out)))

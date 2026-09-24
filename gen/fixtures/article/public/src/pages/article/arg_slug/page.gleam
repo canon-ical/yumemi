@@ -1,9 +1,11 @@
-import framework/front.{type Page, Area, ByKind, Fixed, Frame, Page, Widget}
+import framework/front.{
+  type Page, Area, ByKind, Fixed, Flow, Frame, Page, Widget,
+}
 import framework/front/css
 import gen/blocks
 import gen/service
-import layout
 import gleam/option.{None, Some}
+import layout
 import style
 
 pub const page: Page(service.Service, blocks.Block) = Page(
@@ -26,8 +28,8 @@ pub const page: Page(service.Service, blocks.Block) = Page(
       ),
     ],
     placements: [
-      Fixed(area: "page", block: blocks.Summary),
-      Fixed(area: "page", block: blocks.Article),
+      Fixed(area: "page", block: blocks.Summary, cell: Flow),
+      Fixed(area: "page", block: blocks.Article, cell: Flow),
       Widget(
         area: "rail",
         name: "article_kinds",
@@ -41,29 +43,38 @@ pub const page: Page(service.Service, blocks.Block) = Page(
         ),
       ),
     ],
+    cols: [],
+    rows: [],
+    template: [],
   ),
-  pc: Some(Frame(
-    areas: [
-      Area(
-        name: "page",
-        flow: css.Stack(gap: style.s2),
-        pin: css.NoPin,
-        style: style.page,
-      ),
-      Area(
-        name: "rail",
-        flow: css.Stack(gap: style.s1),
-        pin: css.NoPin,
-        style: [],
-      ),
-      Area(
-        name: "aside",
-        flow: css.Stack(gap: style.s1),
-        pin: css.NoPin,
-        style: [],
-      ),
-    ],
-    placements: [],
-  )),
+  pc: Some(
+    Frame(
+      areas: [
+        Area(
+          name: "page",
+          flow: css.Stack(gap: style.s2),
+          pin: css.NoPin,
+          style: style.page,
+        ),
+        Area(
+          name: "rail",
+          flow: css.Stack(gap: style.s1),
+          pin: css.NoPin,
+          style: [],
+        ),
+        Area(
+          name: "aside",
+          flow: css.Stack(gap: style.s1),
+          pin: css.NoPin,
+          style: [],
+        ),
+      ],
+      placements: [],
+      cols: [],
+      rows: [],
+      template: [],
+    ),
+  ),
   tablet: None,
+  reads: [service.ArticleRead],
 )

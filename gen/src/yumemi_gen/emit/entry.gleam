@@ -43,7 +43,7 @@ type Match {
   Match(target: Target, suffix: String, word_count: Int)
 }
 
-const individual_verbs = ["read", "delete", "put"]
+const individual_verbs = ["read", "delete", "put", "edit", "remove"]
 
 pub fn emit(app: App, hashes: hash.Hashes) -> Output {
   case app.entries {
@@ -99,7 +99,7 @@ pub fn emit(app: App, hashes: hash.Hashes) -> Output {
             text: http_text(routes, hash.entry(hashes)),
           ),
         ],
-        notes: list.reverse(notes),
+        notes: list.append(list.reverse(notes), route_overlap_notes(routes)),
       )
     }
   }
@@ -160,6 +160,52 @@ fn route_compare(left: Route, right: Route) -> order.Order {
     order.Eq -> string.compare(left.face, right.face)
     other -> other
   }
+}
+
+fn route_overlap_notes(routes: List(Route)) -> List(stop.Note) {
+  case routes {
+    [] -> []
+    [route, ..rest] -> {
+      let overlaps =
+        list.filter_map(rest, fn(other) {
+          case
+            route.face == other.face
+            && route.method == other.method
+            && route_path_shape(route.path) == route_path_shape(other.path)
+          {
+            True ->
+              Ok(stop.Note(
+                class: stop.Conflict,
+                text: "HTTP route が重複: "
+                  <> route.face
+                  <> " "
+                  <> route.method
+                  <> " "
+                  <> route.path
+                  <> " ("
+                  <> route.service
+                  <> " / "
+                  <> other.service
+                  <> ")",
+              ))
+            False -> Error(Nil)
+          }
+        })
+      list.append(overlaps, route_overlap_notes(rest))
+    }
+  }
+}
+
+fn route_path_shape(path: String) -> String {
+  path
+  |> string.split("/")
+  |> list.map(fn(segment) {
+    case string.starts_with(segment, "{") && string.ends_with(segment, "}") {
+      True -> "{}"
+      False -> segment
+    }
+  })
+  |> string.join("/")
 }
 
 fn system_only(service: Service) -> Bool {
@@ -261,7 +307,8 @@ fn route_for_target(
     EntityTarget(entity) -> matching_args(entity, available_args)
     CollectionTarget(_) -> []
   }
-  let individual = target_args != [] && verb != "create" && verb != "list"
+  let individual =
+    target_args != [] && verb != "create" && verb != "list" && verb != "add"
   case individual, list.length(target_args) {
     True, count if count > 1 ->
       Error(RouteError(
@@ -406,7 +453,7 @@ fn nested_reserved_entity(
     list.find(app.entities, fn(entity) {
       entity.module != target_module
       && list.any(entity_suffixes(entity.module), fn(suffix) {
-        list.any(individual_verbs_with_create_list(), fn(reserved) {
+        list.any(reserved_verbs(), fn(reserved) {
           verb == suffix <> "_" <> reserved
         })
       })
@@ -417,8 +464,8 @@ fn nested_reserved_entity(
   }
 }
 
-fn individual_verbs_with_create_list() -> List(String) {
-  ["create", "read", "list", "delete", "put"]
+fn reserved_verbs() -> List(String) {
+  ["create", "read", "list", "delete", "put", "add", "edit", "remove"]
 }
 
 fn target_module(target: Target) -> String {
@@ -495,10 +542,13 @@ fn append_variable(base: String, name: String) -> String {
 fn method_for(effect: Effect, verb: String, individual: Bool) -> String {
   case effect, verb, individual {
     model.WriteEffect, "create", False -> "POST"
+    model.WriteEffect, "add", False -> "POST"
     model.ReadEffect, "read", True -> "GET"
     model.ReadEffect, "list", False -> "GET"
     model.WriteEffect, "delete", True -> "DELETE"
+    model.WriteEffect, "remove", _ -> "DELETE"
     model.WriteEffect, "put", True -> "PUT"
+    model.WriteEffect, "edit", _ -> "PUT"
     model.WriteEffect, _, _ -> "POST"
     model.ReadEffect, _, _ -> "GET"
   }
@@ -512,10 +562,13 @@ fn suffix_for(
 ) -> String {
   case effect, verb, individual {
     model.WriteEffect, "create", False -> path
+    model.WriteEffect, "add", False -> path
     model.ReadEffect, "read", True -> path
     model.ReadEffect, "list", False -> path
     model.WriteEffect, "delete", True -> path
     model.WriteEffect, "put", True -> path
+    model.WriteEffect, "edit", _ -> path
+    model.WriteEffect, "remove", _ -> path
     _, _, _ -> append_segment(path, verb)
   }
 }

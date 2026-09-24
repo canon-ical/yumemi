@@ -3,7 +3,8 @@
 import framework/front/el
 import sketch/lustre/element/html
 
-pub type In = Nil
+pub type In =
+  Nil
 
 pub fn view(_it: In) -> el.Element(Nil) {
   html.div_([], [

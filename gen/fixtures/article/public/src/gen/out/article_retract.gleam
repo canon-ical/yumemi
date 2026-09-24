@@ -1,10 +1,13 @@
 //// GENERATED from src/service/article_retract.gleam [sha256:4e7c9e6d1b77] — 手で編集しない
 
-pub type Slug = String
+pub type Slug =
+  String
 
-pub type Title = String
+pub type Title =
+  String
 
-pub type Body = String
+pub type Body =
+  String
 
 pub type Has(entity) {
   Has(value: String)
@@ -30,4 +33,5 @@ pub type Category
 
 pub type Tag
 
-pub type Out = Article
+pub type Out =
+  Article

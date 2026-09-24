@@ -4,6 +4,8 @@
 //// から、次段の emit が使う構造だけを拾う。まだ file は出さない。
 
 import glance
+import gleam/float
+import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
@@ -22,7 +24,6 @@ pub type Front {
   Front(
     face: String,
     package_name: String,
-    warn_missing_shell: Bool,
     layout: Layout,
     shell: Shell,
     pages: List(Page),
@@ -44,6 +45,7 @@ pub type Shell {
     text: String,
     accent: String,
     present: Bool,
+    missing: List(String),
   )
 }
 
@@ -53,6 +55,7 @@ pub type Layout {
     sp: Option(Frame),
     pc: Option(Frame),
     tablet: Option(Frame),
+    reads: List(String),
     nested: Bool,
   )
 }
@@ -68,19 +71,65 @@ pub type Page {
     sp: Option(Frame),
     pc: Option(Frame),
     tablet: Option(Frame),
+    reads: List(String),
   )
 }
 
 pub type Frame {
-  Frame(media: String, areas: List(Area), placements: List(Placement))
+  Frame(
+    media: String,
+    areas: List(Area),
+    placements: List(Placement),
+    cols: List(Track),
+    rows: List(Track),
+    template: List(List(String)),
+  )
+}
+
+pub type Track {
+  Fr(Int)
+  Rem(Float)
+  Px(Float)
+  Minmax(min: TrackSize, max: TrackSize)
+}
+
+pub type TrackSize {
+  FrSize(Int)
+  RemSize(Float)
+  PxSize(Float)
+}
+
+pub type Cell {
+  Flow
+  Span(cols: Int, rows: Int)
+  At(col: Int, row: Int, span: CellSpan)
+}
+
+pub type CellSpan {
+  CellSpan(cols: Int, rows: Int)
+}
+
+pub type GridTracks {
+  GridTracks(cols: List(Track), gap: Length)
+}
+
+pub type Length {
+  RemLength(Float)
+  PxLength(Float)
 }
 
 pub type Area {
-  Area(name: String, flow: String, pin: String, style: List(String))
+  Area(
+    name: String,
+    flow: String,
+    grid_tracks: Option(GridTracks),
+    pin: String,
+    style: List(String),
+  )
 }
 
 pub type Placement {
-  Fixed(area: String, block: String)
+  Fixed(area: String, block: String, cell: Cell)
   Widget(area: String, name: String, service: String, render: Render)
 }
 
@@ -105,12 +154,17 @@ pub type Component {
   Component(
     name: String,
     module: String,
-    calls: List(String),
+    calls: List(CallTarget),
     reloads: List(#(String, String)),
     has_view: Bool,
     after_send: Option(String),
     nested_island: Bool,
   )
+}
+
+pub type CallTarget {
+  ServiceCall(String)
+  AttachedCall(String)
 }
 
 pub type Style {
@@ -130,7 +184,7 @@ pub fn read(
   units: List(Unit),
   services: List(model.Service),
 ) -> Result(Front, Error) {
-  read_with_package_and_warning(face, face, units, services, False)
+  read_with_package_and_warning(face, face, units, services)
 }
 
 pub fn read_with_package(
@@ -139,7 +193,7 @@ pub fn read_with_package(
   units: List(Unit),
   services: List(model.Service),
 ) -> Result(Front, Error) {
-  read_with_package_and_warning(face, package_name, units, services, True)
+  read_with_package_and_warning(face, package_name, units, services)
 }
 
 fn read_with_package_and_warning(
@@ -147,7 +201,6 @@ fn read_with_package_and_warning(
   package_name: String,
   units: List(Unit),
   _services: List(model.Service),
-  warn_missing_shell: Bool,
 ) -> Result(Front, Error) {
   use layout_unit <- result.try(find_unit(units, "layout"))
   use layout <- result.try(parse_layout(face, layout_unit))
@@ -179,7 +232,6 @@ fn read_with_package_and_warning(
   Ok(Front(
     face: face,
     package_name: package_name,
-    warn_missing_shell: warn_missing_shell,
     layout: layout,
     shell: shell,
     pages: pages,
@@ -214,63 +266,223 @@ pub fn notes(front: Front, services: List(model.Service)) -> List(stop.Note) {
     ),
     layout_widget_notes(front.face, front.layout, services),
     widget_notes(front.face, front.pages, services),
+    reads_type_notes(front, services),
     layout_nested_notes(front.face, front.layout),
     unknown_service_notes(front.face, front.services, services),
   ])
 }
 
+fn reads_type_notes(
+  front: Front,
+  services: List(model.Service),
+) -> List(stop.Note) {
+  let layout_notes =
+    reads_context_notes(
+      front.face,
+      "layout",
+      front.layout.reads,
+      layout_frames(front.layout),
+      front.blocks,
+      services,
+    )
+  let page_notes =
+    front.pages
+    |> list.flat_map(fn(page) {
+      reads_context_notes(
+        front.face,
+        page.module,
+        page.reads,
+        page_frames(page),
+        front.blocks,
+        services,
+      )
+    })
+  list.append(layout_notes, page_notes)
+}
+
+fn reads_context_notes(
+  face: String,
+  context: String,
+  reads: List(String),
+  frames: List(Frame),
+  blocks: List(Block),
+  services: List(model.Service),
+) -> List(stop.Note) {
+  let placed_blocks =
+    frames
+    |> list.flat_map(fn(frame) {
+      frame.placements
+      |> list.filter_map(fn(placement) {
+        case placement {
+          Fixed(block:, ..) -> Ok(block)
+          Widget(..) -> Error(Nil)
+        }
+      })
+    })
+    |> list.unique
+  reads
+  |> list.flat_map(fn(variant) {
+    case service_by_variant(services, variant) {
+      Some(service) ->
+        placed_blocks
+        |> list.filter_map(fn(name) {
+          case list.find(blocks, fn(block) { block.name == name }) {
+            Ok(block) ->
+              case block_uses_service(block, service) {
+                False -> Error(Nil)
+                True ->
+                  case block_matches_service_out(block, service) {
+                    True -> Error(Nil)
+                    False ->
+                      Ok(stop.Note(
+                        class: stop.Conflict,
+                        text: face
+                          <> "/"
+                          <> context
+                          <> ": reads の "
+                          <> service.module
+                          <> ".Out と Block "
+                          <> block.name
+                          <> " の In が一致しない",
+                      ))
+                  }
+              }
+            Error(_) -> Error(Nil)
+          }
+        })
+      None -> []
+    }
+  })
+}
+
+fn service_by_variant(
+  services: List(model.Service),
+  variant: String,
+) -> Option(model.Service) {
+  services
+  |> list.find(fn(service) {
+    service.module == variant || naming.pascal(service.module) == variant
+  })
+  |> option_from_result
+}
+
+fn block_uses_service(block: Block, service: model.Service) -> Bool {
+  case block.input_module, service.out_type {
+    Some(module), Some(out_type) ->
+      module == "gen/out/" <> service.module
+      || module == service.module
+      || module == "service/" <> service.module
+      || Some(module) == out_type.module
+    Some(module), None ->
+      module == "gen/out/" <> service.module
+      || module == service.module
+      || module == "service/" <> service.module
+    _, _ -> False
+  }
+}
+
+fn block_matches_service_out(block: Block, service: model.Service) -> Bool {
+  case block.input, block.input_module, service.out_type {
+    Some(input), Some(module), Some(out_type) ->
+      case module == "gen/out/" <> service.module {
+        True -> input == "Out" || input == out_type.name
+        False ->
+          case
+            module == service.module || module == "service/" <> service.module
+          {
+            True -> input == "Out" || input == out_type.name
+            False ->
+              module == option.unwrap(out_type.module, "")
+              && input == out_type.name
+          }
+      }
+    _, _, _ -> False
+  }
+}
+
 fn shell_from_units(units: List(Unit), package_name: String) -> Shell {
   case list.find(units, fn(unit) { unit.path == "shell" }) {
-    Error(_) -> Shell(
-      lang: "ja",
-      title: package_name,
-      background: "#FAF7F0",
-      background_image: "none",
-      text: "#3D2419",
-      accent: "#A93632",
-      present: False,
-    )
+    Error(_) ->
+      Shell(
+        lang: "",
+        title: "",
+        background: "",
+        background_image: "",
+        text: "",
+        accent: "",
+        present: False,
+        missing: [],
+      )
     Ok(unit) -> {
       let module = g.in_order(unit.module)
       let theme = public_named_constant(module, "theme")
+      let lang = constant_string(module, "lang")
+      let title = constant_string(module, "title")
+      let background = theme_string(theme, "background")
+      let background_image = theme_string(theme, "background_image")
+      let text = theme_string(theme, "text")
+      let accent = theme_string(theme, "accent")
+      let missing_theme = case theme {
+        None -> ["theme"]
+        Some(_) ->
+          list.flatten([
+            missing_label("theme.background", background),
+            missing_label("theme.background_image", background_image),
+            missing_label("theme.text", text),
+            missing_label("theme.accent", accent),
+          ])
+      }
       Shell(
-        lang: constant_string(module, "lang", "ja"),
-        title: constant_string(module, "title", package_name),
-        background: theme_string(theme, "background", "#FAF7F0"),
-        background_image: theme_string(theme, "background_image", "none"),
-        text: theme_string(theme, "text", "#3D2419"),
-        accent: theme_string(theme, "accent", "#A93632"),
+        lang: option.unwrap(lang, "ja"),
+        title: option.unwrap(title, package_name),
+        background: option.unwrap(background, "#FAF7F0"),
+        background_image: option.unwrap(background_image, "none"),
+        text: option.unwrap(text, "#3D2419"),
+        accent: option.unwrap(accent, "#A93632"),
         present: True,
+        missing: list.flatten([
+          missing_label("lang", lang),
+          missing_label("title", title),
+          missing_theme,
+        ]),
       )
     }
   }
 }
 
-fn constant_string(module: glance.Module, name: String, fallback: String) -> String {
+fn constant_string(module: glance.Module, name: String) -> Option(String) {
   public_named_constant(module, name)
   |> option.then(fn(constant) { g.string_value(constant.value) })
-  |> option.unwrap(fallback)
 }
 
 fn theme_string(
   theme: Option(glance.Constant),
   label: String,
-  fallback: String,
-) -> String {
+) -> Option(String) {
   theme
   |> option.then(fn(constant) { g.labelled(constant.value, label) })
   |> option.then(g.string_value)
-  |> option.unwrap(fallback)
+}
+
+fn missing_label(name: String, value: Option(a)) -> List(String) {
+  case value {
+    None -> [name]
+    Some(_) -> []
+  }
 }
 
 fn shell_notes(front: Front) -> List(stop.Note) {
-  case front.warn_missing_shell, front.shell.present {
-    False, _ -> []
-    True, True -> []
-    _, False -> [stop.Note(
-      class: stop.Warning,
-      text: front.face <> "/src/shell.gleam: 無いので既定値を使う",
-    )]
+  case front.shell.present {
+    True ->
+      list.map(front.shell.missing, fn(name) {
+        stop.Note(
+          class: stop.Missing,
+          text: front.face <> "/src/shell.gleam: " <> name <> " が無い",
+        )
+      })
+    False -> [
+      stop.Note(class: stop.Missing, text: front.face <> "/src/shell.gleam: 無い"),
+    ]
   }
 }
 
@@ -291,6 +503,7 @@ fn parse_layout(face: String, unit: Unit) -> Result(Layout, Error) {
     sp: frame_field(value, "sp", "sp", unit.path),
     pc: frame_field(value, "pc", "pc", unit.path),
     tablet: frame_field(value, "tablet", "tablet", unit.path),
+    reads: service_list_field(value, "reads"),
     nested: has_nested_constructor(value, "Layout"),
   ))
 }
@@ -311,6 +524,7 @@ fn parse_page(unit: Unit) -> Result(Page, Nil) {
             sp: frame_field(constant.value, "sp", "sp", unit.path),
             pc: frame_field(constant.value, "pc", "pc", unit.path),
             tablet: frame_field(constant.value, "tablet", "tablet", unit.path),
+            reads: service_list_field(constant.value, "reads"),
           ))
         _, _ -> Error(Nil)
       }
@@ -339,7 +553,11 @@ fn parse_block(unit: Unit) -> Result(Block, Nil) {
 fn parse_component(unit: Unit) -> Result(Component, Nil) {
   let module = g.in_order(unit.module)
   let name = last_segment(unit.path) |> naming.pascal
-  let calls = service_list(module, "calls")
+  let calls =
+    list.append(
+      call_target_list(module, "calls"),
+      option_to_list(call_target_constant(module, "target")),
+    )
   let reloads = reload_list(module, "reloads")
   let view = public_function(module, "view")
   Ok(
@@ -425,6 +643,15 @@ fn parse_frame(expression: glance.Expression, media: String) -> Option(Frame) {
         placements: g.labelled(expression, "placements")
           |> option.then(parse_placements)
           |> option.unwrap([]),
+        cols: g.labelled(expression, "cols")
+          |> option.then(parse_tracks)
+          |> option.unwrap([]),
+        rows: g.labelled(expression, "rows")
+          |> option.then(parse_tracks)
+          |> option.unwrap([]),
+        template: g.labelled(expression, "template")
+          |> option.then(parse_template)
+          |> option.unwrap([]),
       ))
     _ -> None
   }
@@ -447,6 +674,8 @@ fn parse_area(expression: glance.Expression) -> Option(Area) {
       Some(Area(
         name: string_label(expression, "name") |> option.unwrap(""),
         flow: constructor_label(expression, "flow") |> option.unwrap(""),
+        grid_tracks: g.labelled(expression, "flow")
+          |> option.then(parse_grid_tracks),
         pin: constructor_label(expression, "pin") |> option.unwrap(""),
         style: style_names(expression),
       ))
@@ -475,6 +704,9 @@ fn parse_placement(expression: glance.Expression) -> Option(Placement) {
       Some(Fixed(
         area: string_label(expression, "area") |> option.unwrap(""),
         block: labelled_constructor(expression, "block") |> option.unwrap(""),
+        cell: g.labelled(expression, "cell")
+          |> option.then(parse_cell)
+          |> option.unwrap(Flow),
       ))
     Some("Widget") ->
       Some(Widget(
@@ -493,6 +725,154 @@ fn parse_placement_result(
   case parse_placement(expression) {
     Some(placement) -> Ok(placement)
     None -> Error(Nil)
+  }
+}
+
+fn parse_tracks(expression: glance.Expression) -> Option(List(Track)) {
+  case expression {
+    glance.List(elements: elements, ..) ->
+      list.try_map(elements, parse_track) |> option_from_result
+    _ -> None
+  }
+}
+
+fn parse_track(expression: glance.Expression) -> Result(Track, Nil) {
+  case g.ctor_name(expression) {
+    Some("Fr") ->
+      case g.args(expression) {
+        [value] -> parse_int(value) |> option.map(Fr) |> option.to_result(Nil)
+        _ -> Error(Nil)
+      }
+    Some("Rem") -> parse_float_arg(expression) |> result.map(Rem)
+    Some("Px") -> parse_float_arg(expression) |> result.map(Px)
+    Some("Minmax") ->
+      case g.labelled(expression, "min"), g.labelled(expression, "max") {
+        Some(min), Some(max) ->
+          case parse_track_size(min), parse_track_size(max) {
+            Ok(min), Ok(max) -> Ok(Minmax(min: min, max: max))
+            _, _ -> Error(Nil)
+          }
+        _, _ -> Error(Nil)
+      }
+    _ -> Error(Nil)
+  }
+}
+
+fn parse_track_size(expression: glance.Expression) -> Result(TrackSize, Nil) {
+  case g.ctor_name(expression) {
+    Some("FrSize") ->
+      case g.args(expression) {
+        [value] ->
+          parse_int(value) |> option.map(FrSize) |> option.to_result(Nil)
+        _ -> Error(Nil)
+      }
+    Some("RemSize") -> parse_float_arg(expression) |> result.map(RemSize)
+    Some("PxSize") -> parse_float_arg(expression) |> result.map(PxSize)
+    _ -> Error(Nil)
+  }
+}
+
+fn parse_float_arg(expression: glance.Expression) -> Result(Float, Nil) {
+  case g.args(expression) {
+    [glance.Float(value:, ..)] -> float.parse(value)
+    [glance.Int(value:, ..)] -> float.parse(value <> ".0")
+    _ -> Error(Nil)
+  }
+}
+
+fn parse_template(expression: glance.Expression) -> Option(List(List(String))) {
+  case expression {
+    glance.List(elements: rows, ..) ->
+      rows
+      |> list.try_map(fn(row) {
+        case row {
+          glance.List(elements: names, ..) ->
+            names
+            |> list.try_map(fn(name) {
+              g.string_value(name) |> option.to_result(Nil)
+            })
+          _ -> Error(Nil)
+        }
+      })
+      |> option_from_result
+    _ -> None
+  }
+}
+
+fn parse_grid_tracks(expression: glance.Expression) -> Option(GridTracks) {
+  case g.ctor_name(expression) {
+    Some("GridTracks") ->
+      case g.labelled(expression, "cols"), g.labelled(expression, "gap") {
+        Some(cols), Some(gap) ->
+          case parse_tracks(cols), parse_length(gap) {
+            Some(cols), Some(gap) -> Some(GridTracks(cols: cols, gap: gap))
+            _, _ -> None
+          }
+        _, _ -> None
+      }
+    _ -> None
+  }
+}
+
+fn parse_length(expression: glance.Expression) -> Option(Length) {
+  case g.ctor_name(expression) {
+    Some("Rem") ->
+      parse_float_arg(expression) |> option_from_result |> option.map(RemLength)
+    Some("Px") ->
+      parse_float_arg(expression) |> option_from_result |> option.map(PxLength)
+    _ -> None
+  }
+}
+
+fn parse_cell(expression: glance.Expression) -> Option(Cell) {
+  case g.ctor_name(expression) {
+    Some("Flow") -> Some(Flow)
+    Some("Span") ->
+      case g.labelled(expression, "cols"), g.labelled(expression, "rows") {
+        Some(cols), Some(rows) ->
+          case parse_int(cols), parse_int(rows) {
+            Some(cols), Some(rows) -> Some(Span(cols: cols, rows: rows))
+            _, _ -> None
+          }
+        _, _ -> None
+      }
+    Some("At") ->
+      case
+        g.labelled(expression, "col"),
+        g.labelled(expression, "row"),
+        g.labelled(expression, "span")
+      {
+        Some(col), Some(row), Some(span) ->
+          case parse_int(col), parse_int(row), parse_cell_span(span) {
+            Some(col), Some(row), Some(span) ->
+              Some(At(col: col, row: row, span: span))
+            _, _, _ -> None
+          }
+        _, _, _ -> None
+      }
+    _ -> None
+  }
+}
+
+fn parse_cell_span(expression: glance.Expression) -> Option(CellSpan) {
+  case g.ctor_name(expression) {
+    Some("CellSpan") ->
+      case g.labelled(expression, "cols"), g.labelled(expression, "rows") {
+        Some(cols), Some(rows) ->
+          case parse_int(cols), parse_int(rows) {
+            Some(cols), Some(rows) -> Some(CellSpan(cols: cols, rows: rows))
+            _, _ -> None
+          }
+        _, _ -> None
+      }
+    _ -> None
+  }
+}
+
+fn parse_int(expression: glance.Expression) -> Option(Int) {
+  case g.int_value(expression) {
+    Some(value) -> int.parse(value) |> option_from_result
+    None -> None
   }
 }
 
@@ -566,19 +946,23 @@ fn service_references(
   pages: List(Page),
   components: List(Component),
 ) -> List(String) {
-  let from_layout = placement_services(layout_frames(layout))
+  let from_layout =
+    list.append(layout.reads, placement_services(layout_frames(layout)))
   let from_pages =
     pages
     |> list.flat_map(fn(page) {
-      list.append(
+      list.flatten([
         option_to_list(page.of),
+        page.reads,
         placement_services(page_frames(page)),
-      )
+      ])
     })
   let from_components =
     list.flat_map(components, fn(component) {
       list.append(
-        component.calls,
+        list.filter_map(component.calls, fn(target) {
+          call_service(target) |> option.to_result(Nil)
+        }),
         list.map(component.reloads, fn(reload) { reload.1 }),
       )
     })
@@ -941,20 +1325,74 @@ fn expected_constructor(
   }
 }
 
-fn service_list(module: glance.Module, name: String) -> List(String) {
+fn service_list_field(
+  expression: glance.Expression,
+  label: String,
+) -> List(String) {
+  g.labelled(expression, label)
+  |> option.then(fn(value) {
+    case value {
+      glance.List(elements: elements, ..) ->
+        Some(
+          list.filter_map(elements, fn(item) {
+            service_target(item) |> option.to_result(Nil)
+          }),
+        )
+      _ -> None
+    }
+  })
+  |> option.unwrap([])
+}
+
+fn call_target_list(module: glance.Module, name: String) -> List(CallTarget) {
   case public_named_constant(module, name) {
     Some(constant) ->
       case constant.value {
         glance.List(elements: elements, ..) ->
           list.filter_map(elements, fn(expression) {
-            case g.ctor_name(expression) {
-              Some(variant) -> Ok(variant)
-              None -> Error(Nil)
-            }
+            target_of(expression) |> option.to_result(Nil)
           })
         _ -> []
       }
     None -> []
+  }
+}
+
+fn call_target_constant(
+  module: glance.Module,
+  name: String,
+) -> Option(CallTarget) {
+  public_named_constant(module, name)
+  |> option.then(fn(constant) { target_of(constant.value) })
+}
+
+fn target_of(expression: glance.Expression) -> Option(CallTarget) {
+  case g.ctor_name(expression) {
+    Some("Of") ->
+      case g.args(expression) {
+        [service] -> g.ctor_name(service) |> option.map(ServiceCall)
+        _ -> None
+      }
+    Some("Entry") ->
+      case g.args(expression) {
+        [attached] -> g.ctor_name(attached) |> option.map(AttachedCall)
+        _ -> None
+      }
+    _ -> service_target(expression) |> option.map(ServiceCall)
+  }
+}
+
+fn service_target(expression: glance.Expression) -> Option(String) {
+  case g.ctor_module(expression), g.ctor_name(expression) {
+    Some(_), Some(variant) -> Some(variant)
+    _, _ -> None
+  }
+}
+
+fn call_service(target: CallTarget) -> Option(String) {
+  case target {
+    ServiceCall(service) -> Some(service)
+    AttachedCall(_) -> None
   }
 }
 

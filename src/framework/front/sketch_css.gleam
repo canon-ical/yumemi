@@ -1,7 +1,9 @@
 import framework/front/css
+import framework/front/track
 import gleam/float
 import gleam/int
 import gleam/list
+import gleam/string
 import sketch/css as sketch_css
 import sketch/css/length
 import sketch/css/media
@@ -64,6 +66,15 @@ fn flow_style(flow: css.Flow) -> List(sketch_css.Style) {
       sketch_css.display("grid"),
       sketch_css.grid_template_columns(
         "repeat(" <> int.to_string(cols) <> ", minmax(0, 1fr))",
+      ),
+      sketch_css.gap(to_length(gap)),
+    ]
+    css.GridTracks(cols:, gap:) -> [
+      sketch_css.display("grid"),
+      sketch_css.grid_template_columns(
+        cols
+        |> list.map(track.to_css)
+        |> string.join(" "),
       ),
       sketch_css.gap(to_length(gap)),
     ]

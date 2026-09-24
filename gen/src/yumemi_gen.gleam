@@ -12,6 +12,7 @@ import argv
 import gleam/int
 import gleam/io
 import gleam/list
+import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
 import simplifile
@@ -24,12 +25,16 @@ import yumemi_gen/emit/query
 import yumemi_gen/emit/reads
 import yumemi_gen/emit/root
 import yumemi_gen/emit/sql
+import yumemi_gen/emit/static as static_emit
 import yumemi_gen/emit/types
 import yumemi_gen/emit/verb
 import yumemi_gen/face
+import yumemi_gen/model
+import yumemi_gen/naming
 import yumemi_gen/reader
 import yumemi_gen/reader/front
 import yumemi_gen/source
+import yumemi_gen/static_source
 import yumemi_gen/stop.{type Note, Note}
 
 pub fn main() {
@@ -69,6 +74,9 @@ fn bundle_front(
   faces: List(String),
 ) -> List(String)
 
+@external(javascript, "./yumemi_gen_ffi.mjs", "format_gleam")
+fn format_gleam(out_dir: String, files: List(String)) -> String
+
 /// 生成束と、止まる理由。理由が1つでもあれば呼び手は非 0 で終わる。
 pub fn generate(
   app_dir: String,
@@ -85,10 +93,15 @@ pub fn generate(
     }),
   )
   use app <- result.try(reader.read(units) |> result.map_error(read_note))
+  let app = model.App(..app, attached: attached_routes(app_dir))
   use discovered <- result.try(
     face.discover(app_dir, units)
     |> result.map_error(source_note),
   )
+  use static_sources <- result.try(static_sources_for_faces(
+    app_dir,
+    discovered.packages,
+  ))
   use front_models <- result.try(
     list.try_map(discovered.packages, fn(package) {
       front.read_with_package(
@@ -114,6 +127,8 @@ pub fn generate(
         )
       }),
     )
+  let front_notes =
+    list.append(front_notes, front_emit.decoder_notes(app, units))
   let notes =
     list.append(
       front_notes,
@@ -164,7 +179,14 @@ pub fn generate(
       entry_output.files,
       list.flat_map(front_models, fn(item) {
         let #(package, model) = item
-        front_emit.emit(app, units, package, model, hashes)
+        let static_files = case static_sources {
+          Some(sources) -> static_emit.emit(package.name, sources)
+          None -> []
+        }
+        list.append(
+          front_emit.emit(app, units, package, model, hashes),
+          static_files,
+        )
       }),
       reads.emit(app, hashes),
       sql.emit(app, hashes),
@@ -176,6 +198,60 @@ pub fn generate(
     ]),
     notes,
   ))
+}
+
+fn attached_routes(app_dir: String) -> List(model.AttachedRoute) {
+  case simplifile.read(app_dir <> "/api/src/gen/http_runtime.mjs") {
+    Ok(source_text) -> attached_routes_from_source(source_text)
+    Error(_) ->
+      case simplifile.read(app_dir <> "/src/gen/http_runtime.mjs") {
+        Ok(source_text) -> attached_routes_from_source(source_text)
+        Error(_) -> []
+      }
+  }
+}
+
+fn attached_routes_from_source(
+  source_text: String,
+) -> List(model.AttachedRoute) {
+  case string.split(source_text, "const attached=[") {
+    [_, rest, ..] ->
+      case string.split(rest, "];") {
+        [table, ..] ->
+          table
+          |> string.split("}")
+          |> list.filter_map(parse_attached_route)
+        [] -> []
+      }
+    _ -> []
+  }
+}
+
+fn parse_attached_route(row: String) -> Result(model.AttachedRoute, Nil) {
+  case
+    single_quoted_field(row, "name"),
+    single_quoted_field(row, "method"),
+    single_quoted_field(row, "path")
+  {
+    Some(name), Some(method), Some(path) ->
+      Ok(model.AttachedRoute(
+        name: naming.pascal(name),
+        method: method,
+        path: path,
+      ))
+    _, _, _ -> Error(Nil)
+  }
+}
+
+fn single_quoted_field(row: String, label: String) -> Option(String) {
+  case string.split(row, label <> ":'") {
+    [_, rest, ..] ->
+      case string.split(rest, "'") {
+        [value, ..] -> Some(value)
+        [] -> None
+      }
+    _ -> None
+  }
 }
 
 fn read_note(error: reader.Error) -> Note {
@@ -208,6 +284,19 @@ fn source_note(error: source.Error) -> Note {
   }
 }
 
+fn static_sources_for_faces(
+  app_dir: String,
+  packages: List(face.Package),
+) -> Result(Option(static_source.Sources), Note) {
+  case packages {
+    [] -> Ok(None)
+    _ ->
+      static_source.load(app_dir)
+      |> result.map(Some)
+      |> result.map_error(static_source.note)
+  }
+}
+
 fn front_note(error: front.Error) -> Note {
   case error {
     front.Unsupported(where: where, detail: detail) ->
@@ -230,6 +319,22 @@ fn run(app_dir: String, out_dir: String) -> Result(#(Int, List(Note)), Note) {
     })
     |> result.map_error(io_note),
   )
+  let gleam_files =
+    files
+    |> list.filter_map(fn(file) {
+      case string.ends_with(file.path, ".gleam") {
+        True -> Ok(file.path)
+        False -> Error(Nil)
+      }
+    })
+  use _ <- result.try(case format_gleam(out_dir, gleam_files) {
+    "" -> Ok(Nil)
+    detail ->
+      Error(Note(
+        class: stop.NotImplemented,
+        text: "gleam format に失敗した: " <> detail,
+      ))
+  })
   let faces =
     files
     |> list.filter_map(fn(file) {
@@ -239,32 +344,31 @@ fn run(app_dir: String, out_dir: String) -> Result(#(Int, List(Note)), Note) {
       }
     })
     |> list.unique
-  let bundle_warnings = bundle_front(out_dir, app_dir, faces)
-  use _ <- result.try(
-    write_bundle_warnings(out_dir, bundle_warnings)
-    |> result.map_error(io_note),
-  )
-  Ok(#(list.length(files), notes))
+  let bundle_errors = bundle_front(out_dir, app_dir, faces)
+  let all_notes = list.append(notes, bundle_notes(bundle_errors))
+  use _ <- result.try(case bundle_errors {
+    [] -> Ok(Nil)
+    _ ->
+      simplifile.write(
+        out_dir <> "/_diagnostics.txt",
+        stop.report(all_notes)
+          <> "\n停止コード: "
+          <> int.to_string(stop.worst(all_notes))
+          <> "\n",
+      )
+      |> result.map_error(io_note)
+  })
+  Ok(#(list.length(files), all_notes))
+}
+
+pub fn bundle_notes(errors: List(String)) -> List(Note) {
+  list.map(errors, fn(error) { Note(class: stop.NotImplemented, text: error) })
 }
 
 fn first_segment(path: String) -> Result(String, Nil) {
   case string.split(path, "/") {
     [first, ..] -> Ok(first)
     [] -> Error(Nil)
-  }
-}
-
-fn write_bundle_warnings(
-  out_dir: String,
-  warnings: List(String),
-) -> Result(Nil, simplifile.FileError) {
-  case warnings {
-    [] -> Ok(Nil)
-    _ ->
-      simplifile.write(
-        out_dir <> "/_diagnostics.txt",
-        string.join(warnings, "\n") <> "\n",
-      )
   }
 }
 

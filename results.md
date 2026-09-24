@@ -1,3 +1,156 @@
+# gen-7 柏木ゲート 2 P0 直し (巡 9)
+
+## 状態
+
+- bundle 用一時 package に生成された面を入力面の上から重ねる。esbuild の `import-is-undefined` を error にした。
+- bundle 失敗は面ごとに `NotImplemented(1)` の Note として返し、`_diagnostics.txt` と stderr に各1行を残す。失敗面の素の `client.mjs` は削除する。
+- 存在する `shell.gleam` の `lang` / `title` / `theme` const と theme の各欄が欠けると `Missing(3)`。file 自体が無い場合は従来どおり1件の `Missing(3)`。
+- 診断の改行と一時パスを正規化して、同じ入力の `_diagnostics.txt` を byte 一致にした。Hex 依存の一時 package には入力面の `manifest.toml` を写し、再走時の Hex API rate limit を回避した。path 依存の fixture は従来どおり manifest を作り直す。
+- fixture / snapshot の再走を完了し、`docs/reports/gen-7.md` の「3面とも本物の bundle」を撤回した。
+
+## DDL
+
+無し。migration / schema / database は変更していない。
+
+## 検証
+
+- `cd gen && gleam test`: **159 passed, no failures** (154 + 5)。`gen/build/gen7-g2-test-final.txt`。
+- 追加試験: `client_bundle_uses_generated_output_over_input_test`、`client_bundle_stops_on_undefined_import_test`、`client_bundle_failures_remain_per_face_notes_test`、`present_shell_missing_consts_are_exit_three_test`、`present_shell_missing_theme_field_is_exit_three_test`。
+- `gleam build` (root): exit 0、既存 warning 1 (`src/framework/secret.gleam:5`)。`build/gen7-g2-root-build.txt`。
+- fixture generator: 各 exit 0 / **88 file**、最終2回の `diff -rq` 空。tracked `public/src/gen` / `priv` と untracked `src/gen` / `db` も出力と一致。`gen/build/gen7-g2-fixture-c.txt`、`-d.txt`、`gen7-g2-fixture-final-diff.txt`。
+- fixture `public` の `gleam build`: exit 0 / warning 0。SSR、isolate、given は ALL PASS、Block preview は PASS (6 blocks)。`gen/build/gen7-g2-public-build.txt`、`gen/build/gen7-g2-verify-front-*.txt`、`gen/build/gen7-g2-build-blocks.txt`。
+- snapshot `9c2b0bd`: run_dir の `ms-9c2b0bd/api` を読み、run_dir 内 `out-gen7-g2-f` / `out-gen7-g2-g` に出力。両回とも generator exit 4、生成報告1181 file、client 3件削除後の実体1178 file、再走 `diff -rq` 空。exit 1 = 5 (metrics 2 + client: www 1 / muses 1 / console 1)、exit 2 = 0、exit 3 = 1 (www shell)、exit 4 = 20、warning 29。各面の失敗は生成物を使った runtime build で発生。`gen/build/gen7-g2-snapshot-f.txt`、`-g.txt`、`gen7-g2-snapshot-final-diff.txt`。
+- www の ★ component は5 fileで `view` 5本、`app` 0本。ただし snapshot は runtime build で先に止まったため、この入力で esbuild の未定義 import は未到達。合成 package の停止試験は通過。
+- `gleam format --check`: fixture 52 `.gleam` / snapshot 816 `.gleam` で exit 0。先頭 sha256 header 欠けは fixture 88 file と snapshot 実体1178 fileで各0 (`_diagnostics.txt` を除く)。
+
+## 確かめていないこと
+
+- snapshot の3面 client は runtime build が止まるため実行・表示は未確認。www の `app` 未 export は実ソースで確認したが、snapshot の esbuild 段でのエラーは未到達。
+
+# gen-7 束 E ── 動詞 → method 対応表
+
+## DDL
+
+無し。DDL / migration / schema は変更していない。
+
+## 状態
+
+- `entry.gleam` の route 対応を修正。add は key 型の引数があっても collection path にし、edit / remove は PUT / DELETE として動的 key path を使う。`root_for` は変更していない。
+- 同一 face 内で method と path 形が重なる route を Conflict(exit 4)にする。`{id}` と `{slug}` も同じ path 形として検査する。`route_methods` fixture で create/add、put/edit、delete/remove の3組を置いた。
+- front-scratch stub は未変更。Article fixture の route には add / edit / remove がなく、再生成した `public/src/gen/` は fresh output と diff 0。
+- 対応表(一般形):
+
+| 動詞 | 変更前 | 変更後 |
+|---|---|---|
+| create | POST `/<plural>` | POST `/<plural>` |
+| read | GET `/<plural>/:id` | GET `/<plural>/:id` |
+| list | GET `/<plural>` | GET `/<plural>` |
+| delete | DELETE `/<plural>/:id` | DELETE `/<plural>/:id` |
+| put | PUT `/<plural>/:id` | PUT `/<plural>/:id` |
+| add | POST `/<plural>/add` or `/<plural>/:id/add` when a key matches | POST `/<plural>` |
+| edit | POST `/<plural>/:id/edit` | PUT `/<plural>/:id` |
+| remove | POST `/<plural>/:id/remove` | DELETE `/<plural>/:id` |
+
+`add` の変更前は key 引数がある場合に `/:id` が入り、無ければ collection に `/add` が付いた。変更後は key 引数を path に載せない。edit は key 引数が無い `setting_edit` で `PUT /api/muse_settings` となった。
+
+## 検証
+
+- root `gleam build`: exit 0、warning 1件のみ (`src/framework/secret.gleam` の既存 unused private constructor)。`build/gen7-e-root-build-final.txt`
+- `cd gen && gleam test`: **149 passed, no failures** (基線146 + 3)。`gen/build/gen7-e-test-final.txt`
+- overlap CLI fixture: exit 4、3件の衝突を実測。`gen/build/gen7-e-route-overlap-cli.txt`
+- `gleam run -m yumemi_gen -- fixtures/article fixtures/article`: exit 0 / 88 files。client Out decoder 5 modules、runtime build、esbuild PASS。fresh output と tracked `public/src/gen/` の diff 0。`gen/build/gen7-e-fixture-final.txt`、`gen/build/gen7-e-fixture-public-final-diff.txt`
+- musearch 固定 snapshot `/home/yumemism/.codex-agents/runs/niekawa-20260924-044509-82060-7565/ms-9c2b0bd/api` を読み取り、生成先は同じ run 外の `out-ms-e-before/` と `out-ms-e/`。`musearch` には書いていない。
+- snapshot の route は 390件→390件。add / edit / remove の変更は service URL 単位で **9 / 7 / 6**、face 展開後で **36 / 28 / 25**。`schedule_add` は前後とも既存の target ambiguity で route が無い。`roster_remove` は `/api/v1/store/...` の別 prefix を持つため unique method/path template は remove が7件。比較表: `gen/build/gen7-e-route-comparison.txt`。
+- snapshot の既存 diagnostics は exit 4 が20件、warning が29件で前後同じ。新しい route overlap diagnostics は0件。各生成ログ: `gen/build/gen7-e-snapshot-before.log`、`gen/build/gen7-e-snapshot-after-final.log`。
+- historical 「採用済み一致」290 は BRIEF の `c99c107` snapshot の数。今回の `ms-9c2b0bd` は別入力で、route registry checker も非system service数を87固定、今回の入力は103のためそのまま再計測できない。今回の registry method/path を直接突合すると **47→53**、生成 route row は390で不変。checker の固定数診断: `gen/build/gen7-e-route-audit-guard.txt`。
+
+---
+
+# gen-7 ── A 差し戻し r2 (P0 decoder compile)
+
+## DDL
+
+無し。migration / schema / database / src/framework/ / root gleam.toml は変更していない。
+
+## 状態
+
+- P0-1: custom type と opaque framework type の decoder を型に合わせ、fixture article_create.Out に別 module の enum field を追加した。
+- P0-2: 完了。gen/fixtures/article 自身へ2回生成し、2回目の後で generated file manifest の SHA-256 差分が空。
+- gen/src/yumemi_gen/emit/front.gleam の変更関数: decoder_for_type / named_decoder / model_ref_decoder / custom_or_alias_decoder / custom_decoder / relation_decoder / relation_property_decoder / opaque_model_decoder / collect_named / collect_model_named / relation_type / out_file。untagged custom union の decode.one_of と Nil / Key / PartyId の decoder を追加した。
+- enum は enum_decoder の文字列値から variant への分岐、record は variant_decoder → field_decoder_chain、別 module の型は model_ref_decoder から module path を辿って同じ enum / record decoder を使う。AliasRedirect / ValueAlias は元宣言と backing type を辿る。
+- fixture input は gen/fixtures/article/src/service/article_create.gleam を変更し、Out(slug: Slug, phase: article.Phase) を追加。logic も Out を返す。Page/Block の手書き file は変更していない。
+- gen/src/yumemi_gen_ffi.mjs は client bundle 検証を分けた。現行生成 out/*.gleam 全件の decoder() を temporary Gleam package から import して型検査し、続いて input face の client module 群と現行生成 client.mjs で runtime build / esbuild を行う。snapshot にある未移行の SSR gen/load / API table / live module は client bundle の dependency ではないので runtime 側は input face のものを使う。
+
+## 検証
+
+- cd gen && gleam test: 138 passed, no failures。既存132 + 追加6。gen/build/gen7-r2-test-nil-typed.txt。
+- 指定 snapshot に対する gleam run -m yumemi_gen -- <snapshot>/api <scratch>: 1175 files。client Out decoder build は console 17 modules PASS / muses 43 modules PASS / www 14 modules PASS。3面の runtime build と esbuild も PASS、生成 client.mjs は www 142863 bytes / muses 330453 bytes / console 279200 bytes。gen/build/gen7-r2-snapshot-probe10.log。
+- snapshot 生成器全体は exit 4。基線の declaration diagnostics を返した。client Out decoder build / runtime build / esbuild の exit 1 は無し。snapshot の api/ は読み取りのみ。
+- snapshot current output www/muses/console/src/gen/out/**/*.gleam の decode.dynamic は 0件。Nil は decode.new_primitive_decoder + dynamic.classify, Key は key(raw), PartyId は party.parse。Blob / framework time の placeholder parser は従来どおり。
+- fixture scratch generation: 86 files、client Out decoder 5 modules PASS、runtime build / esbuild PASS。public/src/gen/out/article_create.gleam は phase: Phase と "Draft" -> decode.success(Draft) を含む。client client.mjs は 187578 bytes。gen/build/gen7-r2-fixture-probe3.log。
+- fixture 自身への生成を同じ条件で2回実行。両方 86 files / Out decoder 5 modules PASS / runtime build / esbuild PASS。証拠: gen/build/gen7-r2-fixture-first.log、gen/build/gen7-r2-fixture-second.log。
+- fixture generated output は public/src/gen 24 files、src/gen 28 files、db/queries 32 files、public/priv/static 2 files。既存 tracked output は22 file更新、新規 generator output は60 file。before/after SHA-256 manifest が一致: gen/build/gen7-r2-fixture-generated-before.sha256 / gen/build/gen7-r2-fixture-generated-after.sha256。
+- public/src の差分は public/src/gen/ 内だけ。src/ の入力差分は P0-1 で追加した article_create.gleam だけで、widget_list.gleam / entry.gleam / types.gleam / widget*.gleam / service/ / entity/ / trailing_spread.gleam は未変更。
+- cd gen && gleam test を fixture 再生成後にも実行し 138 passed, no failures。gen/build/gen7-r2-test-p0-2-final.txt。
+- gleam format は変更した Gleam source / test に実行済み。
+- full face package を現行 generated SSR/live files まで含めた試行では、P0 decoder 以外の snapshot migration 差分が残った。例: console/src/gen/load/switch/page.gleam が session_switch.view(Nil) を生成、muses の blocks_preview.gleam も widget_list.view(Nil)、www の既存 browser_adult / component は旧 gen/api / gen/live contract を参照する。この full face package build は PASS と確認していない。client bundle 検証はそれらを含めず、現行 Out decoder と client runtime の範囲を検査した。
+
+### 追加した試験 (6)
+
+- front_emit_decodes_custom_record_with_cross_module_enum_test
+- front_emit_decodes_er_key_from_string_test
+- front_emit_decodes_nil_out_with_typed_result_test
+- front_emit_decodes_party_id_with_parser_test
+- front_emit_decodes_untagged_custom_union_test
+- front_emit_aliases_local_service_return_as_out_test
+
+---
+
+# gen-7 ── A1 生成器の口: 複数 variant decoder
+
+## 状態
+
+- `custom_decoder` が複数 variant の fields 型を共通の string-like 判別欄で分岐し、全 constructor と欄を保持する decoder を出す。`kind` を優先し、無い場合は唯一の共通候補欄を使う。未知 tag は decode failure にし、判別欄が曖昧なら `NotImplemented` で停止する。
+- A1 の追加試験は4本: `front_emit_decodes_both_fixture_row_variants_test`、`front_emit_decodes_six_snapshot_style_row_variants_test`、`front_emit_decodes_non_row_custom_union_test`、`front_emit_undiscriminable_union_has_stop_diagnostic_test`。
+
+## DDL
+
+無し。
+
+## 検証
+
+- `cd gen && gleam test`: **132 passed, no failures**。`gen/build/gen7-a-test-a1.txt`。
+- 指定 musearch snapshot 生成: parse を通過し、client build の型エラー3件で **exit 1**。診断 `[exit 2 ...]` は **0件**。`gen/build/gen7-a-snapshot-a1d.log`。
+- snapshot `www/src/gen/out/widget_list.gleam`: tag 分岐 **6/6**。`Articles.articles`、`Links.links`、`HeavenDiary.heaven_public`、`HeavenReview.heaven_public` を constructor に保持。`gen/build/gen7-a-snapshot-a1d/www/src/gen/out/widget_list.gleam`。
+
+## A2 — spread の後の末尾カンマ
+
+- glance の `7.0.0` は維持。glexer token 列と bracket nesting から `[... ..rest,]` のカンマ位置を識別し、同じ位置を空白にしてから glance へ渡す。入力全体への正規表現置換はしていない。
+- `gen/fixtures/article/src/trailing_spread.gleam` を1本追加。`source.load(fixture)` がその Unit を含めて parse する試験にし、Gleam formatter への `--stdin` 入力も exit 0 で受理された。formatter が fixture ファイル自身を正規化してカンマを消すため、入力 fixture は formatter に書き戻していない。
+- `cd gen && gleam test`: **132 passed, no failures**。`gen/build/gen7-a2-test.txt`。
+- `gleam run -m yumemi_gen -- fixtures/article build/gen7-a2-fixture`: **exit 0 / 86 files**。`gen/build/gen7-a2-fixture.log`。
+- fixture と指定 snapshot の `.gleam` を同型 spread-comma で検索し、発見は追加 fixture 1箇所だけ。`fixtures/article/src/trailing_spread.gleam:4`。
+
+## A3 — 生成 `.gleam` の format
+
+- 出力を書いた後、生成一覧中の全 `.gleam` に `gleam format` を実行する。formatter の失敗は `NotImplemented` (exit 1) にする。
+- fixture generation 2回: **各 exit 0 / 86 files**、`diff -qr` は空。`gleam format --check build/gen7-a-fixture-final1`: **exit 0**。50個の `.gleam` 全てに sha256 header あり。証拠: `gen/build/gen7-a-fixture-final1.log`、`gen/build/gen7-a-fixture-final2.log`。
+- formatter 失敗注入: **exit 1**, `[exit 1 生成器の不足] gleam format に失敗した: status=73`。`gen/build/gen7-a-format-fail.log`。
+
+## A4 — client bundle の失敗を停止にする
+
+- client bundle 用 Gleam build / esbuild の失敗時は fallback entry を書かず、出力の `client.mjs` を除去して `NotImplemented` (exit 1) で停止する。
+- build 失敗注入: **exit 1 / status 74**。esbuild 失敗注入: **exit 1 / status 81**。両方とも診断は `[exit 1 生成器の不足]`、出力 client file は存在しない。証拠: `gen/build/gen7-a4-build-fail.log`、`gen/build/gen7-a4-esbuild-fail.log`。
+- repository root は面の `gleam.toml` にある `yumemi.path` を面ディレクトリから解決する。generator を cwd `gen/build`、out dir を別 scratch で起動し、**exit 0 / 86 files / bundle 成功**。証拠: `gen/build/gen7-a4-cwdroot.log`。
+- 指定 snapshot は **1172 files** を生成して client bundle build の型エラー3件で exit 1。診断 **exit 2 は0件**、snapshot `widget_list` decoder は **6/6 variant** と `articles` / `links` / 2つの `heaven_public` を保持、出力 formatter check は exit 0。失敗した www client file は残っていない。証拠: `gen/build/gen7-a-snapshot-final.log`、`gen/build/gen7-a-snapshot-final/www/src/gen/out/widget_list.gleam`。
+
+## 共通
+
+- root `gleam build`: **exit 0**。既存 `src/framework/secret.gleam` の unused private constructor warning が1件。`gen/build/gen7-a-root-build.txt`。
+- `cd gen && gleam test`: **132 passed, no failures** (既存128 + A1で追加4)。`gen/build/gen7-a-final-test.txt`。
+
+---
+
 # 指示 段B 差し戻し ── 写し `out/<service>.gleam` の import を正す
 
 ## 状態
@@ -796,3 +949,196 @@ P1、back 側、musearch、DDL、Hex publish、push、main、push は触って�
 - 直し:`let searchFrom = 0;` を `for (const given of givens) {` の**中**へ移す(`emit/front.gleam:3449`、1 行)。同 tag 2 本は既存 `data-yumemi-given` を飛ばす分岐が拾うので壊れない
 - 検査:`gen/scripts/verify-front-given.mjs` に **`GIVEN CROSS TAG ORDER`** を足した。修正前の生成物で **FAIL**、修正後で **PASS**(4 本とも PASS)
 
+# 束 B ── framework の reads・Target・grid API (2026-09-24)
+
+## 状態
+
+- branch `impl/gen-7-fw`、開始点 `0c59f35`。Page / Layout に `reads: List(service)` を追加し、`reads` は Page / Layout ごとに型付けされた Service の列として保持する。
+- `framework/front.Target(service, attached)` と `Of` / `Entry` を追加。fixture の島 `calls` を `List(front.Target(service.Service, Nil))` へ揃えた。
+- Frame に `cols` / `rows` / `template` を追加。空欄は framework の `resolved_cols` / `resolved_template` が breakpoint 既定値へ解決する。Track、Fixed の Cell、`GridTracks` を追加し、既存 `Grid(Int, gap)` は維持した。
+- fixture の Page は `ArticleRead`、Layout は空の `reads`。Fixed は `cell: Flow`、Frame は `cols: []` / `rows: []` / `template: []` を明記した。
+- fixture の手書き file に `api.Entry(...)` は無かった。fixture 再生成と面 build は未実行(生成器側の束 B' の作業)。
+
+## DDL
+
+無し。
+
+## 検証
+
+- `gleam build`: exit 0、`Compiled in 0.03s`。既存 warning 1件(`src/framework/secret.gleam` の unused private constructor)。`build/bundle-b-gleam-build.txt`。
+- `gleam test`: exit 0、`Running yumemi_test.main`、**4 groups / 23 assertions passed**。同じ既存 warning 1件。`build/bundle-b-gleam-test.txt`。
+- `git diff --check`: 出力無し。Fixture の `src/gen/`、`gen/src/`、`docs/` に差分は無い。
+- 生成器側の Service.Out と Block.In の不一致検査(exit 4)はこの木の範囲外で、未実行。
+
+## 変更した file
+
+- `src/framework/front.gleam`, `src/framework/front/css.gleam`, `src/framework/front/sketch_css.gleam`, `src/framework/front/track.gleam`
+- `gleam.toml`, `test/yumemi_test.gleam`
+- `gen/fixtures/article/public/src/layout.gleam`, `gen/fixtures/article/public/src/pages/article/arg_slug/page.gleam`, `gen/fixtures/article/public/src/components/pick_tag.gleam`, `gen/fixtures/article/public/src/components/like_button.gleam`
+- `results.md`
+
+# gen-7 B' ── 生成器を framework 0.8.0 へ追随 (2026-09-24)
+
+## 状態
+
+- branch `impl/gen-7`、開始 HEAD `45192ac`、squash 基点 `0c59f35`。
+- reader / emitter / loader を framework 0.8.0 の `Frame` / `Cell` / `GridTracks` / `reads` / `Target` に追随させた。`src/framework/` と root `gleam.toml` は変更していない。
+- `git diff HEAD -- src/framework/ gleam.toml gen/fixtures/article/public/src/{layout.gleam,pages,blocks,components}` は空。指定の squash 基点が HEAD より前のため、最終 1 commit の base diff にはすでに merge 済みの束 B も含まれる。
+- `Page.reads` の fixture 現物は依頼文の説明と異なり `[service.ArticleRead]`。`Page.of` も同じ Service で、生成 Data は `article_read.Out` 1 欄に束ねられる。★ のため入力は修正していない。
+
+## DDL
+
+無し。migration / schema / index は変更していない。
+
+## 実装
+
+- `reader/front.gleam`: `parse_layout` / `parse_page` が `reads` を field から読む。`parse_frame` が `cols` / `rows` / `template`、`parse_track` が `Fr` / `Rem` / `Px` / `Minmax`、`parse_placement` が `Fixed.cell` を保持する。`parse_grid_tracks` は `Area.flow` の `GridTracks` を保持し、`call_target_list` / `target_of` が `Of` と `Entry` を識別する。
+- `emit/front.gleam`: `static_grid_css` / `frame_columns_css` / `frame_template_css` が framework の `resolved_cols` / `resolved_template` を使い、Track を CSS 化する。Page の明示 grid は Page ごとの selector と wrapper を生成する。`fixed_placement_body` が `Span` / `At` を wrapper の `grid-column` / `grid-row` にする。`layout_sources` / `page_sources` が `reads` の Service.Out を Data に束ね、`unique_load_sources` が重複引数を除く。
+- `reader.gleam` / `model.gleam`: Service の `Out` 型参照を保持する。`reads_type_notes` が読み対象 Service.Out と、配置先 Block.In の不一致を stop code 4 で報告する。
+- `yumemi_gen.gleam` / `emit/front.gleam`: `api/src/gen/http_runtime.mjs` の付属入口表を読む。生成 `gen/api.gleam` は既存の `Method` / `Route` / `routes` 名を維持し、`Attached` / `AttachedRoute` / `attached` を出す。`Target` は `front.Target(service.Service, Attached)` の alias とし、`Of` / `Entry` の型所有を framework に揃えた。
+
+## 検証
+
+- 基準 `cd gen && gleam test`: **130 passed / 8 failures**。失敗は `calls` の `Of(service.X)` を `Of` という未知 Service として扱っていたため live files と service references が欠けていた。修正後は全 8 件が閉じた。
+- 最終 `cd gen && gleam test`: **142 passed / no failures**。追加した試験は `front_emit_grid_tracks_template_and_fixed_cells_test`、`front_emit_page_frame_grid_and_reads_test`、`front_reads_are_loaded_and_block_inputs_are_checked_test`、`front_calls_parse_framework_target_of_and_entry_test` の 4 本。`build/gen-7-final-test.txt`。
+- `gleam build` (root): exit 0、warning 1。既存の `src/framework/secret.gleam` unused private constructor。`build/gen-7-root-build.txt`。
+- `cd gen && gleam build`: exit 0、warning 0。`gen/build/gen-7-gen-build.txt`。
+- `cd gen/fixtures/article/public && gleam build`: exit 0、`Compiled in 0.04s`。`gen/fixtures/article/public/build/gen-7-fixture-build.txt`。
+- 出力不変条件: 作業前 `/tmp/gen7-before.xblKiC` と実装後 `/tmp/gen7-fixture-check.NI3GEK` の `style.css`、`load/layout.gleam`、`load/article/arg_slug/page.gleam` を `diff -u` し、**各 diff 0 行**。`Frame.cols/rows/template` の省略と `Fixed.cell: Flow` の現行出力を維持した。
+- Fixture 生成 1 回目 / 2 回目: どちらも exit 0、**86 files**。`gen/build/gen-7-fixture-output-final-1.sha256` と `gen/build/gen-7-fixture-output-final-2.sha256` の比較は **差分 0**。再生成ログは `gen/build/gen-7-fixture-generate-final-1.txt` / `gen/build/gen-7-fixture-generate-final-2.txt`。
+- fixture の `gleam.toml` は 0.7.0 の path lock を保持していた。`gleam build` 自体では lock が動かなかったため、`cd gen` と fixture face で `gleam update yumemi` を実行して 0.8.0 に選び直し、その後の各 build が exit 0。両 manifest は 0.8.0。
+- `node gen/scripts/verify-front-ssr.mjs`: **ALL PASS**。NO-JS / initial POST / island / selected POST / 同一 URL reload を確認。`gen/build/gen-7-front-ssr.txt`。
+- `node gen/scripts/verify-front-isolate.mjs`: **40 requests、ALL PASS**。各 response の style は length 2228 で安定。`gen/build/gen-7-front-isolate.txt`。stub の route I/O は維持されたため `worker-entry.mjs` は変更していない。
+- 指定 snapshot の read-only trial は `/home/yumemism/.codex-agents/runs/niekawa-20260924-044509-82060-7565/ms-9c2b0bd/api` から `/tmp/gen7-musearch-trial.n6nXW3` へ出力し、1175 files。生成 `www/src/gen/api.gleam` の付属入口表は 6 行。generator は既存 API service diagnostics 20 件で stop code 4、warning 30 件。入力 snapshot は変更していない。`gen/build/gen-7-snapshot-trial.txt`。
+- `Span` / `At` wrapper の Gleam 構文は `/tmp/gen7-grid-custom.xYBfhL` の複製 fixture で生成後に face build し、exit 0。複製の layout source、tracked fixture、snapshot は変更していない。generator log `gen/build/gen-7-grid-custom-generate.txt`。
+
+## 変更 file
+
+- `gen/src/yumemi_gen.gleam`, `gen/src/yumemi_gen/model.gleam`, `gen/src/yumemi_gen/reader.gleam`, `gen/src/yumemi_gen/reader/front.gleam`, `gen/src/yumemi_gen/emit/front.gleam`, `gen/test/yumemi_gen_test.gleam`
+- `gen/manifest.toml`, `gen/fixtures/article/public/manifest.toml`
+- `gen/fixtures/article/public/priv/static/_yumemi/client.mjs`, `style.css`
+- `gen/fixtures/article/public/src/gen/api.gleam`, `blocks_preview.gleam`, `live/article_create.gleam`, `live/article_publish.gleam`, `live/transport_ffi.mjs`, `load/article/arg_slug/page.gleam`, `load/layout.gleam`, `route.gleam`, `shell.mjs`, `widgets.gleam`
+- `results.md`
+
+`gen/fixtures/article/db/` と `gen/fixtures/article/src/gen/` は生成で作られた untracked のまま。commit に入れない。
+
+# gen-7 C+D ── 静的資料の写しと shell 必須化 (2026-09-24)
+
+## 状態
+
+- branch `impl/gen-7`、開始 HEAD `b5ed2cf`、squash 基点 `0c59f35`。
+- 束 C: 面の `.gleam` 走査と別に `<app>/src/external_hosts.mjs` / `<repo-root>/docs/api-v1.md` を読む口を追加。`.mjs` は `Object.freeze([...])` の限定字句読みで6欄を検査し、形が変われば stop。Markdown は解釈せず、原文を `el.text` に写す。生成名は front-4 の `Side` / `Host` / `hosts` / `nodes()` を維持し、sha256 12桁を付けた。
+- 診断分類: 入力が無い = `Missing` / exit 3。I/O で読めない、または `.mjs` の形を読めない = `Syntax` / exit 2。空の表へ置き換えて続行しない。
+- 付属入口: fixture に `api/src/gen/http_runtime.mjs` の2件を置き、`api.gleam` の件数・name・method・path の一致試験を追加。
+- 束 D: `src/shell.gleam` がない面は空の仮値を保持して `Missing` / exit 3 を追加する。既定色・言語・package 名を無い面へ補わない。理由は gen-6 裁定10「手書きが先、生成器が後」の逆転防止。専用 unit test で shell unit を除いて検査し、fixture の ★ は変更していない。
+- `src/framework/`、root `gleam.toml`、fixture の既存 `public/src/shell.gleam` は変更していない。
+
+## DDL
+
+無し。migration / schema は作成・変更していない。
+
+## 検証
+
+- `cd gen && gleam test`: **146 passed, no failures**。`gen/build/gen-7-cd-test.txt`。
+- `gleam build` (root): exit 0、既存 warning 1件 (`src/framework/secret.gleam:5` unused private constructor)。`build/gen-7-root-build.txt`。
+- fixture generation を同条件で2回実行: 両方 exit 0 / **88 files**。生成対象88ファイルの SHA-256 manifest は一致。`gen/build/gen-7-fixture-first.txt`、`gen/build/gen-7-fixture-second.txt`、`gen/build/gen-7-generated-first.sha256`、`gen/build/gen-7-generated-second.sha256`。
+- `cd gen/fixtures/article/public && gleam build`: exit 0、`Compiled in 0.04s`。`gen/build/gen-7-fixture-build.txt`。
+- musearch snapshot の read-only trial は `.../ms-9c2b0bd/api` から `.../scratch-gen-7-cd-attempt1` へ出力。**1181 files = 1175 + 6**、exit 2 が0、exit 3 が1、exit 4 が20、警告29。`gen/build/gen-7-snapshot.txt`。付属入口は `http_runtime.mjs` の6件と、www / muses / console 各 `api.gleam` の6件を name / method / path で比較し全て一致。
+- snapshot の shell 状態は指示前提と異なる。read-only 確認で `www/src/shell.gleam` は無く、`muses/src/shell.gleam` と `console/src/shell.gleam` は存在した。そのため exit 3 は www の1件のみ。snapshot は変更していない。
+- 確かめたこと: 上記 build / test / 2回生成差分 / snapshot 診断数と付属入口表の比較。
+- 確かめていないこと: `doc/api_v1.gleam` の画面上の表示確認。build で型検査済み。
+
+# gen-7 F ── gen-6 P1 残り
+
+## 状態
+
+- 作業木 `impl/gen-7`。gen-6 P1 #3, #5, #10, #2, #7 はすべて実装・検証済み。
+- Blob/Time 等の primitive decoder は `decode.new_primitive_decoder` で dynamic 値を parse する。invalid string / 非 string は decode error になり、失敗時だけ固定 placeholder を parse して primitive decoder の同型 error 値にする。入力ごとの `let assert` は無い。既知の固定 placeholder 自体が将来 parse 不能になった場合だけ fallback の `panic` に入るが、現在の Blob / Time 値は試験で parse 成功を確認した。
+- `gen/fixtures/article/public` の ★ は変更していない。
+
+## DDL
+
+無し。
+
+## 検証
+
+- `cd gen && gleam test`: final **154 passed, no failures**。`gen/build/gen7-final-gen-test.txt`。`front_emit_opaque_decoders_reject_invalid_input_without_assert_test` は空 Blob、不正 Time、非文字列 Blob を decode error として確認。
+- fixture generator final runs: exit 0 / **88 files**、A/B diff 空、tracked `public/src/gen` / static bundle と untracked `db/` / `src/gen/` が出力と一致。`gen/build/gen7-final-fixture-a.txt`、`gen/build/gen7-final-fixture-b.txt`。
+- `gleam build` (root): exit 0、既存 warning 1件 (`src/framework/secret.gleam:5`, unused private constructor)。`build/gen7-final-root-build.txt`。
+
+## gen-6 P1 #5 ── Blob 背景画像の CSS URL
+
+- `option_background` の Blob branch は `to_string(value)` をそのまま返さず、`url("…")` に包む生成 Gleam を出すよう変更。
+- `front_emit_blob_theme_wraps_image_in_quoted_css_url_test` を追加。合成 PageTheme の `background_image: Option(Blob)` から生成された page source に、引用符付き `url(...)` を確認。
+- `cd gen && gleam test`: **151 passed, no failures**。`gen/build/gen7-p1-5-tests.txt`。
+- fixture generator 2回: exit 0 / **88 files**、出力間 diff 空。tracked fixture 出力および既存 untracked `db/`・`src/gen/` と一致。`gen/build/gen7-p1-5-fixture-a.txt`、`gen/build/gen7-p1-5-fixture-b.txt`。
+- fixture の PageTheme は `Option(String)` のため、tracked page に変更は無い。Blob branch は合成試験で確認。
+
+## gen-6 P1 #10 ── widget_list Summary logic
+
+- `service/widget_list.logic` now branches on `args.widget`: `ArticleFeed` rows become `Article`, and `ArticleKinds` rows become `Summary`, both built from the returned article row.
+- `widget_list_logic_builds_summary_for_article_kinds_test` checks both constructor branches in the fixture service source.
+- Fixture generation: exit 0 / **88 files**; `build/gen7-p1-10-fixture-b` and `-c` are identical. Generated tracked `public/src/gen` and client bundle match the generator. The generated `api.gleam`, `service.gleam`, `out/widget_list.gleam`, `blocks_preview.gleam`, `shell.mjs`, `transport_ffi.mjs`, and `client.mjs` changed only in their SHA-256 headers; the Out decoder body stayed the same. Back `src/gen/` and `db/` were refreshed and remain untracked.
+- `cd gen && gleam test`: **152 passed, no failures** (`gen/build/gen7-p1-10-tests-final.txt`). Standalone `public` package `gleam build` exited 0 (`gen/build/gen7-p1-10-public-build.txt`); this incremental build log contains 42 transitive-dependency notices.
+
+## gen-6 P1 #2 ── Block preview の Layout 配置
+
+- `blocks_preview.gleam` 生成時に Layout の PC / tablet / SP placements を集め、header/nav/footer 等の area に対応 Block を描画。page area の全 Block listing は維持し、Layout 配置が無い area は名前表示を維持。
+- `front_emit_blocks_preview_places_layout_blocks_by_area_test` を追加。合成 Layout の header/nav/footer 各 Block と、実 fixture の PC placements が空で SP にだけある `SiteHeader` を確認。
+- 生成 tracked `blocks_preview.gleam` は header の `el.text("header")` から `site_header.view(Nil)` へ変化。
+- `node gen/scripts/build-blocks.mjs`: **BLOCKS: PASS (6 blocks)**。`public/build/blocks.html` の実出力も確認し、header area 内に `blocks/site_header | of Nil | Nil` と `<header class=...>記事</header>` がある。HTML は build 出力。
+- fixture generator 2回: exit 0 / **88 files**、出力差分空。tracked `public/src/gen`、static bundle、および untracked `db/`・`src/gen/` は generator 出力と一致。`gen/build/gen7-p1-2-fixture-a.txt`、`gen/build/gen7-p1-2-fixture-b.txt`。
+- `cd gen && gleam test`: **153 passed, no failures**。`gen/build/gen7-p1-2-tests.txt`。
+
+## gen-6 P1 #7 ── validate failure messages
+
+- `validate_text` now passes a constraint-specific message to `validate_field`. Pattern / Text / Markdown / Range / UUID / URL specs produce messages that identify their constraint; failed validation returns that message with its `Field`.
+- `front_emit_validate_errors_name_the_failed_constraint_test` checks generated `ArticleCreate` and `ArticlePublish` sources for concrete Slug / Title / Markdown messages and absence of the old `"invalid"` payload.
+- Generated `article_create.gleam` now reports the 1–64 character slug pattern, the 1–120 character title limit, or the Markdown constraint. `article_publish.gleam` reports the slug pattern. The bundled `client.mjs` carries the same `message` argument through its validation error tuple.
+- fixture generator outputs: **88 files**. First output's client bundle reflected the previous tracked live files; after syncing that generated source and bundle, the next two runs (`fixture-b` and `fixture-c`) were byte-identical. `public/src/gen`, static bundle, untracked `src/gen/`, and `db/` match the final generated output. Logs: `gen/build/gen7-p1-7-fixture-a.txt`, `-b.txt`, `-c.txt`.
+- `cd gen && gleam test`: **154 passed, no failures** (`gen/build/gen7-p1-7-tests-final.txt`). Standalone public package build exited 0; the incremental output contained 29 transitive-dependency notices (`gen/build/gen7-p1-7-public-build.txt`).
+
+## 最終検証
+
+- `node gen/scripts/verify-front-ssr.mjs`: **ALL PASS**。NO-JS / INITIAL / SELECTED / ISLAND / RELOAD を確認し、document request は2回。`gen/build/gen7-final-front-ssr.txt`。
+- `node gen/scripts/verify-front-isolate.mjs`: **ALL PASS**、40 requests、first / second style は各2228 chars。`gen/build/gen7-final-front-isolate.txt`。
+- `node gen/scripts/verify-front-given.mjs`: ESCAPE / SAME TAG ISLANDS / EXISTING ATTRIBUTE / CROSS TAG ORDER が全 PASS。`gen/build/gen7-final-front-given.txt`。
+- `node gen/scripts/build-blocks.mjs`: **BLOCKS: PASS (6 blocks)**。最終 `blocks.html` の header area 内に `site_header.view(Nil)` 相当の本文と実 `<header>` がある。`gen/build/gen7-final-blocks.txt`。
+- Musearch は指定 snapshot `/home/yumemism/.codex-agents/runs/niekawa-20260924-044509-82060-7565/ms-9c2b0bd/api` から読み、出力は同 run_dir の `out-gen7-f-final-b` / `out-gen7-f-final-c` に置いた。両方 **1181 files**、`diff -rq` は空、generator exit **4**。診断は exit1 **2** (`metrics_muse` / `metrics_store`: `entity/visit.Source` の discriminator 不足)、exit2 **0**、exit3 **1** (`www/src/shell.gleam` 不在)、exit4 **20**、warning **29**。gen-7 C+D の件数から変化なし。各面の Out decoder/runtime build は console 17 / muses 43 / www 14 modules で PASS、esbuild も PASS。`gen/build/gen7-f-snapshot-b.txt`、`gen/build/gen7-f-snapshot-c.txt`。
+- 修正前の snapshot 試走では opaque decoder の括弧付き let 式が formatter に拒否され exit1 になった。生成式を decoder callback 内の let/case に直した後の2回は上記のとおり formatter / Out decoder build を通過した。
+- 確かめていないこと: screenshot による responsive viewport の見た目レビュー。fixture SSR / isolate / given / Block preview の実行確認は済み。
+
+# gen-7 G ── 本記述と最終統合 (2026-09-24)
+
+## 状態
+
+- 作業開始時は branch `impl/gen-7`、HEAD `0505883`、基点 `0c59f35`。完了報告と全分類は [`docs/reports/gen-7.md`](docs/reports/gen-7.md) にまとめた。
+- gen-6 P1 13件と束 A〜F / 本便の追加分を分類し、未分類0件を確認対象にした。束 D の exit 3 は www のみ1件と訂正した。musearch snapshot の最終値は exit 1 が2件、exit 2 が0件、exit 3 が1件、exit 4 が20行、warning 29、1181 file、再走 diff 空。
+- 動詞対応は add / edit / remove の URL が service 単位で9 / 7 / 6、face 展開後36 / 28 / 25。registry method/path 直接一致は47 → 53。履歴値「採用済み一致」290は別 snapshot (`c99c107`) の値で、今回の基点と直接比較しない。
+- 作業差分は `docs/reports/gen-7.md` と root `results.md` の2 file。生成器 `gen/src/`、framework `src/framework/`、fixture `gen/fixtures/` のソースは変更していない。
+- `gen/fixtures/article/db/` と `gen/fixtures/article/src/gen/` は既存の untracked のまま、commit 対象外。
+
+## DDL
+
+無し。DB / migration / schema は変更していない。
+
+## 追随便への申し送り
+
+- yumemi-5 は Page 39・Layout 3・Frame 57・Fixed 69 の const と `calls` 46本を、`reads: []` / `cell: Flow` / `cols: []` / `rows: []` / `template: []` を含む形へ追随する。
+- `entity/visit.Source` の複数 variant を判別できず exit 1 が2件出た。`kind` 欄か判別規則を決める。
+- `gen/scripts/audit-route-registry.mjs` の非 system service 数87は今回 snapshot の103と不一致。snapshot で registry 監査を回す便で修正する。
+- `api/src/gen/http_runtime.mjs:413` は GENERATED header を持つ付属入口表の現ソース。back の世代を揃えると移動または消失する可能性がある。
+- `transport_ffi.mjs` の hash 入力 `hash.entry <> string.inspect(front.components)` は reader model の変更だけでも変化する。minify (gen-6 P1-6)は申し送り最後尾、per-element given (P1-13)は Lustre 待ち。P1-4 / P1-9 / P1-11 も残る。
+- Hex 0.8.0 の publish は鷹野(承認後、yumemi-5 の前)。
+
+## 確かめたこと
+
+- `git diff --check`: 出力無し。
+- `git diff --stat 0c59f35 -- db/ gen/fixtures/article/db/`: 空。
+- `git log --oneline 0c59f35..impl/gen-7`: 最終 squash 後に1 commit。
+- `git status --short`: untracked は指定の `gen/fixtures/article/db/` と `gen/fixtures/article/src/gen/` の2本。
+- この便で build / test は実行していない。前巡の最終値と検証証跡は [`docs/reports/gen-7.md`](docs/reports/gen-7.md) に記載した。
+
+## 確かめていないこと
+
+- 追加の build / test は未実行。今回の依頼に含まれる履歴・差分・untracked・DDL の検証を行う。

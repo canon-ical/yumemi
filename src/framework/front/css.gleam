@@ -1,3 +1,5 @@
+import framework/front/track
+
 pub type Length {
   Px(Float)
   Rem(Float)
@@ -56,6 +58,7 @@ pub type Flow {
   Stack(gap: Length)
   Row(gap: Length, wrap: Bool)
   Grid(cols: Int, gap: Length)
+  GridTracks(cols: List(track.Track), gap: Length)
   Scroller
 }
 

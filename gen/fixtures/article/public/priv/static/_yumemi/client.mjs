@@ -1,4 +1,4 @@
-// GENERATED from public/src/components/*.gleam and src/entry.gleam [sha256:4f2097e4dd4f] — 手で編集しない
+// GENERATED from public/src/components/*.gleam and src/entry.gleam [sha256:a8e8768eb5d4] — 手で編集しない
 // public/build/dev/javascript/prelude.mjs
 var CustomType = class {
   withFields(fields) {
@@ -30,12 +30,12 @@ var List = class {
   }
   countLength() {
     let current = this;
-    let length2 = 0;
+    let length3 = 0;
     while (current) {
       current = current.tail;
-      length2++;
+      length3++;
     }
-    return length2 - 1;
+    return length3 - 1;
   }
 };
 function prepend(element5, tail) {
@@ -1286,6 +1286,11 @@ function success(data) {
     return [data, List$Empty$const];
   });
 }
+function decode_error(expected, found) {
+  return toList([
+    new DecodeError(expected, classify_dynamic(found), List$Empty$const)
+  ]);
+}
 function field(field_name, field_decoder, next) {
   return subfield(toList([field_name]), field_decoder, next);
 }
@@ -1321,6 +1326,11 @@ function then$(decoder4, next) {
       }
     }
   );
+}
+function failure(placeholder, name) {
+  return new Decoder((d) => {
+    return [placeholder, decode_error(name, d)];
+  });
 }
 
 // public/build/dev/javascript/gleam_stdlib/gleam_stdlib.mjs
@@ -5454,6 +5464,91 @@ function select_(attributes, children) {
   return element_("select", attributes, children);
 }
 
+// public/build/dev/javascript/yumemi/framework/front/css.mjs
+var Margin = class extends CustomType {
+};
+var SpaceProperty$Margin$const = new Margin();
+var Padding = class extends CustomType {
+};
+var SpaceProperty$Padding$const = new Padding();
+var Gap = class extends CustomType {
+};
+var SpaceProperty$Gap$const = new Gap();
+var Width = class extends CustomType {
+};
+var SpaceProperty$Width$const = new Width();
+var Height = class extends CustomType {
+};
+var SpaceProperty$Height$const = new Height();
+var Radius = class extends CustomType {
+};
+var SpaceProperty$Radius$const = new Radius();
+var System = class extends CustomType {
+};
+var FontFamily$System$const = new System();
+var SansSerif = class extends CustomType {
+};
+var FontFamily$SansSerif$const = new SansSerif();
+var Serif = class extends CustomType {
+};
+var FontFamily$Serif$const = new Serif();
+var Monospace = class extends CustomType {
+};
+var FontFamily$Monospace$const = new Monospace();
+var Normal2 = class extends CustomType {
+};
+var FontWeight$Normal$const = new Normal2();
+var Medium = class extends CustomType {
+};
+var FontWeight$Medium$const = new Medium();
+var Bold = class extends CustomType {
+};
+var FontWeight$Bold$const = new Bold();
+var Hover = class extends CustomType {
+};
+var Interaction$Hover$const = new Hover();
+var Focus = class extends CustomType {
+};
+var Interaction$Focus$const = new Focus();
+var Disabled = class extends CustomType {
+};
+var Interaction$Disabled$const = new Disabled();
+var SP = class extends CustomType {
+};
+var Breakpoint$SP$const = new SP();
+var PC = class extends CustomType {
+};
+var Breakpoint$PC$const = new PC();
+var Tablet = class extends CustomType {
+};
+var Breakpoint$Tablet$const = new Tablet();
+var Scroller = class extends CustomType {
+};
+var Flow$Scroller$const = new Scroller();
+var Top = class extends CustomType {
+};
+var Pin$Top$const = new Top();
+var Bottom = class extends CustomType {
+};
+var Pin$Bottom$const = new Bottom();
+var NoPin = class extends CustomType {
+};
+var Pin$NoPin$const = new NoPin();
+var Fade = class extends CustomType {
+};
+var Animation$Fade$const = new Fade();
+var SlideUp = class extends CustomType {
+};
+var Animation$SlideUp$const = new SlideUp();
+var Pulse = class extends CustomType {
+};
+var Animation$Pulse$const = new Pulse();
+
+// public/build/dev/javascript/yumemi/framework/front.mjs
+var Flow = class extends CustomType {
+};
+var Cell$Flow$const = new Flow();
+
 // public/build/dev/javascript/yumemi/framework/front/el.mjs
 var text4 = text3;
 
@@ -5558,8 +5653,8 @@ var Invalid = class extends CustomType {
 };
 var Error$Invalid$const = new Invalid();
 function within(raw, min2, max2) {
-  let length2 = codepoints(raw);
-  return length2 >= min2 && length2 <= max2;
+  let length3 = codepoints(raw);
+  return length3 >= min2 && length3 <= max2;
 }
 function validate(raw, spec) {
   let _block;
@@ -5749,12 +5844,12 @@ function send3(args) {
     }
   );
 }
-function validate_field(field2, raw, constraint) {
+function validate_field(field2, raw, constraint, message) {
   let $ = validate(raw, constraint);
   if ($ instanceof Ok) {
     return List$Empty$const;
   } else {
-    return toList([[field2, "invalid"]]);
+    return toList([[field2, message]]);
   }
 }
 function validate2(model) {
@@ -5763,7 +5858,8 @@ function validate2(model) {
       validate_field(
         Field$Slug$const,
         model.args.slug,
-        new Pattern(1, 64, "^[a-z0-9]+(-[a-z0-9]+)*$")
+        new Pattern(1, 64, "^[a-z0-9]+(-[a-z0-9]+)*$"),
+        "must contain 1 to 64 characters and match /^[a-z0-9]+(-[a-z0-9]+)*$/"
       )
     ])
   );
@@ -5885,8 +5981,54 @@ function app() {
 }
 
 // public/build/dev/javascript/public/gen/out/article_create.mjs
+var Draft = class extends CustomType {
+};
+var Phase$Draft$const = new Draft();
+var Scheduled = class extends CustomType {
+};
+var Phase$Scheduled$const = new Scheduled();
+var Published = class extends CustomType {
+};
+var Phase$Published$const = new Published();
+var Retracted = class extends CustomType {
+};
+var Phase$Retracted$const = new Retracted();
+var Out = class extends CustomType {
+  constructor(slug, phase) {
+    super();
+    this.slug = slug;
+    this.phase = phase;
+  }
+};
 function decoder2() {
-  return string2;
+  return field(
+    "slug",
+    string2,
+    (slug) => {
+      return field(
+        "phase",
+        then$(
+          string2,
+          (value2) => {
+            if (value2 === "Draft") {
+              return success(Phase$Draft$const);
+            } else if (value2 === "Scheduled") {
+              return success(Phase$Scheduled$const);
+            } else if (value2 === "Published") {
+              return success(Phase$Published$const);
+            } else if (value2 === "Retracted") {
+              return success(Phase$Retracted$const);
+            } else {
+              return failure(Phase$Draft$const, "Phase");
+            }
+          }
+        ),
+        (phase) => {
+          return success(new Out(slug, phase));
+        }
+      );
+    }
+  );
 }
 
 // public/build/dev/javascript/yumemi/framework/page.mjs
@@ -5943,7 +6085,7 @@ var Category = class extends CustomType {
     this.name = name;
   }
 };
-var Out = class extends CustomType {
+var Out2 = class extends CustomType {
   constructor(page, counts) {
     super();
     this.page = page;
@@ -6038,15 +6180,15 @@ function decoder3() {
                     "let_assert",
                     FILEPATH,
                     "gen/out/article_list",
-                    64,
+                    97,
                     "decoder",
                     "Pattern match failed, no pattern matched the value.",
                     {
                       value: $,
-                      start: 1614,
-                      end: 1648,
-                      pattern_start: 1625,
-                      pattern_end: 1634
+                      start: 2430,
+                      end: 2464,
+                      pattern_start: 2441,
+                      pattern_end: 2450
                     }
                   );
                 }
@@ -6086,7 +6228,7 @@ function decoder3() {
           )
         ),
         (counts) => {
-          return success(new Out(page, counts));
+          return success(new Out2(page, counts));
         }
       );
     }
@@ -6173,12 +6315,12 @@ function send4(args) {
     }
   );
 }
-function validate_field2(field2, raw, constraint) {
+function validate_field2(field2, raw, constraint, message) {
   let $ = validate(raw, constraint);
   if ($ instanceof Ok) {
     return List$Empty$const;
   } else {
-    return toList([[field2, "invalid"]]);
+    return toList([[field2, message]]);
   }
 }
 function validate3(model) {
@@ -6187,17 +6329,20 @@ function validate3(model) {
       validate_field2(
         Field$Slug$const2,
         model.args.slug,
-        new Pattern(1, 64, "^[a-z0-9]+(-[a-z0-9]+)*$")
+        new Pattern(1, 64, "^[a-z0-9]+(-[a-z0-9]+)*$"),
+        "must contain 1 to 64 characters and match /^[a-z0-9]+(-[a-z0-9]+)*$/"
       ),
       validate_field2(
         Field$Title$const,
         model.args.title,
-        new Text2(1, 120)
+        new Text2(1, 120),
+        "must contain 1 to 120 characters"
       ),
       validate_field2(
         Field$Body$const,
         model.args.body,
-        Spec$Markdown$const
+        Spec$Markdown$const,
+        "must be valid Markdown"
       )
     ])
   );

@@ -363,6 +363,11 @@ pub type Entry {
   )
 }
 
+/// Static non-Service HTTP entries mirrored from `api/src/gen/http_runtime.mjs`.
+pub type AttachedRoute {
+  AttachedRoute(name: String, method: String, path: String)
+}
+
 pub type Effect {
   ReadEffect
   WriteEffect
@@ -379,6 +384,8 @@ pub type Subject {
 pub type Service {
   Service(
     module: String,
+    /// Type at the second parameter of `Service(Args, Out, Error)`.
+    out_type: Option(TypeRef),
     params: List(String),
     queries: List(NamedQuery),
     args: List(Arg),
@@ -411,6 +418,7 @@ pub type App {
     services: List(Service),
     arrows: List(Arrow),
     entries: List(Entry),
+    attached: List(AttachedRoute),
     /// Entity / ER 外 module の手書き verb 名。header と警告に使う。
     handwritten_verbs: List(#(String, List(String))),
   )
