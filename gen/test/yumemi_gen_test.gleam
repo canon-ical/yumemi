@@ -1934,7 +1934,10 @@ pub fn undeclared_pages_and_no_pages_do_not_make_missing_notes_test() {
 
 pub fn front_model_reads_url_blocks_widgets_components_and_style_test() {
   let value = article_front()
-  let assert [page] = value.pages
+  let assert Ok(page) =
+    list.find(value.pages, fn(page) {
+      page.module == "pages/article/arg_slug/page"
+    })
   page.url |> should.equal("/article/{slug}")
   page.of |> should.equal(Some("ArticleRead"))
   list.map(value.blocks, fn(block) { block.name })
@@ -1956,7 +1959,10 @@ pub fn front_model_reads_url_blocks_widgets_components_and_style_test() {
     "ArticleCreate",
     "ArticleList",
   ])
-  let assert [page_args] = value.page_service_args
+  let assert Ok(page_args) =
+    list.find(value.page_service_args, fn(page_args) {
+      page_args.page == page.module
+    })
   let assert Ok(widget_args) =
     list.find(page_args.services, fn(service) {
       service.service == "widget_list"
@@ -1967,6 +1973,17 @@ pub fn front_model_reads_url_blocks_widgets_components_and_style_test() {
       name: "widget",
       source: front.VariableSource(name: "widget", from: front.Query("widget")),
     ),
+    front.ResolvedArg(
+      name: "slug",
+      source: front.VariableSource(name: "slug", from: front.Path("slug")),
+    ),
+  ])
+  let assert Ok(article_args) =
+    list.find(page_args.services, fn(service) {
+      service.service == "article_read"
+    })
+  article_args.args
+  |> should.equal([
     front.ResolvedArg(
       name: "slug",
       source: front.VariableSource(name: "slug", from: front.Path("slug")),
@@ -3655,7 +3672,10 @@ pub fn missing_page_arg_is_exit_four_test() {
 
 pub fn widget_service_args_are_resolved_from_same_name_vars_test() {
   let value = article_front()
-  let assert [page_args] = value.page_service_args
+  let assert Ok(page_args) =
+    list.find(value.page_service_args, fn(page_args) {
+      page_args.page == "pages/article/arg_slug/page"
+    })
   let assert Ok(widget_args) =
     list.find(page_args.services, fn(service) {
       service.service == "widget_list"

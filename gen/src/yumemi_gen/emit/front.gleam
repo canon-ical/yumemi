@@ -4712,10 +4712,10 @@ fn shell_page_tables(
       <> shell_var_rows(front, page)
       <> "    ],\n"
       <> "    givens: [\n"
-      <> shell_given_rows(app, front)
+      <> shell_given_rows(app, front, page)
       <> "    ],\n"
       <> "    sources: [\n"
-      <> shell_source_rows(sources)
+      <> shell_source_rows(app, front, page, sources)
       <> "    ],\n"
       <> "  }],"
     })
@@ -4729,7 +4729,11 @@ fn shell_page_tables(
   <> "\n]);\n"
 }
 
-fn shell_given_rows(app: model.App, front: reader_front.Front) -> String {
+fn shell_given_rows(
+  app: model.App,
+  front: reader_front.Front,
+  page: reader_front.Page,
+) -> String {
   front.components
   |> list.filter_map(fn(component) {
     case component.reloads |> list.first |> option.from_result {
@@ -4741,7 +4745,9 @@ fn shell_given_rows(app: model.App, front: reader_front.Front) -> String {
               <> quoted(component_tag(component))
               <> ", service: service.Service$"
               <> naming.pascal(service.module)
-              <> "$const, decoder: decode"
+              <> "$const, "
+              <> shell_service_args(app, front, page, service.module)
+              <> ", decoder: decode"
               <> naming.pascal(service.module)
               <> " },\n",
             )
@@ -4773,9 +4779,26 @@ fn shell_var_rows(
     <> quoted(var.name)
     <> ", optional: "
     <> bool_text(optional)
+    <> ", from: "
+    <> shell_var_source(var.from)
     <> " },\n"
   })
   |> string.concat
+}
+
+fn shell_var_source(source: reader_front.From) -> String {
+  case source {
+    reader_front.Path(name) ->
+      "{ type: \"path\", name: " <> quoted(name) <> " }"
+    reader_front.Query(name) ->
+      "{ type: \"query\", name: " <> quoted(name) <> " }"
+    reader_front.Session(name) ->
+      "{ type: \"session\", name: " <> quoted(name) <> " }"
+    reader_front.Origin(face) ->
+      "{ type: \"origin\", name: " <> quoted(face) <> " }"
+    reader_front.AuthOrigin -> "{ type: \"auth-origin\" }"
+    reader_front.InvalidFrom(_) -> "{ type: \"invalid\" }"
+  }
 }
 
 fn js_export_name(name: String) -> String {
@@ -4787,7 +4810,12 @@ fn js_export_name(name: String) -> String {
   }
 }
 
-fn shell_source_rows(sources: List(LoadSource)) -> String {
+fn shell_source_rows(
+  app: model.App,
+  front: reader_front.Front,
+  page: reader_front.Page,
+  sources: List(LoadSource),
+) -> String {
   sources
   |> list.map(fn(source) {
     case source.type_name == "PageTheme" {
@@ -4795,7 +4823,9 @@ fn shell_source_rows(sources: List(LoadSource)) -> String {
       False -> {
         "      { service: service.Service$"
         <> naming.pascal(source.service)
-        <> "$const, decoder: decode"
+        <> "$const, "
+        <> shell_service_args(app, front, page, source.service)
+        <> ", decoder: decode"
         <> naming.pascal(source.service)
         <> ", optional: "
         <> bool_text(source.optional)
@@ -4806,6 +4836,56 @@ fn shell_source_rows(sources: List(LoadSource)) -> String {
     }
   })
   |> string.concat
+}
+
+fn shell_service_args(
+  app: model.App,
+  front: reader_front.Front,
+  page: reader_front.Page,
+  service_name: String,
+) -> String {
+  let args = case
+    list.find(front.page_service_args, fn(item) { item.page == page.module })
+  {
+    Ok(reader_front.PageServiceArgs(services: services, ..)) ->
+      case list.find(services, fn(item) { item.service == service_name }) {
+        Ok(reader_front.ServiceArgs(args: args, ..)) -> args
+        Error(_) -> []
+      }
+    Error(_) -> []
+  }
+  "args: ["
+  <> string.join(
+    list.map(args, fn(arg) {
+      case arg.source {
+        reader_front.VariableSource(name: var_name, ..) ->
+          "["
+          <> quoted(arg.name)
+          <> ", "
+          <> quoted(var_name)
+          <> ", "
+          <> bool_text(service_arg_optional(app, service_name, arg.name))
+          <> "]"
+      }
+    }),
+    ", ",
+  )
+  <> "]"
+}
+
+fn service_arg_optional(
+  app: model.App,
+  service_name: String,
+  arg_name: String,
+) -> Bool {
+  case list.find(app.services, fn(service) { service.module == service_name }) {
+    Ok(service) ->
+      case list.find(service.args, fn(arg) { arg.name == arg_name }) {
+        Ok(model.Arg(type_: model.NamedShape(name: "Option", ..), ..)) -> True
+        _ -> False
+      }
+    Error(_) -> False
+  }
 }
 
 fn bool_text(value: Bool) -> String {
@@ -5349,9 +5429,25 @@ fn shell_runtime_text(include_client: Bool, grid_css: String) -> String {
   <> "  if (!entry) throw new Error(\"missing front API route\");\n"
   <> "  return entry.path;\n"
   <> "}\n\n"
-  <> "async function readFromApp(app, request, serviceValue, params) {\n"
-  <> "  const path = apiPathFor(serviceValue).replace(/:([A-Za-z0-9_]+)/g, (_, name) => encodeURIComponent(params[name] ?? \"\"));\n"
+  <> "function argsFor(vars, mapping) {\n"
+  <> "  return Object.fromEntries(mapping.map(([name, field, optional]) => {\n"
+  <> "    const value = vars[field];\n"
+  <> "    return [name, optional && typeof value === \"string\" ? new Some(value) : value];\n"
+  <> "  }));\n"
+  <> "}\n\n"
+  <> "async function readFromApp(app, request, serviceValue, args) {\n"
+  <> "  const used = new Set();\n"
+  <> "  const path = apiPathFor(serviceValue).replace(/:([A-Za-z0-9_]+)/g, (_, name) => {\n"
+  <> "    used.add(name);\n"
+  <> "    const arg = args[name];\n"
+  <> "    const value = arg instanceof Some ? arg[0] : arg;\n"
+  <> "    if (typeof value !== \"string\") throw new Error(\"missing service path arg: \" + name);\n"
+  <> "    return encodeURIComponent(value);\n"
+  <> "  });\n"
   <> "  const target = new URL(path, request.url);\n"
+  <> "  for (const [name, value] of Object.entries(args)) {\n"
+  <> "    if (!used.has(name) && value instanceof Some) target.searchParams.set(name, value[0]);\n"
+  <> "  }\n"
   <> "  return app.fetch(new Request(target, request));\n"
   <> "}\n\n"
   <> "function pageTheme(definition, root) {\n"
@@ -5362,7 +5458,49 @@ fn shell_runtime_text(include_client: Bool, grid_css: String) -> String {
   <> "  return new Response(body, {status, headers: {\"content-type\": \"text/plain; charset=utf-8\"}});\n"
   <> "}\n\n"
   <> "async function renderPage(request, env, matched) {\n"
-  <> "  const vars = Object.fromEntries(matched.spec.vars.map((field) => [field.name, field.optional ? Option$None$const : \"\"]));\n"
+  <> "  const vars = {};\n"
+  <> "  const query = new URL(request.url).searchParams;\n"
+  <> "  let sessionLoaded = false;\n"
+  <> "  let session = null;\n"
+  <> "  for (const field of matched.spec.vars) {\n"
+  <> "    const source = field.from;\n"
+  <> "    let value;\n"
+  <> "    if (source.type === \"path\") {\n"
+  <> "      value = matched.params[source.name];\n"
+  <> "    } else if (source.type === \"query\") {\n"
+  <> "      const found = query.get(source.name);\n"
+  <> "      value = found === null ? Option$None$const : new Some(found);\n"
+  <> "    } else if (source.type === \"origin\") {\n"
+  <> "      const envName = \"PUBLIC_\" + source.name.toUpperCase() + \"_ORIGIN\";\n"
+  <> "      const origin = env[envName];\n"
+  <> "      if (typeof origin !== \"string\" || origin.length === 0) return failure(500, envName);\n"
+  <> "      value = origin;\n"
+  <> "    } else if (source.type === \"auth-origin\") {\n"
+  <> "      const envName = \"PUBLIC_IDP_ORIGIN\";\n"
+  <> "      const origin = env[envName];\n"
+  <> "      if (typeof origin !== \"string\" || origin.length === 0) return failure(500, envName);\n"
+  <> "      value = origin;\n"
+  <> "    } else if (source.type === \"session\") {\n"
+  <> "      if (!sessionLoaded) {\n"
+  <> "        sessionLoaded = true;\n"
+  <> "        try {\n"
+  <> "          const target = new URL(\"/api/session\", request.url);\n"
+  <> "          const response = await env.APP.fetch(new Request(target, request));\n"
+  <> "          if (response.ok) session = await response.json();\n"
+  <> "        } catch (_) {\n"
+  <> "          session = null;\n"
+  <> "        }\n"
+  <> "      }\n"
+  <> "      const subject = session?.anonymous === true ? undefined : session?.subject;\n"
+  <> "      const found = source.name === \"SubjectHandle\" ? subject?.handle : subject?.id;\n"
+  <> "      if (typeof found === \"string\") value = field.optional ? new Some(found) : found;\n"
+  <> "      else if (field.optional) value = Option$None$const;\n"
+  <> "      else return failure(401, \"unauthorized\");\n"
+  <> "    } else {\n"
+  <> "      return failure(500, \"invalid variable source\");\n"
+  <> "    }\n"
+  <> "    vars[field.name] = value;\n"
+  <> "  }\n"
   <> "  const values = [vars];\n"
   <> "  let root = null;\n"
   <> "  for (const source of matched.spec.sources) {\n"
@@ -5370,7 +5508,7 @@ fn shell_runtime_text(include_client: Bool, grid_css: String) -> String {
   <> "      values.push(pageTheme(matched.definition, root));\n"
   <> "      continue;\n"
   <> "    }\n"
-  <> "    const response = await readFromApp(env.APP, request, source.service, matched.params);\n"
+  <> "    const response = await readFromApp(env.APP, request, source.service, argsFor(vars, source.args));\n"
   <> "    if (!response.ok) {\n"
   <> "      if (response.status === 403) return failure(403, \"adult declaration required\");\n"
   <> "      if (response.status === 404 && !source.root) { values.push(Option$None$const); continue; }\n"
@@ -5383,7 +5521,7 @@ fn shell_runtime_text(include_client: Bool, grid_css: String) -> String {
   <> "  }\n"
   <> "  const givens = [];\n"
   <> "  for (const given of matched.spec.givens) {\n"
-  <> "    const response = await readFromApp(env.APP, request, matched.definition, given.service, matched.params, null);\n"
+  <> "    const response = await readFromApp(env.APP, request, given.service, argsFor(vars, given.args));\n"
   <> "    if (!response.ok) continue;\n"
   <> "    const raw = await response.json();\n"
   <> "    given.decoder(raw);\n"

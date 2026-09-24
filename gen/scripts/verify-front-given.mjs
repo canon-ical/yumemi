@@ -2,14 +2,11 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import vm from "node:vm";
+import { prepareFrontScratch } from "./front-harness.mjs";
 
-const here = path.dirname(fileURLToPath(import.meta.url));
-const defaultShell = path.resolve(
-  here,
-  "../fixtures/article/public/src/gen/shell.mjs",
-);
+const work = prepareFrontScratch("given", "public");
+const defaultShell = path.join(work, "src/gen/shell.mjs");
 const shellPath = path.resolve(process.argv[2] ?? defaultShell);
 
 function assert(condition, message) {

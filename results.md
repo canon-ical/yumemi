@@ -1171,3 +1171,33 @@ P1、back 側、musearch、DDL、Hex publish、push、main、push は触って�
 - 殻の実値読み (`/api/session`、env、Path / Query / Service Args、`given`、401) は次巡。今回の `shell.mjs` は Vars を空値で作って load に渡す仮配線。
 - `TrackSize.Auto` と `Track.Auto` の別構成子名は Gleam の module namespace 制約に衝突する。贄川が `AutoSize`(`<X>Size` の流儀)に決めた。
 - root / gen 全体の format check を通すための無関係な既存未整形ファイルは今回の作業域外。
+
+# yumemi-1f 巡 3 束 A (2026-09-25)
+
+## 状態
+
+- B (impl/yumemi-1f-b, 334dc0d) を no-ff merge。report と patch 2本の計3 file。
+- shell は Path / Query / Session / Origin / AuthOrigin から Vars を読む。Session は Page ごとに最大1回 /api/session を呼び、Cookie を転送する。
+- reader の PageServiceArgs に page root Service の解決も追加。shell は source / given ごとに Args 欄, Vars 欄, Option の3値組を生成器から受け、Args と request path / query を組む。shell 内に対応表は置かない。
+- String の Session 欄が欠けたら renderPage が 401、Option 欄は None。Origin env が欠けたら renderPage が 500 を返し、本文に env 名を出す。redirect と既定 origin は置かない。
+- verify 用 no-session Page を public fixture に追加。fixture app 内へは生成せず、out と preview は gen/build/y1f-a-* に出した。DDL 無し。
+
+## 確かめたこと
+
+- fixture generation を2回: 各 112 files、diff -qr は0行。gen/build/y1f-a-generated-v4-one/、-v4-two/、gen/build/y1f-a-generated-v4-diff.txt。
+- 両 out の gleam format --check exit 0。各74 .gleam、SHA-256 header 欠け0。gen/build/y1f-a-generated-format-check.txt、header 集計は実行ログ。
+- root gleam build: exit 0、既存 warning 1 (src/framework/secret.gleam:5)。gen/build/y1f-a-root-build.txt。
+- cd gen && gleam test: 189 passed, no failures。gen/build/y1f-a-gen-test.txt。
+- public / admin scratch build: 両方 exit 0。warning は既存の secret constructor 1件のみ。gen/build/y1f-a-verify/gleam-build.txt、gen/build/y1f-a-verify-admin/gleam-build.txt。
+- SSR / isolate / given / file / overlay はすべて ALL PASS。証跡は gen/build/y1f-a-verify-{ssr,isolate,given,file,overlay}.txt。Block preview は public 7 Blocks、admin 1 Block が PASS、gen/build/y1f-a-blocks-preview/{public,admin}-blocks.html。
+- SSR request 列: GET /api/session → GET /api/widgets?widget=summary&slug=42 → GET /api/articles/42 → GET /api/articles。gen/build/y1f-a-verify/requests.txt。public Session は匿名 / subject 無し / handle 無しで 200 + None、Session Var 無し Page は0回。admin は3条件で401、subject ありで200。Origin env 欠落は env 名を含む500。
+- code after r8 の git diff --check は exit 0。基点 e82121e から全体では exit 2、B から統合した patch artifact の空 diff 行に trailing whitespace があり、f5min 38行 / f6 156行。証跡: gen/build/y1f-a-final-diff-check.txt、gen/build/y1f-a-code-diff-check.txt。
+
+## 確かめていないこと
+
+- root gleam test は未実行。今回の指示対象は root build と gen test。
+
+## 残り
+
+- 1〜3 の完了条件はすべて満たした。merge commit を残し、今回の実装・検証 checkpoint は1本へ squash した。
+- B の patch artifact に含まれる whitespace 194箇所はそのまま保持。今回の実装・verify 差分の whitespace は0件。

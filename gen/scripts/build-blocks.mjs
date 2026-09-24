@@ -28,15 +28,36 @@ try {
   const output = path.join(
     repoRoot,
     "gen",
-    "fixtures",
-    "article",
-    "public",
     "build",
-    "blocks.html",
+    "y1f-a-blocks-preview",
+    "public-blocks.html",
   );
   fs.mkdirSync(path.dirname(output), { recursive: true });
   fs.writeFileSync(output, html);
   console.log(`BLOCKS: PASS (7 blocks) -> ${output}`);
 } finally {
   if (worker) await worker.stop();
+}
+
+const adminWork = prepareFrontScratch("blocks-preview-admin", "admin");
+let adminWorker;
+try {
+  adminWorker = await startFrontWorker(adminWork, 8799, "/home", 401);
+  const response = await fetch(adminWorker.baseUrl + "/_blocks");
+  const html = await response.text();
+  assert(response.status === 200, "admin /_blocks returned " + response.status);
+  assert(html.includes("blocks/admin_header"), "admin_header block is missing");
+  assert(html.includes("<style>"), "admin preview style is missing");
+  const output = path.join(
+    repoRoot,
+    "gen",
+    "build",
+    "y1f-a-blocks-preview",
+    "admin-blocks.html",
+  );
+  fs.mkdirSync(path.dirname(output), { recursive: true });
+  fs.writeFileSync(output, html);
+  console.log("ADMIN BLOCKS: PASS (1 block) -> " + output);
+} finally {
+  if (adminWorker) await adminWorker.stop();
 }

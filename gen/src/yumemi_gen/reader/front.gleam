@@ -1445,13 +1445,32 @@ fn resolve_page_service_args(
       })
     })
   let page_scope = list.append(page.vars, layout.vars)
+  let root_args = case find_service(services, page.of) {
+    Some(service) -> [
+      ServiceArgs(
+        service: service.module,
+        args: service.args
+          |> list.filter_map(fn(arg) {
+            case list.find(page_scope, fn(var) { var.name == arg.name }) {
+              Ok(var) ->
+                Ok(ResolvedArg(
+                  name: arg.name,
+                  source: VariableSource(name: var.name, from: var.from),
+                ))
+              Error(_) -> Error(Nil)
+            }
+          }),
+      ),
+    ]
+    None -> []
+  }
   let page_args =
     list.flat_map(page_frames(page), fn(frame) {
       list.flat_map(frame.placements, fn(placement) {
         placement_service_args(placement, blocks, services, page_scope)
       })
     })
-  list.fold(page_args, layout_args, merge_service_args)
+  list.fold(list.append(page_args, root_args), layout_args, merge_service_args)
 }
 
 fn placement_service_args(
