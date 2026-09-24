@@ -5558,6 +5558,9 @@ var Pin$Bottom$const = new Bottom();
 var NoPin = class extends CustomType {
 };
 var Pin$NoPin$const = new NoPin();
+var Overlay = class extends CustomType {
+};
+var Pin$Overlay$const = new Overlay();
 var Fade = class extends CustomType {
 };
 var Animation$Fade$const = new Fade();

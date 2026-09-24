@@ -6,7 +6,8 @@ import gen/out/widget_list
 import sketch/lustre/element/html
 import style
 
-pub type In = widget_list.Row
+pub type In =
+  widget_list.Row
 
 pub const sample: In = widget_list.Summary(
   kind: "Summary",
@@ -24,7 +25,16 @@ pub const sample: In = widget_list.Summary(
 pub fn view(it: In) -> el.Element(Nil) {
   case it {
     widget_list.Summary(article: article, ..) ->
-      html.p(sketch_css.class([style.body]), [], [el.text(article.title)])
+      html.div_([], [
+        html.p(sketch_css.class([style.body]), [], [el.text(article.title)]),
+        el.each_modal(
+          "summary-row",
+          article.slug,
+          [el.text("Open summary row")],
+          [el.text("Close summary row")],
+          [el.text(article.title)],
+        ),
+      ])
     _ -> el.text("")
   }
 }

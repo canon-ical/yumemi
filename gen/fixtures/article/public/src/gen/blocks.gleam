@@ -1,4 +1,4 @@
-//// GENERATED from public/src/blocks/*.gleam [sha256:2d87c7696969] — 手で編集しない
+//// GENERATED from public/src/blocks/*.gleam [sha256:24b0ecfd4858] — 手で編集しない
 
 pub type Block {
   Article

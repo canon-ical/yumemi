@@ -92,6 +92,8 @@ const verb_fixture = "fixtures/verb_features"
 
 const value_prop_column_fixture = "fixtures/value_prop_column"
 
+const front_overlay_negative_fixture = "fixtures/front_overlay_negative"
+
 pub fn main() {
   gleeunit.main()
 }
@@ -1978,6 +1980,108 @@ pub fn front_model_reads_url_blocks_widgets_components_and_style_test() {
   |> should.equal([None, None, Some("Stay"), Some("ReloadPage")])
 }
 
+pub fn front_emit_overlay_area_and_badge_use_generator_css_test() {
+  let page = text("public/src/gen/load/article/arg_slug/page.gleam")
+  [
+    "overlay_area(\"article-dialog\", [],",
+    "attribute.attribute(\"id\", el.overlay_id_prefix <> name)",
+    "attribute.attribute(\"popover\", \"\")",
+    "attribute.attribute(\"data-yumemi-overlay\", \"\")",
+  ]
+  |> list.each(fn(row) { string.contains(page, row) |> should.be_true })
+
+  let css = text("public/priv/static/_yumemi/style.css")
+  [
+    "grid-template-areas: \"page\" \"rail\";",
+    "[data-yumemi-badge] {",
+    "position: absolute;",
+    "[data-yumemi-badge][data-count=\"\"]",
+    "[data-yumemi-badge][data-count=\"0\"] { display: none; }",
+    "[popover]::backdrop { background: rgba(0, 0, 0, 0.45); }",
+  ]
+  |> list.each(fn(row) { string.contains(css, row) |> should.be_true })
+  string.contains(css, "article-dialog") |> should.be_false
+}
+
+pub fn front_overlay_missing_area_opener_is_exit_four_test() {
+  let notes =
+    overlay_negative_notes(
+      "missing_area",
+      "Area(name: \"page\", flow: css.Stack(gap: css.Px(0.0)), pin: css.NoPin, style: [])",
+      "Fixed(area: \"page\", block: blocks.Open, cell: Flow)",
+      "[]",
+    )
+  assert_overlay_exit_four(
+    notes,
+    "el.opener が同じ Page / Layout に無い area \"missing-dialog\" を名指している",
+  )
+}
+
+pub fn front_overlay_non_overlay_area_opener_is_exit_four_test() {
+  let notes =
+    overlay_negative_notes(
+      "non_overlay_area",
+      "Area(name: \"page\", flow: css.Stack(gap: css.Px(0.0)), pin: css.NoPin, style: []), Area(name: \"plain-dialog\", flow: css.Stack(gap: css.Px(0.0)), pin: css.NoPin, style: [])",
+      "Fixed(area: \"page\", block: blocks.Open, cell: Flow)",
+      "[]",
+    )
+  assert_overlay_exit_four(
+    notes,
+    "el.opener の area \"plain-dialog\" は pin: Overlay ではない",
+  )
+}
+
+pub fn front_overlay_dynamic_opener_area_is_exit_four_test() {
+  let notes =
+    overlay_negative_notes(
+      "dynamic_area",
+      "Area(name: \"page\", flow: css.Stack(gap: css.Px(0.0)), pin: css.NoPin, style: []), Area(name: \"article-dialog\", flow: css.Stack(gap: css.Px(0.0)), pin: css.Overlay, style: [])",
+      "Fixed(area: \"page\", block: blocks.Open, cell: Flow)",
+      "[]",
+    )
+  assert_overlay_exit_four(notes, "el.opener の area は文字列リテラルでなければならない")
+}
+
+pub fn front_overlay_explicit_template_is_exit_four_test() {
+  let assert Ok(fixture_units) =
+    source.load(front_overlay_negative_fixture <> "/explicit_template")
+  let units =
+    list.append(
+      [source_unit("layout", overlay_negative_layout())],
+      fixture_units,
+    )
+  let notes = front.notes(front_from_units_named("negative", units, []), [])
+  assert_overlay_exit_four(
+    notes,
+    "明示 template に Overlay area \"article-dialog\" を指定できない",
+  )
+}
+
+pub fn front_overlay_dynamic_each_modal_scope_is_exit_four_test() {
+  let notes =
+    overlay_negative_notes(
+      "dynamic_scope",
+      "Area(name: \"page\", flow: css.Stack(gap: css.Px(0.0)), pin: css.NoPin, style: [])",
+      "Fixed(area: \"page\", block: blocks.Listing, cell: Flow)",
+      "[]",
+    )
+  assert_overlay_exit_four(notes, "el.each_modal の scope は文字列リテラルでなければならない")
+}
+
+pub fn front_overlay_duplicate_each_modal_scope_is_exit_four_test() {
+  let notes =
+    overlay_negative_notes(
+      "duplicate_scope",
+      "Area(name: \"page\", flow: css.Stack(gap: css.Px(0.0)), pin: css.NoPin, style: [])",
+      "Fixed(area: \"page\", block: blocks.First, cell: Flow), Fixed(area: \"page\", block: blocks.Second, cell: Flow)",
+      "[]",
+    )
+  assert_overlay_exit_four(
+    notes,
+    "el.each_modal の scope \"shared-row\" が同じ Page + Layout 内で重複している",
+  )
+}
+
 pub fn front_emit_route_uses_page_only_and_colon_arguments_test() {
   let route = text("public/src/gen/route.gleam")
   string.contains(route, "PageRoute(path: \"/article/:slug\")")
@@ -3275,6 +3379,84 @@ pub fn nested_layout_is_exit_four_test() {
     )
   assert_one_note(notes, stop.Conflict, "Layout の中に Layout")
   stop.worst(notes) |> should.equal(4)
+}
+
+fn overlay_negative_notes(
+  fixture_name: String,
+  areas: String,
+  placements: String,
+  template: String,
+) -> List(stop.Note) {
+  let assert Ok(fixture_units) =
+    source.load(front_overlay_negative_fixture <> "/" <> fixture_name)
+  let block_units =
+    fixture_units
+    |> list.filter(fn(unit) { string.starts_with(unit.path, "blocks/") })
+  let units =
+    list.append(
+      [
+        source_unit("layout", overlay_negative_layout()),
+        source_unit(
+          "pages/example/page",
+          overlay_negative_page(areas, placements, template),
+        ),
+      ],
+      block_units,
+    )
+  front.notes(front_from_units_named("negative", units, []), [])
+}
+
+fn overlay_negative_layout() -> String {
+  "import framework/front.{type Layout, Frame, Layout}\n"
+  <> "import gleam/option.{None}\n\n"
+  <> "pub const negative: Layout(Nil, Nil) = Layout(\n"
+  <> "  sp: Frame(areas: [], placements: [], cols: [], rows: [], template: []),\n"
+  <> "  pc: None,\n"
+  <> "  tablet: None,\n"
+  <> "  reads: [],\n"
+  <> ")\n"
+}
+
+fn overlay_negative_page(
+  areas: String,
+  placements: String,
+  template: String,
+) -> String {
+  "import framework/front.{type Page, Area, Fixed, Flow, Frame, Page}\n"
+  <> "import framework/front/css\n"
+  <> "import gleam/option.{None}\n"
+  <> "import blocks\n\n"
+  <> "pub const page: Page(Nil, Nil) = Page(\n"
+  <> "  of: None,\n"
+  <> "  layout: None,\n"
+  <> "  theme: None,\n"
+  <> "  sp: Frame(\n"
+  <> "    areas: ["
+  <> areas
+  <> "],\n"
+  <> "    placements: ["
+  <> placements
+  <> "],\n"
+  <> "    cols: [],\n"
+  <> "    rows: [],\n"
+  <> "    template: "
+  <> template
+  <> ",\n"
+  <> "  ),\n"
+  <> "  pc: None,\n"
+  <> "  tablet: None,\n"
+  <> "  reads: [],\n"
+  <> ")\n"
+}
+
+fn assert_overlay_exit_four(notes: List(stop.Note), expected: String) -> Nil {
+  stop.worst(notes) |> should.equal(4)
+  let conflicts = list.filter(notes, fn(note) { note.class == stop.Conflict })
+  list.length(conflicts) |> should.equal(1)
+  let assert [note] = conflicts
+  stop.code(note.class) |> should.equal(4)
+  string.contains(stop.line(note), "[exit 4 宣言の矛盾]") |> should.be_true
+  string.contains(note.text, expected) |> should.be_true
 }
 
 fn article_front() -> front.Front {

@@ -4,7 +4,7 @@ import framework/front/css
 import framework/front/el
 import framework/front/sketch_css
 import gen/out/article_read
-import gleam/option.{None}
+import gleam/option.{None, Some}
 import lustre/attribute
 import sketch/lustre/element/html
 
@@ -56,6 +56,10 @@ pub fn view(it: In) -> el.Element(Nil) {
   html.section(sketch_css.class(card), [], [
     html.h1(sketch_css.class(title), [], [el.text(it.article.title)]),
     html.p(sketch_css.class(body), [], [el.text(it.article.body)]),
+    el.opener("article-dialog", [el.text("Open article options")]),
+    el.badge(None, [el.text("none")]),
+    el.badge(Some(0), [el.text("zero")]),
+    el.badge(Some(3), [el.text("three")]),
     html.div_([], [
       el.island("like-button", [
         attribute.attribute("slug", it.article.slug),

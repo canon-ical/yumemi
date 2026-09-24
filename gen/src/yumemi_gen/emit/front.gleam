@@ -2504,6 +2504,7 @@ fn load_imports(
 ) -> String {
   let base = [
     "framework/front/css",
+    "framework/front/el as el",
     "framework/front/sketch_css",
     "gleam/list",
     "gleam/option.{type Option, None, Some}",
@@ -2665,11 +2666,19 @@ fn page_view_text(
     True -> plain_area_text()
     False -> ""
   }
+  <> case has_overlay_area(list.append(layout_areas, page_areas)) {
+    True -> overlay_area_text()
+    False -> ""
+  }
   <> page_helpers
 }
 
 fn has_plain_page_area(areas: List(reader_front.Area)) -> Bool {
   list.any(areas, fn(area) { area.name != "page" && area.style == [] })
+}
+
+fn has_overlay_area(areas: List(reader_front.Area)) -> Bool {
+  list.any(areas, fn(area) { area.pin == "Overlay" })
 }
 
 fn layout_area_text(
@@ -2682,16 +2691,7 @@ fn layout_area_text(
   }
   let children =
     area_children_expression("layout_placement", placements, area.name, extra)
-  let opener = case area.style {
-    [] -> "plain_area(\"" <> area.name <> "\", "
-    _ ->
-      "styled_area(\""
-      <> area.name
-      <> "\", "
-      <> style_expression(area.style)
-      <> ", "
-  }
-  let body = opener <> children <> "),\n"
+  let body = area_element_text(area, children) <> ",\n"
   "    " <> body
 }
 
@@ -2742,16 +2742,32 @@ fn page_children_text(
 }
 
 fn page_area_text(area: reader_front.Area, children: String) -> String {
-  let opener = case area.style {
-    [] -> "plain_area(\"" <> area.name <> "\", "
-    _ ->
-      "styled_area(\""
+  area_element_text(area, children)
+}
+
+fn area_element_text(area: reader_front.Area, children: String) -> String {
+  case area.pin {
+    "Overlay" ->
+      "overlay_area(\""
       <> area.name
       <> "\", "
       <> style_expression(area.style)
       <> ", "
+      <> children
+      <> ")"
+    _ ->
+      case area.style {
+        [] -> "plain_area(\"" <> area.name <> "\", " <> children <> ")"
+        _ ->
+          "styled_area(\""
+          <> area.name
+          <> "\", "
+          <> style_expression(area.style)
+          <> ", "
+          <> children
+          <> ")"
+      }
   }
-  opener <> children <> ")"
 }
 
 fn area_children_expression(
@@ -2846,6 +2862,25 @@ fn plain_area_text() -> String {
   <> "  children: List(element.Element(Nil)),\n"
   <> ") -> element.Element(Nil) {\n"
   <> "  html.div_([attribute.attribute(\"data-yumemi-area\", name)], children)\n"
+  <> "}\n\n"
+}
+
+fn overlay_area_text() -> String {
+  "fn overlay_area(\n"
+  <> "  name: String,\n"
+  <> "  styles: List(css.Style),\n"
+  <> "  children: List(element.Element(Nil)),\n"
+  <> ") -> element.Element(Nil) {\n"
+  <> "  let attributes = [\n"
+  <> "    attribute.attribute(\"id\", el.overlay_id_prefix <> name),\n"
+  <> "    attribute.attribute(\"popover\", \"\"),\n"
+  <> "    attribute.attribute(\"data-yumemi-area\", name),\n"
+  <> "    attribute.attribute(\"data-yumemi-overlay\", \"\"),\n"
+  <> "  ]\n"
+  <> "  case styles {\n"
+  <> "    [] -> html.div_(attributes, children)\n"
+  <> "    _ -> html.div(sketch_css.class(styles), attributes, children)\n"
+  <> "  }\n"
   <> "}\n\n"
 }
 
@@ -3463,7 +3498,9 @@ fn shell_text(
   <> "\n"
   <> shell_runtime_text(
     front.components != [],
-    static_grid_css(front.layout) <> static_pages_grid_css(front.pages),
+    static_grid_css(front.layout)
+      <> static_pages_grid_css(front.pages)
+      <> generated_front_css(front),
   )
 }
 
@@ -3661,7 +3698,9 @@ fn bool_text(value: Bool) -> String {
 
 fn style_text(package: face.Package, front: reader_front.Front) -> String {
   let input_hash =
-    source_hash(package.units, fn(unit) { unit.path == "layout" })
+    source_hash(package.units, fn(unit) {
+      unit.path == "layout" || string.starts_with(unit.path, "pages/")
+    })
   "/* GENERATED from "
   <> package.name
   <> "/src/layout.gleam [sha256:"
@@ -3669,6 +3708,52 @@ fn style_text(package: face.Package, front: reader_front.Front) -> String {
   <> "] — 手で編集しない */\n"
   <> static_grid_css(front.layout)
   <> static_pages_grid_css(front.pages)
+  <> generated_front_css(front)
+}
+
+fn generated_front_css(front: reader_front.Front) -> String {
+  badge_css()
+  <> case front_has_overlay(front) {
+    True -> "[popover]::backdrop { background: rgba(0, 0, 0, 0.45); }\n"
+    False -> ""
+  }
+}
+
+fn badge_css() -> String {
+  "[data-yumemi-badge] {\n"
+  <> "  position: absolute;\n"
+  <> "  inset-block-start: 0;\n"
+  <> "  inset-inline-end: 0;\n"
+  <> "  display: inline-flex;\n"
+  <> "  align-items: center;\n"
+  <> "  justify-content: center;\n"
+  <> "  min-width: 1.25rem;\n"
+  <> "  height: 1.25rem;\n"
+  <> "  padding-inline: 0.25rem;\n"
+  <> "  border-radius: 999px;\n"
+  <> "  color: var(--bg);\n"
+  <> "  background: var(--accent);\n"
+  <> "  font: 600 0.75rem/1 system-ui, sans-serif;\n"
+  <> "}\n"
+  <> "[data-yumemi-badge][data-count=\"\"],\n"
+  <> "[data-yumemi-badge][data-count=\"0\"] { display: none; }\n"
+}
+
+fn front_has_overlay(front: reader_front.Front) -> Bool {
+  let layout_frames =
+    option_frame_list(front.layout.sp)
+    |> list.append(option_frame_list(front.layout.pc))
+    |> list.append(option_frame_list(front.layout.tablet))
+  let page_frames =
+    front.pages
+    |> list.flat_map(fn(page) {
+      option_frame_list(page.sp)
+      |> list.append(option_frame_list(page.pc))
+      |> list.append(option_frame_list(page.tablet))
+    })
+  list.any(list.append(layout_frames, page_frames), fn(frame) {
+    list.any(frame.areas, fn(area) { area.pin == "Overlay" })
+  })
 }
 
 fn static_grid_css(layout: reader_front.Layout) -> String {
@@ -3701,7 +3786,7 @@ fn static_frames_grid_css(
   tablet: Option(reader_front.Frame),
 ) -> String {
   let sp_frame = option.unwrap(sp, empty_frame("sp"))
-  let sp_areas = sp_frame.areas
+  let sp_areas = without_overlay_areas(sp_frame.areas)
   let pc_areas = frame_areas(pc, sp_areas)
   let tablet_areas = frame_areas(tablet, sp_areas)
   let extras =
@@ -3826,12 +3911,22 @@ fn frame_template_css(
   at: framework_css.Breakpoint,
 ) -> String {
   framework_front.resolved_template(
-    framework_frame(sp),
-    framework_frame(frame),
+    framework_frame(frame_without_overlay(sp)),
+    framework_frame(frame_without_overlay(frame)),
     at,
   )
   |> list.map(fn(row) { "\"" <> string.join(row, " ") <> "\"" })
   |> string.join(" ")
+}
+
+fn frame_without_overlay(frame: reader_front.Frame) -> reader_front.Frame {
+  reader_front.Frame(..frame, areas: without_overlay_areas(frame.areas))
+}
+
+fn without_overlay_areas(
+  areas: List(reader_front.Area),
+) -> List(reader_front.Area) {
+  list.filter(areas, fn(area) { area.pin != "Overlay" })
 }
 
 fn framework_frame(
@@ -3907,12 +4002,15 @@ fn page_has_explicit_grid(page: reader_front.Page) -> Bool {
       frame.cols != []
       || frame.rows != []
       || frame.template != []
-      || list.any(frame.areas, fn(area) { area.grid_tracks != None })
+      || list.any(frame.areas, fn(area) {
+        area.pin != "Overlay" && area.grid_tracks != None
+      })
       || list.any(frame.placements, fn(placement) {
         case placement {
-          reader_front.Fixed(cell: reader_front.Flow, ..) -> False
-          reader_front.Fixed(..) -> True
-          reader_front.Widget(..) -> False
+          reader_front.Fixed(area:, cell: reader_front.Flow, ..) ->
+            !area_is_overlay(frame, area)
+          reader_front.Fixed(area:, ..) -> !area_is_overlay(frame, area)
+          reader_front.Widget(area:, ..) -> !area_is_overlay(frame, area)
         }
       })
     },
@@ -3933,9 +4031,13 @@ fn frame_areas(
   fallback: List(reader_front.Area),
 ) -> List(reader_front.Area) {
   case frame {
-    Some(value) -> value.areas
-    None -> fallback
+    Some(value) -> without_overlay_areas(value.areas)
+    None -> without_overlay_areas(fallback)
   }
+}
+
+fn area_is_overlay(frame: reader_front.Frame, name: String) -> Bool {
+  list.any(frame.areas, fn(area) { area.name == name && area.pin == "Overlay" })
 }
 
 fn static_frame_body(
@@ -3985,10 +4087,11 @@ fn static_area_rule(
   area: reader_front.Area,
   visibility: String,
 ) -> String {
-  let base = [
-    selector <> " > [data-yumemi-area=\"" <> area.name <> "\"] {",
-    "  grid-area: " <> area.name <> ";",
-  ]
+  let base = [selector <> " > [data-yumemi-area=\"" <> area.name <> "\"] {"]
+  let grid_area = case area.pin {
+    "Overlay" -> []
+    _ -> ["  grid-area: " <> area.name <> ";"]
+  }
   let grid_tracks = case area.grid_tracks {
     Some(reader_front.GridTracks(cols:, gap: gap)) -> [
       "  display: grid;",
@@ -4020,7 +4123,10 @@ fn static_area_rule(
   string.join(
     list.append(
       base,
-      list.append(grid_tracks, list.append(visible, list.append(pin, ["}"]))),
+      list.append(
+        grid_area,
+        list.append(grid_tracks, list.append(visible, list.append(pin, ["}"]))),
+      ),
     ),
     "\n",
   )
