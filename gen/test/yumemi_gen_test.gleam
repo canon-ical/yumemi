@@ -11,6 +11,7 @@ import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
+import gleam/uri
 import gleeunit
 import gleeunit/should
 import simplifile
@@ -21,6 +22,7 @@ import yumemi_gen/emit/hash
 import yumemi_gen/emit/query
 import yumemi_gen/emit/static as static_emit
 import yumemi_gen/face
+import yumemi_gen/markdown
 import yumemi_gen/model
 import yumemi_gen/naming
 import yumemi_gen/reader
@@ -36,6 +38,9 @@ fn bundle_uses_generated_module() -> String
 
 @external(javascript, "./yumemi_gen_test_ffi.mjs", "bundle_rejects_undefined_import")
 fn bundle_rejects_undefined_import() -> String
+
+@external(javascript, "./yumemi_gen_test_ffi.mjs", "path_manifest_keeps_other_versions")
+fn path_manifest_keeps_other_versions() -> String
 
 /// 本便(gen-2)で置いた fixture ── 20 の写しではない。
 const flag_fixture = "fixtures/flag"
@@ -232,6 +237,8 @@ fn synthetic_out_for(
   extra_units: List(source.Unit),
 ) -> String {
   let assert Ok(back_units) = source.load(fixture)
+  let back_units =
+    list.filter(back_units, fn(unit) { unit.path != "service/" <> module })
   let assert Ok(face_units) = source.load("fixtures/article/public")
   let service_unit = source_unit("service/" <> module, service_source)
   let units = list.append(back_units, [service_unit, ..extra_units])
@@ -2091,6 +2098,17 @@ pub fn front_emit_shell_carries_language_title_and_theme_test() {
   |> list.each(fn(row) { string.contains(page, row) |> should.be_true })
 }
 
+pub fn front_emit_shell_includes_viewport_meta_test() {
+  let page = text("public/src/gen/load/article/arg_slug/page.gleam")
+  string.contains(page, "attribute.attribute(\"name\", \"viewport\")")
+  |> should.be_true
+  string.contains(
+    page,
+    "attribute.attribute(\"content\", \"width=device-width, initial-scale=1, viewport-fit=cover\")",
+  )
+  |> should.be_true
+}
+
 pub fn front_emit_blocks_preview_places_layout_blocks_by_area_test() {
   let files =
     synthetic_front_files_with_layout(
@@ -2136,6 +2154,37 @@ pub fn front_emit_blocks_preview_places_layout_blocks_by_area_test() {
   string.contains(fixture_preview, "el.text(\"header\")") |> should.be_false
 }
 
+pub fn front_emit_blocks_preview_defaults_imported_service_out_test() {
+  let assert Ok(face_units) = source.load("fixtures/article/public")
+  let face_units =
+    face_units
+    |> list.filter(fn(unit) {
+      unit.path != "layout" && unit.path != "blocks/article"
+    })
+    |> list.append([
+      source_unit(
+        "layout",
+        layout_source(
+          "Layout(sp: Frame(areas: [Area(name: \"page\", flow: css.Stack(gap: style.s0), pin: css.NoPin, style: [])], placements: [Fixed(area: \"page\", block: blocks.Article, cell: Flow)], cols: [], rows: [], template: []), pc: None, tablet: None, reads: [])",
+        ),
+      ),
+      source_unit(
+        "blocks/article",
+        "import framework/front/el\n"
+          <> "import gen/out/article_read\n"
+          <> "pub type In = article_read.Out\n"
+          <> "pub fn view(it: In) -> el.Element(Nil) {\n"
+          <> "  el.text(it.article.slug)\n}",
+      ),
+    ])
+  let assert Ok(#(_, preview)) =
+    synthetic_front_files(face_units)
+    |> list.find(fn(file) { file.0 == "public/src/gen/blocks_preview.gleam" })
+  string.contains(preview, "article.view(article_read.Out(")
+  |> should.be_true
+  string.contains(preview, "article.view(Nil)") |> should.be_false
+}
+
 pub fn front_emit_blob_theme_wraps_image_in_quoted_css_url_test() {
   let files = synthetic_front_files_with_blob_theme()
   let assert Ok(#(_, page)) =
@@ -2144,9 +2193,30 @@ pub fn front_emit_blob_theme_wraps_image_in_quoted_css_url_test() {
     })
   string.contains(
     page,
-    "Some(value) -> \"url(\\\"\" <> to_string(value) <> \"\\\")\"",
+    "Some(value) -> \"url(\\\"\" <> media.url(value, media.W1600) <> \"\\\")\"",
   )
   |> should.be_true
+  string.contains(page, "import media") |> should.be_true
+  string.contains(page, "framework/blob.{type Blob}") |> should.be_true
+}
+
+pub fn front_blob_theme_media_url_matches_segment_encoding_test() {
+  let key = "season one+猫/夏祭り 2026+top.jpg"
+  let encoded =
+    key
+    |> string.split("/")
+    |> list.map(fn(segment) {
+      segment
+      |> uri.percent_encode
+      |> string.replace("+", "%2B")
+    })
+    |> string.join("/")
+
+  let url = "/media/" <> encoded <> "?v=w1600"
+  url
+  |> should.equal(
+    "/media/season%20one%2B%E7%8C%AB/%E5%A4%8F%E7%A5%AD%E3%82%8A%202026%2Btop.jpg?v=w1600",
+  )
 }
 
 pub fn missing_shell_is_exit_three_test() {
@@ -2220,7 +2290,7 @@ pub fn static_material_sources_are_required_and_classified_test() {
   stop.code(unreadable.class) |> should.equal(2)
 }
 
-pub fn static_material_copy_keeps_front_four_names_and_markdown_bytes_test() {
+pub fn static_material_copy_keeps_front_four_names_and_markdown_structure_test() {
   let assert Ok(sources) = static_source.load(fixture)
   list.length(sources.hosts) |> should.equal(3)
   let external =
@@ -2233,7 +2303,37 @@ pub fn static_material_copy_keeps_front_four_names_and_markdown_bytes_test() {
   let document = static_emit.api_v1_text(sources.api_v1, sources.api_v1_hash)
   string.contains(document, "pub fn nodes() -> List(el.Element(Nil))")
   |> should.be_true
-  string.contains(document, string.inspect(sources.api_v1)) |> should.be_true
+  string.contains(document, "heading1(\"MuseArch REST API\")") |> should.be_true
+  string.contains(document, "html.table(") |> should.be_true
+  string.contains(document, "html.pre(") |> should.be_true
+  string.contains(document, string.inspect(sources.api_v1)) |> should.be_false
+  text_occurrences(document, "\n    heading") |> should.equal(3)
+  text_occurrences(document, "html.table(") |> should.equal(2)
+  text_occurrences(document, "table_row([") |> should.equal(11)
+  let inline_code_count = text_occurrences(document, "inline_code(") - 1
+  inline_code_count |> should.equal(67)
+  text_occurrences(document, "html.pre(") |> should.equal(1)
+  let list_count = text_occurrences(document, "unordered_list(") - 1
+  list_count |> should.equal(0)
+}
+
+pub fn static_api_v1_source_change_changes_generated_structure_test() {
+  let assert Ok(sources) = static_source.load(fixture)
+  let changed_source =
+    string.replace(sources.api_v1, "MuseArch REST API", "MuseArch REST API!")
+  let original_document = static_emit.api_v1_text(sources.api_v1, "same-hash")
+  let changed_document = static_emit.api_v1_text(changed_source, "same-hash")
+  let different = original_document != changed_document
+  different |> should.be_true
+  string.contains(changed_document, "MuseArch REST API!") |> should.be_true
+}
+
+pub fn static_api_v1_parser_rejects_unhandled_markdown_test() {
+  let source = "# Title\n\n> A block quote is not supported."
+  case markdown.parse(source) {
+    Ok(_) -> should.be_false
+    Error(_) -> should.be_true
+  }
 }
 
 pub fn one_character_host_source_change_changes_the_generated_copy_test() {
@@ -2252,6 +2352,10 @@ pub fn one_character_host_source_change_changes_the_generated_copy_test() {
   same |> should.be_false
   string.contains(changed_text, "host: \"images.example.tesT\"")
   |> should.be_true
+}
+
+fn text_occurrences(source: String, needle: String) -> Int {
+  string.split(source, needle) |> list.length |> int.subtract(1)
 }
 
 pub fn front_emit_grid_css_has_breakpoint_pin_and_hidden_area_rules_test() {
@@ -2450,6 +2554,57 @@ pub fn front_calls_parse_framework_target_of_and_entry_test() {
     generated_api,
     "pub type Target = front.Target(service.Service, Attached)",
   )
+  |> should.be_true
+}
+
+pub fn front_emit_generates_service_and_static_attached_live_modules_test() {
+  let assert Ok(face_units) = source.load("fixtures/article/public")
+  let face_units =
+    face_units
+    |> list.filter(fn(unit) { unit.path != "components/pick_tag" })
+    |> list.append([
+      source_unit(
+        "components/pick_tag",
+        "pub const calls: List(front.Target(service.Service, api.Attached)) = [\n"
+          <> "  front.Of(service.ArticleCreate),\n"
+          <> "]\n"
+          <> "pub const target: api.Target = api.Entry(api.FixtureBrowser)",
+      ),
+    ])
+  let base_app = app()
+  let app =
+    model.App(..base_app, attached: [
+      model.AttachedRoute(
+        name: "FixtureBrowser",
+        method: "GET",
+        path: "/fixture/browser",
+      ),
+    ])
+  let assert Ok(back_units) = source.load(fixture)
+  let assert Ok(front_model) =
+    front.read_with_package("public", "public", face_units, app.services)
+  let package =
+    face.Package(
+      name: "public",
+      path: "fixtures/article/public",
+      pages: face.UndeclaredPages,
+      units: face_units,
+    )
+  let files =
+    front_emit.emit(app, back_units, package, front_model, hash.of(back_units))
+  let assert Ok(service_live) =
+    list.find(files, fn(file) {
+      file.path == "public/src/gen/live/article_create.gleam"
+    })
+  string.contains(service_live.text, "\"/api/articles\"")
+  |> should.be_true
+  let assert Ok(attached_live) =
+    list.find(files, fn(file) {
+      file.path == "public/src/gen/live/fixture_browser.gleam"
+    })
+  string.contains(attached_live.text, "\"/fixture/browser\"")
+  |> should.be_true
+  string.contains(attached_live.text, "live.State(Args, Nil, Dynamic, Failure)")
   |> should.be_true
 }
 
@@ -2680,6 +2835,70 @@ pub fn front_emit_decodes_untagged_custom_union_test() {
   |> list.each(fn(row) { string.contains(out, row) |> should.be_true })
 }
 
+pub fn front_emit_decodes_visit_source_from_codec_fields_test() {
+  let out =
+    synthetic_out_for(
+      app(),
+      "widget_list",
+      "import entity/visit as visit\n\n"
+        <> "pub type Out { Out(source: visit.Source) }\n\n"
+        <> "pub const service: Service(Args, Out, Error) = Nil",
+      [
+        source_unit(
+          "entity/visit",
+          "pub type Source { Tagged(String) External Internal Direct }",
+        ),
+      ],
+    )
+  [
+    "decode.field(\"source_kind\", decode.string",
+    "\"tagged\" ->",
+    "decode.field(\"source_key\", decode.string",
+    "decode.success(Tagged(key))",
+    "\"external\" ->",
+    "decode.field(\"source_key\", decode.optional(decode.string)",
+    "decode.success(External)",
+    "\"internal\" ->",
+    "decode.success(Internal)",
+    "\"direct\" ->",
+    "decode.success(Direct)",
+  ]
+  |> list.each(fn(part) { string.contains(out, part) |> should.be_true })
+  string.contains(out, "decode.one_of(") |> should.be_false
+}
+
+pub fn front_emit_roster_read_qualifies_public_entity_types_test() {
+  let out =
+    synthetic_out_for(
+      app(),
+      "roster_read",
+      "import entity/muse as muse\n"
+        <> "import entity/store as store\n\n"
+        <> "import entity/roster as roster\n\n"
+        <> "pub type Out {\n"
+        <> "  Out(muse: muse.Public, store: store.Public, roster: roster.Public)\n"
+        <> "}\n\n"
+        <> "pub const service: Service(Args, Out, Error) = Nil",
+      [
+        source_unit("entity/muse", "pub type Public { Public(handle: String) }"),
+        source_unit(
+          "entity/store",
+          "pub type Public { Public(handle: String) }",
+        ),
+        source_unit(
+          "entity/roster",
+          "pub type Public { Public(handle: String) }",
+        ),
+      ],
+    )
+  string.contains(out, "pub type MusePublic {") |> should.be_true
+  string.contains(out, "pub type StorePublic {") |> should.be_true
+  string.contains(out, "pub type RosterPublic {") |> should.be_true
+  string.contains(out, "muse: MusePublic") |> should.be_true
+  string.contains(out, "store: StorePublic") |> should.be_true
+  string.contains(out, "roster: RosterPublic") |> should.be_true
+}
+
 pub fn front_emit_aliases_local_service_return_as_out_test() {
   let out =
     synthetic_multi_decoder_out(
@@ -2701,6 +2920,18 @@ pub fn front_emit_undiscriminable_union_has_stop_diagnostic_test() {
   let units =
     list.append(units, [
       source_unit(
+        "entity/visit",
+        "pub type Source { Tagged(String) External Internal Direct }",
+      ),
+      source_unit(
+        "service/visit_metrics",
+        "import entity/visit as visit\n\n"
+          <> "pub type Args\n"
+          <> "pub type Out { Out(source: visit.Source) }\n"
+          <> "pub type Error\n"
+          <> "pub const service: Service(Args, Out, Error) = Nil",
+      ),
+      source_unit(
         "service/ambiguous",
         "pub type Row { Alpha(title: String) Beta(count: Int) }\n\n"
           <> "pub type Out { Out(rows: List(Row)) }\n\n"
@@ -2712,6 +2943,9 @@ pub fn front_emit_undiscriminable_union_has_stop_diagnostic_test() {
     list.find(notes, fn(note) { string.contains(note.text, "ambiguous.Row") })
   note.class |> should.equal(stop.NotImplemented)
   string.contains(note.text, "複数 variant を判別できない") |> should.be_true
+  notes
+  |> list.any(fn(note) { string.contains(note.text, "entity/visit.Source") })
+  |> should.be_false
 }
 
 pub fn front_emit_transport_and_client_are_generic_and_given_safe_test() {
@@ -2736,6 +2970,10 @@ pub fn client_bundle_uses_generated_output_over_input_test() {
 
 pub fn client_bundle_stops_on_undefined_import_test() {
   bundle_rejects_undefined_import() |> should.equal("PASS")
+}
+
+pub fn path_manifest_keeps_other_versions_test() {
+  path_manifest_keeps_other_versions() |> should.equal("PASS")
 }
 
 pub fn client_bundle_failures_remain_per_face_notes_test() {
@@ -2790,7 +3028,7 @@ pub fn front_emit_live_follows_island_calls_and_reload_out_test() {
   let create = text("public/src/gen/live/article_create.gleam")
   string.contains(
     create,
-    "pub type State = live.State(Args, article_list.Out, article_create.Out, Error)",
+    "pub type State = live.State(Args, article_list.Out, article_create.Out, Failure)",
   )
   |> should.be_true
   string.contains(create, "live.Set(Tags, value)") |> should.be_true
@@ -2802,7 +3040,20 @@ pub fn front_emit_live_follows_island_calls_and_reload_out_test() {
   let publish = text("public/src/gen/live/article_publish.gleam")
   string.contains(publish, "pub type Field {\n  Slug\n}")
   |> should.be_true
+  string.contains(
+    publish,
+    "pub type Error {\n  AlreadyPublished\n  AlreadyRetracted\n}",
+  )
+  |> should.be_true
+  string.contains(publish, "  Refused(Error)\n  Broke(String)")
+  |> should.be_true
+  string.contains(publish, "\"already_published\" -> Refused(AlreadyPublished)")
+  |> should.be_true
   string.contains(publish, "pub fn validate(model: State)") |> should.be_true
+
+  let transport = text("public/src/gen/live/transport_ffi.mjs")
+  string.contains(transport, "response.json().then(onError)") |> should.be_true
+  string.contains(transport, "onError(undefined)") |> should.be_false
 }
 
 pub fn front_emit_out_redefines_opaque_relations_test() {

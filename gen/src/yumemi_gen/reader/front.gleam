@@ -145,6 +145,9 @@ pub type Block {
     module: String,
     input: Option(String),
     input_module: Option(String),
+    input_definition: Option(glance.CustomType),
+    input_imports: List(glance.Definition(glance.Import)),
+    source: glance.Module,
     has_view: Bool,
     has_sample: Bool,
   )
@@ -540,11 +543,15 @@ fn parse_block(unit: Unit) -> Result(Block, Nil) {
     view
     |> option.then(fn(function) { first_parameter_input(module, function) })
     |> option.unwrap(#(None, None))
+  let input_definition = input |> option.then(g.find_custom_type(module, _))
   Ok(Block(
     name: name,
     module: unit.path,
     input: input,
     input_module: input_module,
+    input_definition: input_definition,
+    input_imports: module.imports,
+    source: module,
     has_view: view != None,
     has_sample: has_public_constant(module, "sample"),
   ))
@@ -1504,7 +1511,7 @@ fn resolved_input(
   case annotation {
     glance.NamedType(name: name, module: Some(path), ..) -> #(
       Some(name),
-      Some(path),
+      Some(imported_module(module.imports, path) |> option.unwrap(path)),
     )
     glance.NamedType(name: name, module: None, ..) ->
       case g.find_type_alias(module, name) {
