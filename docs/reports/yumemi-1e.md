@@ -1,8 +1,8 @@
-# yumemi-1e 巡 6 結果
+# yumemi-1e 結果
 
 ## DDL
 
-無し。`git diff --stat 2067902 -- db/ gen/fixtures/article/db/` は空。fresh fixture は各92 files、`db/queries` は32 files、2回生成の差分は空。tracked `public/src/gen` と `_yumemi` (client を含む) は fresh 出力と一致。証跡: `gen/build/y1e-n-ddl-diff.txt`、`gen/build/y1e-n-fixture-{a,b}.txt`、`gen/build/y1e-n-fixture-diff.txt`、`gen/build/y1e-n-fixture-tracked-public-{gen,assets}-diff.txt`。
+無し。`git diff --stat 8875df6 -- db/ gen/fixtures/article/db/` は空(基点)。fresh fixture は各92 files、`db/queries` は32 files、2回生成の差分は空。tracked `public/src/gen` と `_yumemi` (client を含む) は fresh 出力と一致。証跡: `gen/build/y1e-n-ddl-diff.txt`、`gen/build/y1e-n-fixture-{a,b}.txt`、`gen/build/y1e-n-fixture-diff.txt`、`gen/build/y1e-n-fixture-tracked-public-{gen,assets}-diff.txt`。
 
 ## 鷹野宛
 
