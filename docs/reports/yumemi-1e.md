@@ -2,7 +2,7 @@
 
 ## DDL
 
-無し。巡7の開始点 `60f7d8f` から `db/` と `gen/fixtures/article/db/` の差分は0行。fresh fixture は各92 files、2回生成の差分は空。tracked `public/src/gen` と `_yumemi` (client を含む) は fresh 出力と一致。証跡: `gen/build/y1e-p-ddl-diff.txt`、`gen/build/y1e-p-fixture-{c,d}.txt`、`gen/build/y1e-p-fixture-{cd-diff,c-tracked-diff}.txt`。
+無し。基点 `8875df6` から `db/` と `gen/fixtures/article/db/` の差分は0行(`git diff --stat 8875df6 -- db/ gen/fixtures/article/db/` は空)。fresh fixture は各92 files、2回生成の差分は空。tracked `public/src/gen` と `_yumemi` (client を含む) は fresh 出力と一致。証跡: `gen/build/y1e-p-ddl-diff.txt`、`gen/build/y1e-p-fixture-{c,d}.txt`、`gen/build/y1e-p-fixture-{cd-diff,c-tracked-diff}.txt`。
 
 ## 鷹野宛
 
@@ -11,6 +11,7 @@
 - PageTheme は `Out` がその型を持つ service module から参照する。Block `In` の必須 `Out` field をページ source に加え、`muse_header.In(page: muse_read, subscription: None)` を生成する。`Option(Out)` は source が無いとき `None` を構築する。
 - F5 の www 生成 load に残る型 error は route parameter `arg_code` / `arg_id` の2件だけ。`claim_head.String` と `space_title.FreeSpace` は値の出所として扱い、snapshot の既存生成例を `### 値の出所の穴` に追加した。
 - generated live の `gleam_json` / `lustre` transitive warning は、F5 面 manifest の直接依存を補った同じ probe で3面とも0。`sketch_lustre` の face-source warning は gen-6 P1-4 の追随事項に残す。
+- 生成 decoder は、欄の無い構成子を back の `tag()`(snapshot `api/src/gen/codec.mjs` の snake_case。`Draft` → `"draft"`)で読む。以前は構成子名そのもの(`"Draft"`)で読んでいて、`visit.Source` に限らず enum の応答をすべて読み違えていた。fixture の `out/article_create.gleam` と mock の応答(`gen/scripts/front-scratch/worker-entry.mjs`)を同じ形に直した。▲ の手書き decoder(例: www `gen/live/notification_mark_read.gleam:126-130`)も snake_case で読んでいる
 - `musearch` は書いていない。開始 snapshot は `a109b47`、終了時 `git status --short` は空、HEAD は `8eed4d8`。
 - root `gleam.toml` と `gen/manifest.toml`、fixture manifest の `yumemi` lock はすべて 0.9.0。
 
