@@ -1,6 +1,6 @@
 # yumemi-gen-8(WGy)── back の生成器(真壁、2026-09-26)
 
-基点は yumemi main `3209703`、branch `impl/yumemi-gen-8`。写しは musearch `645ec49` を `git archive` で `gen/build/wgy/snap/` に置いた(musearch の作業木には 1 file も書いていない)。証跡は全部 `gen/build/wgy/`(git 管理外)。commit は checkpoint 6 本(`7459588`〜`86a82e0`)。**完了条件を全部は満たしていないので squash していない**(下の「届かなかったもの」)。
+基点は yumemi main `3209703`、branch `impl/yumemi-gen-8`。写しは musearch `645ec49` を `git archive` で `gen/build/wgy/snap/` に置いた(musearch の作業木には 1 file も書いていない)。証跡は全部 `gen/build/wgy/`(git 管理外)。commit は checkpoint 7 本(`7459588`〜、7 本目はこの report)。**完了条件を全部は満たしていないので squash していない**(下の「届かなかったもの」)。
 
 ## 結論
 

@@ -3,7 +3,7 @@
 ## 状態
 
 - 完了条件のうち届いたもの:宣言(`framework/server`、routes / aliases / attached / cron / durable_objects / hooks)と reader、`http_runtime.mjs` を入力として読む行 0、Route の曖昧 22 → 0、`owner Self` 28 → 0(主体の鍵の穴 `subject=$K`)、面の Route を面が参照する Service に絞った(www に `Put` 無し)、back の生成物 15 本(registry / sql / codec / attached / shell / queue / cron / key / subject / source / operations / entry×4)、framework の server の JS 7 本
-- **届いていないもの**:`http_runtime.mjs` / `runtime.mjs` / `connector/*.gleam` の生成と、Gleam 側の生成物での `api/src/gen` の丸ごとの置き換え。写しの `api/src/gen` の sha256 無しは 102 のまま。**squash していない**(checkpoint 6 本を残した)。理由と矛盾は `docs/reports/yumemi-gen-8.md` の「鷹野宛」1
+- **届いていないもの**:`http_runtime.mjs` / `runtime.mjs` / `connector/*.gleam` の生成と、Gleam 側の生成物での `api/src/gen` の丸ごとの置き換え。写しの `api/src/gen` の sha256 無しは 102 のまま。**squash していない**(checkpoint 7 本を残した)。理由と矛盾は `docs/reports/yumemi-gen-8.md` の「鷹野宛」1
 - 詳細・棚卸し・★ hook の一覧は `docs/reports/yumemi-gen-8.md`
 
 ## DDL
