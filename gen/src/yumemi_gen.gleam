@@ -30,11 +30,10 @@ import yumemi_gen/emit/static as static_emit
 import yumemi_gen/emit/types
 import yumemi_gen/emit/verb
 import yumemi_gen/face
-import yumemi_gen/model
-import yumemi_gen/naming
 import yumemi_gen/reader
 import yumemi_gen/reader/allow as allow_reader
 import yumemi_gen/reader/front
+import yumemi_gen/reader/server as server_reader
 import yumemi_gen/source
 import yumemi_gen/static_source
 import yumemi_gen/stop.{type Note, Note}
@@ -95,7 +94,6 @@ pub fn generate(
     }),
   )
   use app <- result.try(reader.read(units) |> result.map_error(read_note))
-  let app = model.App(..app, attached: attached_routes(app_dir))
   use discovered <- result.try(
     face.discover(app_dir, units)
     |> result.map_error(source_note),
@@ -133,42 +131,27 @@ pub fn generate(
     )
   let front_notes =
     list.append(front_notes, front_emit.decoder_notes(app, units))
+  let collision_notes =
+    list.map(query.collisions(app), fn(entry) {
+      let #(module, name) = entry
+      Note(
+        class: stop.Conflict,
+        text: "名前の衝突 " <> module <> ": " <> name <> "(構成子は module ごとに1つの名前空間)",
+      )
+    })
   let notes =
-    list.append(
+    list.flatten([
       front_notes,
-      list.append(
-        verb.notes(app),
-        list.append(
-          reader.missing_key_notes(units),
-          list.append(
-            reader.entry_notes(app),
-            list.append(
-              list.map(query.collisions(app), fn(entry) {
-                let #(module, name) = entry
-                Note(
-                  class: stop.Conflict,
-                  text: "名前の衝突 "
-                    <> module
-                    <> ": "
-                    <> name
-                    <> "(構成子は module ごとに1つの名前空間)",
-                )
-              }),
-              list.append(
-                list.append(
-                  list.append(
-                    root.notes(app),
-                    allow_emit.notes(app, allow_usages),
-                  ),
-                  sql.notes(app, hashes),
-                ),
-                entry_output.notes,
-              ),
-            ),
-          ),
-        ),
-      ),
-    )
+      verb.notes(app),
+      reader.missing_key_notes(units),
+      reader.entry_notes(app),
+      server_reader.notes(app),
+      collision_notes,
+      root.notes(app),
+      allow_emit.notes(app, allow_usages),
+      sql.notes(app, hashes),
+      entry_output.notes,
+    ])
   let diagnostics = case notes {
     [] -> []
     _ -> [
@@ -209,60 +192,6 @@ pub fn generate(
     ]),
     notes,
   ))
-}
-
-fn attached_routes(app_dir: String) -> List(model.AttachedRoute) {
-  case simplifile.read(app_dir <> "/api/src/gen/http_runtime.mjs") {
-    Ok(source_text) -> attached_routes_from_source(source_text)
-    Error(_) ->
-      case simplifile.read(app_dir <> "/src/gen/http_runtime.mjs") {
-        Ok(source_text) -> attached_routes_from_source(source_text)
-        Error(_) -> []
-      }
-  }
-}
-
-fn attached_routes_from_source(
-  source_text: String,
-) -> List(model.AttachedRoute) {
-  case string.split(source_text, "const attached=[") {
-    [_, rest, ..] ->
-      case string.split(rest, "];") {
-        [table, ..] ->
-          table
-          |> string.split("}")
-          |> list.filter_map(parse_attached_route)
-        [] -> []
-      }
-    _ -> []
-  }
-}
-
-fn parse_attached_route(row: String) -> Result(model.AttachedRoute, Nil) {
-  case
-    single_quoted_field(row, "name"),
-    single_quoted_field(row, "method"),
-    single_quoted_field(row, "path")
-  {
-    Some(name), Some(method), Some(path) ->
-      Ok(model.AttachedRoute(
-        name: naming.pascal(name),
-        method: method,
-        path: path,
-      ))
-    _, _, _ -> Error(Nil)
-  }
-}
-
-fn single_quoted_field(row: String, label: String) -> Option(String) {
-  case string.split(row, label <> ":'") {
-    [_, rest, ..] ->
-      case string.split(rest, "'") {
-        [value, ..] -> Some(value)
-        [] -> None
-      }
-    _ -> None
-  }
 }
 
 fn read_note(error: reader.Error) -> Note {

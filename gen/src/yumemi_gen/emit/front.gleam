@@ -1594,7 +1594,7 @@ fn blob_entry_live_text(
   hashes: hash.Hashes,
 ) -> String {
   let input_hash = digest.short(hash.entry(hashes) <> string.inspect(route))
-  "//// GENERATED from api/src/gen/http_runtime.mjs [sha256:"
+  "//// GENERATED from src/server.gleam [sha256:"
   <> input_hash
   <> "] — 手で編集しない\n\n"
   <> "import framework/front/live\n"
@@ -4479,7 +4479,10 @@ fn api_text(
   hashes: hash.Hashes,
   front: reader_front.Front,
 ) -> String {
-  let routes = api_routes(app, hashes, face_name)
+  let used = face_service_names(front)
+  let routes =
+    api_routes(app, hashes, face_name)
+    |> list.filter(fn(route) { list.contains(used, route.service) })
   let attached_names = attached_names(front, app.attached)
   let attached_methods =
     app.attached
@@ -4518,6 +4521,22 @@ fn api_text(
   <> "pub const routes: List(Route) = [\n"
   <> rows
   <> "\n]\n"
+}
+
+/// 面の `api.gleam` に載せる Service ── 面が参照する(page の置き場・block・component の calls と
+/// reload)ものだけ。面が呼ばない Service の route を載せない(www に `Put` が出ない)。
+fn face_service_names(front: reader_front.Front) -> List(String) {
+  list.append(
+    front.services,
+    list.flat_map(front.components, fn(component) {
+      list.append(
+        component_services(component),
+        list.map(component.reloads, fn(reload) { reload.1 }),
+      )
+    }),
+  )
+  |> list.flat_map(fn(name) { [name, naming.snake(name)] })
+  |> list.unique
 }
 
 fn attached_names(
@@ -5606,28 +5625,18 @@ fn api_route_text(route: ApiRoute) -> String {
 
 fn api_routes(
   app: model.App,
-  hashes: hash.Hashes,
+  _hashes: hash.Hashes,
   face_name: String,
 ) -> List(ApiRoute) {
-  let output = entry.emit(app, hashes)
-  case
-    list.find(output.files, fn(file) { file.path == "src/gen/entry/http.gleam" })
-  {
-    Ok(file) ->
-      file.text
-      |> string.split("  Route(")
-      |> list.filter_map(fn(rest) {
-        case string.split(rest, ")") {
-          [row, ..] ->
-            case string.contains(row, "face: ") {
-              True -> api_route_from_row(row, face_name)
-              False -> Error(Nil)
-            }
-          _ -> Error(Nil)
-        }
-      })
-    Error(_) -> []
-  }
+  entry.routes(app)
+  |> list.filter(fn(route) { route.face == face_name })
+  |> list.map(fn(route) {
+    ApiRoute(
+      service: route.service,
+      method: route.method,
+      path: colon_path(route.path),
+    )
+  })
 }
 
 pub fn route_notes(
@@ -5677,35 +5686,6 @@ fn api_route_for(
   api_routes(app, hashes, face_name)
   |> list.find(fn(route) { route.service == service })
   |> option.from_result
-}
-
-fn api_route_from_row(row: String, face_name: String) -> Result(ApiRoute, Nil) {
-  case
-    quoted_field(row, "face"),
-    quoted_field(row, "method"),
-    quoted_field(row, "path"),
-    quoted_field(row, "service")
-  {
-    Some(face), Some(method), Some(path), Some(service) ->
-      case face == face_name {
-        True ->
-          Ok(ApiRoute(service: service, method: method, path: colon_path(path)))
-        False -> Error(Nil)
-      }
-    _, _, _, _ -> Error(Nil)
-  }
-}
-
-fn quoted_field(row: String, label: String) -> Option(String) {
-  let marker = label <> ": \""
-  case string.split(row, marker) {
-    [_, rest, ..] ->
-      case string.split(rest, "\"") {
-        [value, ..] -> Some(value)
-        [] -> None
-      }
-    _ -> None
-  }
 }
 
 fn colon_path(path: String) -> String {

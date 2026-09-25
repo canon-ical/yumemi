@@ -12,6 +12,7 @@ import yumemi_gen/glance_util as g
 import yumemi_gen/model.{type App, type Entity, type Prop, type ValueType}
 import yumemi_gen/naming
 import yumemi_gen/reader/clauses
+import yumemi_gen/reader/server as server_reader
 import yumemi_gen/relation
 import yumemi_gen/source.{type Unit}
 import yumemi_gen/stop
@@ -2267,6 +2268,10 @@ pub fn read(units: List(Unit)) -> Result(App, Error) {
     entity_list,
   ))
   use external_manual <- result.try(external_manual_verbs(units, entity_list))
+  use server_read <- result.try(
+    server_reader.read(units)
+    |> result.map_error(fn(detail) { Unsupported("server", detail) }),
+  )
   let arrow_list = arrows(entity_list)
   Ok(model.App(
     value_types: types,
@@ -2281,7 +2286,8 @@ pub fn read(units: List(Unit)) -> Result(App, Error) {
     ),
     clauses: clauses.read(units),
     entries: entry_list,
-    attached: [],
+    attached: server_read.attached,
+    server: server_read.server,
     handwritten_verbs: external_handwritten,
     manual_verbs: external_manual,
   ))

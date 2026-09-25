@@ -340,7 +340,7 @@ pub fn gen_types_value_prop_keeps_property_column_test() {
 
 pub fn fixture_gleam_files_parse_including_trailing_spread_test() {
   let assert Ok(units) = source.load(fixture)
-  list.length(units) |> should.equal(15)
+  list.length(units) |> should.equal(16)
   list.any(units, fn(unit) { unit.path == "trailing_spread" })
   |> should.be_true
 }
@@ -1717,8 +1717,10 @@ pub fn root_module_mismatch_is_a_nonblocking_warning_test() {
   let found = text_of(root_warning_fixture, "src/gen/root/store_check.gleam")
   string.contains(found, "widget: widget.Widget") |> should.be_true
   let notes = notes_of(root_warning_fixture)
-  list.length(notes) |> should.equal(2)
-  stop.worst(notes) |> should.equal(4)
+  // WGy: 名前の前置き(store)が Entity に当たらない Service は、allow の Entity(widget)を
+  // 対象にして route を導く(改名しない ── 2b-7 の裁定 2)。警告だけが残る。
+  list.length(notes) |> should.equal(1)
+  stop.worst(notes) |> should.equal(0)
   notes
   |> list.any(fn(note) {
     note.class == stop.Warning
@@ -1726,13 +1728,8 @@ pub fn root_module_mismatch_is_a_nonblocking_warning_test() {
     && string.contains(note.text, "widget")
   })
   |> should.be_true
-  notes
-  |> list.any(fn(note) {
-    note.class == stop.Conflict
-    && string.contains(note.text, "store_check")
-    && string.contains(note.text, "対象が無い")
-  })
-  |> should.be_true
+  let http = text_of(root_warning_fixture, "src/gen/entry/http.gleam")
+  string.contains(http, "service: \"store_check\"") |> should.be_true
 }
 
 // ── header の入力ハッシュ(20 の規約①、柏木 P2-5) ────────────────────────────
@@ -2162,20 +2159,20 @@ pub fn front_emit_api_is_filtered_by_face_services_test() {
   string.contains(api, "  Entry(Attached)") |> should.be_false
 }
 
-pub fn attached_runtime_table_matches_generated_face_api_test() {
-  let assert Ok(runtime) =
-    simplifile.read("fixtures/article/api/src/gen/http_runtime.mjs")
+pub fn attached_declaration_table_matches_generated_face_api_test() {
+  let assert Ok(declaration) =
+    simplifile.read("fixtures/article/src/server.gleam")
   let api = text("public/src/gen/api.gleam")
-  let runtime_rows =
-    runtime |> string.split("name:'") |> list.length |> int.subtract(1)
+  let declared_rows =
+    declaration |> string.split("  Attached(") |> list.length |> int.subtract(1)
   let face_rows =
     api
     |> string.split("AttachedRoute(entry:")
     |> list.length
     |> int.subtract(1)
     |> int.subtract(1)
-  runtime_rows |> should.equal(3)
-  face_rows |> should.equal(runtime_rows)
+  declared_rows |> should.equal(3)
+  face_rows |> should.equal(declared_rows)
   [
     "AttachedRoute(entry: FixtureBrowser, method: Get, path: \"/fixture/browser\")",
     "AttachedRoute(entry: FixtureSync, method: Post, path: \"/fixture/sync\")",
@@ -2751,6 +2748,7 @@ pub fn front_emit_generates_service_and_static_attached_live_modules_test() {
         name: "FixtureBrowser",
         method: "GET",
         path: "/fixture/browser",
+        who: "anyone",
       ),
     ])
   let assert Ok(back_units) = source.load(fixture)

@@ -1,0 +1,106 @@
+//// back の宣言 ── 生成器が app の `src/server.gleam` の const を読み、`src/gen/registry.mjs` /
+//// `http_runtime.mjs` / `shell.mjs` / `queue_runtime.mjs` / `cron_runtime.mjs` を書く(0.11.1、WGy)。
+////
+//// 置く const は 5 つ。どれも無くてよい(無ければ空の表)。
+////
+//// - `pub const routes: List(Route)` ── Service の (method, path) の上書き。導出規則(entry の prefix と
+////   Entity / Args の型)と同じ行は書かない。公開の URL(REST v1、鍵の発行)は導出に寄せず、ここで固定する
+//// - `pub const aliases: List(Alias)` ── 同じ Service(または attached の口)の 2 本目の口(REST v1 の別名)
+//// - `pub const attached: List(Attached)` ── Service でない HTTP の口(session・blob・media・socket など)。
+////   面の `api.gleam` の `attached` 表も、ここから書く
+//// - `pub const cron: List(Cron)` ── 式と、その式で回す仕事
+//// - `pub const durable_objects: List(DurableObject)` ── class 名と、実装を持つ ★ の adapter
+//// - `pub const hooks: List(Hook)` ── 宣言から導けない業務の行の口。生成物が import する ★ は、ここに名を
+////   書いたものだけ
+////
+//// Service は名(module の名、`article_publish`)で指す ── Service の値は型引数が Service ごとに違い、
+//// 1 つの List に並ばないため。名が Service に無ければ生成器が exit 4 で名指しする。
+//// path の変数は `:name`(registry の綴り)。
+
+pub type Method {
+  Get
+  Post
+  Put
+  Delete
+}
+
+/// 口が受ける媒体。entry の `Credential` と同じ 2 値(`ApiKey` の per_minute は entry が持つ)。
+pub type Credential {
+  Session
+  ApiKey
+}
+
+/// Service でない口の主体。`Anyone` は未ログインを通し、`Party` は session の party を要る。
+pub type Who {
+  Anyone
+  Party
+}
+
+pub type Route {
+  /// 導出の (method, path) をこれに替える。媒体は導出どおり(`Session` の入口)。
+  Route(service: String, method: Method, path: String)
+  /// 媒体を明示する口。`ApiKey` なら REST v1 の入口だけが持つ。
+  RouteVia(
+    service: String,
+    method: Method,
+    path: String,
+    credential: Credential,
+  )
+  /// HTTP の口を持たない Service(queue・cron・Service からの呼び出しだけ)。
+  Internal(service: String)
+}
+
+pub type Alias {
+  /// Service の 2 本目の口。`external_id: True` は path の `:external_id` を店の外部 id として
+  /// 引き直し、Args の `id` に入れる。
+  Alias(
+    name: String,
+    service: String,
+    method: Method,
+    path: String,
+    credential: Credential,
+    external_id: Bool,
+  )
+  /// attached の口の 2 本目。
+  AttachedAlias(
+    name: String,
+    attached: String,
+    method: Method,
+    path: String,
+    credential: Credential,
+    who: Who,
+  )
+}
+
+pub type Attached {
+  Attached(name: String, method: Method, path: String, who: Who)
+}
+
+pub type Job {
+  /// 列挙の読み(`<service>/<query>` の SQL、穴は `$1` = 起動時刻)の行ごとに Service を 1 回ずつ呼ぶ。
+  /// 行の `id` を Args の 1 つ目へ入れる。CAS に負けた行は飛ばして次へ。
+  EachDue(service: String, query: String)
+  /// hook が Args を作り、Service を 1 回呼ぶ(期間の計算など、宣言から導けない行)。
+  Hooked(service: String, hook: String)
+}
+
+pub type Cron {
+  /// `schedule` は wrangler の式。表に無い式で起きたときは outbox の sweep だけを回す。
+  Cron(schedule: String, jobs: List(Job))
+}
+
+pub type DurableObject {
+  /// `class` は wrangler の class 名、`module` は `src/` からの ★ の道(`user_do`)、`adapter` は
+  /// その module が export する class、`methods` は DO の RPC として外へ出す method の名。
+  DurableObject(
+    class: String,
+    module: String,
+    adapter: String,
+    methods: List(String),
+  )
+}
+
+pub type Hook {
+  /// `module` は `src/` からの ★ の道(`hooks`)、`name` はその module が export する関数の名。
+  Hook(name: String, module: String)
+}
