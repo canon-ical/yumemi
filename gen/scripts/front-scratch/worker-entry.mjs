@@ -1,21 +1,14 @@
+import { makeEncode } from "./codec-encode.mjs";
+import * as back from "./build/dev/javascript/yumemi_front_scratch/back_values.mjs";
+import { List } from "./build/dev/javascript/prelude.mjs";
+import { Some, None } from "./build/dev/javascript/gleam_stdlib/gleam/option.mjs";
 import shell from "./build/dev/javascript/yumemi_front_scratch/gen/shell.mjs";
 
+const encode = makeEncode({ Some, None, List });
 let likeCount = 12;
 
-function article(version = 1) {
-  return {
-    slug: "article",
-    title: "本日の記事",
-    body: "夜のシフトが得意な新人です。よろしくお願いします。",
-    version,
-    order: 0,
-    category: { value: "news" },
-    tags: { values: ["fixture"] },
-  };
-}
-
 function json(value) {
-  return new Response(JSON.stringify(value), {
+  return new Response(JSON.stringify(encode(value)), {
     status: 200,
     headers: { "content-type": "application/json" },
   });
@@ -25,47 +18,35 @@ const app = {
   async fetch(request) {
     const url = new URL(request.url);
     if (request.method === "GET" && url.pathname.startsWith("/api/articles/")) {
-      return json({
-        article: article(1),
-        category: { name: "news" },
-        tags: [{ name: "fixture" }],
-        theme: null,
-      });
+      return json(back.article_read());
     }
     if (request.method === "GET" && url.pathname === "/api/articles") {
-      return json({
-        page: { items: [], next: null },
-        counts: [
-          [{ name: "fixture" }, 1],
-          [{ name: "gleam" }, 1],
-          [{ name: "cloudflare" }, 1],
-        ],
-      });
+      return json(back.article_list());
     }
     if (request.method === "GET" && url.pathname === "/api/widgets") {
-      return json({ rows: [{ kind: "Article", article: article(1) }] });
+      return json(back.widget_list());
     }
     if (
       request.method === "POST" &&
       url.pathname === "/api/articles/article/publish"
     ) {
       likeCount += 1;
-      return json(article(likeCount));
+      return json(back.article(likeCount));
     }
     if (request.method === "POST" && url.pathname === "/api/articles") {
-      return json({ slug: "article", phase: "draft" });
+      return json(back.created());
     }
     if (request.method === "POST" && url.pathname === "/api/blobs") {
       if (request.headers.get("content-type") === "image/fail") {
         return new Response("upload failed", { status: 503 });
       }
-      return json({ key: "uploaded-image-key" });
+      return json(back.upload_response());
     }
     if (
       request.method === "POST" &&
       url.pathname === "/api/articles/article/blob_save"
     ) {
-      return json({ saved: true });
+      return json(back.saved());
     }
     return new Response("not found", { status: 404 });
   },

@@ -2874,6 +2874,102 @@ pub fn front_emit_decodes_six_snapshot_style_row_variants_test() {
   |> list.each(fn(row) { string.contains(out, row) |> should.be_true })
 }
 
+pub fn front_emit_decodes_enum_kind_with_codec_tags_test() {
+  let out =
+    synthetic_multi_decoder_out(
+      "pub type Kind { Articles HeavenDiary }\n\n"
+      <> "pub type Row {\n"
+      <> "  Articles(kind: Kind, ids: List(String))\n"
+      <> "  HeavenDiary(kind: Kind, slug: String)\n"
+      <> "}\n\n"
+      <> "pub type Out { Out(rows: List(Row)) }\n\n"
+      <> "pub const service: Service(Args, Out, Error) = Nil",
+    )
+  [
+    "\"articles\" ->",
+    "Articles(kind: kind, ids: ids)",
+    "\"heaven_diary\" ->",
+    "HeavenDiary(kind: kind, slug: slug)",
+    "pub type Kind = String",
+  ]
+  |> list.each(fn(row) { string.contains(out, row) |> should.be_true })
+}
+
+pub fn front_emit_stops_row_when_kind_enum_lacks_constructor_test() {
+  let assert Ok(units) = source.load(fixture)
+  let units =
+    list.filter(units, fn(unit) { unit.path != "service/widget_list" })
+  let units =
+    list.append(units, [
+      source_unit(
+        "service/widget_list",
+        "pub type Kind { Articles }\n\n"
+          <> "pub type Row {\n"
+          <> "  Articles(kind: Kind, ids: List(String))\n"
+          <> "  Summary(kind: Kind, count: Int)\n"
+          <> "}\n\n"
+          <> "pub type Out { Out(rows: List(Row)) }\n\n"
+          <> "pub const service: Service(Args, Out, Error) = Nil",
+      ),
+    ])
+  let notes = front_emit.decoder_notes(app(), units)
+  let assert Ok(note) =
+    list.find(notes, fn(note) { string.contains(note.text, "Summary") })
+  note.class |> should.equal(stop.Conflict)
+  stop.code(note.class) |> should.equal(4)
+  string.contains(note.text, "service/widget_list") |> should.be_true
+}
+
+pub fn front_emit_stops_union_when_non_kind_discriminator_enum_lacks_constructor_test() {
+  let assert Ok(units) = source.load(fixture)
+  let units =
+    list.filter(units, fn(unit) { unit.path != "service/widget_list" })
+  let units =
+    list.append(units, [
+      source_unit(
+        "service/widget_list",
+        "pub type Kind { Articles }\n\n"
+          <> "pub type Row {\n"
+          <> "  Articles(tag: Kind, ids: List(String))\n"
+          <> "  Summary(tag: Kind, count: Int)\n"
+          <> "}\n\n"
+          <> "pub type Out { Out(rows: List(Row)) }\n\n"
+          <> "pub const service: Service(Args, Out, Error) = Nil",
+      ),
+    ])
+  let notes = front_emit.decoder_notes(app(), units)
+  let assert Ok(note) =
+    list.find(notes, fn(note) { string.contains(note.text, "Summary") })
+  note.class |> should.equal(stop.Conflict)
+  stop.code(note.class) |> should.equal(4)
+  string.contains(note.text, "service/widget_list") |> should.be_true
+  string.contains(note.text, "Row") |> should.be_true
+}
+
+pub fn front_emit_decodes_framework_er_values_from_codec_wire_test() {
+  let out =
+    synthetic_multi_decoder_out(
+      "import framework/er.{type Has, type Held, type Key, type Link, type Multi}\n\n"
+      <> "pub type Out {\n"
+      <> "  Out(has: Has(String), held: Held(String), multi: Multi(String), key: Key(String), link: Link(String))\n"
+      <> "}\n\n"
+      <> "pub const service: Service(Args, Out, Error) = Nil",
+    )
+  [
+    "decode.map(decode.string, fn(value) { Has(value: value) })",
+    "decode.map(decode.string, fn(value) { Held(value: value) })",
+    "decode.field(\"keys\", decode.list(of: decode.string), fn(keys) { decode.success(Multi(values: keys)) })",
+    "decode.then(decode.string, fn(raw) { decode.success(key(raw)) })",
+    "decode.optional(decode.then(decode.string, fn(raw) { decode.success(key(raw)) }))",
+  ]
+  |> list.each(fn(row) { string.contains(out, row) |> should.be_true })
+  [
+    "decode.field(\"value\"",
+    "decode.field(\"values\"",
+  ]
+  |> list.each(fn(row) { string.contains(out, row) |> should.be_false })
+}
+
 pub fn front_emit_decodes_non_row_custom_union_test() {
   let out =
     synthetic_multi_decoder_out(
@@ -3036,17 +3132,111 @@ pub fn front_emit_nullary_tag_matches_codec_acronym_rule_test() {
   |> should.be_true
 }
 
-/// The Node round-trip verifier compiles this emitted decoder as a fixture.
-/// It is deliberately independent of entity/visit and metrics services.
-pub fn codec_roundtrip_fixture() -> String {
-  synthetic_multi_decoder_out(
-    "pub type Choice { Named(String) Skipped HTTPReady }\n"
-    <> "pub type ValueBox { ValueBox(value: String) }\n"
-    <> "pub type KeyBox { KeyBox(key: String) }\n"
-    <> "pub type Pair { Pair(String, Int) }\n"
-    <> "pub type Out { Out(choice: Choice, value_box: ValueBox, key_box: KeyBox, pair: Pair) }\n"
-    <> "pub const service: Service(Args, Out, Error) = Nil",
-  )
+/// Node round-trip probe sources. The values are built by the actual framework
+/// constructors and the generated gen/types module in a temporary package.
+pub fn codec_roundtrip_kind_source() -> String {
+  "pub type Kind { Articles HeavenDiary }"
+}
+
+pub fn codec_roundtrip_service_source() -> String {
+  "import entity/codec_kind as kind\n"
+  <> "import framework/blob as blob\n"
+  <> "import framework/er as er\n"
+  <> "import framework/page as page\n"
+  <> "import framework/party as party\n"
+  <> "import framework/time as time\n"
+  <> "import gen/types/slug as slug\n"
+  <> "import gleam/option.{type Option, None, Some}\n\n"
+  <> "pub type ValueBox { ValueBox(value: String) }\n"
+  <> "pub type KeyBox { KeyBox(key: String) }\n"
+  <> "pub type Pair { Pair(String, Int) }\n"
+  <> "pub type Status { HTTPReady Offline }\n"
+  <> "pub type Row {\n"
+  <> "  Articles(kind: kind.Kind, slug: String)\n"
+  <> "  HeavenDiary(kind: kind.Kind, slug: String)\n"
+  <> "}\n"
+  <> "pub type StringRow {\n"
+  <> "  Article(kind: String, title: String)\n"
+  <> "  Summary(kind: String, count: Int)\n"
+  <> "}\n"
+  <> "pub type FieldUnion { ByTitle(title: String) ByCount(count: Int) }\n"
+  <> "pub type Out {\n"
+  <> "  Out(\n"
+  <> "    text: Option(String), integer: Option(Int), boolean: Option(Bool), float: Option(Float),\n"
+  <> "    maybe: Option(Option(String)), missing: Option(Option(String)), values: Option(List(String)),\n"
+  <> "    slug: Option(slug.Slug), blob: Option(blob.Blob), date: Option(time.Date),\n"
+  <> "    datetime: Option(time.Datetime), time: Option(time.Time), party: Option(party.PartyId),\n"
+  <> "    pagination: Option(page.Page(String)),\n"
+  <> "    relation_key: Option(er.Key(String)), link: Option(er.Link(String)), has: Option(er.Has(String)),\n"
+  <> "    held: Option(er.Held(String)), multi: Option(er.Multi(String)),\n"
+  <> "    value_box: Option(ValueBox), key_box: Option(KeyBox), pair: Option(Pair), status: Option(Status),\n"
+  <> "    rows: Option(List(Row)), string_rows: Option(List(StringRow)), choice: Option(FieldUnion),\n"
+  <> "  )\n"
+  <> "}\n"
+  <> "pub type Args\n"
+  <> "pub type Error\n"
+  <> "pub type Service(args, out, error) { Service }\n"
+  <> "pub const service: Service(Args, Out, Error) = Service\n\n"
+  <> "@external(javascript, \"./roundtrip_ffi.mjs\", \"row\")\n"
+  <> "fn row(key: String) -> er.Row\n\n"
+  <> "pub fn sample(field: String) -> Out {\n"
+  <> "  let assert Ok(slug_value) = slug.parse(\"roundtrip-slug\")\n"
+  <> "  let assert Ok(blob_value) = blob.parse(\"blob-key\")\n"
+  <> "  let assert Ok(date_value) = time.date(\"2026-09-25\")\n"
+  <> "  let assert Ok(datetime_value) = time.datetime(\"2026-09-25T12:30:00Z\")\n"
+  <> "  let assert Ok(time_value) = time.time(\"12:30\")\n"
+  <> "  let assert Ok(party_value) = party.parse(\"party-id\")\n"
+  <> "  let assert Ok(cursor_value) = page.cursor(\"cursor-value\")\n"
+  <> "  let has_value = er.from_row(row(\"has-value\"))\n"
+  <> "  let held_value = er.held_from_row(row(\"held-value\"))\n"
+  <> "  let multi_value = er.multi_from_rows([row(\"multi-one\"), row(\"multi-two\")])\n"
+  <> "  let empty = Out(\n"
+  <> "    text: None, integer: None, boolean: None, float: None,\n"
+  <> "    maybe: None, missing: None, values: None, slug: None, blob: None,\n"
+  <> "    date: None, datetime: None, time: None, party: None,\n"
+  <> "    pagination: None, relation_key: None, link: None, has: None, held: None, multi: None,\n"
+  <> "    value_box: None, key_box: None, pair: None, status: None, rows: None,\n"
+  <> "    string_rows: None, choice: None,\n"
+  <> "  )\n"
+  <> "  case field {\n"
+  <> "    \"string\" -> Out(..empty, text: Some(\"plain\"))\n"
+  <> "    \"integer\" -> Out(..empty, integer: Some(42))\n"
+  <> "    \"boolean\" -> Out(..empty, boolean: Some(True))\n"
+  <> "    \"float\" -> Out(..empty, float: Some(1.5))\n"
+  <> "    \"option\" -> Out(..empty, maybe: Some(Some(\"optional\")))\n"
+  <> "    \"option_none\" -> Out(..empty, missing: Some(None))\n"
+  <> "    \"list\" -> Out(..empty, values: Some([\"one\", \"two\"]))\n"
+  <> "    \"gen_type\" -> Out(..empty, slug: Some(slug_value))\n"
+  <> "    \"blob\" -> Out(..empty, blob: Some(blob_value))\n"
+  <> "    \"date\" -> Out(..empty, date: Some(date_value))\n"
+  <> "    \"datetime\" -> Out(..empty, datetime: Some(datetime_value))\n"
+  <> "    \"time\" -> Out(..empty, time: Some(time_value))\n"
+  <> "    \"party\" -> Out(..empty, party: Some(party_value))\n"
+  <> "    \"page\" -> Out(..empty, pagination: Some(page.Page(items: [\"page-one\", \"page-two\"], next: Some(cursor_value))))\n"
+  <> "    \"key\" -> Out(..empty, relation_key: Some(er.key(\"key-value\")))\n"
+  <> "    \"link\" -> Out(..empty, link: Some(Some(er.key(\"link-value\"))))\n"
+  <> "    \"has\" -> Out(..empty, has: Some(has_value))\n"
+  <> "    \"held\" -> Out(..empty, held: Some(held_value))\n"
+  <> "    \"multi\" -> Out(..empty, multi: Some(multi_value))\n"
+  <> "    \"value_record\" -> Out(..empty, value_box: Some(ValueBox(\"boxed-value\")))\n"
+  <> "    \"key_record\" -> Out(..empty, key_box: Some(KeyBox(\"boxed-key\")))\n"
+  <> "    \"position\" -> Out(..empty, pair: Some(Pair(\"first\", 7)))\n"
+  <> "    \"enum\" -> Out(..empty, status: Some(HTTPReady))\n"
+  <> "    \"kind_articles\" -> Out(..empty, rows: Some([Articles(kind: kind.Articles, slug: \"articles\")]))\n"
+  <> "    \"kind_heaven_diary\" -> Out(..empty, rows: Some([HeavenDiary(kind: kind.HeavenDiary, slug: \"heaven-diary\")]))\n"
+  <> "    \"string_kind_article\" -> Out(..empty, string_rows: Some([Article(kind: \"Article\", title: \"article-title\")]))\n"
+  <> "    \"string_kind_summary\" -> Out(..empty, string_rows: Some([Summary(kind: \"Summary\", count: 3)]))\n"
+  <> "    \"field_union_title\" -> Out(..empty, choice: Some(ByTitle(\"title-value\")))\n"
+  <> "    \"field_union_count\" -> Out(..empty, choice: Some(ByCount(7)))\n"
+  <> "    _ -> empty\n"
+  <> "  }\n"
+  <> "}\n"
+}
+
+pub fn codec_roundtrip_decoder_source() -> String {
+  synthetic_out_for(app(), "widget_list", codec_roundtrip_service_source(), [
+    source_unit("entity/codec_kind", codec_roundtrip_kind_source()),
+  ])
 }
 
 pub fn front_emit_roster_read_qualifies_public_entity_types_test() {
