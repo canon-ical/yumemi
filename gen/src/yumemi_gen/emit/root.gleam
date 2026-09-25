@@ -179,6 +179,21 @@ pub fn actor_is_sum(subjects: List(Subject)) -> Bool {
   actor_plan(subjects) == Sum
 }
 
+/// allow の句の who(`As<X>`)の X が allow の Entity そのものか(主体の行 = allow の行)。
+/// 句が全部 `Self` の読みを絞らない規則(`emit/sql`)と入口の相の門(`emit/http` の `phaseGates`)は
+/// この形に限る(WGy r4)── X が別の Entity なら `Self` は読みの行を主体に縛る句で、門を主体の相で閉じない。
+pub fn who_is_allow_entity(app: App, service: Service, who: String) -> Bool {
+  let name = last_segment(string.replace(who, ".", "/"))
+  case service.allow_module, string.starts_with(name, "As") {
+    Some(path), True ->
+      case model_entity_by_module(app.entities, last_segment(path)) {
+        Some(entity) -> entity.name == string.drop_start(name, 2)
+        None -> False
+      }
+    _, _ -> False
+  }
+}
+
 /// root が import する allow module の道。allow を import しない Service は module 名の `_` 前。
 pub fn allow_path(service: Service) -> String {
   case service.allow_module {

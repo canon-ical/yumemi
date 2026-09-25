@@ -162,6 +162,7 @@ api/db/queries/widget_remove/root.sql
 api/db/queries/widget_reorder/place.sql
 api/db/queries/widget_show/root.sql
 api/gen/sql_manifest.json
+api/gleam.toml
 api/src/connector/heaven.gleam
 api/src/connector/idp.gleam
 api/src/connector/litlink.gleam

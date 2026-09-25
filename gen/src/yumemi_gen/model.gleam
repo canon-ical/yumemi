@@ -495,6 +495,24 @@ pub type Server {
     storage: List(Storage),
     reads: List(ManualRead),
     roots: List(RootShape),
+    attached_roles: List(AttachedRole),
+    browser: Option(BrowserCookie),
+  )
+}
+
+/// `src/server.gleam` の `attached_roles` の 1 行(WGy r4)。`role` は framework の JS の綴り
+/// (`declare_browser` / `read_session` / `switch_subject` / `tail_path` / `needs_browser`)。
+pub type AttachedRole {
+  AttachedRole(attached: String, role: String)
+}
+
+/// `src/server.gleam` の `browser`(WGy r4)。
+pub type BrowserCookie {
+  BrowserCookie(
+    cookie: String,
+    key_binding: String,
+    claim: String,
+    max_age_days: Int,
   )
 }
 
@@ -510,6 +528,8 @@ pub fn empty_server() -> Server {
     storage: [],
     reads: [],
     roots: [],
+    attached_roles: [],
+    browser: None,
   )
 }
 

@@ -1,12 +1,63 @@
 # yumemi-gen-8(WGy)── back の生成器(真壁、2026-09-26)
 
-基点は yumemi main `3209703`、branch `impl/yumemi-gen-8`。写しは musearch `645ec49` を `git archive` で `gen/build/wgy/` に置いた(musearch の作業木には 1 file も書いていない)。証跡は全部 `gen/build/wgy/`(git 管理外)。commit は r1 の checkpoint 8 本・r2 の 5 本(どちらも squash していない、各節のとおり)と、r3 の 1 本(r3 の完了条件を満たしたので r3 の checkpoint 10 本をこの 1 本へ squash した)。
+基点は yumemi main `3209703`、branch `impl/yumemi-gen-8`。写しは musearch `645ec49` を `git archive` で `gen/build/wgy/` に置いた(musearch の作業木には 1 file も書いていない)。証跡は全部 `gen/build/wgy/`(git 管理外)。commit は r1 の checkpoint 8 本・r2 の 5 本(どちらも squash していない、各節のとおり)と、r3 の 1 本(r3 の完了条件を満たしたので r3 の checkpoint 10 本をこの 1 本へ squash した)、柏木のゲートの 1 本、r4 の 1 本(r4 の checkpoint 6 本をこの 1 本へ squash した)。
+
+## r4(2026-09-26 04:59〜、柏木のゲートの差し戻し `a2a49d3` の直し)
+
+**DDL:無し**(migration / schema に触れていない。staging / production にも触れていない)。
+
+**結論:柏木の P0-1・P1-1〜3・P2-1〜2 と、鷹野の裁定 1 = (c) を全部入れた。**写し(musearch `645ec49` + 新しい `star.patch`)の生成物は、r3 と比べて **sha256 のヘッダと `http_runtime.mjs` の宣言の 2 行(`roles` / `browserCookie`)と `http({..})` の引数だけ**が変わり、SQL・`phaseGates`・`db/queries` は 1 byte も変わらない。api の `npm test` は 690 / 690 を新しい DB で 2 回。
+
+### 直したもの
+
+| # | 所見 | 直し | 在処 |
+|---|---|---|---|
+| P0-1 | 句が全部 `Self` の読みを絞らない規則が allow の Entity ≠ 主体の形にも掛かる | 絞らないのは **句が全部 `Self` で、どの `As<X>` の X も allow の Entity そのもの**のときだけ(`root.who_is_allow_entity`)。**違う形は r1 の主体の鍵の穴 `subject=$K` で絞る**(X へ from / join から辿る)。辿れなければ exit 4 で名指し(`allow 句の <X> が from / join から辿れない`)。r1 に在った「主体の行そのものを鍵の穴で引く」逃げ道(読みの行を縛らない)は消した。`phase_gate` も同じ条件(X = allow の Entity の句)でだけ出す | `gen/src/yumemi_gen/emit/{sql,http,root}.gleam` |
+| P0-1 の test | `hw1_test:455, 1153` が誤った向きを固めていた | 1153 を 2 本に割った:`allow_clause_self_on_another_entity_uses_the_subject_key_hole_test`(柏木の再現 `gen/allow/memo` × `AsStaff` × `Self` と `gen/allow/article` × `AsStaff` × `Self` が `-- allow: clauses=$2 subject=$3` と `->>'owner'='self' AND <staff>.id=$3` を持つ)・`allow_clause_self_on_the_subject_entity_leaves_rows_open_test`(`gen/allow/staff` × `AsStaff` × `Self` は絞らない)。455 の exit 4 の test に「主体が allow の Entity と違い辿れない」形(`staff_self_far`)を足した。`phase_gate_is_only_for_the_allow_entity_as_subject_test`(wgy)で `AsArticle` × `gen/allow/article` は門を出し、`AsStaff` × `gen/allow/article` は出さない | `gen/test/yumemi_gen_{hw1,wgy}_test.gleam` |
+| 裁定 1 (c) | 生成器だけが出す SQL の置き場 | 出力先が app そのもの(`realpath` で同じ dir)なら、`db/queries/**` へは **既に在って `-- GENERATED` を名乗る file だけ**を書く(`yumemi_gen.into_app`)。★ の手書きは上書きしない(`back` の `bundle` と同じ規則)。生成器だけが出す SQL は `sql.mjs` に束ねるだけ。出力先が別の dir なら従来どおり全部 | `gen/src/yumemi_gen.gleam`、`yumemi_gen_ffi.mjs` の `same_dir` |
+| P1-1 | framework の JS に musearch の名と値 | 新しい宣言 `attached_roles: List(AttachedRole)`(`DeclareBrowser` / `ReadSession` / `SwitchSubject` / `TailPath` / `NeedsBrowser`)と `browser: BrowserCookie(cookie, key_binding, claim, max_age_days)` を `framework/server.gleam` に足し、生成器が `http_runtime.mjs` の `roles` / `browserCookie` に写す。`http.mjs` は口の名・`/media/(.+)`・`_mb`・`MB_KEY`・`adult_declared_at`・395 日を持たない(`TailPath` の口は最後の穴が `/` を含む残りを取り、GET と HEAD で受ける)。失敗の符号の表から `handle_taken` / `mail_taken` を抜いた。生成器の予約の口 3 つ(`emit/http.gleam` の `framework_attached`)も宣言から導く。役の名が attached に無い行と、`browser` の無い `DeclareBrowser` は exit 4。musearch の値は写しの `api/src/server.gleam` に宣言した(645ec49 の綴りのまま ── 外から見える契約なので) | `src/framework/server.gleam`、`src/framework/server/http.mjs`、`gen/src/yumemi_gen/{model,reader/server,emit/http}.gleam` |
+| P1-2 | framework の JS が暗に要るもの | README に「`framework/server` ── what the app must provide」:`@neondatabase/serverless`(app の package.json)、`cloudflare:workers`(Workers runtime)、SQL 16 key と穴の並び、Worker の env | `README.md`(Hex の package に載る)、`server.gleam` の頭から指す |
+| P1-3 | star.patch に api の `gleam.toml` が無い | `api/gleam.toml` の `yumemi = ">= 0.11.1 and < 0.12.0"` を足した(270 file)。`manifest.toml` は入れていない(WGm が 0.11.1 の publish 後に `gleam deps download` で作る) | `docs/reports/yumemi-gen-8-patches/star.patch`・`star-files.txt` |
+| P2-1 | test の名と doc の逆 | 上の test の割り方と名、`sql.gleam` の `allow_clause` / `subject_of` の doc | ── |
+| P2-2 | report の squash の記述 | 頭の段落と r3 の結論の食い違いを直した | 本 file |
+
+**残した musearch の匂い(名指し、本便の指示の外):**`runtime.mjs:129` / `outbox.mjs:41` の Staff の特別扱いと、SQL の key `framework/session_resolve_staff` / `session_subject_staff` の名(README に載せた)。`session_read` の応答の形(`consents.use` / `handling`、`adult`)は 0.11.0 の `framework/require` の語彙のまま。
+
+### WGm での生成の手順(r3 の手順の更新)
+
+1. 生成器を別の出力先へ回し、`api/src/gen` と 3 面の `src/gen` を丸ごと写す(r3 のまま)
+2. `api/db/queries` は、生成器を **出力先 = `api`** で回せば既に在る `-- GENERATED` の file だけが生成物で上書きされる(裁定 1 (c))。写しでは 310 本が byte で変わらず(生成物と同じ道の 128 本は全部 GENERATED で、採用済み)、生成器だけの 246 本は増えない(`r4-appc-{before,after}.txt`)。**ただし出力先 = `api` の実走は、面(console / muses / www)の生成物を `api/<面>/` に書いた後、`bundle_front` が `api/console/gleam.toml` を探して node が落ちる(exit 1)。**面の出力の置き場は F6 の射程で、本便では触れていない。WGm は 1 のまま別の出力先で回し、r3-regen.sh の採用(既に在る GENERATED だけを写す)で足りる
+3. api の `gleam.toml` は star.patch で `>= 0.11.1` に上がる。0.11.1 の Hex publish は鷹野
+
+### 検収(r4)
+
+| 項目 | 結果 | 証拠(`gen/build/`) |
+|---|---|---|
+| root `gleam build` | 0 | `r4-root-build-final.txt` |
+| `cd gen && gleam test` | **267 passed**(r3 262 + 新しい 5:Self の 2 本割り・phaseGates・into_app・roles / browser 2 本) | `r4-gen-test-final.txt` |
+| `gleam format --check src test` | root・gen とも 0 | ── |
+| Article fixture ×2 | exit 0、125 file、`diff -r` 0 行。tracked 64 file と `cmp` で一致(`http_runtime.mjs` は `roles={}` / `browserCookie=null` を足した新しい生成物を tracked に取り込んだ) | `wgy/fx-r4{a,b}` |
+| star.patch | musearch `645ec49` の `git archive` に `patch -p1 --dry-run` で 270 file、exit 0。r3 の patch との差は当てた木で `api/gleam.toml` と `api/src/server.gleam` の 2 file だけ | `wgy/r4-patch/dryrun.txt` |
+| 写し ×2(`645ec49` + 新しい star.patch) | 2 回とも exit 4、1459 file、`diff -r` **0 行**(所要時間の行も同じ)。診断は柏木の `kashiwagi/out-a/_diagnostics.txt` と byte で同一(exit 1 / 2 / 3 / 4 = 3 / 0 / 0 / 97、警告 48) | `wgy/out-r4-n{1,2}`、`wgy/r4-n12.diff` |
+| 写しの生成物と柏木の out-a | 差は sha256 のヘッダ(`server.gleam` の hash)と `src/gen/http_runtime.mjs` の `roles` / `browserCookie` の 2 行と `http({..})` の引数だけ。**SQL・`phaseGates`・`db/queries` は同一 = P0-1 の直しは musearch の生成物を変えない** | `wgy/r4-out-vs-kashiwagi.diff` |
+| 置き換えた `api/src/gen` | 403 file、sha256 ヘッダ無し 0、生成物と一致 | ── |
+| 写しの api `npm test` | **690 / 690 を 2 回**(auth を先に build、clean build、dropdb からの新しい DB)。media の 3 本・`N1: ... retains read/media` を含む | `wgy/r4-api-test-{1,2}.txt` |
+| 出力先 = app(裁定 1 (c)) | `db/queries` の 310 本が前後で sha256 一致、増えた file 0(生成器が出す 374 本のうち app に無い 246 本は書かない) | `wgy/r4-appc-{before,after}.txt` |
+| `git diff v0.11.0 -- src test gleam.toml` | 10 行とも `A`、`src/framework` は +1240 / 削除 0 | ── |
+| `emit/front.gleam` | `a2a49d3` から差 0 | ── |
+
+PG 55540 は本便で起こし(`snap-g/api/test/postgres.sh`、pid 3010223)、終端で `kill 3010223`。`pg_isready -p 55540` は no response、pid は消えた。55541 / 55496 / 5552x / 55502 / 55503 / 55506 には触れていない。musearch は `git archive 645ec49` で読んだだけで、作業木には書いていない。
+
+### 確かめたこと / 確かめていないこと(r4)
+
+- 確かめたこと:上の検収の表の全部。P0-1 は柏木の再現の形(`memo` × `AsStaff` × `Self`)を test に入れ、主体の鍵の穴で絞ることを見た。写しでは P0-1 の直しの前後で SQL・phaseGates が変わらないことを柏木の out-a との `diff -r` で見た
+- 確かめていないこと:出力先 = app での生成器の全走(面の `bundle_front` で落ちる ── 上の手順 2)、3 面の `src/gen` の置き換えと面の test(F6)、`auth` の test、実 API と `_mb` cookie の実機(署名と検証は api の test の範囲だけ)、`cloudflare:workers` を import する `shell.mjs` の実機、Hex の package の中身(`gleam publish` の dry run)、`TailPath` を GET / HEAD 以外の method の口に書いたときの形(musearch では media_read だけ)
 
 ## r3(2026-09-26 03:27〜、役員 人見の裁定 A「全部閉じる」の続きと鷹野の裁定 2)
 
 **DDL:無し**(migration / schema に触れていない。staging / production にも触れていない)。
 
-**結論:写しの上で、r2 の鷹野宛 1 の単位(runtime / http_runtime の生成・GENERATED の SQL の採用・Gleam 側の置き換え)と裁定 2(契約のずれ 19 本)は届いた。**写し(musearch `645ec49` の `git archive` + WGm に渡す ★ の patch)で `api/src/gen` を生成物で丸ごと置き換え、**403 file の全部が生成器の出力と byte で一致・sha256 ヘッダ無し 0**、api の `npm test` は **690 / 690**(clean build・新しい DB で 8 回、最終の状態で 2 回連続)。**閉じていないもの**は下の「届かないもの」── `db/queries` の生成器だけが出す SQL の置き場と manifest の扱い、`framework/` の SQL、3 面(F6 の射程)、★ の側の A-3 の grep。分けて完了にはしない。squash しない(r1・r2・r3 の checkpoint を残す)。
+**結論:写しの上で、r2 の鷹野宛 1 の単位(runtime / http_runtime の生成・GENERATED の SQL の採用・Gleam 側の置き換え)と裁定 2(契約のずれ 19 本)は届いた。**写し(musearch `645ec49` の `git archive` + WGm に渡す ★ の patch)で `api/src/gen` を生成物で丸ごと置き換え、**403 file の全部が生成器の出力と byte で一致・sha256 ヘッダ無し 0**、api の `npm test` は **690 / 690**(clean build・新しい DB で 8 回、最終の状態で 2 回連続)。**閉じていないもの**は下の「届かないもの」── `db/queries` の生成器だけが出す SQL の置き場と manifest の扱い、`framework/` の SQL、3 面(F6 の射程)、★ の側の A-3 の grep。分けて完了にはしない。r1・r2 の checkpoint は残し、r3 の checkpoint 10 本は 1 本(`bf578da`)へ squash した(r4 で直した ── 柏木の P2-2)。
 
 ### 完了条件ごとの現在地
 

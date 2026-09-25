@@ -1,3 +1,24 @@
+# yumemi-gen-8(WGy)真壁 r4 ── 柏木の差し戻し(P0-1)と P1 / P2、鷹野の裁定 1 = (c)(2026-09-26)
+
+## 状態
+
+- **全部入れた。**P0-1:句が全部 `Self` の読みを絞らないのは `As<X>` の X が allow の Entity そのもののときだけ。違う形は主体の鍵の穴 `subject=$K` で絞り、辿れなければ exit 4。`phaseGates` も同じ条件。柏木の再現(`memo` × `AsStaff` × `Self`)を test に入れた
+- 裁定 1 (c):出力先が app なら `db/queries` へは既に在る `-- GENERATED` の file だけを書く(`yumemi_gen.into_app`)
+- P1-1:`attached_roles` / `browser` の宣言を足し、framework の `http.mjs` から `media_read`・`/media/(.+)`・`_mb`・`MB_KEY`・予約の口 3 つ・`handle_taken` / `mail_taken` を抜いた。P1-2:README に npm / runtime の import・SQL 16 key・env。P1-3:star.patch に api の `gleam.toml`(`>= 0.11.1 and < 0.12.0`)、270 file
+- 写しの生成物は r3 と比べて sha のヘッダと `http_runtime.mjs` の `roles` / `browserCookie` だけが変わる(SQL・phaseGates・db/queries は同一)
+- 残り(名指し):出力先 = app の全走は面の `bundle_front` で落ちる(F6)、Staff の特別扱い(`runtime.mjs:129` / `outbox.mjs:41`)。詳細は `docs/reports/yumemi-gen-8.md` の「r4」節
+
+## DDL
+
+無し。
+
+## 検証
+
+- root `gleam build` 0。`cd gen && gleam test` **267 passed**。format root・gen とも 0
+- Article fixture ×2 で diff 0、tracked 64 と一致。写し(`645ec49` + star.patch)×2 で 1459 file、`diff -r` 0、診断は柏木の out-a と同一(3 / 0 / 0 / 97、警告 48)
+- 写しの api `npm test` **690 / 690 を 2 回**(`gen/build/wgy/r4-api-test-{1,2}.txt`、auth を先に build、新しい DB)。PG 55540 は pid 3010223 を起こし、終端で kill
+- `git diff v0.11.0 -- src test gleam.toml` は 10 行とも `A`、`src/framework` +1240 / 削除 0
+
 # yumemi-gen-8(WGy)真壁 r3 ── runtime / http_runtime の生成、GENERATED の SQL の採用、Gleam 側の置き換え、契約のずれ 19 本の宣言(2026-09-26)
 
 ## 状態

@@ -5,6 +5,7 @@ import glance
 import gleam/list
 import gleam/string
 import gleeunit/should
+import yumemi_gen
 import yumemi_gen/emit/back
 import yumemi_gen/emit/codec
 import yumemi_gen/emit/entry
@@ -628,4 +629,152 @@ pub const collection: String = \"memos\"
     "phase(memo,({'d':'draft','f':'final'}[r.mode]??r.mode))",
   )
   |> should.be_true
+}
+
+fn gate_service(name: String, who: String) -> source.Unit {
+  unit("service/" <> name, "import entity/article
+import framework/effect.{type Effect, Read}
+import framework/step.{type Start, type Step}
+import gen/allow/article as allow
+import gen/face.{type Face, Public}
+import gen/query as q
+import gen/root/" <> name <> ".{type Actor, type Root, type Service, Service}
+
+pub const effect: Effect = Read
+
+pub const faces: List(Face) = [Public]
+
+pub type Args {
+  Args(title: String)
+}
+
+pub type Out {
+  Out
+}
+
+pub type Error
+
+pub type P {
+  Title
+}
+
+pub const items: q.Select(P) = q.Select(
+  from: q.Article,
+  join: [],
+  where: [q.Eq(q.ArticleTitle, q.Param(Title))],
+  group: [],
+  having: [],
+  agg: [],
+  along: [],
+  with: [],
+  order: [],
+  limit: q.NoLimit,
+)
+
+pub const service: Service(Args, Out, Error) = Service(
+  allow: [allow.Clause(who: allow." <> who <> ", at: allow.Only([article.Published]), owner: allow.NoOwner)],
+  logic: logic,
+)
+
+pub fn logic(_by: Actor, _it: Root, _args: Args) -> Step(Out, Error, Start) {
+  step.done(Out)
+}
+")
+}
+
+/// 入口の相の門(`phaseGates`)は、root を持たず `As<X>` の X が allow の Entity そのものの句だけで閉じる
+/// (WGy r4)。`Only` は allow の Entity の相なので、X が別の Entity(`gen/allow/article` × `AsStaff`)の
+/// Service は主体の相で門を閉じない(相は読みの SQL が allow の行で照らす)。
+pub fn phase_gate_is_only_for_the_allow_entity_as_subject_test() {
+  let units =
+    units_with(article_fixture, [
+      gate_service("article_gate_own", "AsArticle"),
+      gate_service("article_gate_other", "AsStaff"),
+    ])
+    |> list.filter(fn(item) { item.path != "noop" })
+  let assert Ok(gates) =
+    file(back_files(units), "src/gen/http_runtime.mjs")
+    |> string.split("\n")
+    |> list.find(fn(line) { string.starts_with(line, "const phaseGates=") })
+  string.contains(gates, "article_gate_own:['published']") |> should.be_true
+  string.contains(gates, "article_gate_other") |> should.be_false
+}
+
+/// 出力先が app そのもののとき、`db/queries` へは既に在る `-- GENERATED` の file だけを書く(WGy r4、鷹野の
+/// 裁定 1 (c))。生成器だけが出す SQL は `sql.mjs` に束ねるだけで app に増やさず、★ の手書きも上書きしない。
+/// 出力先が別の dir なら全部を書く。
+pub fn into_app_writes_only_existing_generated_queries_test() {
+  let files = [
+    types.File(path: "db/queries/a/old.sql", text: "-- GENERATED\nSELECT 1;"),
+    types.File(path: "db/queries/a/new.sql", text: "-- GENERATED\nSELECT 2;"),
+    types.File(path: "db/queries/a/star.sql", text: "-- GENERATED\nSELECT 3;"),
+    types.File(path: "src/gen/sql.mjs", text: "export const SQL = {};"),
+  ]
+  let generated = fn(path) { path == "db/queries/a/old.sql" }
+  yumemi_gen.into_app(files, True, generated)
+  |> list.map(fn(file) { file.path })
+  |> should.equal(["db/queries/a/old.sql", "src/gen/sql.mjs"])
+  yumemi_gen.into_app(files, False, generated)
+  |> list.length
+  |> should.equal(4)
+}
+
+/// 機関を framework が持つ attached の口の役と browser の署名 cookie は宣言から渡す(WGy r4)── framework の
+/// JS は口の名も cookie の名も知らない。framework の役の口は ★ hook `attached_<name>` を要らない。
+pub fn attached_roles_and_browser_cookie_follow_the_declaration_test() {
+  let units =
+    units_with(article_fixture, [
+      server(
+        "pub const attached: List(server.Attached) = [Attached(name: \"adult\", method: Post, path: \"/api/adult\", who: Anyone), Attached(name: \"me\", method: Get, path: \"/api/me\", who: Anyone), Attached(name: \"asset\", method: Get, path: \"/asset/:key\", who: Anyone)]\n"
+        <> "pub const hooks: List(server.Hook) = [Hook(name: \"attached_asset\", module: \"hooks\")]\n"
+        <> "pub const attached_roles: List(server.AttachedRole) = [DeclareBrowser(attached: \"adult\"), ReadSession(attached: \"me\"), TailPath(attached: \"asset\"), NeedsBrowser(attached: \"asset\")]\n"
+        <> "pub const browser: server.BrowserCookie = BrowserCookie(cookie: \"_fx\", key_binding: \"FX_KEY\", claim: \"declared_at\", max_age_days: 30)\n",
+      ),
+    ])
+    |> list.filter(fn(item) { item.path != "noop" })
+  let assert Ok(app) = reader.read(units)
+  server_reader.notes(app) |> should.equal([])
+  let text = file(back_files(units), "src/gen/http_runtime.mjs")
+  string.contains(
+    text,
+    "const roles={adult:['declare_browser'],me:['read_session'],asset:['tail_path','needs_browser']};",
+  )
+  |> should.be_true
+  string.contains(
+    text,
+    "const browserCookie={cookie:'_fx',binding:'FX_KEY',claim:'declared_at',maxAgeDays:30};",
+  )
+  |> should.be_true
+  string.contains(text, "const ports={asset:h_attachedAsset};")
+  |> should.be_true
+  string.contains(text, "roles,browserCookie,") |> should.be_true
+}
+
+/// 役の名が attached に無い行と、browser の宣言の無い `DeclareBrowser` は exit 4 で名指し。
+/// 宣言が無ければ browser は null(framework は申告を常に無いと見る)。
+pub fn attached_roles_without_their_attached_are_exit_four_test() {
+  let units =
+    units_with(article_fixture, [
+      server(
+        "pub const attached: List(server.Attached) = [Attached(name: \"adult\", method: Post, path: \"/api/adult\", who: Anyone)]\n"
+        <> "pub const attached_roles: List(server.AttachedRole) = [DeclareBrowser(attached: \"adult\"), ReadSession(attached: \"ghost\")]\n",
+      ),
+    ])
+  let assert Ok(app) = reader.read(units)
+  let notes = server_reader.notes(app)
+  list.length(notes) |> should.equal(2)
+  [
+    "attached_roles の attached が無い: ghost",
+    "attached_roles の DeclareBrowser に browser の宣言が無い: adult",
+  ]
+  |> list.each(fn(text) {
+    list.any(notes, fn(note) { string.contains(note.text, text) })
+    |> should.be_true
+  })
+  let text =
+    file(
+      back_files(list.filter(units, fn(item) { item.path != "noop" })),
+      "src/gen/http_runtime.mjs",
+    )
+  string.contains(text, "const browserCookie=null;") |> should.be_true
 }

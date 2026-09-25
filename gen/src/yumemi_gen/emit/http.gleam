@@ -6,12 +6,15 @@
 ////   型から導けない欄は ★ hook `arg_<service>_<key>` / `arg_<key>`(宣言した名がそのまま勝つ)
 //// - phaseGates:root を持たず、句が全部 `As<Entity>` で相を絞る Service(主体の相で門を閉じる)
 //// - accepted:Accepted の応答の欄(root の Entity の名)
-//// - ports:attached の口のうち framework の session の口(browser_adult / session_read / session_subject)
-////   でないものは ★ hook `attached_<name>`
+//// - ports:attached の口のうち、機関を framework が持つ役(`attached_roles` の `DeclareBrowser` /
+////   `ReadSession` / `SwitchSubject`)でないものは ★ hook `attached_<name>`
+//// - roles / browserCookie:`attached_roles` と `browser` の宣言をそのまま(framework は app の口の名も
+////   cookie の名も知らない ── WGy r4)
 //// - hooks:業務の行(`args_before` / `api_encode` / `failure_status` / `failure` / `respond` / `route_skip` /
 ////   `origin` / `early` / `judge` / `raw_body` / `attached_args` / `external_id` / `db_error` / `write_gate`)
 
 import glance
+import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
@@ -24,7 +27,8 @@ import yumemi_gen/stop
 
 const framework = "../../yumemi/framework/server/"
 
-const framework_attached = ["browser_adult", "session_read", "session_subject"]
+/// 機関を framework の JS が持ち、★ hook `attached_<name>` の要らない役(`attached_roles` の宣言)。
+const framework_roles = ["declare_browser", "read_session", "switch_subject"]
 
 const business_hooks = [
   "args_before", "api_encode", "failure_status", "failure", "respond",
@@ -74,6 +78,10 @@ pub fn text(
     })
   let attached_names =
     list.map(app.attached, fn(route) { naming.snake(route.name) })
+  let framework_attached =
+    app.server.attached_roles
+    |> list.filter(fn(row) { list.contains(framework_roles, row.role) })
+    |> list.map(fn(row) { row.attached })
   let port_missing =
     attached_names
     |> list.filter(fn(name) {
@@ -217,6 +225,34 @@ pub fn text(
     app.entities
     |> list.filter(fn(entity) { entity.subject })
     |> list.map(fn(entity) { quoted(entity.module) })
+  let roles =
+    app.server.attached_roles
+    |> list.map(fn(row) { row.attached })
+    |> list.unique
+    |> list.map(fn(name) {
+      name
+      <> ":["
+      <> string.join(
+        app.server.attached_roles
+          |> list.filter(fn(row) { row.attached == name })
+          |> list.map(fn(row) { quoted(row.role) }),
+        ",",
+      )
+      <> "]"
+    })
+  let browser_cookie = case app.server.browser {
+    None -> "null"
+    Some(declared) ->
+      "{cookie:"
+      <> quoted(declared.cookie)
+      <> ",binding:"
+      <> quoted(declared.key_binding)
+      <> ",claim:"
+      <> quoted(declared.claim)
+      <> ",maxAgeDays:"
+      <> int.to_string(declared.max_age_days)
+      <> "}"
+  }
   let body =
     string.concat([
       "const hosts={",
@@ -243,13 +279,19 @@ pub fn text(
       "const subjects=[",
       string.join(subjects, ","),
       "];\n",
+      "const roles={",
+      string.join(roles, ","),
+      "};\n",
+      "const browserCookie=",
+      browser_cookie,
+      ";\n",
       "const keyPattern=",
       case list.contains(hook_names, "api_key_pattern") {
         True -> "h_apiKeyPattern"
         False -> "'[0-9a-f]{64}'"
       },
       ";\n",
-      "export const {sessionCookie,cookies,signBrowser,verifyBrowser,host,route,origin,browser,admit,resolve,subject,decode,judge,execute,apiEncode,logicFailureStatus}=http({Ok,Error,registry,attached,c,runtime,hosts,args,modules,phaseGates,accepted,ports,hooks,subjects,apiKeyPattern:keyPattern});\n",
+      "export const {sessionCookie,cookies,signBrowser,verifyBrowser,host,route,origin,browser,admit,resolve,subject,decode,judge,execute,apiEncode,logicFailureStatus}=http({Ok,Error,registry,attached,c,runtime,hosts,args,modules,phaseGates,accepted,ports,hooks,subjects,roles,browserCookie,apiKeyPattern:keyPattern});\n",
     ])
   #(header <> imports <> body, notes)
 }
@@ -270,6 +312,8 @@ fn module_alias(path: String) -> String {
 }
 
 /// root を持たず、句が全部 `As<Entity>` で `Only([..])` の Service ── 主体の相で門を閉じる。
+/// `Only` の相は allow の Entity の相なので、`As<X>` の X が allow の Entity そのものの句に限る
+/// (WGy r4)。X が別の Entity の句を持つ Service は門を出さず、相は読みの SQL が allow の行で照らす。
 fn phase_gate(app: App, service: Service) -> Result(String, Nil) {
   case root.root_for(app, service) {
     Some(_) -> Error(Nil)
@@ -282,7 +326,7 @@ fn phase_gate(app: App, service: Service) -> Result(String, Nil) {
         list.map(clauses, fn(clause) {
           case clause {
             model.Clause(who: who, at: model.OnlyAt(items), ..) ->
-              case string.contains(who, "As") {
+              case root.who_is_allow_entity(app, service, who) {
                 True -> Ok(items)
                 False -> Error(Nil)
               }

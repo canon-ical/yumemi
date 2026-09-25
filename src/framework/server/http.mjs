@@ -11,6 +11,9 @@
 // - `phaseGates`: root を持たず、主体の相で絞る Service -> 通す相の名
 // - `accepted`: Service -> Accepted の応答の欄の名(root の Entity)
 // - `attached`: 口の名 -> ★ の実装(framework の session の口は機関が持つ)
+// - `roles`: attached の口の名 -> 役の名の並び(`declare_browser` / `read_session` / `switch_subject` /
+//   `tail_path` / `needs_browser`)。app の `src/server.gleam` の `attached_roles` から。framework は口の名を知らない
+// - `browserCookie`: 成人の申告を焼く署名 cookie(`{cookie,binding,claim,maxAgeDays}`)か null。`browser` の宣言から
 // - `hooks`: ★ の業務の行(下の `hook(...)` の名)。どれも無くてよい
 import * as framework_entry from '../entry.mjs';
 
@@ -19,7 +22,9 @@ export function http(spec) {
  const hook=(name)=>spec.hooks?.[name];
  const encoder=new TextEncoder();
  const cookieSeconds=30*86400;
- const browserSeconds=395*86400;
+ const bc=spec.browserCookie??null;
+ const browserSeconds=(bc?.maxAgeDays??0)*86400;
+ const roleOf=(name,role)=>(spec.roles?.[name]??[]).includes(role);
  const maxBlobBytes=20*1024*1024;
  function sessionCookie(id,env,clear=false) {
   return `session=${id}; Path=/; Domain=${env.COOKIE_DOMAIN}; HttpOnly; Secure; SameSite=Lax; Max-Age=${clear?0:cookieSeconds}`;
@@ -29,18 +34,19 @@ export function http(spec) {
  }
  const base64=bytes=>btoa(String.fromCharCode(...bytes)).replaceAll('+','-').replaceAll('/','_').replace(/=+$/,'');
  const bytes=raw=>Uint8Array.from(atob(raw.replaceAll('-','+').replaceAll('_','/')),x=>x.charCodeAt(0));
- async function mbKey(env) { const value=await env.MB_KEY.get(); return crypto.subtle.importKey('raw',encoder.encode(value),{name:'HMAC',hash:'SHA-256'},false,['sign','verify']); }
+ async function browserKey(env) { const value=await env[bc.binding].get(); return crypto.subtle.importKey('raw',encoder.encode(value),{name:'HMAC',hash:'SHA-256'},false,['sign','verify']); }
  async function signBrowser(env,id,at) {
-  const payload=base64(encoder.encode(JSON.stringify({id,adult_declared_at:at})));
-  return payload+'.'+base64(new Uint8Array(await crypto.subtle.sign('HMAC',await mbKey(env),encoder.encode(payload))));
+  if(!bc) throw new Error('browser の宣言が無い');
+  const payload=base64(encoder.encode(JSON.stringify({id,[bc.claim]:at})));
+  return payload+'.'+base64(new Uint8Array(await crypto.subtle.sign('HMAC',await browserKey(env),encoder.encode(payload))));
  }
  async function verifyBrowser(env,raw,at) {
-  if(!raw) return null;
+  if(!raw||!bc) return null;
   try {
    const [payload,signature,extra]=raw.split('.');
-   if(extra!==undefined||!signature||!await crypto.subtle.verify('HMAC',await mbKey(env),bytes(signature),encoder.encode(payload))) return null;
+   if(extra!==undefined||!signature||!await crypto.subtle.verify('HMAC',await browserKey(env),bytes(signature),encoder.encode(payload))) return null;
    const value=JSON.parse(new TextDecoder().decode(bytes(payload)));
-   const declared=Date.parse(value.adult_declared_at),now=Date.parse(at);
+   const declared=Date.parse(value[bc.claim]),now=Date.parse(at);
    if(!/^[0-9a-f]{32}$/.test(value.id)||!Number.isFinite(declared)||declared>now||now-declared>browserSeconds*1000) return null;
    return value;
   } catch { return null; }
@@ -140,7 +146,7 @@ export function http(spec) {
  function failureStatus(service,code) {
   return hook('failure_status')?.(service,code)??422;
  }
- const allowed=['not_found','forbidden','unauthorized','rate_limited','suspended','adult_declaration_missing','consent_missing','invalid_argument','conflict','handle_taken','mail_taken'];
+ const allowed=['not_found','forbidden','unauthorized','rate_limited','suspended','adult_declaration_missing','consent_missing','invalid_argument','conflict'];
  function failure(s,error) {
   if(error.connector) return response(s,{code:'upstream_unavailable',connector:error.connector},503);
   const custom=hook('failure')?.(s,error,{response});
@@ -189,11 +195,12 @@ export function http(spec) {
   const apiEntry=isApiKeyEntry(s.entry);
   for(const r of candidates) {
    if(apiEntry!==(r.credential==='api_key')) continue;
-   const media=r.name==='media_read';
-   if(media ? !['GET','HEAD'].includes(s.request.method) : r.method!==s.request.method) continue;
+   const tail=roleOf(r.name,'tail_path');
+   if(tail ? !['GET','HEAD'].includes(s.request.method) : r.method!==s.request.method) continue;
    if(c.tag(s.entry.services)==='read_only' && (r.module?c.tag(r.module.effect)!=='read':r.method!=='GET')) continue;
    const names=[];
-   const pattern=media ? (names.push('key'),'^/media/(.+)$') : '^'+r.path.replace(/:([a-z_]+)/g,(_,name)=>{names.push(name);return '([^/]+)';})+'$';
+   // `tail_path` の口は最後の穴が `/` を含む残り全部を取る(`/media/:key` -> `^/media/(.+)$`)
+   const pattern='^'+r.path.replace(/:([a-z_]+)/g,(m,name,at,path)=>{names.push(name);return tail&&at+m.length===path.length?'(.+)':'([^/]+)';})+'$';
    const match=s.url.pathname.match(new RegExp(pattern));
    if(match) {
     if(hook('route_skip')?.(r,s)) continue;
@@ -215,7 +222,7 @@ export function http(spec) {
  });
  const browser=check('resolve',4,async s=>{
   if(hook('early')?.(s)) {s.earlyResponse=emptyResponse(s,202);return;}
-  s.browser=await verifyBrowser(s.env,s.cookies._mb,s.at);
+  s.browser=bc?await verifyBrowser(s.env,s.cookies[bc.cookie],s.at):null;
  });
  const admit=check('resolve',5,async s=>{
   if(isApiKeyEntry(s.entry)) {
@@ -268,7 +275,7 @@ export function http(spec) {
   try {path=Object.fromEntries(Object.entries(s.pathArgs).map(([k,v])=>[k,decodeURIComponent(v)]));} catch {fail('invalid_argument',400,'path');}
   const raw={...Object.fromEntries(s.url.searchParams),...body,...path};
   if(!s.record.module) {
-   if(s.record.name==='session_subject') {
+   if(roleOf(s.record.name,'switch_subject')) {
     const kinds=spec.subjects;
     if(!kinds.includes(raw.kind)) fail('invalid_argument',400,'kind');
     const declared=s.entry?.subject;
@@ -292,7 +299,7 @@ export function http(spec) {
   if(!matched.length) fail('forbidden',403);
   const gate=spec.phaseGates[s.record.name];
   if(gate&&!gate.includes(resolved?.phase)) fail('forbidden',403);
-  if(s.record.name==='media_read'&&!s.browser) fail('adult_declaration_missing',403);
+  if(roleOf(s.record.name,'needs_browser')&&!s.browser) fail('adult_declaration_missing',403);
   if(write&&resolved?.suspended) fail('suspended',403);
   if(write&&s.record.module&&hook('write_gate')?.(s,matched.map(x=>c.tag(x.who)))) fail('forbidden',403);
   for(const req of s.record.module?.requires??[]) {
@@ -305,18 +312,18 @@ export function http(spec) {
  async function execute(s) {
   s.trace.push('execute:10');
   try {
-   if(s.record.name==='browser_adult') {
+   if(roleOf(s.record.name,'declare_browser')) {
     const id=s.browser?.id??Array.from(crypto.getRandomValues(new Uint8Array(16)),v=>v.toString(16).padStart(2,'0')).join('');
     const signed=await signBrowser(s.env,id,s.at);
     await spec.runtime.run(s.db,'framework/browser',[id,s.at]);
-    s.setCookies.push(`_mb=${signed}; Path=/; Domain=${s.env.COOKIE_DOMAIN}; HttpOnly; Secure; SameSite=Lax; Max-Age=${browserSeconds}`);
+    s.setCookies.push(`${bc.cookie}=${signed}; Path=/; Domain=${s.env.COOKIE_DOMAIN}; HttpOnly; Secure; SameSite=Lax; Max-Age=${browserSeconds}`);
     return response(s,{adult:true});
    }
-   if(s.record.name==='session_read') {
+   if(roleOf(s.record.name,'read_session')) {
     const r=s.resolved;
     return response(s,r?{party:r.party,subject:r.subject_kind?{kind:r.subject_kind,id:r.subject_id,handle:r.handle,phase:r.phase}:null,subjects:r.subjects,consents:{use:r.consents.some(x=>x.kind==='use'),handling:r.consents.some(x=>x.kind==='handling')},suspended:r.suspended,adult:!!s.browser}:{anonymous:true,adult:!!s.browser});
    }
-   if(s.record.name==='session_subject') {
+   if(roleOf(s.record.name,'switch_subject')) {
     const rows=await spec.runtime.run(s.db,'framework/session_subject_staff',[s.resolved.id,s.resolved.party,s.args.kind,s.args.id]);
     if(!rows.length) fail('not_found',404);
     return response(s,{subject:{kind:rows[0].subject_kind,id:rows[0].subject_id}});

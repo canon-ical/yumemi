@@ -3,6 +3,8 @@
 //// 出すのは生成束 ── `src/gen/types/*`、`src/gen/query.gleam` と
 //// `src/gen/query/{from,field}.gleam`、`src/gen/reads/*`、`src/gen/root/*`、
 //// `db/queries/<service>/<name>.sql`(読み)、verb / phase、`src/gen/allow/*`(root が指す allow)。
+//// 出力先が app そのものなら、`db/queries` へは既に在る `-- GENERATED` の file だけを書く
+//// (生成器だけが出す SQL は `src/gen/sql.mjs` に束ねる ── `into_app`)。
 ////
 //// **出力が揃わなかったら 0 で終わらない。**理由は 20 の exit code 表で分類し(`stop`)、
 //// stderr と `_diagnostics.txt` の両方に同じ1行で出す。ファイル自体は書いてから止まる
@@ -75,6 +77,9 @@ fn bundle_front(
   app_dir: String,
   faces: List(String),
 ) -> List(String)
+
+@external(javascript, "./yumemi_gen_ffi.mjs", "same_dir")
+fn same_dir(left: String, right: String) -> Bool
 
 @external(javascript, "./yumemi_gen_ffi.mjs", "sql_files")
 fn sql_files(dir: String) -> List(#(String, String))
@@ -250,7 +255,14 @@ fn front_note(error: front.Error) -> Note {
 }
 
 fn run(app_dir: String, out_dir: String) -> Result(#(Int, List(Note)), Note) {
-  use #(files, notes) <- result.try(generate(app_dir))
+  use #(generated, notes) <- result.try(generate(app_dir))
+  let files =
+    into_app(generated, same_dir(app_dir, out_dir), fn(path) {
+      case simplifile.read(out_dir <> "/" <> path) {
+        Ok(text) -> string.starts_with(text, "-- GENERATED")
+        Error(_) -> False
+      }
+    })
   use _ <- result.try(
     simplifile.create_directory_all(out_dir)
     |> result.map_error(io_note),
@@ -328,6 +340,24 @@ fn first_segment(path: String) -> Result(String, Nil) {
   case string.split(path, "/") {
     [first, ..] -> Ok(first)
     [] -> Error(Nil)
+  }
+}
+
+/// 出力先が app そのもののとき、`db/queries/**` へは既に在る file だけを書く(WGy r4、鷹野の裁定 1 (c))。
+/// 生成器だけが出す SQL は `src/gen/sql.mjs` に束ねてあるので、app の `db/queries` には増やさない。
+/// 既に在る file のうち上書きするのは `-- GENERATED` を名乗るもの(`generated` が真)だけで、★ の手書きは
+/// そのまま残す(`back` の `bundle` と同じ規則 ── app の SQL が勝つのは ★ だけ)。出力先が別の dir なら全部を書く。
+pub fn into_app(
+  files: List(types.File),
+  app: Bool,
+  generated: fn(String) -> Bool,
+) -> List(types.File) {
+  case app {
+    False -> files
+    True ->
+      list.filter(files, fn(file) {
+        !string.starts_with(file.path, "db/queries/") || generated(file.path)
+      })
   }
 }
 

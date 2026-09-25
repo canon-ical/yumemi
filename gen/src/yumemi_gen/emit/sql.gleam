@@ -832,7 +832,9 @@ type Hop {
 /// musearch の `article_search/nearest.sql` と同じ ── 実行側が渡す句の jsonb を
 /// `jsonb_array_elements` で開き、相は allow の Entity の `phase`、owner
 /// `Via<Entity>Party` はその Entity の `party` 列と party の穴で照らす。
-/// 入れられない形(Self、相の無い Entity、from / join から辿れない Entity)は exit 4。
+/// owner `Self` は主体の鍵の穴で照らす。ただし句が全部 `Self` でどの `As<X>` も allow の Entity
+/// そのものなら、読みの行を絞らない(主体の門と Logic の主体の鍵に任せる)。
+/// 入れられない形(相の無い Entity、from / join から辿れない Entity)は exit 4。
 fn allow_clause(
   app: App,
   service: model.Service,
@@ -890,17 +892,20 @@ fn allow_clause(
             _ -> False
           }
         })
-      // 句が全部 `Self` の Service は主体(actor)を絞る句で、読みの行を絞らない(WGy r3)──
-      // `Self` は actor の admission で判じ、他の Entity の行(claim の前の Roster、他の嬢の Heaven の連携)は
-      // 読みの側で主体に縛らない(基点の SQL と同じ意味)
-      case all_self, phased, owners, selves {
-        True, _, _, _ -> {
-          use _ <- try(list.try_map(selves, subject_of(app, _)))
-          Ok(#(scope, None))
-        }
+      // 句が全部 `Self` で、どの句の `As<X>` も allow の Entity そのもの(主体の行 = allow の行)の
+      // Service は主体(actor)を絞る句で、読みの行を絞らない(WGy r3)── `Self` は actor の admission と
+      // 入口の相の門で判じ、他の Entity の行(claim の前の Roster、他の嬢の Heaven の連携)は読みの側で
+      // 主体に縛らない(基点の SQL と同じ意味)。X が allow の Entity と違う形(`memo` × `AsStaff` × `Self`)は
+      // 「その行の X が自分」の意味なので、主体の鍵の穴(`subject=$K`)で絞るか、辿れなければ exit 4(WGy r4)
+      let own =
+        all_self
+        && list.all(selves, fn(who) {
+          root.who_is_allow_entity(app, service, who)
+        })
+      case own, phased, owners, selves {
+        True, _, _, _ -> Ok(#(scope, None))
         _, False, [], [] -> Ok(#(scope, None))
-        _, _, _, _ ->
-          restricted(app, service, scope, phased, owners, selves, all_self)
+        _, _, _, _ -> restricted(app, service, scope, phased, owners, selves)
       }
     }
   }
@@ -913,7 +918,6 @@ fn restricted(
   phased: Bool,
   owners: List(String),
   selves: List(String),
-  all_self: Bool,
 ) -> Result(#(Scope, Option(Allowed)), Reason) {
   let allow_entity = case service.allow_module {
     Some(path) ->
@@ -979,36 +983,9 @@ fn restricted(
   use #(inner, hops) <- try(
     list.try_fold(wanted, #(scope, []), fn(acc, entity) {
       let #(current, hops) = acc
-      case reach(app, current, hops, entity) {
-        Ok(found) -> Ok(found)
-        // 句が全部 `Self` で、主体の Entity が読みから辿れない(consent_version を読む
-        // link_import など)── 主体の行そのものを鍵の穴で引いて、相をそこで照らす。
-        Error(reason) ->
-          case
-            all_self
-            && list.any(subjects, fn(other) { other.name == entity.name })
-          {
-            False -> Error(reason)
-            True -> {
-              let next = assign(current, entity)
-              let alias = option.unwrap(alias_of(next, entity.name), "t")
-              Ok(#(
-                next,
-                list.append(hops, [
-                  Hop(
-                    table: entity.table,
-                    alias: alias,
-                    relation: alias
-                      <> "."
-                      <> quoted(entity.key_column)
-                      <> "=$"
-                      <> int.to_string(subject_place),
-                  ),
-                ]),
-              ))
-            }
-          }
-      }
+      // 辿れない Entity は exit 4。主体の行そのものを鍵の穴で引く逃げ道は、読みの行を縛らないので持たない
+      // (WGy r4 ── 句が全部 `Self` で辿れない形は、主体の形なら上で絞らず、別の Entity なら名指しで止める)
+      reach(app, current, hops, entity)
     }),
   )
   let taken = list.map(inner.aliases, fn(pair) { pair.1 })
@@ -1117,6 +1094,9 @@ fn restricted(
 /// owner `Self` の句が照らす主体の Entity。`who` の `As<Entity>` の Entity で、その key の列と
 /// 主体の鍵の穴(`subject=$K`、実行側が actor の subject の id を渡す)を比べる(hw-1 の鷹野宛 1 の案、
 /// WGy の裁定 4)。`As` で始まらない `who`(`Anyone` など)に `Self` は付かない。
+/// 句が全部 `Self` でどの `As<X>` も allow の Entity そのものの形は、ここに来ず穴を使わない
+/// (`allow_clause` が読みを絞らない ── WGy r3 / r4)。穴を使うのは X が allow の Entity と違う形と、
+/// `Self` と他の owner が混ざる形だけ。
 fn subject_of(app: App, who: String) -> Result(Entity, Reason) {
   let name = case string.split(who, ".") |> list.last {
     Ok(last) -> last

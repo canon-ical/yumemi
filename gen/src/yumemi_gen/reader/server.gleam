@@ -33,6 +33,8 @@ pub fn read(units: List(Unit)) -> Result(Read, String) {
       use storage <- result.try(items(module, "storage", storage_of))
       use reads <- result.try(items(module, "reads", manual_read_of))
       use roots <- result.try(items(module, "roots", root_shape_of))
+      use roles <- result.try(items(module, "attached_roles", attached_role_of))
+      use browser <- result.try(browser_of(module))
       Ok(Read(
         server: model.Server(
           declared: True,
@@ -45,6 +47,8 @@ pub fn read(units: List(Unit)) -> Result(Read, String) {
           storage: storage,
           reads: reads,
           roots: roots,
+          attached_roles: roles,
+          browser: browser,
         ),
         attached: attached,
       ))
@@ -164,6 +168,59 @@ fn attached_of(
       ))
     }
     _ -> Error("Attached でない項")
+  }
+}
+
+fn attached_role_of(
+  expression: glance.Expression,
+) -> Result(model.AttachedRole, String) {
+  use role <- result.try(case g.ctor_name(expression) {
+    Some("DeclareBrowser") -> Ok("declare_browser")
+    Some("ReadSession") -> Ok("read_session")
+    Some("SwitchSubject") -> Ok("switch_subject")
+    Some("TailPath") -> Ok("tail_path")
+    Some("NeedsBrowser") -> Ok("needs_browser")
+    _ ->
+      Error(
+        "DeclareBrowser / ReadSession / SwitchSubject / TailPath / NeedsBrowser でない項",
+      )
+  })
+  use attached <- result.try(text(expression, "attached"))
+  Ok(model.AttachedRole(attached: attached, role: role))
+}
+
+/// `pub const browser: BrowserCookie`(1 つ)。無ければ None。
+fn browser_of(
+  module: glance.Module,
+) -> Result(option.Option(model.BrowserCookie), String) {
+  case g.find_constant(module, "browser") {
+    None -> Ok(None)
+    Some(constant) ->
+      case constant.publicity, g.ctor_name(constant.value) {
+        glance.Public, Some("BrowserCookie") -> {
+          let value = constant.value
+          let named = fn(label) {
+            text(value, label) |> result.map_error(fn(e) { "browser: " <> e })
+          }
+          use cookie <- result.try(named("cookie"))
+          use key_binding <- result.try(named("key_binding"))
+          use claim <- result.try(named("claim"))
+          use days <- result.try(
+            integer(value, "max_age_days")
+            |> result.map_error(fn(e) { "browser: " <> e }),
+          )
+          Ok(
+            Some(model.BrowserCookie(
+              cookie: cookie,
+              key_binding: key_binding,
+              claim: claim,
+              max_age_days: days,
+            )),
+          )
+        }
+        glance.Public, _ -> Error("browser が BrowserCookie でない")
+        glance.Private, _ -> Error("browser が pub でない")
+      }
   }
 }
 
@@ -601,7 +658,19 @@ pub fn notes(app: model.App) -> List(stop.Note) {
         False -> Ok("roots の Service が無い: " <> shape.service)
       }
     })
+  let unknown_roles =
+    list.filter_map(app.server.attached_roles, fn(row) {
+      case list.contains(attached, row.attached), row.role, app.server.browser {
+        False, _, _ -> Ok("attached_roles の attached が無い: " <> row.attached)
+        True, "declare_browser", None ->
+          Ok(
+            "attached_roles の DeclareBrowser に browser の宣言が無い: " <> row.attached,
+          )
+        True, _, _ -> Error(Nil)
+      }
+    })
   list.flatten([
+    unknown_roles,
     unknown_roots,
     unknown_reads,
     unknown_routes,

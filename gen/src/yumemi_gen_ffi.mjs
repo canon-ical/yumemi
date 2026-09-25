@@ -419,3 +419,12 @@ export function sql_files(dir) {
   walk(dir, "");
   return toList(found);
 }
+
+// 出力先が app そのものか(symlink と `..` を解いて比べる)。出力先がまだ無ければ app ではない。
+export function same_dir(left, right) {
+  try {
+    return fs.realpathSync(left) === fs.realpathSync(right);
+  } catch {
+    return false;
+  }
+}

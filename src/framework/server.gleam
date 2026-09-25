@@ -1,7 +1,7 @@
 //// back の宣言 ── 生成器が app の `src/server.gleam` の const を読み、`src/gen/registry.mjs` /
 //// `http_runtime.mjs` / `shell.mjs` / `queue_runtime.mjs` / `cron_runtime.mjs` を書く(0.11.1、WGy)。
 ////
-//// 置く const は 5 つ。どれも無くてよい(無ければ空の表)。
+//// 置く const は下のとおり。どれも無くてよい(無ければ空の表)。
 ////
 //// - `pub const routes: List(Route)` ── Service の (method, path) の上書き。導出規則(entry の prefix と
 ////   Entity / Args の型)と同じ行は書かない。公開の URL(REST v1、鍵の発行)は導出に寄せず、ここで固定する
@@ -17,6 +17,11 @@
 //// - `pub const roots: List(RootShape)` ── root の導出(allow の Entity と Args の key の型)と違う Service の root
 //// - `pub const storage: List(Storage)` ── Entity の器と列の写像。導出(Neon の `app.<module>`、Property 名 =
 ////   列名、payload の無い sum は text、record と List は jsonb)と違う Entity の Property だけを書く
+//// - `pub const attached_roles: List(AttachedRole)` ── 機関を framework が持つ attached の口の役(session・
+////   browser の申告・path の残りを取る口)。framework の JS は app の口の名を知らず、ここから受ける
+//// - `pub const browser: BrowserCookie` ── 成人の申告を焼く browser の署名 cookie の名・鍵の binding・期間
+////
+//// framework の JS が app に求めるもの(npm の依存と `db/queries/framework/**` の SQL)は README を見よ。
 ////
 //// Service は名(module の名、`article_publish`)で指す ── Service の値は型引数が Service ごとに違い、
 //// 1 つの List に並ばないため。名が Service に無ければ生成器が exit 4 で名指しする。
@@ -176,4 +181,34 @@ pub type RootShape {
   /// root に入口が運ぶ値を載せる(`browser` = 署名した browser cookie の id)。`type_` は Gleam の綴り、
   /// `import_` はその綴りが要る import の行の中身
   Carried(service: String, name: String, type_: String, import_: String)
+}
+
+/// attached の口のうち、機関を framework の JS(`framework/server/http.mjs`)が持つものの役(WGy r4)。
+/// framework は app の口の名を知らない ── どの attached の名がどの役かを app がここで渡す
+/// (`pub const attached_roles: List(AttachedRole)`)。1 つの口に役を 2 つ以上書いてよい。
+/// 名が `attached` に無ければ生成器が exit 4 で名指しする。
+pub type AttachedRole {
+  /// 成人の申告を browser の署名 cookie に焼く(`browser` の宣言が要る)。行は `framework/browser` の SQL
+  DeclareBrowser(attached: String)
+  /// session の中身(party・主体・同意・browser の申告)を返す
+  ReadSession(attached: String)
+  /// session の主体を切り替える。行は `framework/session_subject_staff` の SQL
+  SwitchSubject(attached: String)
+  /// path の最後の穴(`:key`)が `/` を含む残り全部を取り、GET と HEAD で受ける
+  TailPath(attached: String)
+  /// 署名した browser の申告が無ければ 403(`adult_declaration_missing`)で閉じる
+  NeedsBrowser(attached: String)
+}
+
+/// 成人の申告を焼く browser の署名 cookie(WGy r4、`pub const browser: BrowserCookie`)。`cookie` は cookie の名、
+/// `key_binding` は HMAC の鍵を持つ env の binding(`.get()` で文字列を返す Secret Store)、`claim` は payload で
+/// 申告の時刻を持つ欄の名、`max_age_days` は cookie の Max-Age と申告の有効期間。宣言が無ければ browser の
+/// 申告は常に無い(`DeclareBrowser` の口は書けない)。
+pub type BrowserCookie {
+  BrowserCookie(
+    cookie: String,
+    key_binding: String,
+    claim: String,
+    max_age_days: Int,
+  )
 }
