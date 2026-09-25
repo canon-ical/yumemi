@@ -589,7 +589,7 @@ pub fn manual_verbs_are_quiet_and_listed_in_the_header_test() {
   })
   |> should.equal([])
   let assert [generated] = verb.emit(app, hash.of(units))
-  string.contains(generated.text, "//// handwritten: rebuild_article_index\n")
+  string.contains(generated.text, "//// manual: rebuild_article_index\n")
   |> should.be_true
 }
 
@@ -1162,11 +1162,10 @@ pub fn allow_clause_self_uses_the_subject_key_hole_test() {
         ),
       ]),
     )
+  // WGy r3:句が全部 `Self` の Service は主体(actor)を絞る句で、読みの行を絞らない(基点の SQL と同じ意味)。
+  // 穴の契約(`-- allow:`)も持たない。
   let found = file(out, "db/queries/memo_self/items.sql")
-  string.contains(found, "-- allow: clauses=$2 subject=$3") |> should.be_true
-  string.contains(found, "->>'owner'='no_owner' OR (") |> should.be_true
-  // staff の key は party の列(fixture の宣言)── key の列を主体の鍵と比べる。
-  string.contains(found, "->>'owner'='self' AND s.party=$3)") |> should.be_true
-  string.contains(found, "-- allow: clauses=$2 party=") |> should.be_false
+  string.contains(found, "-- allow:") |> should.be_false
+  string.contains(found, "->>'owner'") |> should.be_false
   no_note_with(out, "memo_self/items")
 }

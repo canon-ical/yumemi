@@ -15,11 +15,118 @@ import yumemi_gen/naming
 pub fn emit(app: model.App, hashes: hash.Hashes) -> List(File) {
   app.services
   |> list.filter(fn(service) {
-    service.queries != [] || root_arrows(app, service) != []
+    service.queries != []
+    || root_arrows(app, service) != []
+    || manual_reads(app, service) != []
   })
   |> list.map(fn(service) {
-    one(app, service, hash.service(hashes, service.module))
+    let file = one(app, service, hash.service(hashes, service.module))
+    case manual_reads(app, service) {
+      [] -> file
+      manual -> with_manual(file, service, manual)
+    }
   })
+}
+
+/// `server.reads` のうち Service の手書きの読み。
+pub fn manual_reads(
+  app: model.App,
+  service: model.Service,
+) -> List(model.ManualRead) {
+  list.filter(app.server.reads, fn(read) { read.service == service.module })
+}
+
+/// 手書きの SQL の読みの口(WGy r3)。型は宣言の綴りのまま、行の写しは runtime が hook へ渡す。
+fn with_manual(
+  file: File,
+  service: model.Service,
+  manual: List(model.ManualRead),
+) -> File {
+  let wanted =
+    list.flatten([
+      [
+        "framework/io.{type Context, type Promise}",
+        "framework/step.{type Step}",
+      ],
+      list.flat_map(manual, fn(read) { read.imports }),
+    ])
+    |> list.unique
+  let present = fn(line) {
+    string.contains(file.text, "\nimport " <> line <> "\n")
+  }
+  let imports =
+    wanted
+    |> list.filter(fn(line) { !present(line) })
+    |> list.map(fn(line) { "import " <> line <> "\n" })
+    |> string.concat
+  let port = case string.contains(file.text, "fn query(ctx: Context") {
+    True -> ""
+    False ->
+      "\n@external(javascript, \"../operations_ffi.mjs\", \"read\")\n"
+      <> "fn query(ctx: Context, name: String, input: a) -> Promise(b)\n"
+  }
+  let functions =
+    manual
+    |> list.map(fn(read) {
+      let input = case read.args {
+        [single] -> single.0
+        many ->
+          "#(" <> string.join(list.map(many, fn(arg) { arg.0 }), ", ") <> ")"
+      }
+      "\npub fn "
+      <> read.query
+      <> "(\n"
+      <> string.concat(
+        list.map(read.args, fn(arg) {
+          "  " <> arg.0 <> " " <> arg.0 <> ": " <> arg.1 <> ",\n"
+        }),
+      )
+      <> "  then then: fn("
+      <> read.returns
+      <> ") -> Step(out, err, state),\n) -> Step(out, err, state) {\n  step.read(fn(ctx) { query(ctx, \""
+      <> read.query
+      <> "\", "
+      <> input
+      <> ") }, then)\n}\n"
+    })
+    |> string.concat
+  // 頭の行(header)の後の import の塊に宣言の import を足し、その後に FFI の口、末尾に読みの口を足す。
+  let #(head, rest) = case string.split_once(file.text, "\n") {
+    Ok(pair) -> pair
+    Error(_) -> #(file.text, "")
+  }
+  let head = case string.contains(head, "manual") {
+    True -> head
+    False ->
+      string.replace(
+        head,
+        " [sha256:",
+        " + server.reads(" <> service.module <> ") [sha256:",
+      )
+  }
+  let lines = string.split(string.trim_start(rest), "\n")
+  let import_lines =
+    list.take_while(lines, fn(line) {
+      string.starts_with(line, "import ") || string.trim(line) == ""
+    })
+  let body =
+    list.drop(lines, list.length(import_lines))
+    |> string.join("\n")
+  let import_block =
+    list.filter(import_lines, fn(line) { string.trim(line) != "" })
+    |> list.map(fn(line) { line <> "\n" })
+    |> string.concat
+  File(
+    ..file,
+    text: head
+      <> "\n\n"
+      <> import_block
+      <> imports
+      <> port
+      <> "\n"
+      <> body
+      <> functions,
+  )
 }
 
 fn one(app: model.App, service: model.Service, input_hash: String) -> File {

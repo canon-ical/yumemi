@@ -6,9 +6,13 @@ import gleam/list
 import gleam/string
 import gleeunit/should
 import yumemi_gen/emit/back
+import yumemi_gen/emit/codec
 import yumemi_gen/emit/entry
 import yumemi_gen/emit/hash
+import yumemi_gen/emit/reads
+import yumemi_gen/emit/root
 import yumemi_gen/emit/types
+import yumemi_gen/emit/verb
 import yumemi_gen/reader
 import yumemi_gen/reader/server as server_reader
 import yumemi_gen/source
@@ -383,4 +387,245 @@ pub fn unreadable_connector_port_stops_the_reader_test() {
       ),
     ])
   let assert Error(_) = reader.read(units)
+}
+
+// ── 器と列の写像(r3、鷹野の裁定)──────────────────────────────────────────
+
+fn storage_units(storage: String) -> List(source.Unit) {
+  units_with(article_fixture, [
+    unit(
+      "server",
+      "import framework/server.{Array, Column, DurableObject, InObject, Split, Text}\n\n"
+        <> "pub const durable_objects: List(server.DurableObject) = [DurableObject(class: \"TagDo\", module: \"tag_do\", adapter: \"TagDoAdapter\", methods: [])]\n"
+        <> "pub const storage: List(server.Storage) = "
+        <> storage
+        <> "\n",
+    ),
+  ])
+}
+
+/// `InObject` の Entity は PG の verb SQL を出さず、`Column` は INSERT / RETURNING / UPDATE の列名を替える。
+/// 穴の数は変えない(Property 1 つに穴 1 つ)。
+pub fn storage_moves_entities_and_renames_columns_test() {
+  let units =
+    storage_units(
+      "[InObject(entity: \"tag\", object: \"TagDo\"), Column(entity: \"article\", property: \"title\", column: \"headline\")]",
+    )
+  let assert Ok(app) = reader.read(units)
+  server_reader.notes(app) |> should.equal([])
+  let files =
+    verb.sql(app, hash.of(units))
+    |> list.map(fn(file) { #(file.path, file.text) })
+  list.any(files, fn(item) { string.ends_with(item.0, "_tag.sql") })
+  |> should.be_false
+  let create = file(files, "db/queries/verb/create_article.sql")
+  string.contains(create, "headline") |> should.be_true
+  string.contains(create, ",title,") |> should.be_false
+  let assert Ok(plain) = reader.read(without(article_fixture, "server"))
+  let before =
+    verb.sql(plain, hash.of(units))
+    |> list.map(fn(file) { #(file.path, file.text) })
+    |> file("db/queries/verb/create_article.sql")
+  string.split(create, "$")
+  |> list.length
+  |> should.equal(string.split(before, "$") |> list.length)
+}
+
+/// `Text` は構成子の snake 名を列の値へ写し、`Split` は穴 1 つを列に割って UPDATE を組の代入にする。
+/// 無い Entity / Property / 器は exit 4 で名指し。
+pub fn storage_text_split_and_unknown_names_test() {
+  let units =
+    storage_units(
+      "[Text(entity: \"article\", property: \"body\", values: [#(\"Short\", \"s\")]), Split(entity: \"article\", property: \"slug\", columns: [#(\"a\", \"slug_a\"), #(\"b\", \"slug_b\")]), Array(entity: \"ghost\", property: \"x\", element: \"uuid\"), Column(entity: \"article\", property: \"nope\", column: \"y\"), InObject(entity: \"tag\", object: \"Missing\")]",
+    )
+  let assert Ok(app) = reader.read(units)
+  let files =
+    verb.sql(app, hash.of(units))
+    |> list.map(fn(file) { #(file.path, file.text) })
+  let create = file(files, "db/queries/verb/create_article.sql")
+  string.contains(create, "slug_a,slug_b") |> should.be_true
+  string.contains(create, "::jsonb->>'a')") |> should.be_true
+  string.contains(create, "WHEN 'short' THEN 's'") |> should.be_true
+  let notes = server_reader.notes(app)
+  list.length(notes) |> should.equal(3)
+  [
+    "storage の Entity が無い: ghost", "storage article に Property が無い: nope",
+    "器が durable_objects に無い: Missing",
+  ]
+  |> list.each(fn(text) {
+    list.any(notes, fn(note) { string.contains(note.text, text) })
+    |> should.be_true
+  })
+}
+
+// ── 手書きの SQL の読み(r3)──────────────────────────────────────────────
+
+/// `ManualRead` は `gen/reads/<service>.gleam` に型付きの口を書く(引数が 2 つ以上なら組で渡す)。
+/// 無い Service・hooks に無い hook は exit 4。
+pub fn manual_read_writes_the_typed_port_test() {
+  let units =
+    units_with(article_fixture, [
+      unit(
+        "server",
+        "import framework/server.{Hook, ManualRead}\n\n"
+          <> "pub const hooks: List(server.Hook) = [Hook(name: \"read_counts\", module: \"hooks\")]\n"
+          <> "pub const reads: List(server.ManualRead) = [\n"
+          <> "  ManualRead(service: \"article_create\", query: \"counts\", args: [#(\"muse\", \"String\"), #(\"since\", \"Date\")], returns: \"List(#(String, Int))\", imports: [\"framework/time.{type Date}\"], hook: \"read_counts\"),\n"
+          <> "  ManualRead(service: \"ghost\", query: \"x\", args: [#(\"a\", \"String\")], returns: \"Int\", imports: [], hook: \"missing\"),\n"
+          <> "]\n",
+      ),
+    ])
+  let assert Ok(app) = reader.read(units)
+  let files =
+    reads.emit(app, hash.of(units))
+    |> list.map(fn(file) { #(file.path, file.text) })
+  let text = file(files, "src/gen/reads/article_create.gleam")
+  string.contains(text, "import framework/time.{type Date}\n") |> should.be_true
+  string.contains(
+    text,
+    "fn query(ctx: Context, name: String, input: a) -> Promise(b)",
+  )
+  |> should.be_true
+  string.contains(text, "then then: fn(List(#(String, Int))) -> Step(")
+  |> should.be_true
+  string.contains(text, "query(ctx, \"counts\", #(muse, since))")
+  |> should.be_true
+  let notes = server_reader.notes(app)
+  list.any(notes, fn(note) {
+    string.contains(note.text, "reads ghost/x の Service が無い")
+  })
+  |> should.be_true
+  list.any(notes, fn(note) {
+    string.contains(note.text, "hook が hooks に無い: missing")
+  })
+  |> should.be_true
+}
+
+// ── root の形(r3)──────────────────────────────────────────────────────────
+
+/// `Rootless` は Entity の行を持たない root、`WithVersion` は `version: Int`、`Carried` は入口の値を載せる
+/// (Option の綴りなら gleam/option を import する)。宣言した Service は名との違いを警告しない。
+pub fn root_shapes_follow_the_declaration_test() {
+  let units =
+    units_with(article_fixture, [
+      unit(
+        "server",
+        "import framework/server.{Carried, Rootless, WithVersion}\n\n"
+          <> "pub const roots: List(server.RootShape) = [\n"
+          <> "  Rootless(service: \"article_read\"),\n"
+          <> "  WithVersion(service: \"article_publish\"),\n"
+          <> "  Carried(service: \"article_read\", name: \"browser\", type_: \"Option(BrowserId)\", import_: \"gen/types/browser_id.{type BrowserId}\"),\n"
+          <> "  Rootless(service: \"ghost\"),\n"
+          <> "]\n",
+      ),
+    ])
+  let assert Ok(app) = reader.read(units)
+  let files =
+    root.emit(app, hash.of(units))
+    |> list.map(fn(file) { #(file.path, file.text) })
+  let read = file(files, "src/gen/root/article_read.gleam")
+  string.contains(read, "browser: Option(BrowserId),\n    at: Datetime,")
+  |> should.be_true
+  string.contains(read, "import gleam/option.{type Option}") |> should.be_true
+  string.contains(read, "article.Article") |> should.be_false
+  let publish = file(files, "src/gen/root/article_publish.gleam")
+  string.contains(publish, "    version: Int,\n") |> should.be_true
+  server_reader.notes(app)
+  |> list.any(fn(note) {
+    string.contains(note.text, "roots の Service が無い: ghost")
+  })
+  |> should.be_true
+}
+
+// ── runtime と http_runtime の表(r3)──────────────────────────────────────
+
+/// runtime.mjs は framework の機関に宣言からの表を渡すだけ ── verb の穴の並び(create は新しい鍵と draft の欄、
+/// advance は Step の辺)、読みの穴と戻りの形、actor の決め方。Service の名ごとの分岐を持たない。
+pub fn runtime_tables_follow_the_declarations_test() {
+  let files = back_files(without(article_fixture, "noop"))
+  let text = file(files, "src/gen/runtime.mjs")
+  string.starts_with(
+    text,
+    "//// GENERATED from service Logic / verb / reads / outbox contracts [sha256:",
+  )
+  |> should.be_true
+  string.contains(text, "from '../../yumemi/framework/server/runtime.mjs';")
+  |> should.be_true
+  string.contains(
+    text,
+    " create_article:{key:'verb/create_article',tuple:false,params:[['id'],['f','title','title']",
+  )
+  |> should.be_true
+  string.contains(text, "['from',2],['to',2],['at']],transitions:{")
+  |> should.be_true
+  string.contains(text, " article_create:{kind:'direct',subject:'staff'},")
+  |> should.be_true
+  string.contains(
+    text,
+    "'article_list/items':{key:'article_list/items',args:[['enc'],['cursor']],allow:[",
+  )
+  |> should.be_true
+  // 名ごとの分岐(`name===` / `record.name===`)を書かない
+  string.contains(text, "name===") |> should.be_false
+}
+
+/// http_runtime.mjs は Args の型から decode の語彙を導く(値型・Entity の鍵・その List)。入口の host は
+/// `<NAME>_HOST`。attached の口の実装は宣言した hook を名で引く。
+pub fn http_tables_follow_the_args_types_test() {
+  let files = back_files(without(article_fixture, "noop"))
+  let text = file(files, "src/gen/http_runtime.mjs")
+  string.contains(
+    text,
+    " article_create:[['slug',['scalar','slug']],['title',['scalar','title']],['body',['scalar','body']],['category',['key']],['tags',['list',['key']]]],",
+  )
+  |> should.be_true
+  string.contains(text, "from '../../yumemi/framework/server/http.mjs';")
+  |> should.be_true
+  string.contains(
+    text,
+    "import { attachedBlobCopy as h_attachedBlobCopy } from '../hooks.mjs';",
+  )
+  |> should.be_true
+  string.contains(text, "blob_copy:h_attachedBlobCopy") |> should.be_true
+  string.contains(text, "name===") |> should.be_false
+}
+
+/// `Text` の宣言は codec の decoder でも逆に写す(列の値 -> 構成子の snake 名 -> 構成子)。
+/// hook(`decode_<entity>`)を持たない Entity の decoder が宣言だけで列の形に合う。
+pub fn text_storage_is_reversed_in_the_codec_test() {
+  let units =
+    units_with(article_fixture, [
+      unit(
+        "entity/memo",
+        "import gen/types/title.{type Title}
+
+pub type Mode {
+  Draft
+  Final
+}
+
+pub type Memo {
+  Memo(title: Title, mode: Mode)
+}
+
+pub fn key(it: Memo) -> Title {
+  it.title
+}
+
+pub const collection: String = \"memos\"
+",
+      ),
+      unit(
+        "server",
+        "import framework/server.{Text}\n\n"
+          <> "pub const storage: List(server.Storage) = [Text(entity: \"memo\", property: \"mode\", values: [#(\"Draft\", \"d\"), #(\"Final\", \"f\")])]\n",
+      ),
+    ])
+  let assert Ok(app) = reader.read(units)
+  let text = codec.text(app, units, "x")
+  string.contains(
+    text,
+    "phase(memo,({'d':'draft','f':'final'}[r.mode]??r.mode))",
+  )
+  |> should.be_true
 }

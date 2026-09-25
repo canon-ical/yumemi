@@ -448,6 +448,40 @@ pub type ConnectorPort {
   PurePort(name: String, module: String, js: String, arity: Int)
 }
 
+/// `server.reads` の 1 行(手書きの SQL の読み)。
+pub type ManualRead {
+  ManualRead(
+    service: String,
+    query: String,
+    args: List(#(String, String)),
+    returns: String,
+    imports: List(String),
+    hook: String,
+  )
+}
+
+/// `server.roots` の 1 行(root の形の上書き)。
+pub type RootShape {
+  Rootless(service: String)
+  OwnRoot(service: String)
+  RootOf(service: String, entity: String)
+  WithVersion(service: String)
+  Carried(service: String, name: String, type_: String, import_: String)
+}
+
+/// `server.storage` の 1 行(Entity の器と列の写像)。entity は module 名。
+pub type Storage {
+  InObject(entity: String, object: String)
+  ColumnName(entity: String, property: String, column: String)
+  TextSum(entity: String, property: String, values: List(#(String, String)))
+  SplitColumns(
+    entity: String,
+    property: String,
+    columns: List(#(String, String)),
+  )
+  ArrayColumn(entity: String, property: String, element: String)
+}
+
 /// `src/server.gleam` の宣言。`declared` は module があったか(無い app は back の表を出さない)。
 pub type Server {
   Server(
@@ -458,6 +492,9 @@ pub type Server {
     durable_objects: List(DurableObject),
     hooks: List(Hook),
     connectors: List(Connector),
+    storage: List(Storage),
+    reads: List(ManualRead),
+    roots: List(RootShape),
   )
 }
 
@@ -470,6 +507,9 @@ pub fn empty_server() -> Server {
     durable_objects: [],
     hooks: [],
     connectors: [],
+    storage: [],
+    reads: [],
+    roots: [],
   )
 }
 

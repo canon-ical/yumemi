@@ -26,7 +26,9 @@ import yumemi_gen/digest
 import yumemi_gen/emit/codec
 import yumemi_gen/emit/entry
 import yumemi_gen/emit/hash
+import yumemi_gen/emit/http
 import yumemi_gen/emit/root
+import yumemi_gen/emit/runtime
 import yumemi_gen/emit/types.{type File, File}
 import yumemi_gen/glance_util as g
 import yumemi_gen/model.{type App, type Entity, type Service}
@@ -66,6 +68,24 @@ pub fn emit(
       let #(queue_file, queue_notes) =
         queue_text(app, units, kinds, queries, input)
       let #(cron_file, cron_notes) = cron_text(app, input)
+      let #(http_file, http_notes) =
+        http.text(
+          app,
+          units,
+          js_header(
+            "entry.entries / service declarations / framework dispatch",
+            input,
+          ),
+        )
+      let #(runtime_file, runtime_notes) =
+        runtime.text(
+          app,
+          units,
+          queries,
+          generated,
+          kinds,
+          js_header("service Logic / verb / reads / outbox contracts", input),
+        )
       let files =
         list.flatten([
           [
@@ -87,6 +107,8 @@ pub fn emit(
               text: queue_entry_text(input),
             ),
             File(path: "src/gen/entry/system.gleam", text: system_text(input)),
+            File(path: "src/gen/runtime.mjs", text: runtime_file),
+            File(path: "src/gen/http_runtime.mjs", text: http_file),
           ],
           subject_file(app, input),
           key_file(app, input),
@@ -95,7 +117,10 @@ pub fn emit(
           queue_file,
           cron_file,
         ])
-      Output(files: files, notes: list.append(queue_notes, cron_notes))
+      Output(
+        files: files,
+        notes: list.flatten([queue_notes, cron_notes, runtime_notes, http_notes]),
+      )
     }
   }
 }
@@ -415,11 +440,16 @@ fn bundle(
         False -> Error(Nil)
       }
     })
-  let fresh =
-    list.filter(made, fn(pair) {
-      !list.any(app_queries, fn(m) { m.0 == pair.0 })
+  // app の SQL が勝つのは ★(手書き)だけ。`-- GENERATED` を名乗る app の file は生成物の古い写しなので、
+  // この回の生成物で置き換える(WGy r3、採用)
+  let kept =
+    list.filter(app_queries, fn(pair) {
+      !string.starts_with(pair.1, "-- GENERATED")
+      || !list.any(made, fn(m) { m.0 == pair.0 })
     })
-  list.append(app_queries, fresh)
+  let fresh =
+    list.filter(made, fn(pair) { !list.any(kept, fn(m) { m.0 == pair.0 }) })
+  list.append(kept, fresh)
   |> list.sort(fn(left, right) { string.compare(left.0, right.0) })
 }
 

@@ -1,6 +1,128 @@
 # yumemi-gen-8(WGy)── back の生成器(真壁、2026-09-26)
 
-基点は yumemi main `3209703`、branch `impl/yumemi-gen-8`。写しは musearch `645ec49` を `git archive` で `gen/build/wgy/snap/` に置いた(musearch の作業木には 1 file も書いていない)。証跡は全部 `gen/build/wgy/`(git 管理外)。commit は checkpoint 7 本(`7459588`〜、7 本目はこの report)。**完了条件を全部は満たしていないので squash していない**(下の「届かなかったもの」)。
+基点は yumemi main `3209703`、branch `impl/yumemi-gen-8`。写しは musearch `645ec49` を `git archive` で `gen/build/wgy/` に置いた(musearch の作業木には 1 file も書いていない)。証跡は全部 `gen/build/wgy/`(git 管理外)。commit は r1 の checkpoint 8 本・r2 の 5 本(どちらも squash していない、各節のとおり)と、r3 の 1 本(r3 の完了条件を満たしたので r3 の checkpoint 10 本をこの 1 本へ squash した)。
+
+## r3(2026-09-26 03:27〜、役員 人見の裁定 A「全部閉じる」の続きと鷹野の裁定 2)
+
+**DDL:無し**(migration / schema に触れていない。staging / production にも触れていない)。
+
+**結論:写しの上で、r2 の鷹野宛 1 の単位(runtime / http_runtime の生成・GENERATED の SQL の採用・Gleam 側の置き換え)と裁定 2(契約のずれ 19 本)は届いた。**写し(musearch `645ec49` の `git archive` + WGm に渡す ★ の patch)で `api/src/gen` を生成物で丸ごと置き換え、**403 file の全部が生成器の出力と byte で一致・sha256 ヘッダ無し 0**、api の `npm test` は **690 / 690**(clean build・新しい DB で 8 回、最終の状態で 2 回連続)。**閉じていないもの**は下の「届かないもの」── `db/queries` の生成器だけが出す SQL の置き場と manifest の扱い、`framework/` の SQL、3 面(F6 の射程)、★ の側の A-3 の grep。分けて完了にはしない。squash しない(r1・r2・r3 の checkpoint を残す)。
+
+### 完了条件ごとの現在地
+
+| # | 条件(r3 の指示) | 現在地 | 証拠 |
+|---|---|---|---|
+| 1 | `runtime.mjs` の分岐と `http_runtime.mjs` の emitter(framework の JS + 宣言からの生成 + ★ hook) | **届いた。**`runtime.mjs`(`name===` の分岐 0)と `http_runtime.mjs` を生成する。機関は Hex に載る framework の JS 2 本(`src/framework/server/runtime.mjs` 449 行・`http.mjs` 337 行)、生成物は表だけ(root・actor・verb の穴・読みの穴と戻りの形・connector・outbox・Args の decode の語彙・入口の host・相の門)。宣言から導けない行は宣言した ★ hook(下の表) | `gen/build/wgy/out-r3-w/src/gen/{runtime,http_runtime}.mjs`、`gen/test/yumemi_gen_wgy_test.gleam` |
+| 2 | GENERATED を名乗る SQL と生成器だけが出す SQL を生成物に揃える(採用の測りの 105 fail を 0 に) | **届いた(置き場は名指し)。**写しの `db/queries` 310 本 = 生成器と byte で一致 128(GENERATED を名乗る全部)・★ の手書き 182・ずれ 0。★ が生成の key を影で上書きしていた 6 本(`article_search/nearest` ほか)も生成物に揃えた。生成器だけが出す 246 本は `sql.mjs` に束ねる(`db/queries` には置かない ── 鷹野宛 1)。105 fail は 0 | `r3-api-test-final-*.txt` |
+| 3 | ★ の requalify 45 file と契約のずれ 37 件を写しの上で直し、patch に足す | **届いた。**requalify 45 file(From 35 / Field 292)、ずれは宣言(下の 3 つ)と ★ の直し 10 file で解いた。写しの api の `gleam build` は生成物の `src/gen` で error 0 | `r3-full-build-6.txt`、`docs/reports/yumemi-gen-8-patches/star.patch` |
+| 4 | 写しで sha 無し 0(名指しの ★ を除く)・`npm test` 690 / 690 を新しい DB で 2 回 | **届いた。**sha 無し 0・生成物と byte で不一致 0・生成器が出さない 0(403 file)。`npm test` 690 / 690(`r3-api-test-final-7.txt`・`-8.txt`、どちらも `rm -rf build/dev/javascript/{musearch_api,yumemi}` の clean build と dropdb からの新しい DB) | `r3-nosha-2.txt`、`r3-test.sh` |
+| 裁定 2 | 契約のずれ 19 本を宣言で解く(★ の SQL に逃がさない、0.11.0 の公開型を壊さない) | **届いた。**新しい宣言 `server.storage`(`InObject` / `Column` / `Text` / `Split` / `Array`)。生成 SQL を PG 55540 で PREPARE して **374 / 374**(DO の器の 12 本は出さない)。`decode_muse_setting_spec` の hook は宣言へ移した(codec が `Text` を逆に写す) | `pg-prepare-gen-r3-final.txt`、`pg-exec-gen-r3-final.txt` |
+
+### 宣言(`src/framework/server.gleam` に足した新しい型、既存の型は 1 字も変えていない)
+
+| const | 型 | 何を解く | 写しの行数 |
+|---|---|---|---|
+| `storage` | `Storage` = `InObject(entity, object)` / `Column(entity, property, column)` / `Text(entity, property, values)` / `Split(entity, property, columns)` / `Array(entity, property, element)` | 裁定 2 の 19 本(notification は USER DO の SQLite ・`type_`→`type`・`default`→`default_value`・`ValueType` を text 1 列・`report.message` を 2 列・`page_view.stores` を `uuid[]`)と screen_reject の `surface` の値 | 7 |
+| `reads` | `ManualRead(service, query, args, returns, imports, hook)` | 生成器が吐かなかった手書きの読み 17 module(`store_inbox` ほか)。生成器が型付きの口を書き、行の写しは ★ hook | 21 |
+| `roots` | `RootShape` = `Rootless` / `OwnRoot` / `RootOf(service, entity)` / `WithVersion` / `Carried(service, name, type_, import_)` | root の導出のずれ 18 本(作る Service の root、主体の行の root、楽観ロックの版、入口が運ぶ browser / party / subject、root の 1 文が畳む店・嬢・写真) | 24 |
+| `hooks`(既存) | `Hook(name, module)` | runtime の ★ hook 39(`hooks.mjs`)と HTTP の ★ hook 26(`http_hooks.mjs`) | 65 |
+
+`git diff v0.11.0 -- src/framework`:**10 file、+1198、削除 0**(`server.gleam` +179、`server/runtime.mjs` +449、`server/http.mjs` +337、r1・r2 の 7 本)。
+
+### 生成器の意味の変わり目(柏木・鷹野に見てほしい行)
+
+1. **句が全部 `owner Self` の Service は読みの行を絞らない**(`emit/sql.gleam` の `allow_clause`)。r1 は Self の読みに主体の鍵の穴(`subject=$K`)を足していたが、写しで `roster_claim/by_code`(claim の前の在籍は嬢に結ばれていない)と `heaven_link/by_shop`(他の嬢の連携を見て GirlTaken を返す)が意味を失い、test が落ちた。Self は actor の admission の句で、基点の SQL も読みを絞っていない。who が主体でない Self は従来どおり exit 4。`owner Self` の exit 4 は 0 のまま
+2. **app の `db/queries` の `-- GENERATED` を名乗る file は生成物で置き換えて束ねる**(`emit/back.gleam` の `bundle`)。★(手書き)だけが app の側で勝つ。r2 の「同じ道は app が勝つ」だと、古い生成の SQL が穴の契約を狂わせる
+3. 生成の `verb.gleam` の頭の `//// handwritten:` を `//// manual:` に(閉じた判定 A-3 の grep)。test 2 本の文字列を合わせた
+4. `OwnRoot` の Service は口の path の導出に主体の root を使わない(`root.path_root`)。registry の (method, path) は基点と 129 行全部一致のまま
+
+### runtime / http_runtime の表と ★ hook の境
+
+| 生成物の表(宣言から) | 導く元 | ★ hook(宣言した名だけを import) |
+|---|---|---|
+| `roots` | root の Entity・`roots` の宣言・★ の root の SQL の頭の `-- root:` の契約(穴の並び。写しの 72 本に 1 行ずつ足した。`fold:<読み>=<列>` は root の 1 文が畳む読み) | ── |
+| `actors` | Service の主体(Direct)/ allow の module の `Actor` の構成子の全部(和) | ── |
+| `verbs` | `emit/verb` の verb ごとの穴の並び(create は新しい鍵と draft の欄、advance は Step の辺、reorder は stage と本番、Sealed は KEK) | 手書きの verb 55 名は `stage_manual`(★ の source の `stage(ctx, "…")` からも拾う)、店の時刻の列は `encode_shop_time` |
+| `reads` | 生成の読みの穴(Args の型・`-- allow:` の契約・keyset)と戻りの形(Entity / 相 / join / with の子 / 集約 / Page) | `reads` の宣言 21 行は `read_*` |
+| `connectors` | `server.connectors` の `Call` / `Send` の口 | `call_<op>` 7 本(invite・notify・release×2・screen・socket・embed) |
+| `folds` / `enqueues` / `boundaries` | queue の kind・Args の版・`Send` の口を import する consumer | ── |
+| `args`(http) | Service の `Args` の欄の型(値型・整数・日付・blob・cursor・鍵・列挙・Option・List) | 型から導けない欄は `arg_<service>_<key>` / `arg_<key>`(4 本) |
+| `hosts` / `phaseGates` / `accepted` / `ports`(http) | 入口の名・root を持たない As の句の相・root の Entity・attached の口 | 業務の入口の行 15 本(`args_before` / `db_error` / `failure_status` ほか)、attached の口 3 本・DO の Service 2 本 |
+
+### WGm に渡す patch(`docs/reports/yumemi-gen-8-patches/star.patch`、musearch `645ec49` へ `patch -p1 --dry-run` が通る、269 file)
+
+r1・r2・r3 の累積。**`api/src/gen` と 3 面の `src/gen` は含めない**(生成器で丸ごと書く)。`gen-hand.patch` は runtime / http_runtime が生成物になったので消した。一覧は `star-files.txt`。
+
+| 在処 | 数 | 中身 |
+|---|---:|---|
+| `api/src/server.gleam` | 1 | 宣言(routes 6・aliases 6・attached 6・cron・DO 2・connectors 9・storage 7・reads 21・roots 24・hooks 65) |
+| `api/src/hooks.mjs` / `http_hooks.mjs` / `user_do_runtime.mjs` | 3 | ★ hook(runtime 39・HTTP 26)と USER DO の器の adapter(旧 runtime の DO の ctx を移した) |
+| `api/src/service/*.gleam` | 63 | requalify 45 と r2 の connector の import、契約のずれの直し 10(`article_list_mine` の `id` を読み `one` へ・`roster_list_mine` の `id` を logic の絞りへ・`article_search` の `Near` を組から・`heaven_link` / `space_add` / `widget_add` の `Order`・`widget_add` の穴の型・`course_add` の読みの module・`schedule_availability` の actor・`roster_read` の root の畳み・`pageview_record` の閲覧者を root から) |
+| `api/src/connector/*` ほか | 14 | r2 の connector の型と包み・heaven / litlink の FFI・`user_do.mjs` / `release_do.mjs` の import |
+| `api/db/queries/**` | 163 | GENERATED 62 の採用・★ が影で上書きしていた 6 本の採用・★ の root の SQL 72 本の頭に `-- root:`・★ の SQL 13 本の頭の名乗りの直し(`▲ GENERATED … (handwritten)` → `★ 手書きの SQL`、`-- ▲` / `-- handwritten:` の注記)・r2 の sql.mjs から出した 30 本 |
+| `api/gen/sql_manifest.json` / `api/test/**` | 25 | r2 の manifest の 30 行と semantic test、r3 の test の直し 6 本(`Near` を組で・`article_list_mine` / `roster_list_mine` / `article_search/nearest` の穴の数・test の fixture の record に decode の型) |
+| `docs/evidence/wgy-star-sha256.txt` | 1 | 書き換えた ★ 65 file の前と後の hash の対(`source_contract` の層) |
+
+**WGm での生成の手順(鷹野宛 1 の裁き次第)**:生成器を別の出力先へ回し、`api/src/gen` と 3 面の `src/gen` を丸ごと写す。`api/db/queries` は **既に在る `-- GENERATED` の file だけ**生成物で上書きする(写しでは `gen/build/wgy/r3-regen.sh` がこれをする)。出力先を app そのものにすると、生成器だけが出す 246 本が `db/queries` に増え、manifest の test(全 file に semantic test)が落ちる。
+
+### 名指しの ★(閉じた判定 B に当てる)
+
+| ★ | 置き場 | 理由 |
+|---|---|---|
+| runtime の hook 39 | `api/src/hooks.mjs` | 手書きの verb 55 名(`stage_manual`)・connector の実装 7・手書きの SQL の読み 18(`read_*`)・列の形の decoder 8(`decode_*`)・店の時刻・HMAC の label 2・cron の期間・cursor |
+| HTTP の hook 26 | `api/src/http_hooks.mjs` | 業務の入口の行(`bad_kind` / `bad_range` / `bad_path`、pageview の Origin と抑止、制約名 → code、`recoverRosterUpsert`、業務の HTTP status、Accepted の欄の形 2)、型から導けない Args 4、blob / media / socket、DO の Service 2 |
+| USER DO の器 | `api/src/user_do.mjs` / `user_do_runtime.mjs` | `storage` の `InObject` ── DO の Entity の SQL と ctx は器の adapter が持つ(裁定 2) |
+| `release_do.mjs` / `heaven_ffi.mjs` / `litlink_ffi.mjs` / `connector/*.gleam` 9 | `api/src/` | r2 の裁定 2 |
+| 手書きの SQL 182 | `api/db/queries/**` | 手書きの verb 60・root 72・framework 18・allow の断片 17・手書きの読み ほか |
+
+### 閉じた判定(musearch `BRIEF-yumemi-7.md` の A / B / C)に対する現在地(写しの `api` で。3 面は F6 の射程で測っていない)
+
+| 判定 | 現在地 |
+|---|---|
+| A-1 sha 無し 0 | api/src/gen **0**(403 file)。3 面は未測 |
+| A-2 生成器 ×2 と byte 一致 | 写しに ×2:`diff -r` は 3 面の `_diagnostics/*-runtime.txt` の所要時間の行 3 か所だけ(`Downloaded 11 packages in 0.0Xs`、基点から在る面の runtime build の失敗の記録)。api/src/gen は生成物と byte で一致、足りない・余る 0 |
+| A-3 grep 0 | **api/src/gen は 7 語とも 0**。★ の `api/src/` には `▲` 83 file・`handwritten` 20 file(★ の注記と `handwritten_verbs` の const ── WGm の手順 2 の書き換え)、`page_vars` ほか 5 語は 0 |
+| A-4 診断 | exit 1 / 2 / 3 / 4 = **3 / 0 / 0 / 97**(back 0、face 97 と exit 1 の 3 は基点から在る面の行 ── F6)。警告 48 = `module 名の _ 前と root Entity が違う` 24(基点 25 から pageview が `Rootless` で抜けた)+ `handwritten_verbs に生成名が無い` 24(WGm の手順 2 で `manual_verbs` へ移せば消える) |
+| A-5 `http_runtime.mjs` を入力として読む行 | 0(`gen/src` の出現は生成物の名・`@external` の道・注記だけ) |
+| B | 上の名指しの表の外の ★ は api に無い。3 面は未測 |
+| C | api の `npm test` 690 / 690(基点 660 + r2 の 30)、registry の (method, path) は基点と 129 行全部一致(差は r1 の裁定 4 の `fields` 4 行だけ)、`route-match` 3 / 3、3 面の `gleam build` 0(生成の `api.gleam`)、www に `Put` 無し。`auth` の test・実 API・門の表は WGm の射程で測っていない |
+
+### 届かないもの(名指し)
+
+1. **生成器だけが出す SQL 246 本の置き場。**写しでは `sql.mjs` に束ねて `db/queries` に置かない。生成器の出力先を app にすると `db/queries` に増えて manifest の test が落ちる(鷹野宛 1)
+2. **`framework/` の SQL 18 本を yumemi の framework へ移すこと**(WGm の問い 1 の (a) の前提)。framework の JS は Hex に載せたが、SQL は musearch の `framework` schema(DDL)に依るので `db/queries/framework/**` の ★ のまま(鷹野宛 2)
+3. 3 面の `src/gen`(A-1 / A-2 / B の面の行)── F6 の射程
+4. ★ の `api/src/` の A-3 の語(`▲` 83・`handwritten` 20)と A-4 の警告 24 ── WGm の手順 2
+5. 往復の数:生成の runtime は、基点の手書きの root の 1 文に畳まれていた読みのうち `article_list/published`・`article_pin/slot_taken`・`roster_read` の店 / 嬢 / 写真を `fold:` と `Carried` で畳んだが、`widget_add` の数え上げ 5 本ほかは別の往復になった(意味は同じ、test は通る。往復の数は測っていない)
+6. 生成器の表で写しが通らない形:`create_<collection>`(create_many)の verb と、集約の `GBucket` / `GVia` の戻りの形は、写しで使われず確かめていない。root の Entity を持つのに ★ の root の SQL が無い Service は、生成器が名指しせず実行時に落ちる
+
+### 検収(r3)
+
+| 項目 | 結果 | 証拠 |
+|---|---|---|
+| root `gleam build` | 0 | ── |
+| `cd gen && gleam test` | **262 passed**(r2 255)。新しい test 7 本(storage 2・ManualRead・roots・runtime の表・http の表・codec の Text)、書き換え 3 本(hw-1 の Self の読み・`manual:` の頭 2) | ── |
+| `gleam format --check src test` | root・gen とも 0 | ── |
+| Article fixture ×2 | exit 0、`diff -r` 0、tracked 64 file と一致(back の生成物に `runtime.mjs` / `http_runtime.mjs` を足した、fixture の `server.gleam` に attached の hook 3) | `fx-r3c`、`fx-r3d` |
+| 写し ×2 | 1459 file、`diff -r` は面の `_diagnostics` の所要時間 3 行だけ | `out-r3-u`、`out-r3-v` |
+| 写しの api `npm test` | **690 / 690**、最終の状態で 2 回連続(clean build・新しい DB) | `r3-api-test-final-7.txt`、`-8.txt` |
+| 生成 SQL を PG で | PREPARE 374 / 374、読みの EXECUTE 166 通る・146 は空の DB での `conflict`(verb の `require_rows`) | `pg-prepare-gen-r3-final.txt`、`pg-exec-gen-r3-final.txt` |
+| registry の (method, path) | 基点と 129 行全部一致 | `registry-r3.json` |
+| 3 面の `gleam build`(生成の `api.gleam`)・`route-match` | www / muses / console とも exit 0、route-match 3 / 3 | `r3-face-*-build.txt` |
+| `http_runtime.mjs` を入力として読む行 | 0 | ── |
+| 0.11.0 の公開型 | `git diff v0.11.0 -- src/framework`:10 file、+1198、削除 0 | ── |
+
+### 鷹野宛(r3)
+
+1. **生成器だけが出す SQL 246 本をどこに置くか。**(a) `sql.mjs` に束ねるだけで `db/queries` に置かない ── 写しの形。WGm は生成器を別の出力先へ回し、`src/gen` と既に在る GENERATED の SQL だけを写す(手順は上)、(b) `db/queries` に置き、musearch の manifest の test を「`-- GENERATED` を名乗る file は生成器の PREPARE で確かめ、semantic test は ★ だけ」に変える、(c) 生成器が出力先に app を与えられたとき、`db/queries` へは既に在る file だけを書く。推奨は (c)(生成器の手順が 1 つで済み、manifest の test を弱めない)。本便では入れていない
+2. **`framework/` の SQL 18 本。**framework の JS は Hex に載ったが、SQL は musearch の `framework` schema の DDL に依る。(a) ★ のまま名指しの残り(B の表に足す)、(b) yumemi に移し、DDL も framework の持ち分にする(DDL の便が要る)。推奨は (a)
+3. **句が全部 `owner Self` の読みを絞らないことにした**(上の「意味の変わり目」1)。r1 の報告(Self 28 本を主体の鍵の穴で出す)を、読みについては取り消す形になる。hw-1 の Self の意味の裁きとして確かめてほしい
+4. PG 55540 は本便で起こし(`snap-g/api/test/build/pgdata-public`、pid 2824431)、終端で `kill 2824431` で止めた(55540 が listen していないことを確かめた)。55541 / 55496 / 5552x / 55502 / 55503 には触れていない
+
+### 確かめたこと / 確かめていないこと(r3)
+
+- 確かめたこと:上の検収の表の全部。写しの api の test は clean build(`build/dev/javascript/{musearch_api,yumemi}` を消して)と dropdb からの新しい DB で回した(`gen/build/wgy/r3-test.sh`)。star.patch は musearch `645ec49` の写しに `patch -p1 --dry-run` で 269 file 当たる
+- 確かめていないこと:3 面の `src/gen` の生成物での置き換えと面の test(F6 の射程)、`auth` の test、実 API と門の status 表、`cloudflare:workers` を import する生成の `shell.mjs` の実機(node の test では読まれない)、Hex に載せた後の package の中身(`gleam publish` の dry run)、生成の runtime の往復の数(意味は test で確かめたが、往復が増えた読みがある ── 届かないもの 5)
 
 ## r2(2026-09-26 02:58〜、役員 人見の裁定 A「全部閉じる」と鷹野の裁定 2〜5 を受けて)
 

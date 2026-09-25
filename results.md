@@ -1,3 +1,26 @@
+# yumemi-gen-8(WGy)真壁 r3 ── runtime / http_runtime の生成、GENERATED の SQL の採用、Gleam 側の置き換え、契約のずれ 19 本の宣言(2026-09-26)
+
+## 状態
+
+- **r3 の完了条件 4 つと鷹野の裁定 2 は写しの上で届いた。**`runtime.mjs` と `http_runtime.mjs` を framework の JS(Hex、`src/framework/server/runtime.mjs` / `http.mjs`)+ 宣言からの表 + 宣言した ★ hook で生成する。写しの `api/src/gen` 403 file は全部が生成物と byte で一致・sha 無し 0、api の `npm test` 690 / 690(clean build・新しい DB で最終 2 回連続)
+- 新しい宣言 3 つ(`storage` / `reads` / `roots`、`src/framework/server.gleam` の新しい型)。裁定 2 の 19 本は宣言で解き、生成 SQL は PG 55540 で PREPARE 374 / 374
+- 生成器の意味の変わり目:句が全部 `owner Self` の読みは絞らない(r1 の主体の鍵の穴を読みについて取り消す)、app の `-- GENERATED` の SQL は生成物で置き換えて束ねる、`verb.gleam` の頭を `manual:` に
+- **届かないもの(名指し)**:生成器だけが出す SQL 246 本の置き場と manifest(鷹野宛 1)、`framework/` の SQL 18 本(鷹野宛 2)、3 面(F6)、★ の側の A-3 の語と A-4 の警告(WGm)
+- WGm に渡す patch は `docs/reports/yumemi-gen-8-patches/star.patch`(269 file、musearch `645ec49` に dry-run で当たる)。詳細は `docs/reports/yumemi-gen-8.md` の「r3」節
+
+## DDL
+
+無し。
+
+## 検証
+
+- root `gleam build` 0。`cd gen && gleam test` **262 passed**。`gleam format --check src test` root・gen とも 0
+- Article fixture ×2 で diff 0、tracked 64 と一致。写し ×2 で 1459 file、差は面の `_diagnostics` の所要時間 3 行だけ。診断 exit 1/2/3/4 = 3/0/0/97(back 0)
+- 写し:`api/src/gen` sha 無し 0・byte 不一致 0・生成器が出さない 0。`npm test` 690 / 690(`gen/build/wgy/r3-api-test-final-7.txt`・`-8.txt`)。registry の (method, path) は基点と 129 行一致、route-match 3 / 3、3 面の `gleam build` 0
+- 生成 SQL:PREPARE 374 / 374、読みの EXECUTE 166 通る・146 は空の DB での `conflict`
+- `git diff v0.11.0 -- src/framework`:10 file、+1198、削除 0
+- 証拠は `gen/build/wgy/`(`r3-*.txt`、`pg-*-r3-final.txt`、`out-r3-u` / `out-r3-v`、`fx-r3c` / `fx-r3d`、写しの履歴は `snap-g/.git` の scratch branch)
+
 # yumemi-gen-8(WGy)真壁 r2 ── 人見の裁定 A「全部閉じる」への続き(2026-09-26)
 
 ## 状態

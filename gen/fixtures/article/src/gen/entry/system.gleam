@@ -1,4 +1,4 @@
-//// GENERATED from framework session / credential_floor contract [sha256:e7c15d777523] — 手で編集しない
+//// GENERATED from framework session / credential_floor contract [sha256:032d56dd277b] — 手で編集しない
 
 import framework/io.{type Promise}
 import gen/entry/auth.{type Database}

@@ -30,6 +30,9 @@ pub fn read(units: List(Unit)) -> Result(Read, String) {
       use objects <- result.try(items(module, "durable_objects", object_of))
       use hooks <- result.try(items(module, "hooks", hook_of))
       use connectors <- result.try(items(module, "connectors", connector_of))
+      use storage <- result.try(items(module, "storage", storage_of))
+      use reads <- result.try(items(module, "reads", manual_read_of))
+      use roots <- result.try(items(module, "roots", root_shape_of))
       Ok(Read(
         server: model.Server(
           declared: True,
@@ -39,6 +42,9 @@ pub fn read(units: List(Unit)) -> Result(Read, String) {
           durable_objects: objects,
           hooks: hooks,
           connectors: connectors,
+          storage: storage,
+          reads: reads,
+          roots: roots,
         ),
         attached: attached,
       ))
@@ -277,6 +283,116 @@ fn port_of(
   }
 }
 
+fn storage_of(expression: glance.Expression) -> Result(model.Storage, String) {
+  case g.ctor_name(expression) {
+    Some("InObject") -> {
+      use entity <- result.try(text(expression, "entity"))
+      use object <- result.try(text(expression, "object"))
+      Ok(model.InObject(entity: entity, object: object))
+    }
+    Some("Column") -> {
+      use entity <- result.try(text(expression, "entity"))
+      use property <- result.try(text(expression, "property"))
+      use column <- result.try(text(expression, "column"))
+      Ok(model.ColumnName(entity: entity, property: property, column: column))
+    }
+    Some("Text") -> {
+      use entity <- result.try(text(expression, "entity"))
+      use property <- result.try(text(expression, "property"))
+      use values <- result.try(pairs(expression, "values"))
+      Ok(model.TextSum(entity: entity, property: property, values: values))
+    }
+    Some("Split") -> {
+      use entity <- result.try(text(expression, "entity"))
+      use property <- result.try(text(expression, "property"))
+      use columns <- result.try(pairs(expression, "columns"))
+      Ok(model.SplitColumns(
+        entity: entity,
+        property: property,
+        columns: columns,
+      ))
+    }
+    Some("Array") -> {
+      use entity <- result.try(text(expression, "entity"))
+      use property <- result.try(text(expression, "property"))
+      use element <- result.try(text(expression, "element"))
+      Ok(model.ArrayColumn(entity: entity, property: property, element: element))
+    }
+    _ -> Error("InObject / Column / Text / Split / Array でない項")
+  }
+}
+
+fn root_shape_of(
+  expression: glance.Expression,
+) -> Result(model.RootShape, String) {
+  use service <- result.try(text(expression, "service"))
+  case g.ctor_name(expression) {
+    Some("Rootless") -> Ok(model.Rootless(service: service))
+    Some("OwnRoot") -> Ok(model.OwnRoot(service: service))
+    Some("WithVersion") -> Ok(model.WithVersion(service: service))
+    Some("RootOf") -> {
+      use entity <- result.try(text(expression, "entity"))
+      Ok(model.RootOf(service: service, entity: entity))
+    }
+    Some("Carried") -> {
+      use name <- result.try(text(expression, "name"))
+      use type_ <- result.try(text(expression, "type_"))
+      use import_ <- result.try(text(expression, "import_"))
+      Ok(model.Carried(
+        service: service,
+        name: name,
+        type_: type_,
+        import_: import_,
+      ))
+    }
+    _ -> Error("Rootless / OwnRoot / RootOf / WithVersion / Carried でない項")
+  }
+}
+
+fn manual_read_of(
+  expression: glance.Expression,
+) -> Result(model.ManualRead, String) {
+  case g.ctor_name(expression) {
+    Some("ManualRead") -> {
+      use service <- result.try(text(expression, "service"))
+      use query <- result.try(text(expression, "query"))
+      use args <- result.try(pairs(expression, "args"))
+      use returns <- result.try(text(expression, "returns"))
+      use imports <- result.try(texts(expression, "imports"))
+      use hook <- result.try(text(expression, "hook"))
+      Ok(model.ManualRead(
+        service: service,
+        query: query,
+        args: args,
+        returns: returns,
+        imports: imports,
+        hook: hook,
+      ))
+    }
+    _ -> Error("ManualRead でない項")
+  }
+}
+
+fn pairs(
+  expression: glance.Expression,
+  label: String,
+) -> Result(List(#(String, String)), String) {
+  case g.labelled(expression, label) {
+    Some(glance.List(elements: elements, rest: None, ..)) ->
+      list.try_map(elements, fn(item) {
+        case item {
+          glance.Tuple(elements: [left, right], ..) ->
+            case g.string_value(left), g.string_value(right) {
+              Some(a), Some(b) -> Ok(#(a, b))
+              _, _ -> Error(label <> " の組が String の literal でない")
+            }
+          _ -> Error(label <> " の項が 2 つ組でない")
+        }
+      })
+    _ -> Error(label <> " が List の literal でない")
+  }
+}
+
 fn integer(
   expression: glance.Expression,
   label: String,
@@ -425,8 +541,89 @@ pub fn notes(app: model.App) -> List(stop.Note) {
         }
       })
     })
-  list.flatten([unknown_routes, duplicate_routes, unknown_aliases, unknown_jobs])
+  let classes =
+    list.map(app.server.durable_objects, fn(object) { object.class })
+  let unknown_storage =
+    list.filter_map(app.server.storage, fn(row) {
+      let #(entity, property) = storage_target(row)
+      case list.find(app.entities, fn(found) { found.module == entity }) {
+        Error(_) -> Ok("storage の Entity が無い: " <> entity)
+        Ok(found) ->
+          case row, property {
+            model.InObject(object: object, ..), _ ->
+              case list.contains(classes, object) {
+                True -> Error(Nil)
+                False ->
+                  Ok(
+                    "storage "
+                    <> entity
+                    <> " の器が durable_objects に無い: "
+                    <> object,
+                  )
+              }
+            _, Some(name) ->
+              case list.any(found.props, fn(prop) { prop.name == name }) {
+                True -> Error(Nil)
+                False -> Ok("storage " <> entity <> " に Property が無い: " <> name)
+              }
+            _, None -> Error(Nil)
+          }
+      }
+    })
+  let unknown_reads =
+    list.flat_map(app.server.reads, fn(read) {
+      let label = "reads " <> read.service <> "/" <> read.query
+      list.flatten([
+        case list.contains(services, read.service) {
+          True -> []
+          False -> [label <> " の Service が無い"]
+        },
+        case list.contains(hook_names, read.hook) {
+          True -> []
+          False -> [label <> " の hook が hooks に無い: " <> read.hook]
+        },
+        case
+          list.find(app.services, fn(service) { service.module == read.service })
+        {
+          Ok(service) ->
+            case list.any(service.queries, fn(q) { q.name == read.query }) {
+              True -> [label <> " は Service の query と同じ名"]
+              False -> []
+            }
+          Error(_) -> []
+        },
+      ])
+    })
+  let unknown_roots =
+    list.filter_map(app.server.roots, fn(shape) {
+      case list.contains(services, shape.service) {
+        True -> Error(Nil)
+        False -> Ok("roots の Service が無い: " <> shape.service)
+      }
+    })
+  list.flatten([
+    unknown_roots,
+    unknown_reads,
+    unknown_routes,
+    duplicate_routes,
+    unknown_aliases,
+    unknown_jobs,
+    unknown_storage,
+  ])
   |> list.map(fn(text) {
     stop.Note(class: stop.Conflict, text: "server.gleam: " <> text)
   })
+}
+
+fn storage_target(row: model.Storage) -> #(String, option.Option(String)) {
+  case row {
+    model.InObject(entity: entity, ..) -> #(entity, None)
+    model.ColumnName(entity: entity, property: property, ..)
+    | model.TextSum(entity: entity, property: property, ..)
+    | model.SplitColumns(entity: entity, property: property, ..)
+    | model.ArrayColumn(entity: entity, property: property, ..) -> #(
+      entity,
+      Some(property),
+    )
+  }
 }

@@ -16,6 +16,7 @@ import yumemi_gen/reader/server as server_reader
 import yumemi_gen/relation
 import yumemi_gen/source.{type Unit}
 import yumemi_gen/stop
+import yumemi_gen/storage
 
 pub type Error {
   NoTypesModule
@@ -2272,6 +2273,7 @@ pub fn read(units: List(Unit)) -> Result(App, Error) {
     server_reader.read(units)
     |> result.map_error(fn(detail) { Unsupported("server", detail) }),
   )
+  let entity_list = storage.apply(entity_list, server_read.server.storage)
   let arrow_list = arrows(entity_list)
   Ok(model.App(
     value_types: types,

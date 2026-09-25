@@ -12,6 +12,11 @@
 //// - `pub const durable_objects: List(DurableObject)` ── class 名と、実装を持つ ★ の adapter
 //// - `pub const hooks: List(Hook)` ── 宣言から導けない業務の行の口。生成物が import する ★ は、ここに名を
 ////   書いたものだけ
+//// - `pub const reads: List(ManualRead)` ── 手書きの SQL で引く読み。生成器は型付きの口と runtime の振り分けを書き、
+////   SQL と行の写し(hook)は ★
+//// - `pub const roots: List(RootShape)` ── root の導出(allow の Entity と Args の key の型)と違う Service の root
+//// - `pub const storage: List(Storage)` ── Entity の器と列の写像。導出(Neon の `app.<module>`、Property 名 =
+////   列名、payload の無い sum は text、record と List は jsonb)と違う Entity の Property だけを書く
 ////
 //// Service は名(module の名、`article_publish`)で指す ── Service の値は型引数が Service ごとに違い、
 //// 1 つの List に並ばないため。名が Service に無ければ生成器が exit 4 で名指しする。
@@ -122,4 +127,53 @@ pub type Port {
   Fetch(name: String, module: String, js: String, arity: Int)
   /// ★ の JS の純関数
   Pure(name: String, module: String, js: String, arity: Int)
+}
+
+/// Entity の器と列の写像(WGy r3、鷹野の裁定)。`entity` は Entity の module 名(`muse_setting_spec`)、
+/// `property` はレコードの欄の名(`type_`)。生成器は verb の SQL をこの写像で書き、穴の契約
+/// (Property 1 つに穴 1 つ、値は codec の encode)は変えない ── 割る・写すのは SQL の側でする。
+pub type Storage {
+  /// Entity を Neon でなく Durable Object の SQLite に置く。`object` は `durable_objects` の class 名。
+  /// 生成器はこの Entity の PG 向けの SQL(verb・読み)を出さず、器の ★ adapter が持つ
+  InObject(entity: String, object: String)
+  /// Property の列名を替える(`type_` → `type`、`default` → `default_value`)
+  Column(entity: String, property: String, column: String)
+  /// payload の無い構成子だけの sum を text 1 列で持つ。`values` は (構成子, 列の値)。
+  /// 列名は Property 名(`Column` があればその列)
+  Text(entity: String, property: String, values: List(#(String, String)))
+  /// record(または `Option(record)`)の Property を複数の列に割る。`columns` は (record の欄, 列)
+  Split(entity: String, property: String, columns: List(#(String, String)))
+  /// `List(<値型>)` を PG の配列で持つ。`element` は要素の SQL の型(`uuid`)
+  Array(entity: String, property: String, element: String)
+}
+
+/// 手書きの SQL(`db/queries/<service>/<query>.sql`、★)で引く読み(WGy r3)。生成器は
+/// `gen/reads/<service>.gleam` の型付きの口(`<query>(<args>, then:)`)と runtime の振り分けを書き、
+/// 行の写しは `hook`(`hooks` に宣言した ★ の関数)が持つ。型は Gleam の綴り(`List(course.Course)`)、
+/// `imports` はその綴りが要る import の行の中身(`entity/course`)。引数が 2 つ以上なら口は組で渡す。
+pub type ManualRead {
+  ManualRead(
+    service: String,
+    query: String,
+    args: List(#(String, String)),
+    returns: String,
+    imports: List(String),
+    hook: String,
+  )
+}
+
+/// root の形の上書き(WGy r3)。導出は「allow の Entity の key の型が Args に在れば、その Entity の行」。
+/// 作る Service(Args の key は新しい行の鍵)や、主体の行を root にする Service はここに書く。
+pub type RootShape {
+  /// root に Entity の行を持たない(`Root(at, seed)`)
+  Rootless(service: String)
+  /// root を主体(session の subject)の行にする。Entity は allow の Entity
+  OwnRoot(service: String)
+  /// root を `entity`(module 名)の行にする。鍵は Args の `id`
+  RootOf(service: String, entity: String)
+  /// root に行の `version` 列(楽観ロックの版、Entity のレコードに無い列)を `version: Int` で載せる
+  WithVersion(service: String)
+  /// root に入口が運ぶ値を載せる(`browser` = 署名した browser cookie の id)。`type_` は Gleam の綴り、
+  /// `import_` はその綴りが要る import の行の中身
+  Carried(service: String, name: String, type_: String, import_: String)
 }

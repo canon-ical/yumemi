@@ -1069,7 +1069,7 @@ pub fn handwritten_verbs_suppress_matching_output_and_warn_once_per_miss_test() 
   list.contains(paths, "db/queries/verb/create_handwritten.sql")
   |> should.be_false
   let found = text_of(verb_fixture, "src/gen/verb.gleam")
-  string.contains(found, "//// handwritten: ") |> should.be_true
+  string.contains(found, "//// manual: ") |> should.be_true
   string.contains(found, "create_handwritten") |> should.be_true
   string.contains(found, "external_handwritten") |> should.be_true
   let notes = notes_of(verb_fixture)

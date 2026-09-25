@@ -368,7 +368,7 @@ fn derived_route(
   service: Service,
   entry: Entry,
 ) -> Result(Route, RouteError) {
-  let root_entity = root.root_for(app, service)
+  let root_entity = root.path_root(app, service)
   case target_for(app, service) {
     Error(error) -> Error(error)
     Ok(#(target, suffix)) -> {

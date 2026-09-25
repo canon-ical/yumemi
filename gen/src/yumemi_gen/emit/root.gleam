@@ -22,6 +22,16 @@ pub fn emit(app: App, hashes: hash.Hashes) -> List(File) {
 
 pub fn notes(app: App) -> List(stop.Note) {
   list.filter_map(app.services, fn(service) {
+    // `server.roots` で root を明示した Service は名との違いを警告しない(宣言が意図)
+    case shape_of(app, service) {
+      Some(_) -> Error(Nil)
+      None -> name_note(app, service)
+    }
+  })
+}
+
+fn name_note(app: App, service: Service) -> Result(stop.Note, Nil) {
+  {
     case root_for(app, service) {
       Some(root) ->
         case module_prefix(service.module) == root.module {
@@ -37,10 +47,66 @@ pub fn notes(app: App) -> List(stop.Note) {
         }
       None -> Error(Nil)
     }
-  })
+  }
 }
 
 pub fn root_for(app: App, service: Service) -> Option(Entity) {
+  case shape_of(app, service) {
+    Some(model.Rootless(..)) -> None
+    Some(model.RootOf(entity: module, ..)) ->
+      model_entity_by_module(app.entities, module)
+    Some(model.OwnRoot(..)) ->
+      case service.allow_module {
+        Some(path) -> model_entity_by_module(app.entities, last_segment(path))
+        None -> None
+      }
+    _ -> derived_root(app, service)
+  }
+}
+
+/// 口の path の導出が見る root。主体の行を root にする Service(`OwnRoot`)は path に鍵を持たない。
+pub fn path_root(app: App, service: Service) -> Option(Entity) {
+  case shape_of(app, service) {
+    Some(model.OwnRoot(..)) -> derived_root(app, service)
+    _ -> root_for(app, service)
+  }
+}
+
+/// `server.roots` のうち root の Entity を決める行(Rootless / OwnRoot / RootOf)。
+pub fn shape_of(app: App, service: Service) -> Option(model.RootShape) {
+  list.find(app.server.roots, fn(shape) {
+    shape.service == service.module
+    && case shape {
+      model.Rootless(..) | model.OwnRoot(..) | model.RootOf(..) -> True
+      _ -> False
+    }
+  })
+  |> option.from_result
+}
+
+/// root に `version` を載せるか(`WithVersion`)。
+pub fn with_version(app: App, service: Service) -> Bool {
+  list.any(app.server.roots, fn(shape) {
+    case shape {
+      model.WithVersion(service: name) -> name == service.module
+      _ -> False
+    }
+  })
+}
+
+/// root に載せる入口の値(`Carried`)。
+pub fn carried(app: App, service: Service) -> List(#(String, String, String)) {
+  list.filter_map(app.server.roots, fn(shape) {
+    case shape {
+      model.Carried(service: name, name: field, type_: type_, import_: path)
+        if name == service.module
+      -> Ok(#(field, type_, path))
+      _ -> Error(Nil)
+    }
+  })
+}
+
+fn derived_root(app: App, service: Service) -> Option(Entity) {
   case service.allow_module {
     None -> None
     Some(path) -> {
@@ -157,7 +223,21 @@ fn text(app: App, service: Service, input_hash: String) -> String {
     ]
     None -> list.append(base_imports, actor_imports(plan))
   }
-  let imports = imports |> list.unique |> list.sort(string.compare)
+  let extras = carried(app, service)
+  let option_import = case
+    list.any(extras, fn(extra) { string.contains(extra.1, "Option(") })
+  {
+    True -> ["gleam/option.{type Option}"]
+    False -> []
+  }
+  let imports =
+    list.flatten([
+      imports,
+      list.map(extras, fn(extra) { extra.2 }),
+      option_import,
+    ])
+    |> list.unique
+    |> list.sort(string.compare)
   let root = root_for(app, service)
   string.concat([
     "//// GENERATED from service.",
@@ -169,7 +249,7 @@ fn text(app: App, service: Service, input_hash: String) -> String {
       |> string.join("\n"),
     "\n\n",
     actor_declaration(plan),
-    root_declaration(root),
+    root_declaration(root, with_version(app, service), extras),
     "pub type Service(args, out, err) {\n",
     "  Service(\n",
     "    allow: List(allow.Clause),\n",
@@ -181,14 +261,35 @@ fn text(app: App, service: Service, input_hash: String) -> String {
   ])
 }
 
-fn root_declaration(root: Option(Entity)) -> String {
-  case root {
-    None -> "pub type Root {\n  Root(at: Datetime, seed: String)\n}\n\n"
-    Some(entity) -> {
+fn root_declaration(
+  root: Option(Entity),
+  version: Bool,
+  extras: List(#(String, String, String)),
+) -> String {
+  let extra_fields =
+    list.map(extras, fn(extra) { "    " <> extra.0 <> ": " <> extra.1 <> "," })
+  case root, extra_fields {
+    None, [] -> "pub type Root {\n  Root(at: Datetime, seed: String)\n}\n\n"
+    None, _ ->
+      string.concat([
+        "pub type Root {\n",
+        "  Root(\n",
+        string.join(extra_fields, "\n"),
+        "\n    at: Datetime,\n",
+        "    seed: String,\n",
+        "  )\n",
+        "}\n\n",
+      ])
+    Some(entity), _ -> {
       let phase_fields = case entity.phases {
         [] -> []
         _ -> ["    phase: " <> entity.module <> ".Phase,"]
       }
+      let phase_fields = case version {
+        True -> list.append(phase_fields, ["    version: Int,"])
+        False -> phase_fields
+      }
+      let phase_fields = list.append(phase_fields, extra_fields)
       let fields = [
         "    "
           <> entity.module

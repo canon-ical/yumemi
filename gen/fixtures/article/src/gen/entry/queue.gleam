@@ -1,4 +1,4 @@
-//// GENERATED from service commit continuations / framework outbox [sha256:e7c15d777523] — 手で編集しない
+//// GENERATED from service commit continuations / framework outbox [sha256:032d56dd277b] — 手で編集しない
 
 import framework/io.{type Context, type Promise}
 import framework/step.{type Committed, type Outcome, type Step}

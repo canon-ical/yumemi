@@ -29,6 +29,7 @@ import yumemi_gen/glance_util as g
 import yumemi_gen/model.{type App, type Entity, type Prop}
 import yumemi_gen/naming
 import yumemi_gen/source.{type Unit}
+import yumemi_gen/storage
 
 const framework = "../../yumemi/framework/"
 
@@ -156,7 +157,7 @@ pub fn text(app: App, units: List(Unit), input: String) -> String {
   )
   <> "]);\n"
   <> "const base=codec({scalar,integerKeys,Some,None,List,time});\n"
-  <> "export const {checked,parse,option,unwrap,text,tag,encode,phase}=base;\n"
+  <> "export const {checked,parse,option,unwrap,text,tag,encode,phase,timeText,dateText}=base;\n"
   <> "const {cDate,cDatetime,cTime,list}=base;\n"
   <> string.concat(derived)
 }
@@ -228,6 +229,23 @@ fn prop_value(
   prop: Prop,
 ) -> Result(String, String) {
   let raw = "r." <> column(entity, prop)
+  // `Text` の宣言(列の値 -> 構成子)を持つ sum は、列の値を構成子の snake 名へ戻してから読む
+  let raw = case storage.text_values(app, entity, prop.name) {
+    [] -> raw
+    pairs ->
+      "({"
+      <> string.join(
+        list.map(pairs, fn(pair) {
+          "'" <> pair.1 <> "':'" <> naming.snake(pair.0) <> "'"
+        }),
+        ",",
+      )
+      <> "}["
+      <> raw
+      <> "]??"
+      <> raw
+      <> ")"
+  }
   case prop.kind {
     model.RelProp(kind: model.Held, ..) ->
       Ok(

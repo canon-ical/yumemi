@@ -1,4 +1,4 @@
-//// GENERATED from entity / types declarations [sha256:e7c15d777523] — 手で編集しない
+//// GENERATED from entity / types declarations [sha256:032d56dd277b] — 手で編集しない
 // 宣言から導けない decoder(hook も無い): article(tags が Multi), staff(framework/idp.Name の module が読めない)
 import { Some, None } from '../../gleam_stdlib/gleam/option.mjs';
 import { toList, List } from '../gleam.mjs';
@@ -23,7 +23,7 @@ export { Some, None, toList, article, category, staff, tag, widget, party, time,
 export const scalar = {slug:t_slug,title:t_title,body:t_body,category_name:t_category_name,tag_name:t_tag_name};
 const integerKeys=new Set([]);
 const base=codec({scalar,integerKeys,Some,None,List,time});
-export const {checked,parse,option,unwrap,text,tag,encode,phase}=base;
+export const {checked,parse,option,unwrap,text,tag,encode,phase,timeText,dateText}=base;
 const {cDate,cDatetime,cTime,list}=base;
 export function decodeCategory(r) {
  return new category.Category(

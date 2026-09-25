@@ -15,6 +15,7 @@ import yumemi_gen/model.{type App, type Entity, type Select}
 import yumemi_gen/naming
 import yumemi_gen/relation
 import yumemi_gen/stop
+import yumemi_gen/storage
 
 /// SQL を出せない理由。`class` は 20 の exit code 表(`stop`)へそのまま写る。
 pub type Reason {
@@ -65,7 +66,11 @@ pub fn build(app: App, hashes: hash.Hashes) -> #(List(File), List(Skipped)) {
 /// 受けて関係先の行を鍵の順で返す。実行側は Context の `relation` でこれを流し、復号して返す。
 fn build_arrows(app: App, hashes: hash.Hashes) -> #(List(File), List(Skipped)) {
   list.fold(app.services, #([], []), fn(acc, service) {
-    list.fold(reads.root_arrows(app, service), acc, fn(inner, arrow) {
+    reads.root_arrows(app, service)
+    |> list.filter(fn(arrow) {
+      !storage.in_object_named(app, arrow.target_entity)
+    })
+    |> list.fold(acc, fn(inner, arrow) {
       let #(files, skipped) = inner
       let query = reads.arrow_query(arrow)
       case arrow_statement(app, arrow) {
@@ -135,35 +140,45 @@ fn build_queries(
   list.fold(app.services, #([], []), fn(acc, service) {
     list.fold(service.queries, acc, fn(inner, query) {
       let #(files, skipped) = inner
-      case statement(app, service, query.select) {
-        Ok(text) -> #(
-          [
-            File(
-              path: "db/queries/"
-                <> service.module
-                <> "/"
-                <> query.name
-                <> ".sql",
-              text: "-- GENERATED from service."
-                <> service.module
-                <> "."
-                <> query.name
-                <> " [sha256:"
-                <> hash.service(hashes, service.module)
-                <> "] — 手で編集しない\n"
-                <> text,
-            ),
-            ..files
-          ],
-          skipped,
-        )
-        Error(reason) -> #(files, [
-          Skipped(service: service.module, query: query.name, reason: reason),
-          ..skipped
-        ])
+      case storage.in_object_named(app, query.select.from) {
+        True -> inner
+        False -> query_file(app, hashes, service, query, files, skipped)
       }
     })
   })
+}
+
+fn query_file(
+  app: App,
+  hashes: hash.Hashes,
+  service: model.Service,
+  query: model.NamedQuery,
+  files: List(File),
+  skipped: List(Skipped),
+) -> #(List(File), List(Skipped)) {
+  case statement(app, service, query.select) {
+    Ok(text) -> #(
+      [
+        File(
+          path: "db/queries/" <> service.module <> "/" <> query.name <> ".sql",
+          text: "-- GENERATED from service."
+            <> service.module
+            <> "."
+            <> query.name
+            <> " [sha256:"
+            <> hash.service(hashes, service.module)
+            <> "] — 手で編集しない\n"
+            <> text,
+        ),
+        ..files
+      ],
+      skipped,
+    )
+    Error(reason) -> #(files, [
+      Skipped(service: service.module, query: query.name, reason: reason),
+      ..skipped
+    ])
+  }
 }
 
 // ── 別名 ────────────────────────────────────────────────────────────────────
@@ -875,9 +890,16 @@ fn allow_clause(
             _ -> False
           }
         })
-      case phased, owners, selves {
-        False, [], [] -> Ok(#(scope, None))
-        _, _, _ ->
+      // 句が全部 `Self` の Service は主体(actor)を絞る句で、読みの行を絞らない(WGy r3)──
+      // `Self` は actor の admission で判じ、他の Entity の行(claim の前の Roster、他の嬢の Heaven の連携)は
+      // 読みの側で主体に縛らない(基点の SQL と同じ意味)
+      case all_self, phased, owners, selves {
+        True, _, _, _ -> {
+          use _ <- try(list.try_map(selves, subject_of(app, _)))
+          Ok(#(scope, None))
+        }
+        _, False, [], [] -> Ok(#(scope, None))
+        _, _, _, _ ->
           restricted(app, service, scope, phased, owners, selves, all_self)
       }
     }
