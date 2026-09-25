@@ -52,3 +52,7 @@
 - **5(root の version)と 7(manifest の旧綴り)は本便の外。**★ の entity に `version: Int` を宣言する形と manifest の綴りは、どちらも musearch の F6 の後の追随便へ
 - **宿題 9 件の外の 3 つ**(query の requalify / `root.sql` と allow SQL / 今すぐ採れる root 4 本)は本便に入れず、keiei `canon/open.md` の yumemi の行に立てた
 - **見積(推定):**最短 4:25 / 中央 5:55 / 最長 9:30、予算 445 分(中央 × 1.25)。うち列の選択が中央 2:15
+
+## 役員 人見の裁定(09-25 18:5x)── framework の `Select` に列の選択を足す
+
+**破壊的変更で構わない。yumemi にはまだ利用者がいないので、今のうちに直す(役員 人見「いまなら間に合う」)。**真壁の鷹野宛 3(`Pick` を生成の `gen/query.gleam` にだけ足し、framework `src/framework/query.gleam` の `Select` には足さなかった)を覆す。framework の `Select` に返す列の欄を足し、生成 SQL の `SELECT x.*` が選んだ列に変わるところまでを本便に入れる。型引数が増えるのは受ける。Hex は予定どおり 0.11.0(hw-2 と合わせて 1 回)。柏木のゲートの後、P0 と一緒に真壁を新しい session で 1 回起こして直させる。
