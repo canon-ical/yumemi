@@ -1,0 +1,2526 @@
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/src/connector/heaven.gleam snap-g/api/src/connector/heaven.gleam
+--- a/api/src/connector/heaven.gleam	1970-01-01 09:00:00.000000000 +0900
++++ b/api/src/connector/heaven.gleam	2026-09-26 03:03:46.179039222 +0900
+@@ -0,0 +1,60 @@
++// ★ src/connector/heaven.gleam ── connector.heaven の型と typed な包み(WGy r2、鷹野の裁定 2)。FFI の口は生成物 gen/connector/heaven。
++
++import framework/connector
++import gen/connector/heaven as port
++import gen/types/heaven_color.{type HeavenColor}
++import gen/types/heaven_fontsize.{type HeavenFontsize}
++import gen/types/heaven_id.{type HeavenId}
++import gen/types/heaven_num.{type HeavenNum}
++import gen/types/name.{type Name}
++import gen/types/page_url.{type PageUrl}
++import gen/types/store_name.{type StoreName}
++import gleam/option.{type Option}
++
++pub type Failure {
++  Waf
++  FetchFailed(status: Option(Int))
++  NoShopId
++  ShopIdMismatch
++  TitleMismatch
++}
++
++pub type Resolution {
++  Resolved(
++    shop_id: HeavenId,
++    girl_id: HeavenId,
++    shop_name: StoreName,
++    name: Name,
++  )
++  Unresolved(reason: Failure)
++}
++
++pub fn is_girl_page(url: PageUrl) -> Bool {
++  port.is_girl_page(page_url.to_string(url))
++}
++
++pub fn resolve(url: PageUrl) -> connector.Read(Resolution) {
++  port.resolve(page_url.to_string(url))
++}
++
++pub fn embed_src(
++  shop_id shop_id: HeavenId,
++  girl_id girl_id: HeavenId,
++  mode mode: Int,
++  design design: Int,
++  num num: HeavenNum,
++  color color: HeavenColor,
++  fontsize fontsize: HeavenFontsize,
++  width width: Int,
++) -> String {
++  port.embed_src(
++    heaven_id.to_string(shop_id),
++    heaven_id.to_string(girl_id),
++    mode,
++    design,
++    heaven_num.to_int(num),
++    heaven_color.to_int(color),
++    heaven_fontsize.to_int(fontsize),
++    width,
++  )
++}
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/src/connector/idp.gleam snap-g/api/src/connector/idp.gleam
+--- a/api/src/connector/idp.gleam	1970-01-01 09:00:00.000000000 +0900
++++ b/api/src/connector/idp.gleam	2026-09-26 03:03:46.179104834 +0900
+@@ -0,0 +1,15 @@
++// ★ src/connector/idp.gleam ── connector.idp の型と typed な包み(WGy r2、鷹野の裁定 2)。FFI の口は生成物 gen/connector/idp。
++
++import framework/connector
++import gen/connector/idp as port
++import framework/party.{type PartyId}
++import gen/types/mail.{type Mail}
++
++pub type Invitation {
++  Invited(PartyId)
++  MailTaken
++}
++
++pub fn invite(mail: Mail) -> connector.Read(Invitation) {
++  port.invite(mail)
++}
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/src/connector/litlink.gleam snap-g/api/src/connector/litlink.gleam
+--- a/api/src/connector/litlink.gleam	1970-01-01 09:00:00.000000000 +0900
++++ b/api/src/connector/litlink.gleam	2026-09-26 03:03:46.179079623 +0900
+@@ -0,0 +1,24 @@
++// ★ src/connector/litlink.gleam ── connector.litlink の型と typed な包み(WGy r2、鷹野の裁定 2)。FFI の口は生成物 gen/connector/litlink。
++
++import framework/connector
++import gen/connector/litlink as port
++import gen/types/headline.{type Headline}
++import gen/types/label.{type Label}
++import gen/types/name.{type Name}
++import gen/types/page_url.{type PageUrl}
++import gen/types/widget_body.{type WidgetBody}
++import gleam/option.{type Option}
++
++pub type Extract {
++  Extracted(
++    name: Option(Name),
++    headline: Option(Headline),
++    bio: Option(WidgetBody),
++    icon_url: Option(PageUrl),
++    links: List(#(Label, PageUrl)),
++  )
++}
++
++pub fn fetch(url: PageUrl) -> connector.Read(Extract) {
++  port.fetch(page_url.to_string(url))
++}
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/src/connector/notify.gleam snap-g/api/src/connector/notify.gleam
+--- a/api/src/connector/notify.gleam	1970-01-01 09:00:00.000000000 +0900
++++ b/api/src/connector/notify.gleam	2026-09-26 03:03:46.179127844 +0900
+@@ -0,0 +1,19 @@
++// ★ src/connector/notify.gleam ── connector.notify の型と typed な包み(WGy r2、鷹野の裁定 2)。FFI の口は生成物 gen/connector/notify。
++
++import entity/notification
++import framework/connector
++import gen/connector/notify as port
++import framework/party.{type PartyId}
++import gen/types/event_id.{type EventId}
++import gen/types/name.{type Name}
++import gen/types/path.{type Path}
++
++pub fn send(
++  recipient: PartyId,
++  event: EventId,
++  kind: notification.Kind,
++  path: Path,
++  name: Name,
++) -> connector.Write(Nil) {
++  port.send(#(recipient, event, kind, path, name))
++}
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/src/connector/queue.gleam snap-g/api/src/connector/queue.gleam
+--- a/api/src/connector/queue.gleam	1970-01-01 09:00:00.000000000 +0900
++++ b/api/src/connector/queue.gleam	2026-09-26 03:03:46.179150905 +0900
+@@ -0,0 +1,23 @@
++// ★ src/connector/queue.gleam ── connector.queue の型と typed な包み(WGy r2、鷹野の裁定 2)。FFI の口は生成物 gen/connector/queue。
++
++import framework/connector
++import gen/connector/queue as port
++import gen/types/article_id.{type ArticleId}
++import gen/types/store_request_id.{type StoreRequestId}
++import gen/types/reservation_id.{type ReservationId}
++
++pub fn article_index(id: ArticleId, version: Int) -> connector.Write(Nil) {
++  port.article_index(#(id, version))
++}
++
++pub fn notification_fanout(id: ArticleId) -> connector.Write(Nil) {
++  port.notification_fanout(id)
++}
++
++pub fn store_request_notify(id: StoreRequestId) -> connector.Write(Nil) {
++  port.store_request_notify(id)
++}
++
++pub fn reservation_notify(id: ReservationId) -> connector.Write(Nil) {
++  port.reservation_notify(id)
++}
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/src/connector/release.gleam snap-g/api/src/connector/release.gleam
+--- a/api/src/connector/release.gleam	1970-01-01 09:00:00.000000000 +0900
++++ b/api/src/connector/release.gleam	2026-09-26 03:03:46.179173155 +0900
+@@ -0,0 +1,17 @@
++// ★ src/connector/release.gleam ── connector.release の型と typed な包み(WGy r2、鷹野の裁定 2)。FFI の口は生成物 gen/connector/release。
++
++import framework/connector
++import gen/connector/release as port
++import framework/time.{type Datetime}
++import gen/types/article_id.{type ArticleId}
++
++/// Reserve the article's one Durable Object alarm.  This is a Read boundary
++/// because it runs before the Neon transaction owned by the Service.
++pub fn schedule(id: ArticleId, publish_at: Datetime) -> connector.Read(Nil) {
++  port.schedule(#(id, publish_at))
++}
++
++/// Remove the article's alarm and all of its reservation state.
++pub fn unschedule(id: ArticleId) -> connector.Read(Nil) {
++  port.unschedule(id)
++}
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/src/connector/screen.gleam snap-g/api/src/connector/screen.gleam
+--- a/api/src/connector/screen.gleam	1970-01-01 09:00:00.000000000 +0900
++++ b/api/src/connector/screen.gleam	2026-09-26 03:03:46.179195726 +0900
+@@ -0,0 +1,25 @@
++// ★ src/connector/screen.gleam ── connector.screen の型と typed な包み(WGy r2、鷹野の裁定 2)。FFI の口は生成物 gen/connector/screen。
++
++import framework/connector
++import gen/connector/screen as port
++
++import gen/types/category.{type Category}
++import gen/types/model_name.{type ModelName}
++
++pub type Surface {
++  Article
++  Profile
++  Widget
++  FreeSpace
++  Roster
++  Reservation
++}
++
++pub type Verdict {
++  Allowed
++  Rejected(category: Category, model: ModelName)
++}
++
++pub fn judge(surface: Surface, texts: List(String)) -> connector.Read(Verdict) {
++  port.judge(#(surface, texts))
++}
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/src/connector/socket.gleam snap-g/api/src/connector/socket.gleam
+--- a/api/src/connector/socket.gleam	1970-01-01 09:00:00.000000000 +0900
++++ b/api/src/connector/socket.gleam	2026-09-26 03:03:46.179221466 +0900
+@@ -0,0 +1,13 @@
++// ★ src/connector/socket.gleam ── connector.socket の型と typed な包み(WGy r2、鷹野の裁定 2)。FFI の口は生成物 gen/connector/socket。
++
++import framework/connector
++import gen/connector/socket as port
++import framework/party.{type PartyId}
++import gen/draft/notification.{type NotificationCreated}
++
++pub fn push(
++  recipient: PartyId,
++  notification: NotificationCreated,
++) -> connector.Write(Nil) {
++  port.push(#(recipient, notification))
++}
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/src/connector/workers_ai.gleam snap-g/api/src/connector/workers_ai.gleam
+--- a/api/src/connector/workers_ai.gleam	1970-01-01 09:00:00.000000000 +0900
++++ b/api/src/connector/workers_ai.gleam	2026-09-26 03:03:46.179243597 +0900
+@@ -0,0 +1,10 @@
++// ★ src/connector/workers_ai.gleam ── connector.workers_ai の型と typed な包み(WGy r2、鷹野の裁定 2)。FFI の口は生成物 gen/connector/workers_ai。
++
++import framework/connector
++import gen/connector/workers_ai as port
++import framework/vector.{type Embedding}
++import gen/types/chunk_text.{type ChunkText}
++
++pub fn embed(texts: List(ChunkText)) -> connector.Read(List(Embedding)) {
++  port.embed(texts)
++}
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/src/heaven_ffi.mjs snap-g/api/src/heaven_ffi.mjs
+--- a/api/src/heaven_ffi.mjs	1970-01-01 09:00:00.000000000 +0900
++++ b/api/src/heaven_ffi.mjs	2026-09-26 03:04:50.456646352 +0900
+@@ -0,0 +1,286 @@
++//// GENERATED from connector.heaven declaration — 手で編集しない
++// GENERATED connector boundary for Heaven.  The public connector functions
++// delegate through Context; the *Page helper is the implementation used by
++// gen/runtime.call and is kept separate to avoid a call -> call cycle.
++
++import { firstHostFor } from "./external_hosts.mjs";
++
++const PUBLIC_HOST = firstHostFor("heaven-page");
++const WIDGET_HOST = firstHostFor("heaven-widget");
++const USER_AGENT = "Mozilla/5.0";
++const CACHE_TTL_MS = 60 * 1000;
++const CACHE_MAX = 128;
++const resolvedCache = new Map();
++
++// ORDER-05: only the public girl's page shape is accepted.  Query and hash
++// are deliberately ignored by this predicate and stripped before the GET.
++const GIRL_PATH =
++  /^\/([a-z]+)\/([A-Za-z0-9]+)\/([A-Za-z0-9]+)\/([A-Za-z0-9_.-]+)\/girlid-(\d+)\/?$/;
++
++function parseGirlUrl(input) {
++  let url;
++  try {
++    url = new URL(String(input));
++  } catch {
++    return null;
++  }
++  if (url.protocol !== "https:" || url.hostname !== PUBLIC_HOST) return null;
++  const match = GIRL_PATH.exec(url.pathname);
++  if (!match) return null;
++  const path = match[0].endsWith("/") ? match[0] : `${match[0]}/`;
++  return {
++    url: `https://${PUBLIC_HOST}${path}`,
++    girlId: match[5],
++  };
++}
++
++export function isGirlPage(input) {
++  return parseGirlUrl(input) !== null;
++}
++
++const entities = Object.freeze({
++  amp: "&",
++  apos: "'",
++  gt: ">",
++  lt: "<",
++  nbsp: "\u00a0",
++  quot: '"',
++});
++
++function decodeEntities(value) {
++  return String(value).replace(
++    /&(#x?[0-9a-fA-F]+|[a-zA-Z]+);/g,
++    (whole, body) => {
++      if (body[0] === "#") {
++        const code =
++          body[1]?.toLowerCase() === "x"
++            ? Number.parseInt(body.slice(2), 16)
++            : Number.parseInt(body.slice(1), 10);
++        return Number.isFinite(code) && code > 0 && code <= 0x10ffff
++          ? String.fromCodePoint(code)
++          : whole;
++      }
++      return entities[body.toLowerCase()] ?? whole;
++    },
++  );
++}
++
++function decodeString(value) {
++  const source = String(value);
++  try {
++    // Values from the Next.js RSC payload are JSON-string escaped.  Parsing a
++    // quoted value also handles \\/, \\uXXXX, and escaped quotation marks.
++    return decodeEntities(JSON.parse(`"${source}"`));
++  } catch {
++    return decodeEntities(
++      source
++        .replaceAll('\\"', '"')
++        .replaceAll("\\/", "/")
++        .replaceAll("\\n", "\n")
++        .replaceAll("\\r", "\r")
++        .replaceAll("\\t", "\t"),
++    );
++  }
++}
++
++function quotedKey(key) {
++  // The same matcher accepts ordinary HTML JSON and RSC's \"key\" spelling.
++  return `\\\\?"${key}\\\\?"`;
++}
++
++function fieldMatches(source, key) {
++  const value = String(source);
++  const re = value.includes("\\")
++    ? new RegExp(`${quotedKey(key)}\\s*:\\s*\\\\?"([^"\\\\]*?)\\\\?"`, "g")
++    : new RegExp(`"${key}"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)"`, "g");
++  return [...value.matchAll(re)].map((match) => ({
++    index: match.index ?? 0,
++    value: decodeString(match[1]),
++  }));
++}
++
++function fieldBefore(source, key, position) {
++  const found = fieldMatches(String(source).slice(0, position), key);
++  return found.at(-1)?.value ?? null;
++}
++
++function fieldAfter(source, key, position) {
++  const found = fieldMatches(String(source).slice(position), key);
++  return found[0]?.value ?? null;
++}
++
++function extractTitle(source) {
++  const match = /<title\b[^>]*>([\s\S]*?)<\/title>/i.exec(String(source));
++  return match ? decodeEntities(match[1]).replace(/\s+/g, " ").trim() : null;
++}
++
++function extractGirlIdFromPath(source) {
++  return /\/girlid-(\d+)\/?(?:[?#]|$)/i.exec(String(source))?.[1] ?? null;
++}
++
++const TITLE_RE =
++  /^「([^」]+)」(.+?)\s*[-‐‑‒–—―−－]\s*(.+)\/([^\/]+)\s*[｜|]\s*シティヘブンネット$/;
++
++function parseGirlTitle(title) {
++  if (title === null || title === undefined) return null;
++  const match = TITLE_RE.exec(String(title).replace(/\s+/g, " ").trim());
++  if (!match) return null;
++  const name = match[1].trim();
++  const shopName = match[2].trim();
++  return name && shopName ? { name, shopName } : null;
++}
++
++function extractShopSources(source) {
++  const value = String(source);
++  const first = (re) => value.match(re)?.[1] ?? null;
++  return {
++    data: first(/data-c_commu_id\s*=\s*["']?(\d+)/i),
++    dataLayer: first(
++      /dataLayer\s*\.\s*push\s*\(\s*\{[^}]*["']shop_id["']\s*:\s*["']?(\d+)/i,
++    ),
++    review: first(
++      /\/mypage\/review\/edit\/\?[^"'<>\s]*?\bc_commu_id=(\d+)/i,
++    ),
++  };
++}
++
++function failure(module, name, value) {
++  const ctor = module[name];
++  if (typeof ctor !== "function") throw new Error(`missing Heaven variant ${name}`);
++  return new ctor(...(value === undefined ? [] : [value]));
++}
++
++async function constructors() {
++  const [module, option] = await Promise.all([
++    import("./connector/heaven.mjs"),
++    import("../gleam_stdlib/gleam/option.mjs"),
++  ]);
++  return { module, option };
++}
++
++async function unresolved(name, status) {
++  const { module, option } = await constructors();
++  let reason;
++  if (name === "FetchFailed") {
++    reason = failure(module, name, status === null ? new option.None() : new option.Some(status));
++  } else {
++    reason = failure(module, name);
++  }
++  return new module.Unresolved(reason);
++}
++
++async function resolved(shopId, girlId, shopName, name) {
++  const [module, heavenId, storeName, nameType] = await Promise.all([
++    import("./connector/heaven.mjs"),
++    import("./gen/types/heaven_id.mjs"),
++    import("./gen/types/store_name.mjs"),
++    import("./gen/types/name.mjs"),
++  ]);
++  const checked = (type, value) => {
++    const result = type.parse(value);
++    if (!result.isOk()) throw new Error("invalid resolved Heaven value");
++    return result[0];
++  };
++  return new module.Resolved(
++    checked(heavenId, shopId),
++    checked(heavenId, girlId),
++    checked(storeName, shopName),
++    checked(nameType, name),
++  );
++}
++
++function responseHasWaf(response, body) {
++  const marker = String(body);
++  return (
++    response.status === 403 ||
++    response.status === 503 ||
++    response.headers.get("cf-mitigated") !== null ||
++    marker.includes("challenge-platform") ||
++    marker.includes("Just a moment") ||
++    marker.includes("Attention Required")
++  );
++}
++
++/**
++ * The implementation called by runtime.call("heaven_resolve").
++ * It intentionally performs at most one GET and never forwards cookies.
++ */
++export async function resolvePage(input, fetchImpl = globalThis.fetch) {
++  const parsed = parseGirlUrl(input);
++  if (!parsed) return unresolved("FetchFailed", null);
++  // Only the Worker-global fetch path uses the isolate cache.  Tests and
++  // callers that inject a fetch function always observe their own request.
++  const cacheable = fetchImpl === globalThis.fetch;
++  if (cacheable) {
++    const cached = resolvedCache.get(parsed.url);
++    if (cached && cached.expiresAt > Date.now()) return cached.value;
++    if (cached) resolvedCache.delete(parsed.url);
++  }
++
++  let response;
++  try {
++    response = await fetchImpl(parsed.url, {
++      method: "GET",
++      redirect: "manual",
++      headers: { accept: "text/html,*/*", "user-agent": USER_AGENT },
++    });
++  } catch {
++    return unresolved("FetchFailed", null);
++  }
++
++  const body = response.status === 200 ? await response.text() : "";
++  if (responseHasWaf(response, body)) return unresolved("Waf");
++  if (response.status !== 200) return unresolved("FetchFailed", response.status);
++
++  const sources = extractShopSources(body);
++  const shopIds = [sources.data, sources.dataLayer, sources.review].filter(Boolean);
++  if (shopIds.length === 0) return unresolved("NoShopId");
++  if (!shopIds.every((value) => value === shopIds[0])) {
++    return unresolved("ShopIdMismatch");
++  }
++
++  const title = parseGirlTitle(extractTitle(body));
++  if (!title) return unresolved("TitleMismatch");
++
++  const girlId = parsed.girlId || extractGirlIdFromPath(parsed.url);
++  try {
++    const value = await resolved(shopIds[0], girlId, title.shopName, title.name);
++    if (cacheable) {
++      while (resolvedCache.size >= CACHE_MAX) resolvedCache.delete(resolvedCache.keys().next().value);
++      resolvedCache.set(parsed.url, { value, expiresAt: Date.now() + CACHE_TTL_MS });
++    }
++    return value;
++  } catch {
++    return unresolved("TitleMismatch");
++  }
++}
++
++/**
++ * The generated connector wrapper.  Keep this separate from resolvePage:
++ * Context.call is the runtime injection point used by tests and Workers.
++ */
++export function resolve(context, input) {
++  return context.call("heaven_resolve", input);
++}
++
++export function embedSrc(shopId, girlId, mode, design, num, color, fontsize, width) {
++  const query = new URLSearchParams([
++    ["shopId", String(shopId)],
++    ["mode", String(mode)],
++    ["type", String(design)],
++    ["girlId", String(girlId)],
++    ["limitedKind", ""],
++    ["num", String(num)],
++    ["color", String(color)],
++    ["fontsize", String(fontsize)],
++    ["width", String(width)],
++  ]);
++  return `https://${WIDGET_HOST}/widget/?${query.toString()}`;
++}
++
++export const __test = Object.freeze({
++  clearCache: () => resolvedCache.clear(),
++  extractGirlTitle: parseGirlTitle,
++  extractShopSources,
++  parseGirlUrl,
++});
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/src/hooks.mjs snap-g/api/src/hooks.mjs
+--- a/api/src/hooks.mjs	1970-01-01 09:00:00.000000000 +0900
++++ b/api/src/hooks.mjs	2026-09-26 02:41:44.959865140 +0900
+@@ -0,0 +1,178 @@
++// ★ src/hooks.mjs ── 宣言から導けない業務の行(src/server.gleam の hooks)。生成物はここに名を宣言した関数だけを import する。
++// metrics_rollup_args: 日次の rollup の期間(JST の前日、月初なら前月、保持月数より古い行の purge の境)。
++function dateText(value) {
++ return [value.getUTCFullYear(),String(value.getUTCMonth()+1).padStart(2,'0'),String(value.getUTCDate()).padStart(2,'0')].join('-');
++}
++function cronPeriods(at,retentionMonths) {
++ const jst=new Date(Date.parse(at)+9*60*60*1000);
++ const previous=new Date(Date.UTC(jst.getUTCFullYear(),jst.getUTCMonth(),jst.getUTCDate()-1));
++ const month=jst.getUTCDate()===1
++  ? dateText(new Date(Date.UTC(jst.getUTCFullYear(),jst.getUTCMonth()-1,1)))
++  : null;
++ const monthIndex=jst.getUTCMonth()-retentionMonths;
++ const targetYear=jst.getUTCFullYear()+Math.floor(monthIndex/12);
++ const targetMonth=((monthIndex%12)+12)%12;
++ const lastDay=new Date(Date.UTC(targetYear,targetMonth+1,0)).getUTCDate();
++ const targetDay=Math.min(jst.getUTCDate(),lastDay);
++ const purge=new Date(Date.UTC(
++  targetYear,targetMonth,targetDay,jst.getUTCHours(),jst.getUTCMinutes(),jst.getUTCSeconds(),jst.getUTCMilliseconds(),
++ )-9*60*60*1000).toISOString();
++ return {day:dateText(previous),month,purge};
++}
++export function metricsRollupArgs(at,module,c) {
++ const periods=cronPeriods(at,Number(module.retention_months));
++ const day=c.checked(c.time.date(periods.day));
++ const month=periods.month?new c.Some(c.checked(c.time.date(periods.month))):new c.None();
++ const purge=c.checked(c.time.datetime(periods.purge));
++ return {args:new module.Args(day,month,purge),report:{day:periods.day,month:periods.month,purge_before:periods.purge}};
++}
++
++// ── codec の hook(decode_*、src/server.gleam の hooks)── 列の形が宣言と違う decoder と、ER の外の集計の写し。
++// 生成の gen/codec.mjs がこれを re-export する。共通の口は c(生成の codec)、日時の文字列化は h。
++import * as c from './gen/codec.mjs';
++const h={
++ timeText:raw=>raw instanceof Date?raw.toISOString():raw,
++ dateText:raw=>raw instanceof Date?[raw.getFullYear(),String(raw.getMonth()+1).padStart(2,'0'),String(raw.getDate()).padStart(2,'0')].join('-'):String(raw),
++ cDate:raw=>c.checked(c.time.date(h.dateText(raw).slice(0,10))),
++ cDatetime:raw=>c.checked(c.time.datetime(String(h.timeText(raw)))),
++};
++function minuteTime(raw) {
++ const value=Number(raw),hours=Math.floor(value/60),minutes=value%60;
++ return String(hours).padStart(2,'0')+':'+String(minutes).padStart(2,'0');
++}
++
++function metricSource(r) {
++ const kind=r.source_kind??r.source?.source_kind??r.source?.kind??r.source;
++ const key=r.source_key??r.source?.source_key??null;
++ if(kind==='tagged') return new c.visit.Tagged(c.parse('source_key',key));
++ if(kind==='external') return new c.visit.External();
++ if(kind==='internal') return new c.visit.Internal();
++ if(kind==='direct') return new c.visit.Direct();
++ throw new Error('invalid metric source');
++}
++
++function metricPageKind(raw) {
++ if(typeof raw==='object'&&raw) raw=raw.page_kind??raw.kind;
++ return c.phase(c.pageView,String(raw));
++}
++
++function metricBucket(raw) {
++ if(Array.isArray(raw)) raw=raw[0];
++ return c.phase(c.metrics,String(raw));
++}
++
++function metricDaily(row) {
++ return new c.metrics.DailyRow(h.cDate(row.date),Number(row.pv),Number(row.unique),Number(row.visits));
++}
++
++function metricRosterRow(row) {
++ return new c.metrics.RosterRow(
++  c.parse('roster_id',String(row.roster)),c.parse('name',String(row.name)),Boolean(row.claimed),
++  Number(row.pv),Number(row.unique),Number(row.visits),Number(row.visits_2plus),c.option(row.revisit_ratio,v=>Number(v)),
++ );
++}
++
++export function decodeMuseSchedule(r) {
++ return new c.museSchedule.MuseSchedule(
++  c.parse('muse_schedule_id',String(r.id)),c.er.held_from_row({key:r.muse_id}),c.checked(c.party.parse(r.party)),
++  c.parse('ledger_store_id',String(r.ledger_store_id)),h.cDate(r.date),c.parse('shop_time',minuteTime(r.starts_at)),c.parse('shop_time',minuteTime(r.ends_at)),
++ );
++}
++
++export function decodeReservation(r) {
++ return new c.reservation.Reservation(
++  c.parse('reservation_id',String(r.id)),
++  c.option(r.muse_id,v=>c.er.key(String(v))),
++  c.option(r.fan_id,v=>c.er.key(String(v))),
++  c.er.from_row({key:r.schedule_id}),
++  c.er.from_row({key:r.course_id}),
++  c.parse('shop_time',minuteTime(r.starts_at)),
++  c.option(r.ends_at,v=>c.parse('shop_time',minuteTime(v))),
++  c.option(r.note,v=>c.parse('reservation_note',String(v))),
++  h.cDatetime(r.requested_at),Boolean(r.notified),
++ );
++}
++
++export function decodePrep(r) {
++ return new c.prep.Prep(
++  c.parse('prep_id',String(r.id)),
++  c.er.from_row({key:r.schedule_id}),
++  c.option(r.reservation_id,v=>c.er.key(String(v))),
++  c.parse('shop_time',minuteTime(r.starts_at)),
++  c.parse('shop_time',minuteTime(r.ends_at)),
++ );
++}
++
++export function decodeCourse(r) {
++ return new c.course.Course(
++  c.parse('course_id',String(r.id)),c.parse('ledger_store_id',String(r.ledger_store_id??r.ledger_store)),c.parse('name',r.name),
++  c.parse('minutes',Number(r.minutes)),Boolean(r.popular),c.checked(c.party.parse(r.author_party)),
++ );
++}
++
++export function decodeStore(r) {
++ return new c.store.Store(
++  c.parse('store_id',r.id),c.checked(c.party.parse(r.party)),c.parse('handle',r.handle),c.parse('store_name',r.name),
++  Boolean(r.verified),c.checked(c.time.time(String(r.day_starts_at))),new c.None(),new c.None(),c.option(r.ledger_store_id,v=>c.parse('ledger_store_id',v)),
++ );
++}
++
++export function decodeMuseSettingSpec(r) {
++ const typeCtor={int:c.museSettingSpec.IntValue,bool:c.museSettingSpec.BoolValue,enum:c.museSettingSpec.EnumValue}[String(r.type)];
++ const typeValue=typeCtor?new typeCtor():c.phase(c.museSettingSpec,String(r.type));
++ return new c.museSettingSpec.MuseSettingSpec(
++  c.parse('muse_setting_spec_id',String(r.id)),c.parse('setting_key',String(r.key)),c.parse('label',String(r.label)),
++  typeValue,c.parse('setting_value',String(r.default_value)),
++  c.option(r.range,v=>c.parse('setting_range',String(v))),c.phase(c.museSettingSpec,String(r.applies_to)),
++ );
++}
++
++export function decodeLedgerStore(r) {
++ return new c.ledgerStore.LedgerStore(
++  c.parse('ledger_store_id',String(r.store_id)),String(r.store_name),c.phase(c.ledgerStore,String(r.type)),c.option(r.genre,v=>String(v)),
++  c.option(r.area,v=>String(v)),
++ );
++}
++
++export function decodeMetrics(value) {
++ const raw=typeof value==='string'?JSON.parse(value):value?.metrics??value;
++ const distribution=(raw.distribution??[]).map(row=>Array.isArray(row)?[metricBucket(row[0]),Number(row[1])]:[metricBucket(row.bucket??row.kind),Number(row.count)]);
++ const daily=(raw.daily??[]).map(metricDaily);
++ const sources=(raw.sources??[]).map(row=>new c.metrics.SourceRow(
++  metricSource(row),Number(row.visits),Number(row.unique),Number(row.visits_2plus),c.option(row.revisit_ratio,v=>Number(v)),c.option(row.pages_median,v=>Number(v)),
++ ));
++ const transitions=(raw.transitions??[]).map(row=>new c.metrics.Transition(
++  metricPageKind(row.from),metricPageKind(row.to),Number(row.count),
++  ));
++ return new c.metrics.Metrics(
++  Number(raw.pv),Number(raw.unique),Number(raw.visits),Number(raw.visits_2plus),c.option(raw.revisit_ratio,v=>Number(v)),c.option(raw.pages_median,v=>Number(v)),
++ c.toList(distribution),c.toList(daily),Number(raw.browsers),Number(raw.returning),c.toList(sources),c.toList(transitions),c.option(raw.peer_median,v=>Number(v)),
++ );
++}
++
++export function decodeMetricsStore(value) {
++ const raw=value??{};
++ return [decodeMetrics(raw),c.toList((raw.breakdown??[]).map(metricRosterRow))];
++}
++
++export function decodePage(rows, kind) {
++ const visible=rows.slice(0,20), last=visible.at(-1);
++ const cursor=rows.length>20 ? c.checked(c.page.cursor(btoa(JSON.stringify(kind==='mine' ? [h.timeText(last.entered_draft),last.id] : [last.slot,h.dateText(last.posted_on),h.timeText(last.entered_published),last.id])))) : null;
++ return new c.page.Page(c.toList(visible.map(r=>[c.decodeArticle(r),c.phase(c.article,r.phase)])),c.option(cursor));
++}
++
++export function cursorArgs(raw, kind) {
++ if(raw==null) return kind==='mine' ? [null,null] : [false,null,null,null,null];
++ try {
++  const parts=JSON.parse(atob(c.text(c.unwrap(raw))));
++  if (!Array.isArray(parts) || parts.length!==(kind==='mine'?2:4)) throw 0;
++  if(kind==='mine') c.checked(c.time.datetime(parts.at(-2)));
++  else {
++   if(parts[0]!==null) c.parse('slot',parts[0]);
++   if(parts[1]!==null) c.checked(c.time.date(parts[1]));
++   c.checked(c.time.datetime(parts[2]));
++  }
++  c.parse('article_id',parts.at(-1));
++  return kind==='mine' ? parts : [true,...parts];
++ } catch { throw Object.assign(new Error('invalid_argument'),{status:400,field:'cursor'}); }
++}
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/src/litlink_ffi.mjs snap-g/api/src/litlink_ffi.mjs
+--- a/api/src/litlink_ffi.mjs	1970-01-01 09:00:00.000000000 +0900
++++ b/api/src/litlink_ffi.mjs	2026-09-26 03:04:50.456877537 +0900
+@@ -0,0 +1,255 @@
++//// GENERATED from connector.litlink declaration — 手で編集しない
++// GENERATED connector boundary for lit.link.  `fetch` is the generated
++// Context wrapper; `fetchPage` is the implementation used by runtime.call.
++
++import { hostSetFor } from "./external_hosts.mjs";
++
++const HOSTS = hostSetFor("litlink");
++const USER_AGENT = "Mozilla/5.0";
++const IMAGE_HOSTS = hostSetFor("blob");
++
++function requestedUrl(input) {
++  let url;
++  try {
++    url = new URL(String(input));
++  } catch {
++    return null;
++  }
++  if (url.protocol !== "https:" || !HOSTS.has(url.hostname)) return null;
++  // A public profile is the only page this connector reads.  The locale form
++  // (`/en/name`) is accepted as observed in the survey.
++  const parts = url.pathname.split("/").filter(Boolean);
++  if (parts.length < 1 || parts.length > 2 || parts.some((part) => !/^[A-Za-z0-9_-]+$/.test(part))) return null;
++  url.search = "";
++  url.hash = "";
++  return url;
++}
++
++const entities = Object.freeze({
++  amp: "&",
++  apos: "'",
++  gt: ">",
++  lt: "<",
++  nbsp: "\u00a0",
++  quot: '"',
++});
++
++function decodeEntities(value) {
++  return String(value).replace(
++    /&(#x?[0-9a-fA-F]+|[a-zA-Z]+);/g,
++    (whole, body) => {
++      if (body[0] === "#") {
++        const code =
++          body[1]?.toLowerCase() === "x"
++            ? Number.parseInt(body.slice(2), 16)
++            : Number.parseInt(body.slice(1), 10);
++        return Number.isFinite(code) && code > 0 && code <= 0x10ffff
++          ? String.fromCodePoint(code)
++          : whole;
++      }
++      return entities[body.toLowerCase()] ?? whole;
++    },
++  );
++}
++
++function decodeString(value) {
++  const source = String(value);
++  try {
++    return decodeEntities(JSON.parse(`"${source}"`));
++  } catch {
++    return decodeEntities(
++      source
++        .replaceAll('\\"', '"')
++        .replaceAll("\\/", "/")
++        .replaceAll("\\n", "\n")
++        .replaceAll("\\r", "\r")
++        .replaceAll("\\t", "\t"),
++    );
++  }
++}
++
++function quotedKey(key) {
++  return `\\\\?"${key}\\\\?"`;
++}
++
++function fieldMatches(source, key) {
++  const value = String(source);
++  const re = value.includes("\\")
++    ? new RegExp(`${quotedKey(key)}\\s*:\\s*\\\\?"([^"\\\\]*?)\\\\?"`, "g")
++    : new RegExp(`"${key}"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)"`, "g");
++  return [...value.matchAll(re)].map((match) => ({
++    index: match.index ?? 0,
++    value: decodeString(match[1]),
++  }));
++}
++
++function firstField(source, key, from = 0) {
++  return fieldMatches(String(source).slice(from), key)[0]?.value ?? null;
++}
++
++function fieldBefore(source, key, position) {
++  const found = fieldMatches(String(source).slice(0, position), key);
++  return found.at(-1)?.value ?? null;
++}
++
++function profilePosition(source, slug) {
++  const matches = fieldMatches(source, "urlPath");
++  const exact = matches.find((match) => match.value === slug);
++  return exact?.index ?? matches[0]?.index ?? 0;
++}
++
++function extractTitle(source) {
++  const match = /<title\b[^>]*>([\s\S]*?)<\/title>/i.exec(String(source));
++  return match ? decodeEntities(match[1]).replace(/\s+/g, " ").trim() : null;
++}
++
++function titleValues(title) {
++  if (!title) return { name: null, headline: null };
++  const value = String(title).replace(/\s+/g, " ").trim();
++  const match = /^(.*?)\s*\/\s*(.*?)\s+lit\.link(?:\s*\([^)]*\))?$/i.exec(value);
++  if (match) return { name: match[1].trim(), headline: match[2].trim() };
++  const fallback = value.split(/\s*[|｜]\s*/)[0]?.trim() ?? "";
++  return { name: fallback || null, headline: null };
++}
++
++function validPublicImage(value) {
++  if (!value) return null;
++  try {
++    const url = new URL(value);
++    if (url.protocol !== "https:" || !IMAGE_HOSTS.has(url.hostname)) return null;
++   return url.toString();
++  } catch {
++    return null;
++  }
++}
++
++function validHttpUrl(value) {
++  if (!value) return null;
++  try {
++    const url = new URL(value);
++    if (!["http:", "https:"].includes(url.protocol) || !url.hostname || url.username || url.password) return null;
++    return url.toString();
++  } catch {
++    return null;
++  }
++}
++
++function candidateLinks(source, from) {
++  const value = String(source);
++  const urls = fieldMatches(value.slice(from), "url").map((match) => ({
++    index: from + match.index,
++    value: match.value,
++  }));
++  const out = [];
++  const seen = new Set();
++  for (const url of urls) {
++    const target = validHttpUrl(url.value);
++    if (!target || seen.has(target)) continue;
++    // Every supported link shape has its visible title before its URL.  Keep
++    // the search local to the profile link payload so unrelated RSC metadata
++    // cannot become a Link row.
++    const title = fieldBefore(value, "title", url.index);
++    if (!title || title.length === 0) continue;
++    const label = title.trim();
++    if (!label || label.length > 40) continue;
++    seen.add(target);
++    out.push([label, target]);
++  }
++  return out;
++}
++
++function profileImage(source, position) {
++  const after = firstField(source, "pictureUrl", position);
++  if (validPublicImage(after)) return after;
++  const profileIcon = /<img\b[^>]*alt=["']profile icon["'][^>]*\bsrc=["']([^"']+)["']/i.exec(String(source));
++  return validPublicImage(profileIcon?.[1] ?? null);
++}
++
++function extractedValues(source, input) {
++  let slug;
++  try {
++    slug = new URL(String(input)).pathname.split("/").filter(Boolean).at(-1);
++  } catch {
++    slug = null;
++  }
++  const position = profilePosition(source, slug);
++  const title = titleValues(extractTitle(source));
++  const name = fieldBefore(source, "name", position) ?? title.name;
++  const headline = fieldBefore(source, "catchphrase", position) ?? title.headline;
++  const bio = fieldBefore(source, "profileText", position);
++  return {
++    name,
++    headline,
++    bio,
++    iconUrl: profileImage(source, position),
++    links: candidateLinks(source, position),
++  };
++}
++
++async function optionValue(module, type, value) {
++  if (value === null || value === undefined || value === "") return new module.None();
++  const parsed = type.parse(value);
++  return parsed.isOk() ? new module.Some(parsed[0]) : new module.None();
++}
++
++async function toGleamExtracted(value) {
++  const [module, option, gleam, name, headline, body, pageUrl, label] = await Promise.all([
++    import("./connector/litlink.mjs"),
++    import("../gleam_stdlib/gleam/option.mjs"),
++    import("./gleam.mjs"),
++    import("./gen/types/name.mjs"),
++    import("./gen/types/headline.mjs"),
++    import("./gen/types/widget_body.mjs"),
++    import("./gen/types/page_url.mjs"),
++    import("./gen/types/label.mjs"),
++  ]);
++  const asOption = (type, raw) => {
++    if (raw === null || raw === undefined || raw === "") return new option.None();
++    const parsed = type.parse(raw);
++    return parsed.isOk() ? new option.Some(parsed[0]) : new option.None();
++  };
++  const links = value.links.flatMap(([rawLabel, rawUrl]) => {
++    const parsedLabel = label.parse(rawLabel);
++    const parsedUrl = pageUrl.parse(rawUrl);
++    return parsedLabel.isOk() && parsedUrl.isOk() ? [[parsedLabel[0], parsedUrl[0]]] : [];
++  });
++  return new module.Extracted(
++    asOption(name, value.name),
++    asOption(headline, value.headline),
++    asOption(body, value.bio),
++    asOption(pageUrl, value.iconUrl),
++    gleam.toList(links),
++  );
++}
++
++/** Implementation used by runtime.call("litlink_fetch"). */
++export async function fetchPage(input, fetchImpl = globalThis.fetch) {
++  const url = requestedUrl(input);
++  if (!url) throw new Error("invalid lit.link URL");
++  let response;
++  try {
++    response = await fetchImpl(url.toString(), {
++      method: "GET",
++      redirect: "manual",
++      headers: { accept: "text/html,*/*", "user-agent": USER_AGENT },
++    });
++  } catch {
++    throw new Error("lit.link fetch failed");
++  }
++  if (response.status !== 200) throw new Error(`lit.link fetch failed (${response.status})`);
++  const body = await response.text();
++  return toGleamExtracted(extractedValues(body, url.toString()));
++}
++
++/** Generated connector wrapper. */
++export function fetch(context, input) {
++  return context.call("litlink_fetch", input);
++}
++
++export const __test = Object.freeze({
++  candidateLinks,
++  extractedValues,
++  fieldMatches,
++  requestedUrl,
++  titleValues,
++});
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/src/release_do.mjs snap-g/api/src/release_do.mjs
+--- a/api/src/release_do.mjs	2026-09-26 00:57:16.000000000 +0900
++++ b/api/src/release_do.mjs	2026-09-26 02:32:04.580949124 +0900
+@@ -1,6 +1,6 @@
+ //// ▲ Article release Durable Object adapter.  The DO owns one alarm and
+ //// keeps only the data needed to identify its article at alarm time.
+-import {database} from './gen/driver.mjs';
++import {database} from '../yumemi/framework/server/driver.mjs';
+ import {invoke} from './gen/runtime.mjs';
+ import {sweep} from './gen/queue_runtime.mjs';
+ import {byName} from './gen/registry.mjs';
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/src/server.gleam snap-g/api/src/server.gleam
+--- a/api/src/server.gleam	1970-01-01 09:00:00.000000000 +0900
++++ b/api/src/server.gleam	2026-09-26 03:03:20.433660787 +0900
+@@ -0,0 +1,176 @@
++// ★ src/server.gleam ── back の宣言(yumemi framework/server、0.11.1 WGy)。
++// routes は導出規則(entry の prefix と Entity / Args の型)と違う口だけ。公開の URL(REST v1 と鍵の発行)は
++// 導出に寄せずここで固定する(URL を 1 本も動かさない)。写し元は api/src/gen/registry.mjs(645ec49)の 129 行。
++import framework/server.{
++  Alias, Anyone, ApiKey, Attached, AttachedAlias, Call, Connector, Cron, Delete,
++  DurableObject, EachDue, Enqueue, Fetch, Get, Hook, Hooked, Party, Post, Pure,
++  Put, Route, RouteVia, Send, Session,
++}
++
++pub const routes: List(server.Route) = [
++  Route(service: "pageview_record", method: Post, path: "/api/pageviews"),
++  Route(
++    service: "schedule_list",
++    method: Get,
++    path: "/api/muse/:handle/schedule",
++  ),
++  Route(service: "store_roster_list", method: Get, path: "/api/rosters"),
++  RouteVia(
++    service: "store_api_key_issue",
++    method: Post,
++    path: "/api/store/api_key",
++    credential: Session,
++  ),
++  RouteVia(
++    service: "store_api_key_revoke",
++    method: Delete,
++    path: "/api/store/api_key",
++    credential: Session,
++  ),
++  RouteVia(
++    service: "roster_upsert",
++    method: Put,
++    path: "/api/v1/store/rosters/:external_id",
++    credential: ApiKey,
++  ),
++]
++
++pub const aliases: List(server.Alias) = [
++  Alias(
++    name: "store_roster_list_v1",
++    service: "store_roster_list",
++    method: Get,
++    path: "/api/v1/store/rosters",
++    credential: ApiKey,
++    external_id: False,
++  ),
++  Alias(
++    name: "roster_remove_v1",
++    service: "roster_remove",
++    method: Delete,
++    path: "/api/v1/store/rosters/:external_id",
++    credential: ApiKey,
++    external_id: True,
++  ),
++  Alias(
++    name: "roster_photo_put_v1",
++    service: "roster_photo_put",
++    method: Put,
++    path: "/api/v1/store/rosters/:external_id/photos/:order",
++    credential: ApiKey,
++    external_id: True,
++  ),
++  Alias(
++    name: "store_schedule_put_v1",
++    service: "store_schedule_put",
++    method: Put,
++    path: "/api/v1/store/rosters/:external_id/schedule/:date",
++    credential: ApiKey,
++    external_id: True,
++  ),
++  Alias(
++    name: "roster_reorder_v1",
++    service: "roster_reorder",
++    method: Put,
++    path: "/api/v1/store/rosters/order",
++    credential: ApiKey,
++    external_id: False,
++  ),
++  AttachedAlias(
++    name: "blob_copy_v1",
++    attached: "blob_copy",
++    method: Post,
++    path: "/api/v1/store/blobs",
++    credential: ApiKey,
++    who: Party,
++  ),
++]
++
++pub const attached: List(server.Attached) = [
++  Attached(
++    name: "browser_adult",
++    method: Post,
++    path: "/api/browser/adult",
++    who: Anyone,
++  ),
++  Attached(name: "session_read", method: Get, path: "/api/session", who: Anyone),
++  Attached(
++    name: "session_subject",
++    method: Post,
++    path: "/api/session/subject",
++    who: Party,
++  ),
++  Attached(name: "blob_copy", method: Post, path: "/api/blobs", who: Party),
++  Attached(name: "media_read", method: Get, path: "/media/:key", who: Anyone),
++  Attached(name: "socket", method: Get, path: "/api/socket", who: Party),
++]
++
++pub const cron: List(server.Cron) = [
++  Cron(schedule: "0 16 * * *", jobs: [
++    Hooked(service: "metrics_rollup", hook: "metrics_rollup_args"),
++    EachDue(service: "article_release", query: "due"),
++  ]),
++]
++
++pub const durable_objects: List(server.DurableObject) = [
++  DurableObject(
++    class: "MusearchUserDo",
++    module: "user_do",
++    adapter: "UserDoAdapter",
++    methods: [
++      "fetch", "webSocketMessage", "webSocketClose", "webSocketError", "notify",
++      "inbox", "markRead",
++    ],
++  ),
++  DurableObject(
++    class: "MusearchReleaseDo",
++    module: "release_do",
++    adapter: "ReleaseDoAdapter",
++    methods: ["schedule", "unschedule", "alarm"],
++  ),
++]
++
++pub const hooks: List(server.Hook) = [
++  Hook(name: "metrics_rollup_args", module: "hooks"),
++  // codec: 店の時刻を分の整数で持つ列(muse_schedule / reservation / prep)、秘密を読まない店、台帳の店、
++  // 集計の値、記事の頁と cursor ── 列の形が宣言と違うので、生成の codec が名指しで re-export する。
++  Hook(name: "decode_muse_schedule", module: "hooks"),
++  Hook(name: "decode_reservation", module: "hooks"),
++  Hook(name: "decode_prep", module: "hooks"),
++  Hook(name: "decode_course", module: "hooks"),
++  Hook(name: "decode_store", module: "hooks"),
++  Hook(name: "decode_muse_setting_spec", module: "hooks"),
++  Hook(name: "decode_ledger_store", module: "hooks"),
++  Hook(name: "decode_metrics", module: "hooks"),
++  Hook(name: "decode_metrics_store", module: "hooks"),
++  Hook(name: "decode_page", module: "hooks"),
++  Hook(name: "cursor_args", module: "hooks"),
++]
++
++// connector の FFI の口(鷹野の裁定 2)。型と typed な包みは ★ `src/connector/<name>.gleam`、
++// Heaven / lit.link の取得の実装は ★ `src/heaven_ffi.mjs` / `src/litlink_ffi.mjs`。
++pub const connectors: List(server.Connector) = [
++  Connector(name: "heaven", ports: [
++    Pure(name: "is_girl_page", module: "heaven_ffi", js: "isGirlPage", arity: 1),
++    Fetch(name: "resolve", module: "heaven_ffi", js: "resolve", arity: 1),
++    Pure(name: "embed_src", module: "heaven_ffi", js: "embedSrc", arity: 8),
++  ]),
++  Connector(name: "idp", ports: [Call(name: "invite", op: "invite")]),
++  Connector(name: "litlink", ports: [
++    Fetch(name: "fetch", module: "litlink_ffi", js: "fetch", arity: 1),
++  ]),
++  Connector(name: "notify", ports: [Send(name: "send", op: "notify")]),
++  Connector(name: "queue", ports: [
++    Enqueue(name: "article_index", kind: "article_index"),
++    Enqueue(name: "notification_fanout", kind: "notification_fanout"),
++    Enqueue(name: "store_request_notify", kind: "store_request_notify"),
++    Enqueue(name: "reservation_notify", kind: "reservation_notify"),
++  ]),
++  Connector(name: "release", ports: [
++    Call(name: "schedule", op: "release_schedule"),
++    Call(name: "unschedule", op: "release_unschedule"),
++  ]),
++  Connector(name: "screen", ports: [Call(name: "judge", op: "screen")]),
++  Connector(name: "socket", ports: [Send(name: "push", op: "socket")]),
++  Connector(name: "workers_ai", ports: [Call(name: "embed", op: "embed")]),
++]
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/src/service/article_edit.gleam snap-g/api/src/service/article_edit.gleam
+--- a/api/src/service/article_edit.gleam	2026-09-26 00:57:16.000000000 +0900
++++ b/api/src/service/article_edit.gleam	2026-09-26 03:03:57.511904074 +0900
+@@ -10,7 +10,7 @@
+ import framework/require.{type Requirement, Use}
+ import framework/step.{type Start, type Step}
+ import gen/allow/article as allow
+-import gen/connector/release
++import connector/release
+ import gen/phase
+ import gen/root/article_edit.{type Root, type Service, Service}
+ import gen/types/article_id.{type ArticleId}
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/src/service/article_index.gleam snap-g/api/src/service/article_index.gleam
+--- a/api/src/service/article_index.gleam	2026-09-26 00:57:16.000000000 +0900
++++ b/api/src/service/article_index.gleam	2026-09-26 03:03:57.512850464 +0900
+@@ -8,7 +8,7 @@
+ import framework/step.{type Start, type Step}
+ import framework/vector.{type Embedding}
+ import gen/allow/article as allow
+-import gen/connector/workers_ai as ai
++import connector/workers_ai as ai
+ import gen/draft/chunk.{type ChunkDraft, ChunkDraft}
+ import gen/key
+ import gen/root/article_index.{type Root, type Service, Service}
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/src/service/article_publish.gleam snap-g/api/src/service/article_publish.gleam
+--- a/api/src/service/article_publish.gleam	2026-09-26 00:57:16.000000000 +0900
++++ b/api/src/service/article_publish.gleam	2026-09-26 03:03:57.510607536 +0900
+@@ -16,9 +16,9 @@
+ import framework/step.{type Open, type Start, type Step}
+ import framework/time.{type Date, type Datetime}
+ import gen/allow/article as allow
+-import gen/connector/queue
+-import gen/connector/release
+-import gen/connector/screen
++import connector/queue
++import connector/release
++import connector/screen
+ import gen/draft/screen_reject.{ScreenRejectDraft} as screen_reject_draft
+ import gen/phase
+ import gen/root/article_publish.{type Root, type Service, Service}
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/src/service/article_release.gleam snap-g/api/src/service/article_release.gleam
+--- a/api/src/service/article_release.gleam	2026-09-26 00:57:16.000000000 +0900
++++ b/api/src/service/article_release.gleam	2026-09-26 03:03:57.511433683 +0900
+@@ -9,7 +9,7 @@
+ import framework/step.{type Start, type Step}
+ import framework/time
+ import gen/allow/article as allow
+-import gen/connector/queue
++import connector/queue
+ import gen/phase
+ import gen/query as q
+ import gen/root/article_release.{type Root, type Service, Service}
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/src/service/article_revise.gleam snap-g/api/src/service/article_revise.gleam
+--- a/api/src/service/article_revise.gleam	2026-09-26 00:57:16.000000000 +0900
++++ b/api/src/service/article_revise.gleam	2026-09-26 03:03:57.511510805 +0900
+@@ -14,8 +14,8 @@
+ import framework/step.{type Start, type Step}
+ import framework/time.{type Date}
+ import gen/allow/article as allow
+-import gen/connector/queue
+-import gen/connector/screen
++import connector/queue
++import connector/screen
+ import gen/draft/screen_reject.{ScreenRejectDraft} as screen_reject_draft
+ import gen/root/article_revise.{type Root, type Service, Service}
+ import gen/types/article_id.{type ArticleId}
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/src/service/article_search.gleam snap-g/api/src/service/article_search.gleam
+--- a/api/src/service/article_search.gleam	2026-09-26 00:57:16.000000000 +0900
++++ b/api/src/service/article_search.gleam	2026-09-26 03:03:57.511361342 +0900
+@@ -9,7 +9,7 @@
+ import framework/require.{type Requirement, Adult}
+ import framework/step.{type Start, type Step}
+ import gen/allow/article as allow
+-import gen/connector/workers_ai as ai
++import connector/workers_ai as ai
+ import gen/query as q
+ import gen/reads/article_search as reads
+ import gen/root/article_search.{type Root, type Service, Service}
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/src/service/article_unschedule.gleam snap-g/api/src/service/article_unschedule.gleam
+--- a/api/src/service/article_unschedule.gleam	2026-09-26 00:57:16.000000000 +0900
++++ b/api/src/service/article_unschedule.gleam	2026-09-26 03:03:57.512779192 +0900
+@@ -10,7 +10,7 @@
+ import framework/require.{type Requirement, Use}
+ import framework/step.{type Start, type Step}
+ import gen/allow/article as allow
+-import gen/connector/release
++import connector/release
+ import gen/phase
+ import gen/root/article_unschedule.{type Root, type Service, Service}
+ import gen/types/article_id.{type ArticleId}
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/src/service/heaven_embed_code.gleam snap-g/api/src/service/heaven_embed_code.gleam
+--- a/api/src/service/heaven_embed_code.gleam	2026-09-26 00:57:16.000000000 +0900
++++ b/api/src/service/heaven_embed_code.gleam	2026-09-26 03:03:57.510275609 +0900
+@@ -10,7 +10,7 @@
+ import framework/effect.{type Effect, Read}
+ import framework/step.{type Start, type Step}
+ import gen/allow/muse_heaven as allow
+-import gen/connector/heaven
++import connector/heaven
+ import gen/root/heaven_embed_code.{type Root, type Service, Service}
+ import gen/types/heaven_color.{type HeavenColor}
+ import gen/types/heaven_fontsize.{type HeavenFontsize}
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/src/service/heaven_resolve.gleam snap-g/api/src/service/heaven_resolve.gleam
+--- a/api/src/service/heaven_resolve.gleam	2026-09-26 00:57:16.000000000 +0900
++++ b/api/src/service/heaven_resolve.gleam	2026-09-26 03:03:57.512236931 +0900
+@@ -10,7 +10,7 @@
+ import framework/require.{type Requirement, Use}
+ import framework/step.{type Start, type Step}
+ import gen/allow/muse as allow
+-import gen/connector/heaven
++import connector/heaven
+ import gen/root/heaven_resolve.{type Root, type Service, Service}
+ import gen/types/heaven_id.{type HeavenId}
+ import gen/types/name.{type Name}
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/src/service/link_import.gleam snap-g/api/src/service/link_import.gleam
+--- a/api/src/service/link_import.gleam	2026-09-26 00:57:16.000000000 +0900
++++ b/api/src/service/link_import.gleam	2026-09-26 03:03:57.510802100 +0900
+@@ -12,7 +12,7 @@
+ import framework/require.{type Requirement, Use}
+ import framework/step.{type Open, type Start, type Step}
+ import gen/allow/muse as allow
+-import gen/connector/litlink
++import connector/litlink
+ import gen/draft/consent.{ConsentDraft} as consent_draft
+ import gen/draft/link_import.{LinkImportDraft} as link_import_draft
+ import gen/draft/link_import_candidate.{LinkImportCandidateDraft} as candidate_draft
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/src/service/link_import_apply.gleam snap-g/api/src/service/link_import_apply.gleam
+--- a/api/src/service/link_import_apply.gleam	2026-09-26 00:57:16.000000000 +0900
++++ b/api/src/service/link_import_apply.gleam	2026-09-26 03:03:57.512489246 +0900
+@@ -20,7 +20,7 @@
+ import framework/step.{type Open, type Start, type Step}
+ import framework/time
+ import gen/allow/muse as allow
+-import gen/connector/screen
++import connector/screen
+ import gen/draft/link.{type LinkCreated} as link_draft
+ import gen/draft/screen_reject.{ScreenRejectDraft} as screen_reject_draft
+ import gen/face.{type Face, Admin, Console, Muses, Www}
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/src/service/muse_edit_profile.gleam snap-g/api/src/service/muse_edit_profile.gleam
+--- a/api/src/service/muse_edit_profile.gleam	2026-09-26 00:57:16.000000000 +0900
++++ b/api/src/service/muse_edit_profile.gleam	2026-09-26 03:03:57.511974935 +0900
+@@ -13,7 +13,7 @@
+ import framework/step.{type Start, type Step}
+ import framework/time
+ import gen/allow/muse as allow
+-import gen/connector/screen
++import connector/screen
+ import gen/draft/screen_reject.{ScreenRejectDraft} as screen_reject_draft
+ import gen/root/muse_edit_profile.{type Root, type Service, Service}
+ import gen/types/category.{type Category}
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/src/service/notification_fanout.gleam snap-g/api/src/service/notification_fanout.gleam
+--- a/api/src/service/notification_fanout.gleam	2026-09-26 00:57:16.000000000 +0900
++++ b/api/src/service/notification_fanout.gleam	2026-09-26 03:03:57.510710968 +0900
+@@ -19,7 +19,7 @@
+ import framework/er
+ import framework/step.{type Committed, type Start, type Step}
+ import gen/allow/article as allow
+-import gen/connector/notify
++import connector/notify
+ import gen/query as q
+ import gen/reads/notification_fanout as reads
+ import gen/root/notification_fanout.{type Root, type Service, Service}
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/src/service/notification_notify.gleam snap-g/api/src/service/notification_notify.gleam
+--- a/api/src/service/notification_notify.gleam	2026-09-26 00:57:16.000000000 +0900
++++ b/api/src/service/notification_notify.gleam	2026-09-26 03:03:57.510887732 +0900
+@@ -16,7 +16,7 @@
+ import framework/party.{type PartyId}
+ import framework/step.{type Start, type Step}
+ import gen/allow/notification as allow
+-import gen/connector/socket
++import connector/socket
+ import gen/draft/notification.{NotificationDraft} as notification_draft
+ import gen/root/notification_notify.{type Root, type Service, Service}
+ import gen/types/event_id.{type EventId}
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/src/service/reservation_approve.gleam snap-g/api/src/service/reservation_approve.gleam
+--- a/api/src/service/reservation_approve.gleam	2026-09-26 00:57:16.000000000 +0900
++++ b/api/src/service/reservation_approve.gleam	2026-09-26 03:03:57.512152409 +0900
+@@ -8,7 +8,7 @@
+ import framework/require.{type Requirement, Use}
+ import framework/step.{type Start, type Step}
+ import gen/allow/reservation as allow
+-import gen/connector/queue as queue
++import connector/queue as queue
+ import gen/face.{type Face, Www, Muses, Console, Admin}
+ import gen/key
+ import gen/query as q
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/src/service/reservation_cancel.gleam snap-g/api/src/service/reservation_cancel.gleam
+--- a/api/src/service/reservation_cancel.gleam	2026-09-26 00:57:16.000000000 +0900
++++ b/api/src/service/reservation_cancel.gleam	2026-09-26 03:03:57.512589988 +0900
+@@ -8,7 +8,7 @@
+ import framework/require.{type Requirement, Use}
+ import framework/step.{type Start, type Step}
+ import gen/allow/reservation as allow
+-import gen/connector/queue as queue
++import connector/queue as queue
+ import gen/face.{type Face, Www, Muses, Console, Admin}
+ import gen/key
+ import gen/query as q
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/src/service/reservation_notify.gleam snap-g/api/src/service/reservation_notify.gleam
+--- a/api/src/service/reservation_notify.gleam	2026-09-26 00:57:16.000000000 +0900
++++ b/api/src/service/reservation_notify.gleam	2026-09-26 03:03:57.511286260 +0900
+@@ -9,7 +9,7 @@
+ import framework/step.{type Start, type Step}
+ import gen/face.{type Face}
+ import gen/allow/reservation as allow
+-import gen/connector/notify
++import connector/notify
+ import gen/reads/reservation_notify as reads
+ import gen/root/reservation_notify.{type Root, type Service, Service}
+ import gen/types/event_id.{type EventId}
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/src/service/reservation_request.gleam snap-g/api/src/service/reservation_request.gleam
+--- a/api/src/service/reservation_request.gleam	2026-09-26 00:57:16.000000000 +0900
++++ b/api/src/service/reservation_request.gleam	2026-09-26 03:03:57.512309962 +0900
+@@ -14,8 +14,8 @@
+ import framework/step.{type Start, type Step}
+ import framework/time
+ import gen/allow/muse_schedule as allow
+-import gen/connector/screen
+-import gen/connector/queue as queue
++import connector/screen
++import connector/queue as queue
+ import gen/draft/reservation.{type ReservationCreated, ReservationDraft}
+ import gen/draft/screen_reject.{ScreenRejectDraft} as screen_reject_draft
+ import gen/face.{type Face, Www, Muses, Console, Admin}
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/src/service/reservation_reschedule.gleam snap-g/api/src/service/reservation_reschedule.gleam
+--- a/api/src/service/reservation_reschedule.gleam	2026-09-26 00:57:16.000000000 +0900
++++ b/api/src/service/reservation_reschedule.gleam	2026-09-26 03:03:57.512402234 +0900
+@@ -8,7 +8,7 @@
+ import framework/require.{type Requirement, Use}
+ import framework/step.{type Start, type Step}
+ import gen/allow/reservation as allow
+-import gen/connector/queue as queue
++import connector/queue as queue
+ import gen/face.{type Face, Www, Muses, Console, Admin}
+ import gen/key
+ import gen/query as q
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/src/service/roster_add.gleam snap-g/api/src/service/roster_add.gleam
+--- a/api/src/service/roster_add.gleam	2026-09-26 00:57:16.000000000 +0900
++++ b/api/src/service/roster_add.gleam	2026-09-26 03:03:57.511732210 +0900
+@@ -21,7 +21,7 @@
+ import framework/step.{type Start, type Step}
+ import framework/time.{type Date}
+ import gen/allow/store as allow
+-import gen/connector/screen
++import connector/screen
+ import gen/draft/roster.{RosterDraft} as roster_draft
+ import gen/draft/screen_reject.{ScreenRejectDraft} as screen_reject_draft
+ import gen/key
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/src/service/roster_edit.gleam snap-g/api/src/service/roster_edit.gleam
+--- a/api/src/service/roster_edit.gleam	2026-09-26 00:57:16.000000000 +0900
++++ b/api/src/service/roster_edit.gleam	2026-09-26 03:03:57.511824422 +0900
+@@ -21,7 +21,7 @@
+ import framework/step.{type Start, type Step}
+ import framework/time.{type Date}
+ import gen/allow/roster as allow
+-import gen/connector/screen
++import connector/screen
+ import gen/draft/screen_reject.{ScreenRejectDraft} as screen_reject_draft
+ import gen/root/roster_edit.{type Root, type Service, Service}
+ import gen/types/age.{type Age}
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/src/service/roster_upsert.gleam snap-g/api/src/service/roster_upsert.gleam
+--- a/api/src/service/roster_upsert.gleam	2026-09-26 00:57:16.000000000 +0900
++++ b/api/src/service/roster_upsert.gleam	2026-09-26 03:03:57.511097396 +0900
+@@ -26,7 +26,7 @@
+ import framework/step.{type Start, type Step}
+ import framework/time.{type Date}
+ import gen/allow/store as allow
+-import gen/connector/screen
++import connector/screen
+ import gen/draft/roster.{RosterDraft} as roster_draft
+ import gen/draft/screen_reject.{ScreenRejectDraft} as screen_reject_draft
+ import gen/key
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/src/service/space_add.gleam snap-g/api/src/service/space_add.gleam
+--- a/api/src/service/space_add.gleam	2026-09-26 00:57:16.000000000 +0900
++++ b/api/src/service/space_add.gleam	2026-09-26 03:03:57.513022188 +0900
+@@ -14,7 +14,7 @@
+ import framework/step.{type Start, type Step}
+ import framework/time
+ import gen/allow/muse as allow
+-import gen/connector/screen
++import connector/screen
+ import gen/draft/free_space.{type FreeSpaceCreated} as free_space_draft
+ import gen/draft/screen_reject.{ScreenRejectDraft} as screen_reject_draft
+ import gen/face.{type Face, Admin, Console, Muses, Www}
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/src/service/space_edit.gleam snap-g/api/src/service/space_edit.gleam
+--- a/api/src/service/space_edit.gleam	2026-09-26 00:57:16.000000000 +0900
++++ b/api/src/service/space_edit.gleam	2026-09-26 03:03:57.511579027 +0900
+@@ -13,7 +13,7 @@
+ import framework/step.{type Start, type Step}
+ import framework/time
+ import gen/allow/free_space as allow
+-import gen/connector/screen
++import connector/screen
+ import gen/draft/screen_reject.{ScreenRejectDraft} as screen_reject_draft
+ import gen/root/space_edit.{type Root, type Service, Service}
+ import gen/types/category.{type Category}
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/src/service/store_onboard.gleam snap-g/api/src/service/store_onboard.gleam
+--- a/api/src/service/store_onboard.gleam	2026-09-26 00:57:16.000000000 +0900
++++ b/api/src/service/store_onboard.gleam	2026-09-26 03:03:57.512921235 +0900
+@@ -28,7 +28,7 @@
+ import framework/step.{type Start, type Step}
+ import framework/time.{type Time}
+ import gen/allow/store as allow
+-import gen/connector/idp
++import connector/idp
+ import gen/draft/store.{StoreDraft} as store_draft
+ import gen/query as q
+ import gen/reads/store_onboard as reads
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/src/service/store_request_handle.gleam snap-g/api/src/service/store_request_handle.gleam
+--- a/api/src/service/store_request_handle.gleam	2026-09-26 00:57:16.000000000 +0900
++++ b/api/src/service/store_request_handle.gleam	2026-09-26 03:03:57.512680440 +0900
+@@ -32,7 +32,7 @@
+ import framework/effect.{type Effect, Write}
+ import framework/step.{type Open, type Start, type Step}
+ import gen/allow/store_request as allow
+-import gen/connector/queue
++import connector/queue
+ import gen/phase
+ import gen/reads/store_request_handle as reads
+ import gen/root/store_request_handle.{type Root, type Service, Service}
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/src/service/store_request_notify.gleam snap-g/api/src/service/store_request_notify.gleam
+--- a/api/src/service/store_request_notify.gleam	2026-09-26 00:57:16.000000000 +0900
++++ b/api/src/service/store_request_notify.gleam	2026-09-26 03:03:57.511213509 +0900
+@@ -8,7 +8,7 @@
+ import framework/step.{type Start, type Step}
+ import gen/face.{type Face}
+ import gen/allow/store_request_notify as allow
+-import gen/connector/notify
++import connector/notify
+ import gen/reads/store_request_notify as reads
+ import gen/root/store_request_notify.{type Root, type Service, Service}
+ import gen/types/event_id.{type EventId}
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/src/service/widget_add.gleam snap-g/api/src/service/widget_add.gleam
+--- a/api/src/service/widget_add.gleam	2026-09-26 00:57:16.000000000 +0900
++++ b/api/src/service/widget_add.gleam	2026-09-26 03:03:57.512047467 +0900
+@@ -17,7 +17,7 @@
+ import framework/step.{type Start, type Step}
+ import framework/time
+ import gen/allow/muse as allow
+-import gen/connector/screen
++import connector/screen
+ import gen/draft/screen_reject.{ScreenRejectDraft} as screen_reject_draft
+ import gen/draft/widget.{type WidgetCreated} as widget_draft
+ import gen/face.{type Face, Admin, Console, Muses, Www}
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/src/service/widget_edit.gleam snap-g/api/src/service/widget_edit.gleam
+--- a/api/src/service/widget_edit.gleam	2026-09-26 00:57:16.000000000 +0900
++++ b/api/src/service/widget_edit.gleam	2026-09-26 03:03:57.511651868 +0900
+@@ -15,7 +15,7 @@
+ import framework/step.{type Start, type Step}
+ import framework/time
+ import gen/allow/widget as allow
+-import gen/connector/screen
++import connector/screen
+ import gen/draft/screen_reject.{ScreenRejectDraft} as screen_reject_draft
+ import gen/root/widget_edit.{type Root, type Service, Service}
+ import gen/types/caption.{type Caption}
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/src/service/widget_list.gleam snap-g/api/src/service/widget_list.gleam
+--- a/api/src/service/widget_list.gleam	2026-09-26 00:57:16.000000000 +0900
++++ b/api/src/service/widget_list.gleam	2026-09-26 03:03:57.510965224 +0900
+@@ -17,7 +17,7 @@
+ import framework/require.{type Requirement, Adult}
+ import framework/step.{type Start, type Step}
+ import gen/allow/muse as allow
+-import gen/connector/heaven
++import connector/heaven
+ import gen/key
+ import gen/reads/link_list as link_reads
+ import gen/reads/muse_heaven_list as heaven_reads
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/test/2a-1.test.mjs snap-g/api/test/2a-1.test.mjs
+--- a/api/test/2a-1.test.mjs	2026-09-26 00:57:16.000000000 +0900
++++ b/api/test/2a-1.test.mjs	2026-09-26 03:04:01.255860930 +0900
+@@ -3,7 +3,7 @@
+ import {identity,onboard,request,jar,pool,connectors,db,env} from './support.mjs';
+ import {issueSession} from '../build/dev/javascript/musearch_api/gen/runtime.mjs';
+ import * as c from '../build/dev/javascript/musearch_api/gen/codec.mjs';
+-import * as idp from '../build/dev/javascript/musearch_api/gen/connector/idp.mjs';
++import * as idp from '../build/dev/javascript/musearch_api/connector/idp.mjs';
+ 
+ const ledgerStores=[
+  '10000000-0000-4000-8000-000000000001',
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/test/2a-2.test.mjs snap-g/api/test/2a-2.test.mjs
+--- a/api/test/2a-2.test.mjs	2026-09-26 00:57:16.000000000 +0900
++++ b/api/test/2a-2.test.mjs	2026-09-26 03:04:01.255992473 +0900
+@@ -4,7 +4,7 @@
+ import {request,identity,onboard,pool,db,connectors,log,env} from './support.mjs';
+ import {issueSession} from '../build/dev/javascript/musearch_api/gen/runtime.mjs';
+ import * as c from '../build/dev/javascript/musearch_api/gen/codec.mjs';
+-import * as screen from '../build/dev/javascript/musearch_api/gen/connector/screen.mjs';
++import * as screen from '../build/dev/javascript/musearch_api/connector/screen.mjs';
+ import {SQL} from '../build/dev/javascript/musearch_api/gen/sql.mjs';
+ 
+ const pgConfig={
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/test/2a-4.test.mjs snap-g/api/test/2a-4.test.mjs
+--- a/api/test/2a-4.test.mjs	2026-09-26 00:57:16.000000000 +0900
++++ b/api/test/2a-4.test.mjs	2026-09-26 03:04:01.256123696 +0900
+@@ -5,7 +5,7 @@
+ import {credential} from '../build/dev/javascript/yumemi/framework/entry.mjs';
+ import {request,identity,onboard,jar,pool,env,db,log,connectors} from './support.mjs';
+ import * as c from '../build/dev/javascript/musearch_api/gen/codec.mjs';
+-import * as screen from '../build/dev/javascript/musearch_api/gen/connector/screen.mjs';
++import * as screen from '../build/dev/javascript/musearch_api/connector/screen.mjs';
+ 
+ after(()=>pool.end());
+ 
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/test/2b-4-service.test.mjs snap-g/api/test/2b-4-service.test.mjs
+--- a/api/test/2b-4-service.test.mjs	2026-09-26 00:57:16.000000000 +0900
++++ b/api/test/2b-4-service.test.mjs	2026-09-26 03:04:01.256243438 +0900
+@@ -2,7 +2,7 @@
+ import assert from 'node:assert/strict';
+ import pg from 'pg';
+ import {identity,onboard,request,pool,connectors,config,db} from './support.mjs';
+-import * as screen from '../build/dev/javascript/musearch_api/gen/connector/screen.mjs';
++import * as screen from '../build/dev/javascript/musearch_api/connector/screen.mjs';
+ import * as codec from '../build/dev/javascript/musearch_api/gen/codec.mjs';
+ 
+ after(()=>pool.end());
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/test/compile_fail.test.mjs snap-g/api/test/compile_fail.test.mjs
+--- a/api/test/compile_fail.test.mjs	2026-09-26 00:57:16.000000000 +0900
++++ b/api/test/compile_fail.test.mjs	2026-09-26 02:32:04.582386628 +0900
+@@ -4,7 +4,7 @@
+ import {resolve} from 'node:path';
+ import {spawnSync} from 'node:child_process';
+ import {pathToFileURL} from 'node:url';
+-import {validateWho} from '../src/gen/contracts.mjs';
++import {validateWho} from '../build/dev/javascript/yumemi/framework/server/contracts.mjs';
+ for(const name of ['missing_commit','wrong_phase','subject_type','mixed_system'])test('compile_fail: '+name,async()=>{
+  const dir=resolve('build/compile_fail/'+name);await mkdir(dir+'/src',{recursive:true});
+  await writeFile(dir+'/gleam.toml','name = "musearch_negative"\nversion = "0.0.0"\ntarget = "javascript"\n[dependencies]\nmusearch_api = { path = "../../.." }\n');
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/test/connector-10b.test.mjs snap-g/api/test/connector-10b.test.mjs
+--- a/api/test/connector-10b.test.mjs	2026-09-26 00:57:16.000000000 +0900
++++ b/api/test/connector-10b.test.mjs	2026-09-26 03:03:57.496394851 +0900
+@@ -1,8 +1,8 @@
+ import {test} from 'node:test';
+ import assert from 'node:assert/strict';
+ import {readFile} from 'node:fs/promises';
+-import * as heaven from '../build/dev/javascript/musearch_api/gen/heaven_ffi.mjs';
+-import * as litlink from '../build/dev/javascript/musearch_api/gen/litlink_ffi.mjs';
++import * as heaven from '../build/dev/javascript/musearch_api/heaven_ffi.mjs';
++import * as litlink from '../build/dev/javascript/musearch_api/litlink_ffi.mjs';
+ import * as c from '../build/dev/javascript/musearch_api/gen/codec.mjs';
+ 
+ test('CONNECTOR-10B: Heaven resolves once without cookies and builds the issued src query',async()=>{
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/test/driver-errors.test.mjs snap-g/api/test/driver-errors.test.mjs
+--- a/api/test/driver-errors.test.mjs	2026-09-26 00:57:16.000000000 +0900
++++ b/api/test/driver-errors.test.mjs	2026-09-26 02:32:04.584626887 +0900
+@@ -1,7 +1,7 @@
+ import {test} from 'node:test';
+ import assert from 'node:assert/strict';
+ import {neonConfig} from '@neondatabase/serverless';
+-import {database} from '../build/dev/javascript/musearch_api/gen/driver.mjs';
++import {database} from '../build/dev/javascript/yumemi/framework/server/driver.mjs';
+ import {SQL} from '../build/dev/javascript/musearch_api/gen/sql.mjs';
+ test('HTTP-TRANSPORT: Neon network failure is named; SQLSTATE conflict remains an ER error',async()=>{
+  const previous=neonConfig.fetchFunction;
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/test/egress-10f.test.mjs snap-g/api/test/egress-10f.test.mjs
+--- a/api/test/egress-10f.test.mjs	2026-09-26 00:57:16.000000000 +0900
++++ b/api/test/egress-10f.test.mjs	2026-09-26 03:03:57.495990325 +0900
+@@ -1,8 +1,8 @@
+ import { test } from 'node:test';
+ import assert from 'node:assert/strict';
+ import { EXTERNAL_HOSTS } from '../build/dev/javascript/musearch_api/external_hosts.mjs';
+-import * as litlink from '../build/dev/javascript/musearch_api/gen/litlink_ffi.mjs';
+-import * as heaven from '../build/dev/javascript/musearch_api/gen/heaven_ffi.mjs';
++import * as litlink from '../build/dev/javascript/musearch_api/litlink_ffi.mjs';
++import * as heaven from '../build/dev/javascript/musearch_api/heaven_ffi.mjs';
+ import * as http from '../build/dev/javascript/musearch_api/gen/http_runtime.mjs';
+ import * as codec from '../build/dev/javascript/musearch_api/gen/codec.mjs';
+ 
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/test/final.test.mjs snap-g/api/test/final.test.mjs
+--- a/api/test/final.test.mjs	2026-09-26 00:57:16.000000000 +0900
++++ b/api/test/final.test.mjs	2026-09-26 03:04:01.256470843 +0900
+@@ -3,7 +3,7 @@
+ import {request,onboard,pool,db,env,connectors,log} from './support.mjs';
+ import * as c from '../build/dev/javascript/musearch_api/gen/codec.mjs';
+ import {makeContext,step} from '../build/dev/javascript/musearch_api/gen/runtime.mjs';
+-import * as screen from '../build/dev/javascript/musearch_api/gen/connector/screen.mjs';
++import * as screen from '../build/dev/javascript/musearch_api/connector/screen.mjs';
+ import * as verb from '../build/dev/javascript/musearch_api/gen/verb.mjs';
+ import * as sd from '../build/dev/javascript/musearch_api/gen/draft/screen_reject.mjs';
+ import * as entity from '../build/dev/javascript/musearch_api/entity/screen_reject.mjs';
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/test/fixtures/resume_read.gleam snap-g/api/test/fixtures/resume_read.gleam
+--- a/api/test/fixtures/resume_read.gleam	2026-09-26 00:57:16.000000000 +0900
++++ b/api/test/fixtures/resume_read.gleam	2026-09-26 03:03:57.513095409 +0900
+@@ -2,7 +2,7 @@
+ 
+ import entity/consent
+ import framework/step.{type Committed, type Start, type Step}
+-import gen/connector/queue
++import connector/queue
+ import gen/reads/consent_give as reads
+ import gen/types/article_id.{type ArticleId}
+ 
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/test/logic-10b.test.mjs snap-g/api/test/logic-10b.test.mjs
+--- a/api/test/logic-10b.test.mjs	2026-09-26 00:57:16.000000000 +0900
++++ b/api/test/logic-10b.test.mjs	2026-09-26 03:04:01.256548574 +0900
+@@ -15,9 +15,9 @@
+ import * as museEntity from '../build/dev/javascript/musearch_api/entity/muse.mjs';
+ import * as museHeavenEntity from '../build/dev/javascript/musearch_api/entity/muse_heaven.mjs';
+ import * as widgetEntity from '../build/dev/javascript/musearch_api/entity/widget.mjs';
+-import * as screen from '../build/dev/javascript/musearch_api/gen/connector/screen.mjs';
+-import * as heaven from '../build/dev/javascript/musearch_api/gen/connector/heaven.mjs';
+-import * as litlink from '../build/dev/javascript/musearch_api/gen/connector/litlink.mjs';
++import * as screen from '../build/dev/javascript/musearch_api/connector/screen.mjs';
++import * as heaven from '../build/dev/javascript/musearch_api/connector/heaven.mjs';
++import * as litlink from '../build/dev/javascript/musearch_api/connector/litlink.mjs';
+ import * as allowArticle from '../build/dev/javascript/musearch_api/gen/allow/article.mjs';
+ import * as allowMuse from '../build/dev/javascript/musearch_api/gen/allow/muse.mjs';
+ import * as articleDraft from '../build/dev/javascript/musearch_api/gen/draft/article.mjs';
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/test/logic.test.mjs snap-g/api/test/logic.test.mjs
+--- a/api/test/logic.test.mjs	2026-09-26 00:57:16.000000000 +0900
++++ b/api/test/logic.test.mjs	2026-09-26 03:04:01.256383631 +0900
+@@ -9,7 +9,7 @@
+ import * as sd from '../build/dev/javascript/musearch_api/gen/draft/screen_reject.mjs';
+ import {Near} from '../build/dev/javascript/musearch_api/gen/reads/article_search.mjs';
+ import * as wd from '../build/dev/javascript/musearch_api/gen/draft/widget.mjs';
+-import * as screen from '../build/dev/javascript/musearch_api/gen/connector/screen.mjs';
++import * as screen from '../build/dev/javascript/musearch_api/connector/screen.mjs';
+ import * as phase from '../build/dev/javascript/musearch_api/gen/phase.mjs';
+ import * as vector from '../build/dev/javascript/yumemi/framework/vector.mjs';
+ import * as visit from '../build/dev/javascript/musearch_api/entity/visit.mjs';
+@@ -31,7 +31,7 @@
+  const args=new record.module.Args(...record.fields.map(f=>values[f]));
+  const ctx={
+   async stage(name,input){trace.push(name);wrote.push([name,input]);if(name.startsWith('create_')){const e=name.slice(7),Ctor={muse:md.MuseCreated,article:ad.ArticleCreated,consent:cd.ConsentCreated,widget:wd.WidgetCreated,screen_reject:sd.ScreenRejectCreated}[e];return new Ctor(c.parse(e+'_id',crypto.randomUUID()),...Object.values(input));}},
+-  async read(name){trace.push(name);if(name==='nearest')return c.toList([new Near(article,muse,0.1)]);if(name==='current')return new c.Some(new c.cv.ConsentVersionRow(new c.consent.Use(),c.parse('consent_version','2026-09-12')));if(name==='slot_taken')return taken;if(name==='active_stores')return c.toList([]);return new c.page.Page(c.toList([[article,new c.article.Published()]]),new c.None());},
++  async read(name){trace.push(name);if(name==='nearest')return c.toList([new Near(article,muse,0.1)]);if(name==='current')return new c.Some(new c.consentVersion.ConsentVersionRow(new c.consent.Use(),c.parse('consent_version','2026-09-12')));if(name==='slot_taken')return taken;if(name==='active_stores')return c.toList([]);return new c.page.Page(c.toList([[article,new c.article.Published()]]),new c.None());},
+   async call(name,input){trace.push(name);if(name==='screen')return reject?new screen.Rejected(c.parse('category','category'),c.parse('model_name','test-model')):new screen.Allowed();if(name==='release_schedule'||name==='release_unschedule')return undefined;return c.toList([...input].map(()=>c.checked(vector.parse(c.toList([1.0])))));},
+   async reject(stage){await stage(ctx);trace.push('reject');},
+   async commit(){trace.push('commit');ctx.committed=true;return true;},
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/test/roster-logic.test.mjs snap-g/api/test/roster-logic.test.mjs
+--- a/api/test/roster-logic.test.mjs	2026-09-26 00:57:16.000000000 +0900
++++ b/api/test/roster-logic.test.mjs	2026-09-26 03:04:01.256794620 +0900
+@@ -2,7 +2,7 @@
+ import assert from 'node:assert/strict';
+ import {step} from '../build/dev/javascript/musearch_api/gen/runtime.mjs';
+ import * as c from '../build/dev/javascript/musearch_api/gen/codec.mjs';
+-import * as screen from '../build/dev/javascript/musearch_api/gen/connector/screen.mjs';
++import * as screen from '../build/dev/javascript/musearch_api/connector/screen.mjs';
+ import * as secret from '../build/dev/javascript/yumemi/framework/secret.mjs';
+ import * as draft from '../build/dev/javascript/musearch_api/gen/draft/roster.mjs';
+ import * as verbManual from '../build/dev/javascript/musearch_api/verb_manual.mjs';
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/test/semantics.test.mjs snap-g/api/test/semantics.test.mjs
+--- a/api/test/semantics.test.mjs	2026-09-26 00:57:16.000000000 +0900
++++ b/api/test/semantics.test.mjs	2026-09-26 03:04:01.257004404 +0900
+@@ -3,7 +3,7 @@
+ import {request,onboard,identity,pool,db,connectors} from './support.mjs';
+ import * as c from '../build/dev/javascript/musearch_api/gen/codec.mjs';
+ import {SQL} from '../build/dev/javascript/musearch_api/gen/sql.mjs';
+-import * as screen from '../build/dev/javascript/musearch_api/gen/connector/screen.mjs';
++import * as screen from '../build/dev/javascript/musearch_api/connector/screen.mjs';
+ after(()=>pool.end());
+ async function article(x,phase='draft',text='本文') {
+  const r=await request('POST','/api/articles',{title:'題',body:text},{cookie:x.cookie});assert.equal(r.status,200);const id=r.body.id;
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/test/services-10b.test.mjs snap-g/api/test/services-10b.test.mjs
+--- a/api/test/services-10b.test.mjs	2026-09-26 00:57:16.000000000 +0900
++++ b/api/test/services-10b.test.mjs	2026-09-26 03:04:01.256881312 +0900
+@@ -2,8 +2,8 @@
+ import assert from 'node:assert/strict';
+ import { request, onboard, connectors, db, env, media, pool } from './support.mjs';
+ import * as c from '../build/dev/javascript/musearch_api/gen/codec.mjs';
+-import * as heavenConnector from '../build/dev/javascript/musearch_api/gen/connector/heaven.mjs';
+-import * as litlinkConnector from '../build/dev/javascript/musearch_api/gen/connector/litlink.mjs';
++import * as heavenConnector from '../build/dev/javascript/musearch_api/connector/heaven.mjs';
++import * as litlinkConnector from '../build/dev/javascript/musearch_api/connector/litlink.mjs';
+ import { releaseDue } from '../build/dev/javascript/musearch_api/gen/cron_runtime.mjs';
+ 
+ after(() => pool.end());
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/test/source_contract.test.mjs snap-g/api/test/source_contract.test.mjs
+--- a/api/test/source_contract.test.mjs	2026-09-26 00:57:16.000000000 +0900
++++ b/api/test/source_contract.test.mjs	2026-09-26 03:05:42.056124009 +0900
+@@ -7,16 +7,21 @@
+ import {registry,byName} from '../build/dev/javascript/musearch_api/gen/registry.mjs';
+ import {F4_ADDED_SERVICES} from './f4-added-services.mjs';
+ import {cases as semanticCases} from './sql-cases.mjs';
+-import {foldable} from '../src/gen/contracts.mjs';
++import {foldable} from '../build/dev/javascript/yumemi/framework/server/contracts.mjs';
+ const root=resolve('..');
+ const currentPath=path=>path.replace(/^app\//,'api/');
+ async function walk(dir){const result=[];for(const x of await readdir(dir,{withFileTypes:true})){const p=dir+'/'+x.name;if(x.isDirectory())result.push(...await walk(p));else result.push(p);}return result;}
+ test('source_contract: current stars byte-identical; all Services registered',async()=>{
++ // WGy(yumemi 0.11.1): connector の型を ★ `src/connector/` に移し、★ の import を `gen/connector/` から付け替えた。
++ // 変わった ★ は書き換え前と後の hash の対で pin し、既存の層は書き換えない(書き換え後の byte のときだけ前の hash として読む)。
++ const wgyLines=(await readFile(root+'/docs/evidence/wgy-star-sha256.txt','utf8')).trim().split('\n');
++ const wgy=Object.fromEntries(wgyLines.map(line=>{const [before,after,path]=line.split('  ');return [path,{before,after}];}));
++ const starHash=async path=>{const found=createHash('sha256').update(await readFile(root+'/'+currentPath(path))).digest('hex');const pinned=wgy[path];return pinned&&found===pinned.after?pinned.before:found;};
+  const manifest=(await readFile(root+'/docs/evidence/10b-star-sha256.txt','utf8')).trim().split('\n');assert.equal(manifest.length,66);
+  // 2b-8: 台帳の Area・公開の提出先の読み・Prep の id・送れるかの 2 欄・通知の path で動いた ★ を最上位の層で pin する(既存の層は書き換えない)。
+  const current2b8Lines=(await readFile(root+'/docs/evidence/2b-8-star-sha256.txt','utf8')).trim().split('\n');
+  const current2b8=Object.fromEntries(current2b8Lines.map(line=>{const [hash,path]=line.split('  ');return [path,hash];}));
+- for(const [path,hash] of Object.entries(current2b8)) assert.equal(createHash('sha256').update(await readFile(root+'/'+currentPath(path))).digest('hex'),hash,path);
++ for(const [path,hash] of Object.entries(current2b8)) assert.equal((await starHash(path)),hash,path);
+  const current2a1Lines=(await readFile(root+'/docs/evidence/2a-1-star-sha256.txt','utf8')).trim().split('\n');
+  const current2a1=Object.fromEntries(current2a1Lines.map(line=>{const [hash,path]=line.split('  ');return [path,hash];}));
+  const current2a2Lines=(await readFile(root+'/docs/evidence/2a-2-star-sha256.txt','utf8')).trim().split('\n');
+@@ -142,7 +147,7 @@
+  assert.equal(current2b6MergeLines.length,1);
+  Object.assign(current2b4,current2b5);
+  Object.assign(current2b4B,current2b5);
+- for(const [path,hash] of Object.entries(current2b5)) assert.equal(createHash('sha256').update(await readFile(root+'/'+currentPath(path))).digest('hex'),current2b8[path]??current2b6Merge[path]??hash,path);
++ for(const [path,hash] of Object.entries(current2b5)) assert.equal((await starHash(path)),current2b8[path]??current2b6Merge[path]??hash,path);
+  // 2b-6: Notice's write declaration is the current ★ layer; keep earlier layers unchanged.
+  const current2b6Lines=(await readFile(root+'/docs/evidence/2b-6-star-sha256.txt','utf8')).trim().split('\n');
+  const current2b6=Object.fromEntries(current2b6Lines.map(line=>{const [hash,path]=line.split('  ');return [path,hash];}));
+@@ -152,12 +157,12 @@
+  const current2b6C=Object.fromEntries(current2b6CLines.map(line=>{const [hash,path]=line.split('  ');return [path,hash];}));
+  assert.equal(current2b6CLines.length,4);
+  Object.assign(current2b6C,current2b6Merge);
+- for(const [path,hash] of Object.entries(current2b6C)) assert.equal(createHash('sha256').update(await readFile(root+'/'+currentPath(path))).digest('hex'),current2b8[path]??hash,path);
++ for(const [path,hash] of Object.entries(current2b6C)) assert.equal((await starHash(path)),current2b8[path]??hash,path);
+  // 2b-6 D: the two Store read Services are the current ★ layer; keep C and the original Notice layer historical.
+  const current2b6DLines=(await readFile(root+'/docs/evidence/2b-6-d-star-sha256.txt','utf8')).trim().split('\n');
+  const current2b6D=Object.fromEntries(current2b6DLines.map(line=>{const [hash,path]=line.split('  ');return [path,hash];}));
+  assert.equal(current2b6DLines.length,2);
+- for(const [path,hash] of Object.entries(current2b6D)) assert.equal(createHash('sha256').update(await readFile(root+'/'+currentPath(path))).digest('hex'),current2b8[path]??hash,path);
++ for(const [path,hash] of Object.entries(current2b6D)) assert.equal((await starHash(path)),current2b8[path]??hash,path);
+  // store-1 A: the Service-side grid and metrics output changed these three
+  // ★ sources; keep the historical layers unchanged and pin this new layer.
+  const currentStore1ALines=(await readFile(root+'/docs/evidence/store-1-a-star-sha256.txt','utf8')).trim().split('\n');
+@@ -222,13 +227,13 @@
+  Object.assign(currentYumemi4,current2b8);
+  const expected2a1Paths=['app/src/app.gleam','app/src/entry.gleam','app/src/entity/page_view.gleam','app/src/entity/roster.gleam','app/src/entity/roster_photo.gleam','app/src/entity/staff.gleam','app/src/entity/store.gleam','app/src/entity/store_schedule.gleam','app/src/service/pageview_record.gleam','app/src/service/store_onboard.gleam','app/src/service/store_read.gleam','app/src/service/store_verify.gleam','app/src/types.gleam'];
+  assert.equal(current2a1Lines.length,13);assert.deepEqual(Object.keys(current2a1).sort(),expected2a1Paths.sort());
+- for(const [path,hash] of Object.entries(currentRedraw2)) assert.equal(createHash('sha256').update(await readFile(root+'/'+currentPath(path))).digest('hex'),currentYumemi4[path]??current2b6D[path]??current2b6C[path]??current2b6[path]??currentStage6[path]??currentStore1A[path]??currentConsole1a[path]??current2b4B[path]??current2b4[path]??current2b3[path]??currentStage3[path]??currentRedraw3[path]??currentYumemi3R7[path]??currentConsole1b[path]??currentFront1Gate2[path]??currentFront1[path]??currentYumemi3P0[path]??currentYumemi3E3[path]??currentYumemi3E1[path]??currentYumemi3[path]??currentStage2[path]??currentYumemi2[path]??hash,path);
++ for(const [path,hash] of Object.entries(currentRedraw2)) assert.equal((await starHash(path)),currentYumemi4[path]??current2b6D[path]??current2b6C[path]??current2b6[path]??currentStage6[path]??currentStore1A[path]??currentConsole1a[path]??current2b4B[path]??current2b4[path]??current2b3[path]??currentStage3[path]??currentRedraw3[path]??currentYumemi3R7[path]??currentConsole1b[path]??currentFront1Gate2[path]??currentFront1[path]??currentYumemi3P0[path]??currentYumemi3E3[path]??currentYumemi3E1[path]??currentYumemi3[path]??currentStage2[path]??currentYumemi2[path]??hash,path);
+  const restart10g={
+   'app/src/service/article_publish.gleam':'31ad3614656960f44aab052c16d540589f68dae629b2b73ba7a1d76603bd3811',
+   'app/src/service/article_edit.gleam':'a96b8082fb48bd493db32afb70b8719d4601851219fb5bdae46b5d3c292a4689',
+  'app/src/service/article_unschedule.gleam':'8f8aa66431b915468bd183b8ba76400c80186370838060ca244ee3dc28f18db9',
+  };
+- for(const line of manifest){const [hash,path]=line.split('  ');const current=createHash('sha256').update(await readFile(root+'/'+currentPath(path))).digest('hex');
++ for(const line of manifest){const [hash,path]=line.split('  ');const current=(await starHash(path));
+   // BRIEF-10c's two scalar declarations were already promoted on the base
+   // commit; keep this historical 10b manifest useful for the other stars.
+   const expected=currentYumemi4[path]??current2b6D[path]??current2b6C[path]??current2b6[path]??currentStage6[path]??currentStore1A[path]??currentConsole1a[path]??current2b4B[path]??current2b4[path]??current2b3[path]??currentStage3[path]??currentRedraw3[path]??currentYumemi3R7[path]??currentConsole1b[path]??currentFront1Gate2[path]??currentFront1[path]??currentYumemi3P0[path]??currentYumemi3E3[path]??currentYumemi3E1[path]??currentYumemi3[path]??currentStage2[path]??currentYumemi2[path]??currentRedraw2[path]??currentYumemi1C[path]??currentYumemi1B2[path]??currentYumemi1[path]??current2b1[path]??current2a7[path]??current2a6[path]??current2a4[path]??current2a3[path]??current2a2[path]??current2a1[path]??(path==='app/src/types.gleam'?'2664bd1908d0036c921d8b92485225857a6264c31bc8dbb06679a4811589846e':restart10g[path]??hash);
+@@ -236,11 +241,11 @@
+   // BRIEF-10g restart: these three ★ services gained only the DO alarm
+   // wiring; retain the historical manifest and pin each new source hash here.
+  }
+- for(const [path,hash] of Object.entries(current2a1)) assert.equal(createHash('sha256').update(await readFile(root+'/'+currentPath(path))).digest('hex'),currentYumemi4[path]??current2b6D[path]??current2b6C[path]??current2b6[path]??currentStage6[path]??currentStore1A[path]??currentConsole1a[path]??current2b4B[path]??current2b4[path]??current2b3[path]??currentStage3[path]??currentRedraw3[path]??currentYumemi3R7[path]??currentYumemi3P0[path]??currentYumemi3E3[path]??currentYumemi3E1[path]??currentYumemi3[path]??currentStage2[path]??currentYumemi2[path]??currentRedraw2[path]??currentYumemi1C[path]??currentYumemi1B2[path]??currentYumemi1[path]??current2b1[path]??current2a7[path]??current2a6[path]??current2a4[path]??current2a3[path]??current2a2[path]??hash,path);
+- for(const [path,hash] of Object.entries(current2a2)) assert.equal(createHash('sha256').update(await readFile(root+'/'+currentPath(path))).digest('hex'),currentYumemi4[path]??current2b6D[path]??current2b6C[path]??current2b6[path]??currentStage6[path]??currentStore1A[path]??currentConsole1a[path]??current2b4B[path]??current2b4[path]??current2b3[path]??currentStage3[path]??currentRedraw3[path]??currentYumemi3R7[path]??currentYumemi3P0[path]??currentYumemi3E3[path]??currentYumemi3E1[path]??currentYumemi3[path]??currentStage2[path]??currentYumemi2[path]??currentRedraw2[path]??currentYumemi1C[path]??currentYumemi1B2[path]??currentYumemi1[path]??current2b1[path]??current2a7[path]??current2a6[path]??current2a4[path]??current2a3[path]??hash,path);
+- for(const [path,hash] of Object.entries(current2a3)) assert.equal(createHash('sha256').update(await readFile(root+'/'+currentPath(path))).digest('hex'),currentYumemi4[path]??current2b6D[path]??current2b6C[path]??current2b6[path]??currentStage6[path]??currentStore1A[path]??currentConsole1a[path]??current2b4B[path]??current2b4[path]??current2b3[path]??currentStage3[path]??currentRedraw3[path]??currentYumemi3R7[path]??currentYumemi3P0[path]??currentYumemi3E3[path]??currentYumemi3E1[path]??currentYumemi3[path]??currentStage2[path]??currentYumemi2[path]??currentRedraw2[path]??currentYumemi1C[path]??currentYumemi1B2[path]??currentYumemi1[path]??current2b1[path]??current2a7[path]??current2a6[path]??current2a4[path]??current2a3[path]??hash,path);
+- for(const [path,hash] of Object.entries(current2a6)) assert.equal(createHash('sha256').update(await readFile(root+'/'+currentPath(path))).digest('hex'),currentYumemi4[path]??current2b6D[path]??current2b6C[path]??current2b6[path]??currentStage6[path]??currentStore1A[path]??currentConsole1a[path]??current2b4B[path]??current2b4[path]??current2b3[path]??currentStage3[path]??currentRedraw3[path]??currentYumemi3R7[path]??currentYumemi3P0[path]??currentYumemi3E3[path]??currentYumemi3E1[path]??currentYumemi3[path]??currentStage2[path]??currentYumemi2[path]??currentRedraw2[path]??currentYumemi1C[path]??currentYumemi1B2[path]??currentYumemi1[path]??current2b1[path]??current2a7[path]??current2a6[path]??current2a4[path]??current2a3[path]??hash,path);
+- for(const [path,hash] of Object.entries(current2a7)) assert.equal(createHash('sha256').update(await readFile(root+'/'+currentPath(path))).digest('hex'),currentYumemi4[path]??currentStage6[path]??currentStore1A[path]??currentConsole1a[path]??current2b4B[path]??current2b4[path]??current2b3[path]??currentStage3[path]??currentRedraw3[path]??currentYumemi3R7[path]??currentYumemi3P0[path]??currentYumemi3E3[path]??currentYumemi3E1[path]??currentYumemi3[path]??currentStage2[path]??currentYumemi2[path]??currentYumemi1C[path]??currentYumemi1B2[path]??currentYumemi1[path]??current2b1[path]??current2a7[path]??current2a6[path]??current2a4[path]??current2a3[path]??hash,path);
++ for(const [path,hash] of Object.entries(current2a1)) assert.equal((await starHash(path)),currentYumemi4[path]??current2b6D[path]??current2b6C[path]??current2b6[path]??currentStage6[path]??currentStore1A[path]??currentConsole1a[path]??current2b4B[path]??current2b4[path]??current2b3[path]??currentStage3[path]??currentRedraw3[path]??currentYumemi3R7[path]??currentYumemi3P0[path]??currentYumemi3E3[path]??currentYumemi3E1[path]??currentYumemi3[path]??currentStage2[path]??currentYumemi2[path]??currentRedraw2[path]??currentYumemi1C[path]??currentYumemi1B2[path]??currentYumemi1[path]??current2b1[path]??current2a7[path]??current2a6[path]??current2a4[path]??current2a3[path]??current2a2[path]??hash,path);
++ for(const [path,hash] of Object.entries(current2a2)) assert.equal((await starHash(path)),currentYumemi4[path]??current2b6D[path]??current2b6C[path]??current2b6[path]??currentStage6[path]??currentStore1A[path]??currentConsole1a[path]??current2b4B[path]??current2b4[path]??current2b3[path]??currentStage3[path]??currentRedraw3[path]??currentYumemi3R7[path]??currentYumemi3P0[path]??currentYumemi3E3[path]??currentYumemi3E1[path]??currentYumemi3[path]??currentStage2[path]??currentYumemi2[path]??currentRedraw2[path]??currentYumemi1C[path]??currentYumemi1B2[path]??currentYumemi1[path]??current2b1[path]??current2a7[path]??current2a6[path]??current2a4[path]??current2a3[path]??hash,path);
++ for(const [path,hash] of Object.entries(current2a3)) assert.equal((await starHash(path)),currentYumemi4[path]??current2b6D[path]??current2b6C[path]??current2b6[path]??currentStage6[path]??currentStore1A[path]??currentConsole1a[path]??current2b4B[path]??current2b4[path]??current2b3[path]??currentStage3[path]??currentRedraw3[path]??currentYumemi3R7[path]??currentYumemi3P0[path]??currentYumemi3E3[path]??currentYumemi3E1[path]??currentYumemi3[path]??currentStage2[path]??currentYumemi2[path]??currentRedraw2[path]??currentYumemi1C[path]??currentYumemi1B2[path]??currentYumemi1[path]??current2b1[path]??current2a7[path]??current2a6[path]??current2a4[path]??current2a3[path]??hash,path);
++ for(const [path,hash] of Object.entries(current2a6)) assert.equal((await starHash(path)),currentYumemi4[path]??current2b6D[path]??current2b6C[path]??current2b6[path]??currentStage6[path]??currentStore1A[path]??currentConsole1a[path]??current2b4B[path]??current2b4[path]??current2b3[path]??currentStage3[path]??currentRedraw3[path]??currentYumemi3R7[path]??currentYumemi3P0[path]??currentYumemi3E3[path]??currentYumemi3E1[path]??currentYumemi3[path]??currentStage2[path]??currentYumemi2[path]??currentRedraw2[path]??currentYumemi1C[path]??currentYumemi1B2[path]??currentYumemi1[path]??current2b1[path]??current2a7[path]??current2a6[path]??current2a4[path]??current2a3[path]??hash,path);
++ for(const [path,hash] of Object.entries(current2a7)) assert.equal((await starHash(path)),currentYumemi4[path]??currentStage6[path]??currentStore1A[path]??currentConsole1a[path]??current2b4B[path]??current2b4[path]??current2b3[path]??currentStage3[path]??currentRedraw3[path]??currentYumemi3R7[path]??currentYumemi3P0[path]??currentYumemi3E3[path]??currentYumemi3E1[path]??currentYumemi3[path]??currentStage2[path]??currentYumemi2[path]??currentYumemi1C[path]??currentYumemi1B2[path]??currentYumemi1[path]??current2b1[path]??current2a7[path]??current2a6[path]??current2a4[path]??current2a3[path]??hash,path);
+  assert.equal(current2a2Lines.length,15);assert.equal(current2a3Lines.length,9);assert.equal(current2a4Lines.length,7);assert.equal(registry.length,114+F4_ADDED_SERVICES.length);assert.ok(byName.article_search);
+ });
+ test('source_contract: production source has no forbidden vocabulary, deployment names or PoC resources',async()=>{
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/test/sql-cases-wgy-1.mjs snap-g/api/test/sql-cases-wgy-1.mjs
+--- a/api/test/sql-cases-wgy-1.mjs	1970-01-01 09:00:00.000000000 +0900
++++ b/api/test/sql-cases-wgy-1.mjs	2026-09-26 03:09:17.451167705 +0900
+@@ -0,0 +1,94 @@
++import assert from 'node:assert/strict';
++import {SQL} from '../build/dev/javascript/musearch_api/gen/sql.mjs';
++export function register(define,h){
++ const AREA='20000000-0000-4000-8000-000000000003',AREA_PATH='東京都 > 23区 > 池袋';
++ const tag=f=>f.id().replaceAll('-','').slice(0,12);
++ const ledger=async(f,name,area=null)=>{const id=f.id();await f.q("INSERT INTO public.store(store_id,store_name,type,genre,area_id) VALUES($1,$2,'soap','fixture',$3)",[id,name,area]);return id;};
++ const appStore=async(f,ledgerId=null,party=f.other)=>{const id=f.id();await f.q("INSERT INTO app.store(id,party,handle,name,verified,day_starts_at,ledger_store_id,phase,entered_onboarded) VALUES($1,$2,$3,'store',true,'05:00',$4,'onboarded',$5)",[id,party,'s'+id.replaceAll('-','').slice(0,20),ledgerId,f.at]);return id;};
++ const roster=async(f,store,muse,party,phase)=>{const id=f.id();await f.q("INSERT INTO app.roster(id,store_id,muse_id,party,name,catch,body,age,\"order\",visible,since,phase,entered_active,entered_left) VALUES($1,$2,$3,$4,'r','','body',18,0,true,'2026-09-01',$5::text,$6::timestamptz,CASE WHEN $5::text='left' THEN $6::timestamptz ELSE NULL END)",[id,store,muse,party,phase,f.at]);return id;};
++ const target=async(f,muse,ledgerId)=>{const id=f.id();await f.q('INSERT INTO app.shift_target(id,muse_id,ledger_store_id) VALUES($1,$2,$3)',[id,muse,ledgerId]);return id;};
++ const schedule=async(f,muse,party,ledgerId,date,phase='active')=>{const id=f.id();await f.q("INSERT INTO app.muse_schedule(id,muse_id,party,ledger_store_id,date,starts_at,ends_at,phase,entered_active,entered_withdrawn) VALUES($1,$2,$3,$4,$5::date,600,660,$6::text,$7::timestamptz,CASE WHEN $6::text='withdrawn' THEN $7::timestamptz ELSE NULL END)",[id,muse,party,ledgerId,date,phase,f.at]);return id;};
++
++ define('allow/ledger','public ledger fragment admits a ledger store for any caller','unknown ledger store stays excluded under the fragment',async f=>{
++  const id=await ledger(f,'wgy allow '+tag(f)),sql=`SELECT s.store_id AS id FROM public.store s WHERE s.store_id=$1::uuid AND ${SQL['allow/ledger']}`;
++  await f.probe('allow/ledger','inside',[id],h.ids,[id],sql);
++  await f.probe('allow/ledger','outside',[f.id()],h.ids,[],sql);
++ });
++ define('allow/muse_schedule','fragment admits a MuseSchedule of another party (owner is checked by the root)','unknown MuseSchedule stays excluded under the fragment',async f=>{
++  const l=await ledger(f,'wgy allow '+tag(f)),id=await schedule(f,f.y,f.other,l,'2026-09-13');
++  const sql=`SELECT s.id FROM app.muse_schedule s JOIN app.muse m ON m.id=s.muse_id WHERE s.id=$1::uuid AND ${SQL['allow/muse_schedule']}`;
++  await f.probe('allow/muse_schedule','inside',[id],h.ids,[id],sql);
++  await f.probe('allow/muse_schedule','outside',[f.id()],h.ids,[],sql);
++ });
++ define('allow/shift_target','fragment admits a ShiftTarget of another party (owner is checked by the root)','unknown ShiftTarget stays excluded under the fragment',async f=>{
++  const l=await ledger(f,'wgy allow '+tag(f)),id=await target(f,f.y,l);
++  const sql=`SELECT t.id FROM app.shift_target t JOIN app.muse m ON m.id=t.muse_id WHERE t.id=$1::uuid AND ${SQL['allow/shift_target']}`;
++  await f.probe('allow/shift_target','inside',[id],h.ids,[id],sql);
++  await f.probe('allow/shift_target','outside',[f.id()],h.ids,[],sql);
++ });
++
++ define('store_list/all','every store is listed in handle order','a store that does not exist is not listed',async f=>{
++  const t=tag(f),late=f.id(),early=f.id();
++  for(const [id,handle] of [[late,'zzzz'+t],[early,'aaaa'+t]])await f.q("INSERT INTO app.store(id,party,handle,name,verified,day_starts_at,phase,entered_onboarded) VALUES($1,$2,$3,'store',false,'05:00','onboarded',$4)",[id,f.other,handle,f.at]);
++  await f.probe('store_list/all','inside',[],rows=>rows.map(r=>r.id).filter(id=>id===late||id===early),[early,late]);
++  const missing=f.id();
++  await f.probe('store_list/all','outside',[],rows=>rows.some(r=>r.id===missing),false);
++ });
++
++ define('schedule_add/candidate_stores','own targets and active-roster ledger stores are folded per store with area and listed flag','left-roster ledger and another Muse target are excluded',async f=>{
++  const t=tag(f);
++  const both=await ledger(f,'wgy a '+t,AREA),rosterOnly=await ledger(f,'wgy b '+t),leftOnly=await ledger(f,'wgy c '+t),foreign=await ledger(f,'wgy d '+t);
++  const tBoth=await target(f,f.x,both);await target(f,f.y,foreign);
++  await roster(f,await appStore(f,both),f.x,f.party,'active');
++  await roster(f,await appStore(f,rosterOnly),f.x,f.party,'active');
++  await roster(f,await appStore(f,leftOnly),f.x,f.party,'left');
++  const view=rows=>rows.map(r=>({target_id:r.target_id,store_id:r.store_id,area:r.area,listed:r.listed}));
++  await f.probe('schedule_add/candidate_stores','inside',[f.x],view,[
++   {target_id:tBoth,store_id:both,area:AREA_PATH,listed:true},
++   {target_id:null,store_id:rosterOnly,area:null,listed:true}]);
++  await f.probe('schedule_add/candidate_stores','outside',[f.x],rows=>rows.filter(r=>r.store_id===leftOnly||r.store_id===foreign).length,0);
++  await f.probe('schedule_add/candidate_stores','outside',[f.y],view,[{target_id:(await f.q('SELECT id FROM app.shift_target WHERE muse_id=$1',[f.y]))[0].id,store_id:foreign,area:null,listed:false}]);
++ });
++
++ define('schedule_list/upcoming','own schedules on or after from are listed in date order with store name regardless of phase','earlier dates and other Muse schedules are excluded',async f=>{
++  const name='wgy up '+tag(f),l=await ledger(f,name);
++  const past=await schedule(f,f.x,f.party,l,'2026-09-10'),first=await schedule(f,f.x,f.party,l,'2026-09-13'),second=await schedule(f,f.x,f.party,l,'2026-09-14','withdrawn');
++  const foreign=await schedule(f,f.y,f.other,l,'2026-09-13');
++  await f.probe('schedule_list/upcoming','inside',[f.x,'2026-09-13'],rows=>rows.map(r=>[r.id,r.phase,r.store_name]),[[first,'active',name],[second,'withdrawn',name]]);
++  await f.probe('schedule_list/upcoming','outside',[f.x,'2026-09-13'],rows=>rows.some(r=>r.id===past||r.id===foreign),false);
++  await f.probe('schedule_list/upcoming','outside',[f.x,'2026-09-15'],rows=>rows,[]);
++ });
++
++ define('schedule_list/root','onboarded Muse handle resolves for anyone','unknown handle or excluded phase is not resolved',async f=>{
++  const clauses=JSON.stringify([{phases:['onboarded','retiring'],owner:'no_owner'}]);
++  await f.probe('schedule_list/root','inside',[f.handle,clauses,null],h.ids,[f.x]);
++  await f.probe('schedule_list/root','outside',['missing',clauses,null],h.ids,[]);
++  await f.probe('schedule_list/root','outside',[f.handle,JSON.stringify([{phases:['retiring'],owner:'no_owner'}]),f.x],h.ids,[]);
++ });
++
++ define('ledger_store_search/by_name','name substring matches case-insensitively with area path','non-matching name is excluded',async f=>{
++  const t=tag(f),id=await ledger(f,'WGY Search '+t,AREA);
++  await f.probe('ledger_store_search/by_name','inside',['wgy search '+t],rows=>rows.map(r=>({store_id:r.store_id,area:r.area})),[{store_id:id,area:AREA_PATH}]);
++  await f.probe('ledger_store_search/by_name','outside',['nomatch'+tag(f)],rows=>rows,[]);
++ });
++
++ define('schedule_withdraw/root','MuseSchedule resolves for its Muse party','other party or unknown schedule is excluded',async f=>{
++  const l=await ledger(f,'wgy wd '+tag(f)),id=await schedule(f,f.x,f.party,l,'2026-09-13'),clauses=JSON.stringify([{phases:null,owner:'via_muse_party'}]);
++  await f.probe('schedule_withdraw/root','inside',[id,clauses,f.party],h.ids,[id]);
++  await f.probe('schedule_withdraw/root','outside',[id,clauses,f.other],h.ids,[]);
++  await f.probe('schedule_withdraw/root','outside',[f.id(),clauses,f.party],h.ids,[]);
++ });
++
++ define('shift_target_remove/root','ShiftTarget resolves for its Muse party','other party or unknown target is excluded',async f=>{
++  const l=await ledger(f,'wgy st '+tag(f)),id=await target(f,f.x,l),clauses=JSON.stringify([{phases:null,owner:'via_muse_party'}]);
++  await f.probe('shift_target_remove/root','inside',[id,clauses,f.party],h.ids,[id]);
++  await f.probe('shift_target_remove/root','outside',[id,clauses,f.other],h.ids,[]);
++  await f.probe('shift_target_remove/root','outside',[f.id(),clauses,f.party],h.ids,[]);
++ });
++
++ define('store_schedule_list/active_rosters','active rosters of the store are returned including hidden ones','left and other-store rosters are excluded',async f=>{
++  const x=await h.storeRosterFixture(f);
++  await f.probe('store_schedule_list/active_rosters','inside',[x.store],h.ids,[x.active,x.hidden].sort());
++  await f.probe('store_schedule_list/active_rosters','outside',[x.store],rows=>rows.some(r=>r.id===x.left||r.id===x.foreign),false);
++ });
++}
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/test/sql-cases-wgy-2.mjs snap-g/api/test/sql-cases-wgy-2.mjs
+--- a/api/test/sql-cases-wgy-2.mjs	1970-01-01 09:00:00.000000000 +0900
++++ b/api/test/sql-cases-wgy-2.mjs	2026-09-26 03:10:09.751636483 +0900
+@@ -0,0 +1,52 @@
++import assert from 'node:assert/strict';
++import {SQL} from '../build/dev/javascript/musearch_api/gen/sql.mjs';
++export function register(define,h){
++ const {ids,rosterStore,rosterRow,rosterOwner}=h;
++ const staffRow=async(f,party=f.party)=>{const id=f.id();await f.q("INSERT INTO app.staff(id,party,name) VALUES($1,$2,'staff')",[id,party]);return id;};
++ const requestRow=async(f,{phase='filed',filedAt=f.at}={})=>{const id=f.id();await f.q("INSERT INTO app.store_request(id,muse_id,kind,phase,name,area,genre,courses,filed_at) VALUES($1,$2,'add',$3,'store','area','genre','courses',$4)",[id,f.x,phase,filedAt]);return id;};
++ define('allow/store_request','staff clause admits any store request','unknown request id is excluded by the surrounding query only',async f=>{
++  const req=await requestRow(f),sql=`SELECT r.id FROM app.store_request r WHERE r.id=$1 AND ${SQL['allow/store_request']}`;
++  await f.probe('allow/store_request','inside',[req],ids,[req],sql);
++  await f.probe('allow/store_request','outside',[f.id()],ids,[],sql);
++ });
++ define('store_request_list/by_phase','filed requests in filed_at order','handled requests are excluded',async f=>{
++  const late=await requestRow(f,{filedAt:'2026-09-20T00:00:00.000Z'}),early=await requestRow(f,{filedAt:'2026-09-10T00:00:00.000Z'}),handled=await requestRow(f,{phase:'handled'});
++  await f.probe('store_request_list/by_phase','inside',['filed'],rows=>rows.map(r=>r.id).filter(id=>[late,early,handled].includes(id)),[early,late]);
++  await f.probe('store_request_list/by_phase','outside',['handled'],rows=>rows.map(r=>r.id).filter(id=>[late,early,handled].includes(id)),[handled]);
++ });
++ define('store_request_handle/root','store request id resolves root','unknown id or missing clauses is excluded',async f=>{
++  const req=await requestRow(f),clauses=JSON.stringify([{phases:null,owner:'no_owner'}]);
++  await f.probe('store_request_handle/root','inside',[req,clauses,f.party],rows=>rows.map(r=>({id:r.id,phase:r.phase})),[{id:req,phase:'filed'}]);
++  await f.probe('store_request_handle/root','outside',[f.id(),clauses,f.party],ids,[]);
++  await f.probe('store_request_handle/root','outside',[req,null,f.party],ids,[]);
++ });
++ for(const name of ['roster_hide','roster_show','roster_move'])define(name+'/root','matching store owner returns roster root with store','foreign store party or left roster is excluded',async f=>{
++  const key=name+'/root',store=await rosterStore(f),row=await rosterRow(f,store),left=await rosterRow(f,store,{phase:'left',order:1});
++  await f.probe(key,'inside',[row,rosterOwner,f.party],rows=>rows.map(r=>({id:r.id,store:r.store.id})),[{id:row,store}]);
++  await f.probe(key,'outside',[row,rosterOwner,f.other],ids,[]);
++  await f.probe(key,'outside',[left,rosterOwner,f.party],ids,[]);
++ });
++ define('verb/update_roster_visible','active roster visibility changes','left roster is rejected and unchanged',async f=>{
++  const store=await rosterStore(f),row=await rosterRow(f,store),left=await rosterRow(f,store,{phase:'left',order:1});
++  const visible=async id=>(await f.q('SELECT visible FROM app.roster WHERE id=$1',[id]))[0].visible;
++  await f.probe('verb/update_roster_visible','inside',[row,false],async()=>visible(row),false);
++  await f.probe('verb/update_roster_visible','inside',[row,true],async()=>visible(row),true);
++  await f.reject('verb/update_roster_visible','outside',[left,false],'conflict');
++  assert.equal(await visible(left),true);
++ });
++ define('framework/session_resolve_staff','staff subject resolves with staff row and short expiry extends','revoked session is absent and not extended',async f=>{
++  const staff=await staffRow(f);
++  await f.q("UPDATE framework.session SET subject_kind='staff',subject_id=$2,expires_at=now()+interval '10 days' WHERE id=$1",[f.session,staff]);
++  await f.probe('framework/session_resolve_staff','inside',[f.session,f.at,true],r=>r.map(x=>({kind:x.subject_kind,id:x.subject_id,staff:x.staff?.id,extended:x.extended,retry:x.retry,subjects:x.subjects.filter(s=>s.kind==='staff').map(s=>s.id)})),[{kind:'staff',id:staff,staff,extended:true,retry:false,subjects:[staff]}]);
++  await f.q('UPDATE framework.session SET revoked_at=now() WHERE id=$1',[f.session]);
++  const before=await f.q('SELECT expires_at FROM framework.session WHERE id=$1',[f.session]);
++  await f.probe('framework/session_resolve_staff','outside',[f.session,f.at,true],r=>r,[]);
++  assert.deepEqual(await f.q('SELECT expires_at FROM framework.session WHERE id=$1',[f.session]),before);
++ });
++ define('framework/session_subject_staff','own staff selected as subject','foreign party staff not selected',async f=>{
++  const own=await staffRow(f),foreign=await staffRow(f,f.other);
++  await f.probe('framework/session_subject_staff','inside',[f.session,f.party,'staff',own],r=>r,[{subject_kind:'staff',subject_id:own}]);
++  await f.probe('framework/session_subject_staff','outside',[f.session,f.party,'staff',foreign],r=>r,[]);
++  assert.equal((await f.q('SELECT subject_id FROM framework.session WHERE id=$1',[f.session]))[0].subject_id,own);
++ });
++}
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/test/sql-cases-wgy-3.mjs snap-g/api/test/sql-cases-wgy-3.mjs
+--- a/api/test/sql-cases-wgy-3.mjs	1970-01-01 09:00:00.000000000 +0900
++++ b/api/test/sql-cases-wgy-3.mjs	2026-09-26 03:08:57.982930387 +0900
+@@ -0,0 +1,39 @@
++import assert from 'node:assert/strict';
++import {SQL} from '../build/dev/javascript/musearch_api/gen/sql.mjs';
++export function register(define,h){
++ const any=(owner)=>JSON.stringify([{phases:null,owner}]);
++ for(const key of ['reservation_request/root','prep_add/root'])assert.ok(SQL[key],key);
++ define('reservation_request/root','fan resolves an existing Muse schedule under no_owner','unknown schedule id is excluded',async f=>{
++  const base=await h.reservationBase(f),clauses=any('no_owner');
++  await f.probe('reservation_request/root','inside',[base.schedule,clauses,null],h.ids,[base.schedule]);
++  await f.probe('reservation_request/root','outside',[f.id(),clauses,null],h.ids,[]);
++  await f.probe('reservation_request/root','outside',[base.schedule,JSON.stringify([{phases:['withdrawn'],owner:'no_owner'}]),null],h.ids,[]);
++ });
++ define('prep_add/root','schedule owner party resolves own schedule','foreign party or unknown schedule is excluded',async f=>{
++  const base=await h.reservationBase(f),clauses=any('via_muse_party');
++  await f.probe('prep_add/root','inside',[base.schedule,clauses,f.party],r=>r.map(x=>({id:x.id,party:x.party})),[{id:base.schedule,party:f.party}]);
++  await f.probe('prep_add/root','outside',[base.schedule,clauses,f.other],h.ids,[]);
++  await f.probe('prep_add/root','outside',[f.id(),clauses,f.party],h.ids,[]);
++ });
++ const reservationRoot=(name,phase)=>define(name+'/root','Muse party resolves own '+phase+' reservation','foreign party or unknown reservation is excluded',async f=>{
++  const key=name+'/root',base=await h.reservationBase(f),id=await h.addReservation(f,base,{phase,ends:phase==='approved'?660:null}),clauses=any('via_muse_party');
++  await f.probe(key,'inside',[id,clauses,f.party],r=>r.map(x=>({id:x.id,phase:x.phase,muse_id:x.muse_id})),[{id,phase,muse_id:f.x}]);
++  await f.probe(key,'outside',[id,clauses,f.other],h.ids,[]);
++  await f.probe(key,'outside',[f.id(),clauses,f.party],h.ids,[]);
++ });
++ reservationRoot('reservation_approve','requested');
++ reservationRoot('reservation_cancel','approved');
++ reservationRoot('reservation_reschedule','approved');
++ for(const name of ['prep_edit','prep_remove'])define(name+'/root','schedule owner party resolves own prep','foreign party or unknown prep is excluded',async f=>{
++  const key=name+'/root',base=await h.reservationBase(f),id=await h.addPrep(f,base,{starts:650,ends:680}),clauses=any('via_muse_party');
++  await f.probe(key,'inside',[id,clauses,f.party],r=>r.map(x=>({id:x.id,schedule_id:x.schedule_id})),[{id,schedule_id:base.schedule}]);
++  await f.probe(key,'outside',[id,clauses,f.other],h.ids,[]);
++  await f.probe(key,'outside',[f.id(),clauses,f.party],h.ids,[]);
++ });
++ define('reservation_send/root','self Muse resolves own reservation','other Muse or unknown reservation is excluded',async f=>{
++  const x=await h.reservationSendFixture(f),clauses=any('self');
++  await f.probe('reservation_send/root','inside',[x.reservation,clauses,f.x],r=>r.map(y=>({id:y.id,muse_id:y.muse_id,phase:y.phase})),[{id:x.reservation,muse_id:f.x,phase:'approved'}]);
++  await f.probe('reservation_send/root','outside',[x.reservation,clauses,f.y],h.ids,[]);
++  await f.probe('reservation_send/root','outside',[f.id(),clauses,f.x],h.ids,[]);
++ });
++}
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/test/sql-cases-wgy-4.mjs snap-g/api/test/sql-cases-wgy-4.mjs
+--- a/api/test/sql-cases-wgy-4.mjs	1970-01-01 09:00:00.000000000 +0900
++++ b/api/test/sql-cases-wgy-4.mjs	2026-09-26 03:11:25.558165672 +0900
+@@ -0,0 +1,21 @@
++import {SQL} from '../build/dev/javascript/musearch_api/gen/sql.mjs';
++// WGy r2(真壁): 群 2 で外れた 2 本。allow/course は jsonb の要素の別名 c が course の c を隠していたのを cl に直した上で、
++// widget_list/published は生成物(cursor の穴に型を付けた版)に揃えた上で。
++export function register(define,h){
++ define('allow/course','store owner clause admits own course','foreign store owner is excluded',async f=>{
++  const row=await h.courseRow(f),store=f.id(),handle='course'+store.replaceAll('-','').slice(0,12);
++  await f.q("INSERT INTO app.store(id,party,handle,name,verified,day_starts_at,ledger_store_id,phase,entered_onboarded) VALUES($1,$2,$3,'course',true,'09:00',$4,'onboarded',$5)",[store,f.party,handle,row.ledger,f.at]);
++  const clauses=JSON.stringify([{phases:['active'],owner:'via_store_party'}]);
++  const sql=`SELECT c.id FROM app.course c LEFT JOIN app.store s ON s.ledger_store_id=c.ledger_store_id WHERE c.id=$1::uuid AND ${SQL['allow/course']}`;
++  await f.probe('allow/course','inside',[row.id,clauses,f.party],h.ids,[row.id],sql);
++  await f.probe('allow/course','outside',[row.id,clauses,f.other],h.ids,[],sql);
++ });
++ define('widget_list/published','own published slotted article after the cursor slot','draft, other Muse and not-after-cursor rows are excluded',async f=>{
++  await f.q('UPDATE app.article SET slot=2 WHERE id=$1',[f.a]);
++  await f.q('UPDATE app.article SET slot=1 WHERE id=$1',[f.b]);
++  await f.q('UPDATE app.article SET slot=3 WHERE id=$1',[f.d]);
++  await f.probe('widget_list/published','inside',[f.x,false,null,null,null,null],h.ids,[f.a]);
++  await f.probe('widget_list/published','inside',[f.x,true,1,null,null,null],h.ids,[f.a]);
++  await f.probe('widget_list/published','outside',[f.x,true,2,null,null,null],h.ids,[]);
++ });
++}
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/test/sql-cases.mjs snap-g/api/test/sql-cases.mjs
+--- a/api/test/sql-cases.mjs	2026-09-26 00:57:16.000000000 +0900
++++ b/api/test/sql-cases.mjs	2026-09-26 03:11:37.189846618 +0900
+@@ -1379,3 +1379,10 @@
+  await f.probe('store_roster_count/count','inside',[store.store],rows=>Number(rows[0].count),1);
+  await f.probe('store_roster_count/count','outside',[store.otherStore],rows=>Number(rows[0].count),0);
+ });
++// WGy(yumemi 0.11.1): sql.mjs にだけ在った ★ の SQL 30 本を db/queries に出した分の case は sql-cases-wgy-*.mjs に置き、ここの helper を渡す。
++export const helpers={ids,owner,storeRosterFixture,scheduleFixture,parent,ownPhase,publicPhase,addSpace,addLink,addWidget,addHeaven,storeRow,linkedStore,rosterStore,rosterRow,rosterOwner,museOwner,courseRow,settingSpec,settingRow,reservationBase,addReservation,reservationSendFixture,addPrep};
++import {register as registerWgy1} from './sql-cases-wgy-1.mjs';
++import {register as registerWgy2} from './sql-cases-wgy-2.mjs';
++import {register as registerWgy3} from './sql-cases-wgy-3.mjs';
++import {register as registerWgy4} from './sql-cases-wgy-4.mjs';
++for(const register of [registerWgy1,registerWgy2,registerWgy3,registerWgy4]) register(define,helpers);
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/test/support.mjs snap-g/api/test/support.mjs
+--- a/api/test/support.mjs	2026-09-26 00:57:16.000000000 +0900
++++ b/api/test/support.mjs	2026-09-26 03:04:01.257092916 +0900
+@@ -4,7 +4,7 @@
+ pg.types.setTypeParser(1082,value=>value);
+ import { dispatch } from '../build/dev/javascript/musearch_api/gen/entry/http.mjs';
+ import { issueSession } from '../build/dev/javascript/musearch_api/gen/runtime.mjs';
+-import * as screen from '../build/dev/javascript/musearch_api/gen/connector/screen.mjs';
++import * as screen from '../build/dev/javascript/musearch_api/connector/screen.mjs';
+ import * as vector from '../build/dev/javascript/yumemi/framework/vector.mjs';
+ import { toList } from '../build/dev/javascript/musearch_api/gleam.mjs';
+ export const config={host:'127.0.0.1',port:Number(process.env.MUSEARCH_TEST_PG_PORT??55439),database:process.env.MUSEARCH_TEST_APP_DB??'musearch10a',user:process.env.USER};
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/db/queries/allow/course.sql snap-g/api/db/queries/allow/course.sql
+--- a/api/db/queries/allow/course.sql	1970-01-01 09:00:00.000000000 +0900
++++ b/api/db/queries/allow/course.sql	2026-09-26 03:10:41.000000000 +0900
+@@ -0,0 +1,3 @@
++EXISTS(SELECT 1 FROM jsonb_array_elements($2::jsonb) cl
++ WHERE (cl->'phases'='null'::jsonb OR cl->'phases' ? c.phase)
++ AND (cl->>'owner'='no_owner' OR (cl->>'owner'='via_store_party' AND s.party=$3)));
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/db/queries/allow/ledger.sql snap-g/api/db/queries/allow/ledger.sql
+--- a/api/db/queries/allow/ledger.sql	1970-01-01 09:00:00.000000000 +0900
++++ b/api/db/queries/allow/ledger.sql	2026-09-26 02:18:07.000000000 +0900
+@@ -0,0 +1 @@
++TRUE
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/db/queries/allow/muse_schedule.sql snap-g/api/db/queries/allow/muse_schedule.sql
+--- a/api/db/queries/allow/muse_schedule.sql	1970-01-01 09:00:00.000000000 +0900
++++ b/api/db/queries/allow/muse_schedule.sql	2026-09-26 02:18:07.000000000 +0900
+@@ -0,0 +1 @@
++TRUE
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/db/queries/allow/shift_target.sql snap-g/api/db/queries/allow/shift_target.sql
+--- a/api/db/queries/allow/shift_target.sql	1970-01-01 09:00:00.000000000 +0900
++++ b/api/db/queries/allow/shift_target.sql	2026-09-26 02:18:07.000000000 +0900
+@@ -0,0 +1 @@
++TRUE
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/db/queries/allow/store_request.sql snap-g/api/db/queries/allow/store_request.sql
+--- a/api/db/queries/allow/store_request.sql	1970-01-01 09:00:00.000000000 +0900
++++ b/api/db/queries/allow/store_request.sql	2026-09-26 02:18:07.000000000 +0900
+@@ -0,0 +1 @@
++TRUE
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/db/queries/framework/session_resolve_staff.sql snap-g/api/db/queries/framework/session_resolve_staff.sql
+--- a/api/db/queries/framework/session_resolve_staff.sql	1970-01-01 09:00:00.000000000 +0900
++++ b/api/db/queries/framework/session_resolve_staff.sql	2026-09-26 02:18:07.000000000 +0900
+@@ -0,0 +1,66 @@
++WITH original AS MATERIALIZED (
++ SELECT * FROM framework.session WHERE id=$1 AND revoked_at IS NULL
++ AND expires_at>$2::timestamptz AND created_at+interval '180 days'>$2::timestamptz
++), subject AS MATERIALIZED (
++ SELECT 'muse'::text AS kind,m.id,m.party,m.handle,m.phase FROM app.muse m
++ JOIN original s ON s.subject_kind='muse' AND s.subject_id=m.id
++ UNION ALL
++ SELECT 'store',m.id,m.party,m.handle,m.phase FROM app.store m
++ JOIN original s ON s.subject_kind='store' AND s.subject_id=m.id
++ UNION ALL
++ SELECT 'fan',f.id,f.party,f.handle,f.phase FROM app.fan f
++ JOIN original s ON s.subject_kind='fan' AND s.subject_id=f.id
++ UNION ALL
++ SELECT 'staff',st.id,st.party,NULL::text,NULL::text FROM app.staff st
++ JOIN original s ON s.subject_kind='staff' AND s.subject_id=st.id
++), resolved AS MATERIALIZED (
++ SELECT s.*, t.party AS subject_party,
++ CASE WHEN t.phase='retired' OR t.id IS NULL THEN NULL ELSE t.kind END AS next_kind,
++ CASE WHEN t.phase='retired' OR t.id IS NULL THEN NULL ELSE t.id END AS next_id,
++ CASE WHEN t.phase='retired' OR t.id IS NULL THEN NULL ELSE t.handle END AS handle,
++ CASE WHEN t.phase='retired' OR t.id IS NULL THEN NULL ELSE t.phase END AS phase,
++ s.expires_at<$2::timestamptz+interval '15 days' AS extend,
++ (s.subject_kind IS NOT NULL AND (t.id IS NULL OR t.phase='retired')) AS clear_subject
++ FROM original s LEFT JOIN subject t ON true
++), changed AS (
++ UPDATE framework.session s SET subject_kind=r.next_kind,subject_id=r.next_id,
++ expires_at=CASE WHEN r.extend THEN LEAST($2::timestamptz+interval '30 days',s.created_at+interval '180 days') ELSE s.expires_at END
++ FROM resolved r WHERE $3::boolean AND (r.extend OR r.clear_subject)
++ AND (r.subject_party IS NULL OR r.subject_party=r.party)
++ AND s.id=r.id AND s.revoked_at IS NULL AND s.expires_at>$2::timestamptz
++ AND (s.subject_kind,s.subject_id) IS NOT DISTINCT FROM (r.subject_kind,r.subject_id)
++ RETURNING s.subject_kind,s.subject_id,s.expires_at
++)
++SELECT r.id,r.party,r.subject_party,r.next_kind AS subject_kind,r.next_id AS subject_id,r.handle,r.phase,
++ COALESCE(c.expires_at,r.expires_at) AS expires_at,r.created_at,
++ (SELECT to_jsonb(m) FROM app.muse m WHERE r.next_kind='muse' AND m.id=r.next_id) AS muse,
++ (SELECT to_jsonb(st) FROM app.store st WHERE r.next_kind='store' AND st.id=r.next_id) AS store,
++ (SELECT to_jsonb(f) FROM app.fan f WHERE r.next_kind='fan' AND f.id=r.next_id) AS fan,
++ ($3::boolean AND (r.extend OR r.clear_subject) AND c.expires_at IS NULL AND (r.subject_party IS NULL OR r.subject_party=r.party)) AS retry,
++ (r.extend AND c.expires_at IS NOT NULL) AS extended,
++ EXISTS(SELECT 1 FROM app.measure m WHERE m.target=r.party AND m.kind='suspend'
++ AND (m.until IS NULL OR m.until>$2::timestamptz)
++ AND NOT EXISTS(SELECT 1 FROM app.measure l WHERE l.kind='lift' AND l.report_id=m.report_id)) AS suspended,
++ COALESCE((SELECT jsonb_agg(jsonb_build_object('kind',v.kind,'subject',v.subject)) FROM app.consent v
++ JOIN app.consent_version cv ON cv.kind=v.kind AND cv.version=v.version
++ WHERE v.party=r.party),'[]') AS consents,
++ COALESCE((SELECT jsonb_agg(subject)
++ FROM (
++   SELECT jsonb_build_object('kind','muse','id',m.id,'handle',m.handle,'phase',m.phase) AS subject
++   FROM app.muse m
++   WHERE m.party=r.party AND m.phase IN ('onboarded','retiring')
++   UNION ALL
++   SELECT jsonb_build_object('kind','store','id',st.id,'handle',st.handle,'phase',NULL::text) AS subject
++   FROM app.store st
++   WHERE st.party=r.party
++   UNION ALL
++   SELECT jsonb_build_object('kind','fan','id',f.id,'handle',f.handle,'phase',f.phase) AS subject
++   FROM app.fan f
++   WHERE f.party=r.party AND f.phase IN ('onboarded','retiring')
++   UNION ALL
++   SELECT jsonb_build_object('kind','staff','id',st.id,'handle',NULL::text,'phase',NULL::text) AS subject
++   FROM app.staff st
++   WHERE st.party=r.party
++ ) available),'[]') AS subjects,
++ (SELECT to_jsonb(st) FROM app.staff st WHERE r.next_kind='staff' AND st.id=r.next_id) AS staff
++FROM resolved r LEFT JOIN changed c ON true;
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/db/queries/framework/session_subject_staff.sql snap-g/api/db/queries/framework/session_subject_staff.sql
+--- a/api/db/queries/framework/session_subject_staff.sql	1970-01-01 09:00:00.000000000 +0900
++++ b/api/db/queries/framework/session_subject_staff.sql	2026-09-26 02:18:07.000000000 +0900
+@@ -0,0 +1,16 @@
++WITH target AS (
++ SELECT 'muse'::text AS kind,m.id,m.phase FROM app.muse m
++ WHERE $3='muse' AND m.id=$4::uuid AND m.party=$2 AND m.phase IN ('onboarded','retiring')
++ UNION ALL
++ SELECT 'store'::text AS kind,s.id,NULL::text AS phase FROM app.store s
++ WHERE $3='store' AND s.id=$4::uuid AND s.party=$2
++ UNION ALL
++ SELECT 'fan'::text AS kind,f.id,f.phase FROM app.fan f
++ WHERE $3='fan' AND f.id=$4::uuid AND f.party=$2 AND f.phase IN ('onboarded','retiring')
++ UNION ALL
++ SELECT 'staff'::text AS kind,s.id,NULL::text AS phase FROM app.staff s
++ WHERE $3='staff' AND s.id=$4::uuid AND s.party=$2
++)
++UPDATE framework.session s SET subject_kind=t.kind,subject_id=t.id FROM target t
++WHERE s.id=$1 AND s.party=$2 AND s.revoked_at IS NULL AND s.expires_at>now()
++RETURNING s.subject_kind,s.subject_id;
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/db/queries/ledger_store_search/by_name.sql snap-g/api/db/queries/ledger_store_search/by_name.sql
+--- a/api/db/queries/ledger_store_search/by_name.sql	1970-01-01 09:00:00.000000000 +0900
++++ b/api/db/queries/ledger_store_search/by_name.sql	2026-09-26 02:18:07.000000000 +0900
+@@ -0,0 +1,9 @@
++SELECT s.store_id,s.store_name,s.type,s.genre,
++       NULLIF(concat_ws(' > ',g.name,p.name,a.name),'') AS area
++FROM public.store s
++LEFT JOIN public.area a ON a.area_id=s.area_id
++LEFT JOIN public.area p ON p.area_id=a.parent_id
++LEFT JOIN public.area g ON g.area_id=p.parent_id
++WHERE s.store_name ILIKE '%' || $1 || '%'
++ORDER BY s.store_name ASC,s.store_id ASC
++LIMIT 50;
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/db/queries/prep_add/root.sql snap-g/api/db/queries/prep_add/root.sql
+--- a/api/db/queries/prep_add/root.sql	1970-01-01 09:00:00.000000000 +0900
++++ b/api/db/queries/prep_add/root.sql	2026-09-26 02:18:07.000000000 +0900
+@@ -0,0 +1,6 @@
++SELECT s.*
++FROM app.muse_schedule s
++WHERE s.id=$1::uuid
++AND EXISTS(SELECT 1 FROM jsonb_array_elements($2::jsonb) c
++ WHERE (c->'phases'='null'::jsonb OR c->'phases' ? s.phase)
++ AND (c->>'owner'='no_owner' OR (c->>'owner'='via_muse_party' AND s.party=$3)));
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/db/queries/prep_edit/root.sql snap-g/api/db/queries/prep_edit/root.sql
+--- a/api/db/queries/prep_edit/root.sql	1970-01-01 09:00:00.000000000 +0900
++++ b/api/db/queries/prep_edit/root.sql	2026-09-26 02:18:07.000000000 +0900
+@@ -0,0 +1,8 @@
++SELECT p.*
++FROM app.prep p
++JOIN app.muse_schedule s ON s.id=p.schedule_id
++JOIN app.muse m ON m.id=s.muse_id
++WHERE p.id=$1::uuid
++AND EXISTS(SELECT 1 FROM jsonb_array_elements($2::jsonb) c
++ WHERE (c->'phases'='null'::jsonb OR c->'phases' ? s.phase)
++ AND (c->>'owner'='no_owner' OR (c->>'owner'='via_muse_party' AND m.party=$3)));
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/db/queries/prep_remove/root.sql snap-g/api/db/queries/prep_remove/root.sql
+--- a/api/db/queries/prep_remove/root.sql	1970-01-01 09:00:00.000000000 +0900
++++ b/api/db/queries/prep_remove/root.sql	2026-09-26 02:18:07.000000000 +0900
+@@ -0,0 +1,8 @@
++SELECT p.*
++FROM app.prep p
++JOIN app.muse_schedule s ON s.id=p.schedule_id
++JOIN app.muse m ON m.id=s.muse_id
++WHERE p.id=$1::uuid
++AND EXISTS(SELECT 1 FROM jsonb_array_elements($2::jsonb) c
++ WHERE (c->'phases'='null'::jsonb OR c->'phases' ? s.phase)
++ AND (c->>'owner'='no_owner' OR (c->>'owner'='via_muse_party' AND m.party=$3)));
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/db/queries/reservation_approve/root.sql snap-g/api/db/queries/reservation_approve/root.sql
+--- a/api/db/queries/reservation_approve/root.sql	1970-01-01 09:00:00.000000000 +0900
++++ b/api/db/queries/reservation_approve/root.sql	2026-09-26 02:18:07.000000000 +0900
+@@ -0,0 +1,7 @@
++SELECT r.*
++FROM app.reservation r
++JOIN app.muse m ON m.id=r.muse_id
++WHERE r.id=$1::uuid
++AND EXISTS(SELECT 1 FROM jsonb_array_elements($2::jsonb) c
++ WHERE (c->'phases'='null'::jsonb OR c->'phases' ? r.phase)
++ AND (c->>'owner'='no_owner' OR (c->>'owner'='via_muse_party' AND m.party=$3)));
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/db/queries/reservation_cancel/root.sql snap-g/api/db/queries/reservation_cancel/root.sql
+--- a/api/db/queries/reservation_cancel/root.sql	1970-01-01 09:00:00.000000000 +0900
++++ b/api/db/queries/reservation_cancel/root.sql	2026-09-26 02:18:07.000000000 +0900
+@@ -0,0 +1,7 @@
++SELECT r.*
++FROM app.reservation r
++JOIN app.muse m ON m.id=r.muse_id
++WHERE r.id=$1::uuid
++AND EXISTS(SELECT 1 FROM jsonb_array_elements($2::jsonb) c
++ WHERE (c->'phases'='null'::jsonb OR c->'phases' ? r.phase)
++ AND (c->>'owner'='no_owner' OR (c->>'owner'='via_muse_party' AND m.party=$3)));
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/db/queries/reservation_request/root.sql snap-g/api/db/queries/reservation_request/root.sql
+--- a/api/db/queries/reservation_request/root.sql	1970-01-01 09:00:00.000000000 +0900
++++ b/api/db/queries/reservation_request/root.sql	2026-09-26 02:18:07.000000000 +0900
+@@ -0,0 +1,6 @@
++SELECT s.*
++FROM app.muse_schedule s
++WHERE s.id=$1::uuid
++AND EXISTS(SELECT 1 FROM jsonb_array_elements($2::jsonb) c
++ WHERE (c->'phases'='null'::jsonb OR c->'phases' ? s.phase)
++ AND (c->>'owner'='no_owner' OR (c->>'owner'='via_muse_party' AND s.party=$3)));
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/db/queries/reservation_reschedule/root.sql snap-g/api/db/queries/reservation_reschedule/root.sql
+--- a/api/db/queries/reservation_reschedule/root.sql	1970-01-01 09:00:00.000000000 +0900
++++ b/api/db/queries/reservation_reschedule/root.sql	2026-09-26 02:18:07.000000000 +0900
+@@ -0,0 +1,7 @@
++SELECT r.*
++FROM app.reservation r
++JOIN app.muse m ON m.id=r.muse_id
++WHERE r.id=$1::uuid
++AND EXISTS(SELECT 1 FROM jsonb_array_elements($2::jsonb) c
++ WHERE (c->'phases'='null'::jsonb OR c->'phases' ? r.phase)
++ AND (c->>'owner'='no_owner' OR (c->>'owner'='via_muse_party' AND m.party=$3)));
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/db/queries/reservation_send/root.sql snap-g/api/db/queries/reservation_send/root.sql
+--- a/api/db/queries/reservation_send/root.sql	1970-01-01 09:00:00.000000000 +0900
++++ b/api/db/queries/reservation_send/root.sql	2026-09-26 02:18:07.000000000 +0900
+@@ -0,0 +1,6 @@
++SELECT r.*
++FROM app.reservation r
++WHERE r.id=$1::uuid
++AND EXISTS(SELECT 1 FROM jsonb_array_elements($2::jsonb) c
++ WHERE (c->'phases'='null'::jsonb OR c->'phases' ? r.phase)
++ AND (c->>'owner'='no_owner' OR (c->>'owner'='self' AND r.muse_id=$3::uuid)));
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/db/queries/roster_hide/root.sql snap-g/api/db/queries/roster_hide/root.sql
+--- a/api/db/queries/roster_hide/root.sql	1970-01-01 09:00:00.000000000 +0900
++++ b/api/db/queries/roster_hide/root.sql	2026-09-26 02:18:07.000000000 +0900
+@@ -0,0 +1,8 @@
++SELECT r.*,to_jsonb(s) AS store
++FROM app.roster r
++JOIN app.store s ON s.id=r.store_id
++WHERE r.id=$1::uuid
++AND EXISTS(SELECT 1 FROM jsonb_array_elements($2::jsonb) c
++ WHERE (c->'phases'='null'::jsonb OR c->'phases' ? r.phase)
++ AND (c->>'owner'='no_owner'
++      OR (c->>'owner'='via_store_party' AND s.party=$3)));
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/db/queries/roster_move/root.sql snap-g/api/db/queries/roster_move/root.sql
+--- a/api/db/queries/roster_move/root.sql	1970-01-01 09:00:00.000000000 +0900
++++ b/api/db/queries/roster_move/root.sql	2026-09-26 02:18:07.000000000 +0900
+@@ -0,0 +1,8 @@
++SELECT r.*,to_jsonb(s) AS store
++FROM app.roster r
++JOIN app.store s ON s.id=r.store_id
++WHERE r.id=$1::uuid
++AND EXISTS(SELECT 1 FROM jsonb_array_elements($2::jsonb) c
++ WHERE (c->'phases'='null'::jsonb OR c->'phases' ? r.phase)
++ AND (c->>'owner'='no_owner'
++      OR (c->>'owner'='via_store_party' AND s.party=$3)));
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/db/queries/roster_show/root.sql snap-g/api/db/queries/roster_show/root.sql
+--- a/api/db/queries/roster_show/root.sql	1970-01-01 09:00:00.000000000 +0900
++++ b/api/db/queries/roster_show/root.sql	2026-09-26 02:18:07.000000000 +0900
+@@ -0,0 +1,8 @@
++SELECT r.*,to_jsonb(s) AS store
++FROM app.roster r
++JOIN app.store s ON s.id=r.store_id
++WHERE r.id=$1::uuid
++AND EXISTS(SELECT 1 FROM jsonb_array_elements($2::jsonb) c
++ WHERE (c->'phases'='null'::jsonb OR c->'phases' ? r.phase)
++ AND (c->>'owner'='no_owner'
++      OR (c->>'owner'='via_store_party' AND s.party=$3)));
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/db/queries/schedule_add/candidate_stores.sql snap-g/api/db/queries/schedule_add/candidate_stores.sql
+--- a/api/db/queries/schedule_add/candidate_stores.sql	1970-01-01 09:00:00.000000000 +0900
++++ b/api/db/queries/schedule_add/candidate_stores.sql	2026-09-26 02:18:07.000000000 +0900
+@@ -0,0 +1,28 @@
++WITH candidates AS (
++ SELECT t.id AS target_id,s.store_id,s.store_name,s.type,s.genre,s.area_id,false AS listed
++ FROM app.shift_target t
++ JOIN public.store s ON s.store_id=t.ledger_store_id
++ WHERE t.muse_id=$1::uuid
++ UNION ALL
++ SELECT NULL::uuid,s.store_id,s.store_name,s.type,s.genre,s.area_id,true
++ FROM app.roster r
++ JOIN app.store a ON a.id=r.store_id
++ JOIN public.store s ON s.store_id=a.ledger_store_id
++ WHERE r.muse_id=$1::uuid
++   AND r.phase='active'
++   AND a.ledger_store_id IS NOT NULL
++), folded AS (
++ SELECT DISTINCT ON (store_id)
++        target_id,store_id,store_name,type,genre,area_id,
++        bool_or(listed) OVER (PARTITION BY store_id) AS listed
++ FROM candidates
++ ORDER BY store_id,target_id NULLS LAST
++)
++SELECT f.target_id,f.store_id,f.store_name,f.type,f.genre,
++       NULLIF(concat_ws(' > ',g.name,p.name,a.name),'') AS area,
++       f.listed
++FROM folded f
++LEFT JOIN public.area a ON a.area_id=f.area_id
++LEFT JOIN public.area p ON p.area_id=a.parent_id
++LEFT JOIN public.area g ON g.area_id=p.parent_id
++ORDER BY f.store_name,f.store_id;
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/db/queries/schedule_list/root.sql snap-g/api/db/queries/schedule_list/root.sql
+--- a/api/db/queries/schedule_list/root.sql	1970-01-01 09:00:00.000000000 +0900
++++ b/api/db/queries/schedule_list/root.sql	2026-09-26 02:18:07.000000000 +0900
+@@ -0,0 +1,6 @@
++SELECT m.* FROM app.muse m
++WHERE m.handle=$1
++AND EXISTS(SELECT 1 FROM jsonb_array_elements($2::jsonb) c
++ WHERE (c->'phases'='null'::jsonb OR c->'phases' ? m.phase)
++ AND c->>'owner'='no_owner')
++AND ($3::uuid IS NULL OR $3::uuid IS NOT NULL);
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/db/queries/schedule_list/upcoming.sql snap-g/api/db/queries/schedule_list/upcoming.sql
+--- a/api/db/queries/schedule_list/upcoming.sql	1970-01-01 09:00:00.000000000 +0900
++++ b/api/db/queries/schedule_list/upcoming.sql	2026-09-26 02:18:07.000000000 +0900
+@@ -0,0 +1,6 @@
++SELECT m.*,s.store_name
++FROM app.muse_schedule m
++JOIN public.store s ON s.store_id=m.ledger_store_id
++WHERE m.muse_id=$1::uuid AND m.date >= $2::date
++ORDER BY m.date ASC,m.starts_at ASC,m.id ASC
++LIMIT 200;
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/db/queries/schedule_withdraw/root.sql snap-g/api/db/queries/schedule_withdraw/root.sql
+--- a/api/db/queries/schedule_withdraw/root.sql	1970-01-01 09:00:00.000000000 +0900
++++ b/api/db/queries/schedule_withdraw/root.sql	2026-09-26 02:18:07.000000000 +0900
+@@ -0,0 +1,8 @@
++SELECT s.*
++FROM app.muse_schedule s
++JOIN app.muse m ON m.id=s.muse_id
++WHERE s.id=$1::uuid
++AND EXISTS(SELECT 1 FROM jsonb_array_elements($2::jsonb) c
++ WHERE (c->'phases'='null'::jsonb OR c->'phases' ? s.phase)
++ AND (c->>'owner'='no_owner'
++      OR (c->>'owner'='via_muse_party' AND m.party=$3)));
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/db/queries/shift_target_remove/root.sql snap-g/api/db/queries/shift_target_remove/root.sql
+--- a/api/db/queries/shift_target_remove/root.sql	1970-01-01 09:00:00.000000000 +0900
++++ b/api/db/queries/shift_target_remove/root.sql	2026-09-26 02:18:07.000000000 +0900
+@@ -0,0 +1,7 @@
++SELECT t.*
++FROM app.shift_target t
++JOIN app.muse m ON m.id=t.muse_id
++WHERE t.id=$1::uuid
++AND EXISTS(SELECT 1 FROM jsonb_array_elements($2::jsonb) c
++ WHERE c->>'owner'='no_owner'
++    OR (c->>'owner'='via_muse_party' AND m.party=$3));
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/db/queries/store_list/all.sql snap-g/api/db/queries/store_list/all.sql
+--- a/api/db/queries/store_list/all.sql	1970-01-01 09:00:00.000000000 +0900
++++ b/api/db/queries/store_list/all.sql	2026-09-26 02:18:07.000000000 +0900
+@@ -0,0 +1,2 @@
++SELECT s.* FROM app.store s
++ORDER BY s.handle ASC,s.id ASC;
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/db/queries/store_request_handle/root.sql snap-g/api/db/queries/store_request_handle/root.sql
+--- a/api/db/queries/store_request_handle/root.sql	1970-01-01 09:00:00.000000000 +0900
++++ b/api/db/queries/store_request_handle/root.sql	2026-09-26 02:18:07.000000000 +0900
+@@ -0,0 +1,5 @@
++SELECT r.*
++FROM app.store_request r
++WHERE r.id=$1::uuid
++AND $2::jsonb IS NOT NULL
++AND ($3::text IS NULL OR $3::text IS NOT NULL);
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/db/queries/store_request_list/by_phase.sql snap-g/api/db/queries/store_request_list/by_phase.sql
+--- a/api/db/queries/store_request_list/by_phase.sql	1970-01-01 09:00:00.000000000 +0900
++++ b/api/db/queries/store_request_list/by_phase.sql	2026-09-26 02:18:07.000000000 +0900
+@@ -0,0 +1,5 @@
++SELECT r.*
++FROM app.store_request r
++WHERE r.phase=$1
++ORDER BY r.filed_at ASC,r.id ASC
++LIMIT 200;
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/db/queries/store_schedule_list/active_rosters.sql snap-g/api/db/queries/store_schedule_list/active_rosters.sql
+--- a/api/db/queries/store_schedule_list/active_rosters.sql	1970-01-01 09:00:00.000000000 +0900
++++ b/api/db/queries/store_schedule_list/active_rosters.sql	2026-09-26 02:18:07.000000000 +0900
+@@ -0,0 +1,5 @@
++-- GENERATED from service.store_schedule_list.active_rosters [sha256:4bd40ba057f7] — 手で編集しない
++SELECT r.*
++FROM app.roster r
++WHERE r.store_id=$1::uuid AND r.phase='active'
++ORDER BY r."order" ASC,r.id ASC;
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/db/queries/verb/update_roster_visible.sql snap-g/api/db/queries/verb/update_roster_visible.sql
+--- a/api/db/queries/verb/update_roster_visible.sql	1970-01-01 09:00:00.000000000 +0900
++++ b/api/db/queries/verb/update_roster_visible.sql	2026-09-26 02:18:07.000000000 +0900
+@@ -0,0 +1,4 @@
++-- handwritten: roster_hide / roster_show; visible だけを更新する
++WITH changed AS (UPDATE app.roster SET visible=$2::boolean
++WHERE id=$1::uuid AND phase='active' RETURNING id)
++SELECT framework.require_rows(count(*),'conflict') FROM changed;
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/api/db/queries/widget_list/published.sql snap-g/api/db/queries/widget_list/published.sql
+--- a/api/db/queries/widget_list/published.sql	1970-01-01 09:00:00.000000000 +0900
++++ b/api/db/queries/widget_list/published.sql	2026-09-26 03:10:41.000000000 +0900
+@@ -0,0 +1,6 @@
++-- GENERATED from service.widget_list.published [sha256:eac5cd7df8b6] — 手で編集しない
++SELECT a.*
++FROM app.article a
++WHERE a.muse_id=$1::uuid AND a.phase='published' AND a.slot IS NOT NULL AND ($2::boolean=false OR ($3::integer IS NOT NULL AND (a.slot IS NULL OR (a.slot IS NOT NULL AND a.slot>$3::integer))) OR (a.slot IS NOT DISTINCT FROM $3::integer AND ($4::date IS NOT NULL AND (a.posted_on IS NULL OR (a.posted_on IS NOT NULL AND a.posted_on<$4::date)))) OR (a.slot IS NOT DISTINCT FROM $3::integer AND a.posted_on IS NOT DISTINCT FROM $4::date AND a.entered_published<$5::timestamptz) OR (a.slot IS NOT DISTINCT FROM $3::integer AND a.posted_on IS NOT DISTINCT FROM $4::date AND a.entered_published IS NOT DISTINCT FROM $5::timestamptz AND a.id<$6::uuid))
++ORDER BY a.slot ASC NULLS LAST,a.posted_on DESC NULLS LAST,a.entered_published DESC,a.id DESC
++LIMIT 21;
+diff -ruN -x gen -x build -x node_modules -x '*.tgz' snap-base-pristine/docs/evidence/wgy-star-sha256.txt snap-g/docs/evidence/wgy-star-sha256.txt
+--- a/docs/evidence/wgy-star-sha256.txt	1970-01-01 09:00:00.000000000 +0900
++++ b/docs/evidence/wgy-star-sha256.txt	2026-09-26 03:05:42.044133201 +0900
+@@ -0,0 +1,30 @@
++4b32996c319db169f5d12f74c932684002c165ee9366b2f0cd956dea299ffd0f  62ac24ed5b374279258ec2f34d4bf92809ba6ef5c2d7b31e7b39f6ff99d71899  app/src/service/article_edit.gleam
++81b9563519f4c934e8c56a29c2a9f04c4526695df992a56d7a8aa06147a3d5db  d51e9cdea7a770dc33e367462f4ef9e046fc961e84dae29298264ca8830cac90  app/src/service/article_index.gleam
++b640441da61afe10e7e8c61d75f280a7892696a8f58024f534a018d58f8a6382  b09b3ab439c8821690b25282c95778d03115bd8d64d2e04928359c90b4630fbf  app/src/service/article_publish.gleam
++dd1a24eed0cb6af670ed3ea5224648194924aad60ef8ad0334e00f88add304af  3c0304467fe78175779e60d9796b7ca8ff35ddf75ad51d41bc49dc5343b3623c  app/src/service/article_release.gleam
++c1146dd55112b8dcd388a9d58877c729c44ae266f826e80d55b8b58f830f87e2  27277a0e35c41f8b48413796a5341fbfaf0f8f1d02a8978d8664a0c4b9e7df76  app/src/service/article_revise.gleam
++2afa245b280775d6a477fdddcff462bdd7f891374022418a23cb13964d04a2a9  b3798559ee28592a51e37d485ceb85f26d70b8b442923b38acd0a866b717e7c6  app/src/service/article_search.gleam
++bcc519e3bc19e156660312f0b14694cdefc319b2269f56eae0b4ae85c850dd69  4045ffb3c0c8f0b518bb5a3afcee87788fbef0dafdbdcd44185922767f499fc5  app/src/service/article_unschedule.gleam
++ae9f59a6707a0578a1f54baf6aa89d0a2ddb8979743818b04eae72e3c2131175  3b53cf0fa7483540aa011d1811f5fbd353e86f588f3f5b1292d82a3af9bed87d  app/src/service/heaven_embed_code.gleam
++4f3f07dd8220559e7080da781da7998d43b56b134455a13ea90482476876fe0e  262df824cf7b117ed1bc5358e2d6c80277e038d25dcfa424cf049141b218aaab  app/src/service/heaven_resolve.gleam
++4aeb765f47d258d76817678b360392a97516834788011abb031dbb60c76466ea  cf718a7e754a1fe70be6e7ef7d70c0ee2309872d3efe90f6bf90e53d2ace9d16  app/src/service/link_import.gleam
++6303054af78083cbda62dfe900ac87a6b5b4d4232bc40bd89f6e39f68795fe87  8a1016051b4af79d4a58ddbebba409a7a9d760959a8d714ef5079005beb6b067  app/src/service/link_import_apply.gleam
++d6379d7eabe41a2625995ac72b54d2b5912105e6c3bd2f1228463c4409b39fd5  35c562600e49d7faeb4669f25e6bad8725f440915c3047448d567f62705d04fb  app/src/service/muse_edit_profile.gleam
++5d167fb1ae7805e231ba0a9002ebbdff6770eefdfb5fba67ae5e4bc47c34f74a  5243540e180128c0ce653417567fca73e8d2021d1a44b6b16ccf2c4c0027663d  app/src/service/notification_fanout.gleam
++f7524cbe7d8637b2b533fc2b5c05a239a53fb4bd05ea3218c0f7ddcdb0791176  5a1af841090135baaeda3f2811c948a73fb5348d86cf2dcfb4dfad9f8f731bd4  app/src/service/notification_notify.gleam
++6b13a49e925a92c47c1b047bf3ecd11cca503163739b194872631888404b3acf  1def7725273c761627df2b9b622bb8ce7caeb4394a40049e2b83170f09f07ecf  app/src/service/reservation_approve.gleam
++59cb3551562a610a895f53bc7d99696774aecb7bf49f3126caed4d4bd41fdf32  ee9a24311355a29a0cdf0fe2241ba8a89f4993184ab699120077eced8b035ff8  app/src/service/reservation_cancel.gleam
++9808b0dd22295a9a5391738c46192ee307e9c58833fe09bb7f12e26f01497e8d  fa5ec887d56a088cea7ba072392248ab270d98935531ef907dfe90d9ad1f4d65  app/src/service/reservation_notify.gleam
++942c3c9ea8864c7d1e8e2adad335252cc2bf6c1fee48c61151e2a66daebe614a  d7d7b628775bf3bfae771a63d8d14fbd4ea0b56666d881b797155b8ed638a211  app/src/service/reservation_request.gleam
++aaa44ba05ae383dbb84fdeedd2be2ef08bb1dce65c81fb0dd77ce0c6173ab050  f374ea80b4d110ef8bd7b3b6b1c604a365530cf020df3fdba1b974797e5d2380  app/src/service/reservation_reschedule.gleam
++63f97f9591d518a66b05c8a38b6ca713e4ea2d1c0487829794d18a9ead88ef95  6a443a3fe1af5462b9ae3418ab0eae1e62b5468e3bc59aaa7431bb1ed4ff820b  app/src/service/roster_add.gleam
++4ae1930518289a7fa5998260cd463691b5de7a83efa2343efcbd7fdd01300cb2  74e20a5f8b54910aee554f642783dea2db2588fa9eec27a26125981f15c424e6  app/src/service/roster_edit.gleam
++fa60d2781882d9d18a9cd06a6b83b287ac3dccfb2f4c62decab9061a5571a8ed  bc4cbf173c76f4e23033e16550238f74460164cc934e4e5fe37567fab9b9b54b  app/src/service/roster_upsert.gleam
++2c66b2ed00ddfd1d793428def846aba10846e44ab231b017e2b9b46cfd01ae55  c6bb51eaab0305ad234da6511fc3bba485186d97f0c0527b519137e753ae6cbe  app/src/service/space_add.gleam
++4a84f3c9dff1aebd94e7fa9c54a33de6b54028e5ffe0eede2493b090725ff742  67bb9a835e749f39fedec7ab4eb8c739af6124017a3f35f29f258188b3d001b4  app/src/service/space_edit.gleam
++380e3dc4bf57a76972fc26f6c627d3e30fa2eb9cb6fd2e3cf558733f77dfaa9b  4efac149564e2801ad061ec8e010f5fb2bb0b27eba4a339946e3fb55b9dd3e6b  app/src/service/store_onboard.gleam
++93fd420bb86b6a1777663ffc0fe417770cb957b47f3ecb9d8e1423447f7baace  2d390536858c8a45f43a4b11977350267444efc3b0159224f895ec0315d34741  app/src/service/store_request_handle.gleam
++c939162aa77dadc61e07f15087bfd45c756108db2a2a54149bdbc4f84250c029  7979e76cd1c518b1c0afbd16e951c127cfe51597b984c246102838ae4beda6d3  app/src/service/store_request_notify.gleam
++afecf17fed64c7af73eaab9b993748d17b4dfacd03693aa8679928ab1d2d826f  2eb0e204803bf6a2319dcc9ae16a762e98970e7feb732a01b7c65c4e0041107e  app/src/service/widget_add.gleam
++168a4325e0ff72ba2dbf88ef4aedde9a4679f446f2f687985dd95c4ab2f1bae6  a2eb19f288b17642ccbe0a448469efdca5810b53024f5485d26337dc3d854f62  app/src/service/widget_edit.gleam
++080e299c7220e2502f5a6f49fcf3fa072a04d7ca5be35399a590e65511aac8e6  8d7ef757b21d517b66a9d25df74cb2780b66763e08230b011799300a86d4983e  app/src/service/widget_list.gleam
+--- a/api/gen/sql_manifest.json	2026-09-26 00:57:16.000000000 +0900
++++ b/api/gen/sql_manifest.json	2026-09-26 03:11:59.382366850 +0900
+@@ -1550,5 +1550,35 @@
+   {"file":"gen/sql/queries/verb/set_reservation_send_notified.sql","kind":"verb","source":"entity.reservation","handwritten":true,"semantic_tests":[{"file":"test/sql-coverage.test.mjs","id":"SQL:verb/set_reservation_send_notified","inside":"eligible reservation is marked notified","outside":"already-notified reservation fails as already_sent"}]},
+   {"file":"gen/sql/queries/verb/insert_notice_for_send.sql","kind":"verb","source":"entity.notice","handwritten":true,"semantic_tests":[{"file":"test/sql-coverage.test.mjs","id":"SQL:verb/insert_notice_for_send","inside":"approved notified reservation inserts Notice for its claimed Active Roster","outside":"unclaimed Roster cannot receive a Notice"}]},
+   {"file":"gen/sql/queries/store_inbox/inbox.sql","kind":"reads","source":"service.store_inbox","handwritten":true,"semantic_tests":[{"file":"test/sql-coverage.test.mjs","id":"SQL:store_inbox/inbox","inside":"store inbox returns its Notice with live Roster name and current reservation phase","outside":"other store Notice is excluded and empty total is zero"}]},
+-  {"file":"gen/sql/queries/store_roster_count/count.sql","kind":"reads","source":"service.store_roster_count","handwritten":true,"semantic_tests":[{"file":"test/sql-coverage.test.mjs","id":"SQL:store_roster_count/count","inside":"claimed Active Roster is counted once","outside":"unclaimed Active and Left Roster are excluded"}]}
++  {"file":"gen/sql/queries/store_roster_count/count.sql","kind":"reads","source":"service.store_roster_count","handwritten":true,"semantic_tests":[{"file":"test/sql-coverage.test.mjs","id":"SQL:store_roster_count/count","inside":"claimed Active Roster is counted once","outside":"unclaimed Active and Left Roster are excluded"}]},
++  {"file":"gen/sql/queries/allow/ledger.sql","kind":"allow","source":"service.ledger_store_search.service.allow","semantic_tests":[{"file":"test/sql-coverage.test.mjs","id":"SQL:allow/ledger","inside":"public ledger fragment admits a ledger store for any caller","outside":"unknown ledger store stays excluded under the fragment"}]},
++  {"file":"gen/sql/queries/allow/muse_schedule.sql","kind":"allow","source":"service.schedule_withdraw.service.allow","semantic_tests":[{"file":"test/sql-coverage.test.mjs","id":"SQL:allow/muse_schedule","inside":"fragment admits a MuseSchedule of another party (owner is checked by the root)","outside":"unknown MuseSchedule stays excluded under the fragment"}]},
++  {"file":"gen/sql/queries/allow/shift_target.sql","kind":"allow","source":"service.shift_target_remove.service.allow","semantic_tests":[{"file":"test/sql-coverage.test.mjs","id":"SQL:allow/shift_target","inside":"fragment admits a ShiftTarget of another party (owner is checked by the root)","outside":"unknown ShiftTarget stays excluded under the fragment"}]},
++  {"file":"gen/sql/queries/store_list/all.sql","kind":"reads","source":"service.store_list.all","semantic_tests":[{"file":"test/sql-coverage.test.mjs","id":"SQL:store_list/all","inside":"every store is listed in handle order","outside":"a store that does not exist is not listed"}]},
++  {"file":"gen/sql/queries/schedule_add/candidate_stores.sql","kind":"reads","source":"service.schedule_add","semantic_tests":[{"file":"test/sql-coverage.test.mjs","id":"SQL:schedule_add/candidate_stores","inside":"own targets and active-roster ledger stores are folded per store with area and listed flag","outside":"left-roster ledger and another Muse target are excluded"}]},
++  {"file":"gen/sql/queries/schedule_list/upcoming.sql","kind":"reads","source":"service.schedule_list","semantic_tests":[{"file":"test/sql-coverage.test.mjs","id":"SQL:schedule_list/upcoming","inside":"own schedules on or after from are listed in date order with store name regardless of phase","outside":"earlier dates and other Muse schedules are excluded"}]},
++  {"file":"gen/sql/queries/schedule_list/root.sql","kind":"root","source":"service.schedule_list.service.allow","semantic_tests":[{"file":"test/sql-coverage.test.mjs","id":"SQL:schedule_list/root","inside":"onboarded Muse handle resolves for anyone","outside":"unknown handle or excluded phase is not resolved"}]},
++  {"file":"gen/sql/queries/ledger_store_search/by_name.sql","kind":"reads","source":"service.ledger_store_search","semantic_tests":[{"file":"test/sql-coverage.test.mjs","id":"SQL:ledger_store_search/by_name","inside":"name substring matches case-insensitively with area path","outside":"non-matching name is excluded"}]},
++  {"file":"gen/sql/queries/schedule_withdraw/root.sql","kind":"root","source":"service.schedule_withdraw.service.allow","semantic_tests":[{"file":"test/sql-coverage.test.mjs","id":"SQL:schedule_withdraw/root","inside":"MuseSchedule resolves for its Muse party","outside":"other party or unknown schedule is excluded"}]},
++  {"file":"gen/sql/queries/shift_target_remove/root.sql","kind":"root","source":"service.shift_target_remove.service.allow","semantic_tests":[{"file":"test/sql-coverage.test.mjs","id":"SQL:shift_target_remove/root","inside":"ShiftTarget resolves for its Muse party","outside":"other party or unknown target is excluded"}]},
++  {"file":"gen/sql/queries/store_schedule_list/active_rosters.sql","kind":"reads","source":"service.store_schedule_list.active_rosters","semantic_tests":[{"file":"test/sql-coverage.test.mjs","id":"SQL:store_schedule_list/active_rosters","inside":"active rosters of the store are returned including hidden ones","outside":"left and other-store rosters are excluded"}]},
++  {"file":"gen/sql/queries/allow/store_request.sql","kind":"allow","source":"service.store_request_list.service.allow","semantic_tests":[{"file":"test/sql-coverage.test.mjs","id":"SQL:allow/store_request","inside":"staff clause admits any store request","outside":"unknown request id is excluded by the surrounding query only"}]},
++  {"file":"gen/sql/queries/store_request_list/by_phase.sql","kind":"reads","source":"service.store_request_list.by_phase","semantic_tests":[{"file":"test/sql-coverage.test.mjs","id":"SQL:store_request_list/by_phase","inside":"filed requests in filed_at order","outside":"handled requests are excluded"}]},
++  {"file":"gen/sql/queries/store_request_handle/root.sql","kind":"root","source":"service.store_request_handle.service.allow","semantic_tests":[{"file":"test/sql-coverage.test.mjs","id":"SQL:store_request_handle/root","inside":"store request id resolves root","outside":"unknown id or missing clauses is excluded"}]},
++  {"file":"gen/sql/queries/roster_hide/root.sql","kind":"root","source":"service.roster_hide.service.allow","semantic_tests":[{"file":"test/sql-coverage.test.mjs","id":"SQL:roster_hide/root","inside":"matching store owner returns roster root with store","outside":"foreign store party or left roster is excluded"}]},
++  {"file":"gen/sql/queries/roster_show/root.sql","kind":"root","source":"service.roster_show.service.allow","semantic_tests":[{"file":"test/sql-coverage.test.mjs","id":"SQL:roster_show/root","inside":"matching store owner returns roster root with store","outside":"foreign store party or left roster is excluded"}]},
++  {"file":"gen/sql/queries/roster_move/root.sql","kind":"root","source":"service.roster_move.service.allow","semantic_tests":[{"file":"test/sql-coverage.test.mjs","id":"SQL:roster_move/root","inside":"matching store owner returns roster root with store","outside":"foreign store party or left roster is excluded"}]},
++  {"file":"gen/sql/queries/verb/update_roster_visible.sql","kind":"verb","source":"service.roster_hide","semantic_tests":[{"file":"test/sql-coverage.test.mjs","id":"SQL:verb/update_roster_visible","inside":"active roster visibility changes","outside":"left roster is rejected and unchanged"}]},
++  {"file":"gen/sql/queries/framework/session_resolve_staff.sql","kind":"framework","source":"framework.session_resolve_staff","semantic_tests":[{"file":"test/sql-coverage.test.mjs","id":"SQL:framework/session_resolve_staff","inside":"staff subject resolves with staff row and short expiry extends","outside":"revoked session is absent and not extended"}]},
++  {"file":"gen/sql/queries/framework/session_subject_staff.sql","kind":"framework","source":"framework.session_subject_staff","semantic_tests":[{"file":"test/sql-coverage.test.mjs","id":"SQL:framework/session_subject_staff","inside":"own staff selected as subject","outside":"foreign party staff not selected"}]},
++  {"file":"gen/sql/queries/reservation_request/root.sql","kind":"root","source":"service.reservation_request.service.allow","semantic_tests":[{"file":"test/sql-coverage.test.mjs","id":"SQL:reservation_request/root","inside":"fan resolves an existing Muse schedule under no_owner","outside":"unknown schedule id is excluded"}]},
++  {"file":"gen/sql/queries/prep_add/root.sql","kind":"root","source":"service.prep_add.service.allow","semantic_tests":[{"file":"test/sql-coverage.test.mjs","id":"SQL:prep_add/root","inside":"schedule owner party resolves own schedule","outside":"foreign party or unknown schedule is excluded"}]},
++  {"file":"gen/sql/queries/reservation_approve/root.sql","kind":"root","source":"service.reservation_approve.service.allow","semantic_tests":[{"file":"test/sql-coverage.test.mjs","id":"SQL:reservation_approve/root","inside":"Muse party resolves own requested reservation","outside":"foreign party or unknown reservation is excluded"}]},
++  {"file":"gen/sql/queries/reservation_cancel/root.sql","kind":"root","source":"service.reservation_cancel.service.allow","semantic_tests":[{"file":"test/sql-coverage.test.mjs","id":"SQL:reservation_cancel/root","inside":"Muse party resolves own approved reservation","outside":"foreign party or unknown reservation is excluded"}]},
++  {"file":"gen/sql/queries/reservation_reschedule/root.sql","kind":"root","source":"service.reservation_reschedule.service.allow","semantic_tests":[{"file":"test/sql-coverage.test.mjs","id":"SQL:reservation_reschedule/root","inside":"Muse party resolves own approved reservation","outside":"foreign party or unknown reservation is excluded"}]},
++  {"file":"gen/sql/queries/prep_edit/root.sql","kind":"root","source":"service.prep_edit.service.allow","semantic_tests":[{"file":"test/sql-coverage.test.mjs","id":"SQL:prep_edit/root","inside":"schedule owner party resolves own prep","outside":"foreign party or unknown prep is excluded"}]},
++  {"file":"gen/sql/queries/prep_remove/root.sql","kind":"root","source":"service.prep_remove.service.allow","semantic_tests":[{"file":"test/sql-coverage.test.mjs","id":"SQL:prep_remove/root","inside":"schedule owner party resolves own prep","outside":"foreign party or unknown prep is excluded"}]},
++  {"file":"gen/sql/queries/reservation_send/root.sql","kind":"root","source":"service.reservation_send.service.allow","semantic_tests":[{"file":"test/sql-coverage.test.mjs","id":"SQL:reservation_send/root","inside":"self Muse resolves own reservation","outside":"other Muse or unknown reservation is excluded"}]},
++  {"file":"gen/sql/queries/allow/course.sql","kind":"allow","source":"service.course_edit.service.allow","semantic_tests":[{"file":"test/sql-coverage.test.mjs","id":"SQL:allow/course","inside":"store owner clause admits own course","outside":"foreign store owner is excluded"}]},
++  {"file":"gen/sql/queries/widget_list/published.sql","kind":"reads","source":"service.widget_list.published","semantic_tests":[{"file":"test/sql-coverage.test.mjs","id":"SQL:widget_list/published","inside":"own published slotted article after the cursor slot","outside":"draft, other Muse and not-after-cursor rows are excluded"}]}
+ ]
+--- a/api/gleam.toml	2026-09-26 00:57:16.000000000 +0900
++++ b/api/gleam.toml	2026-09-26 02:19:15.072767692 +0900
+@@ -4,7 +4,7 @@
+ 
+ [dependencies]
+ gleam_stdlib = ">= 0.44.0 and < 2.0.0"
+-yumemi = ">= 0.7.0 and < 0.8.0"
++yumemi = { path = "/home/yumemism/yumemism_repo/yumemi-gen-8" }
+ 
+ [dev-dependencies]
+ gleeunit = ">= 1.0.0 and < 2.0.0"
