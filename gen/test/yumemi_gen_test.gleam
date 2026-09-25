@@ -1820,7 +1820,7 @@ pub fn mixed_direction_keyset_is_generated_test() {
   let found = text_of(flag_fixture, "db/queries/widget_page/paged.sql")
   string.contains(
     found,
-    "($3 IS NOT NULL AND (w.place IS NULL OR (w.place IS NOT NULL AND w.place>$3::integer)))",
+    "($3::integer IS NOT NULL AND (w.place IS NULL OR (w.place IS NOT NULL AND w.place>$3::integer)))",
   )
   |> should.be_true
   string.contains(found, "COALESCE(w.place,2147483647)") |> should.be_false

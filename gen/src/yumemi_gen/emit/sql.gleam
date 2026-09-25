@@ -1637,7 +1637,11 @@ fn keyset_branches(
         _ -> "(" <> string.join(prefix, " AND ") <> " AND " <> comparison <> ")"
       }
       let #(found, _) = term
-      let equal = found.reference <> " IS NOT DISTINCT FROM " <> place
+      let equal =
+        found.reference
+        <> " IS NOT DISTINCT FROM "
+        <> place
+        <> keyset_cast(found.kind)
       [
         branch,
         ..keyset_branches(
@@ -1668,7 +1672,7 @@ fn cursor_compare(found: Column, way: String, place: String) -> String {
   case found.optional {
     True ->
       "("
-      <> place
+      <> right
       <> " IS NOT NULL AND ("
       <> found.reference
       <> " IS NULL OR ("
