@@ -72,3 +72,10 @@
 
 1. **URL の `-` とフォルダの `_`(`/api-key` → `api_key`、`/for-stores/api/v1` → `for_stores/api/v1`)。**(a) 生成器の規則にする ── URL の段の `-` はフォルダの `_` に対応(Gleam の module 名に `-` が使えないため)── **推奨**、(b) 面の門の宣言に rewrite を 1 行ずつ
 2. **★ client entry(島の登録と bundle の入口、3 面)と console の ★ `blob_copy*`(Y1e 候補)を本便に入れるか。**(a) client entry は入れる(+ 0:45)、`blob_copy` は名指しの残り ── **推奨**。client entry は生成 shell と同じ面の入口の仕事で、人見の「中途半端にしない」に当たる。`blob_copy` は `roster_photo_put` の live module の生成で、Blob の 2 段の upload の型が要る別の仕事、(b) 両方入れる(+ 1:30 前後)、(c) 両方名指しの残り
+
+## 鷹野の裁定(2026-09-26 02:2x)
+
+版は 0.11.1(patch、役員 人見 09-26)。問いは推奨で採る。
+1. **(a)** URL の段の `-` はフォルダの `_` に対応させる規則を生成器に置く
+2. **(a)** client entry は本便に入れる(+ 0:45)。`blob_copy*` は名指しの残り
+- WGy(yumemi-gen-8)と並走する。`emit/front.gleam` は区画で持ち分を分け、merge は WGy が先。本便は WGy の merge 後に載せ直してから merge

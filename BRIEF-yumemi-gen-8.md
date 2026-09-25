@@ -116,3 +116,12 @@
 2. **業務の行の置き場。**(a) 生成物は宣言した hook だけを import し、実装は gen の外の ★ ── **推奨**、(b) hook を持たず、業務の行は musearch の ★ Service に移す(`recoverRosterUpsert` などは Service の logic に畳む。WGm が重くなる)
 3. **`contracts.mjs` の `foldable`(実行時に Service の source を読む)。**(a) 生成時に解いて registry の `folded` に焼く ── **推奨**、(b) framework に写してそのまま
 4. **`owner Self` の 28 本を本便に入れるか。**(a) 入れる ── **推奨**(人見「中途半端にしない」、musearch が使う `store_roster_list/mine` を含む)、(b) 名指しの残りにして WGm は hand の SQL を ★ で持つ
+
+## 鷹野の裁定(2026-09-26 02:2x)
+
+版は 0.11.1(patch、役員 人見 09-26)。問いは全部推奨で採る。
+1. **(a)** server の JS は yumemi の Hex package に載せる(`src/framework/server/` ほか)
+2. **(a)** 業務の行は gen の外の ★ に置き、生成物は宣言した hook だけを import する
+3. **(a)** `foldable` は生成時に解く。実行時に Service の source を読む行を 0 に
+4. **(a)** `owner Self` の 28 本は本便に入れる
+- 門の便(yumemi-gate-1)と並走する。`emit/front.gleam` は区画で持ち分を分け、merge は本便が先。門の区画に触らない
