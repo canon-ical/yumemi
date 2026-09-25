@@ -49,7 +49,7 @@
 
 **最短 1:30 / 中央 2:30 / 最長 4:00(推定)。**内訳は関係の decoder と `kind` の綴りと停止 0:30、往復の test と `encode` の写しの一本化 0:40、fixture と mock 0:15、snapshot の 2 生成器の比較 0:20、実 API の立ち上げと Page の表 0:35(a6 の道具を使い回す)、ゲート 2 の P0 の余地 0:10。生成器の便は 2 本続けて見積の 1.5 倍に振れた(G7・Y1e)ので、**予算は中央 × 1.5 = 225 分**(Y1f の裁定 7 の引き方)。
 
-- **F5:**本便の merge 後に `~/yumemism_repo/yumemi/gen` で再生成し、30 file を生成物のまま受け、muses `widget_list` の ▲ 例外を消す(例外 24 → 23)。続きの指示は鷹野が F5 の箱に書く
+- **F5:**本便の merge 後に `~/yumemism_repo/yumemi/gen` で再生成し、30 file を生成物のまま受け、muses `widget_list` の ▲ 例外(F5 r28)を消す(例外 25 → 24)。続きの指示は鷹野が F5 の箱に書く
 - **Y1f:**`impl/yumemi-1f` は本便の merge 後に main を取り込み(`emit/front.gleam` が重なる)、本便の往復の test を通してから段 10 の後の merge に進む
 
 ## 裁定待ち ── 起動前に鷹野が裁く
@@ -58,3 +58,11 @@
 2. **`Kind = String` の alias は本便で残す。**面の型を enum に戻すと 0.9.x の ★ が compile しなくなる。typed の Kind は Y の列へ
 3. **encode の規則の正の置き場。**`codec.mjs` は GENERATED の header を持つ手書きで、yumemi の写しと食い違うと本便の test は緑のまま実 API で割れる。推奨:本便は写しと本文の一致を検収で確かめるまで。正をどちらが持つか(生成器が codec を吐くか)は back の世代揃えの射程として `keiei/canon/open.md` に立てる
 4. **Hex 0.9.1 は `src/framework` 0 行の publish になる**(F5 は生成器を main の作業木から呼ぶので、publish が無くても直る)。推奨:裁定どおり publish して tag と版を揃える
+
+## 鷹野の裁定(2026-09-25 16:1x)
+
+1. 予算 225 分
+2. 推奨どおり。`Kind = String` の alias は残す、typed の Kind は Y の列へ
+3. 推奨どおり。本便は写しと `codec.mjs` の本文の一致を検収で確かめるまで。正の置き場は鷹野が `keiei/canon/open.md` に立てる
+4. 推奨どおり。承認後に鷹野が merge し Hex 0.9.1 を publish、tag `v0.9.1`
+5. (追加)`Multi` の `keys` も本便で直す(同じ `relation_decoder` の経路、往復 test に入れる)。使い手 0 でも残さない
