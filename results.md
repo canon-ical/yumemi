@@ -1,3 +1,30 @@
+# yumemi-gate-1 真壁 ── 面の門・URL の綴り・CSP・pageview・route の順・client の入口を生成器へ(2026-09-26)
+
+## 状態
+
+- 門の宣言の型 `src/framework/gate.gleam`(新しい module だけ。0.11.0 の公開型は変えていない)、reader `reader/gate.gleam`、emit `emit/gate.gleam` → 面の `src/gen/gate.mjs`(`before_route` / `after_response` / `serve`)。生成 shell の export default は `gate.serve(..)`
+- route 表を literal-first に(`route_order`)。URL の段の `-` はフォルダの `_`(裁定 1 (a)、宣言なし)。空の Page query は `None`
+- client の入口(裁定 2 (a)):`app()` を持つ component を全部登録、`calls` があって `app()` の無い島は exit 3。`blob_copy*` は名指しの残り
+- 詳細・写しの表・前と変わるところ(鷹野宛 5 点)・WGm への申し送り(www / console の `gate.gleam` の本文つき)は `docs/reports/yumemi-gate-1.md`
+
+## DDL
+
+無し。
+
+## 検証
+
+- root `gleam build` 0(warning 1、既存)。`cd gen && gleam test` **252 passed**(241 + 11)。`gleam format --check src test` 0(root / gen)
+- fixture ×2 で diff 0、tracked 一致(`shell.mjs` ×2 更新、`gate.mjs` ×2 追加)
+- 写し `645ec49` ×2:exit 4、差は runtime build の時間 1 行。診断は基線 + www の `app()` 無し 7 行
+- 写しの 3 面:`entry-gates.test.mjs` 11 / 16 / 18 pass(前後同じ)、Workerd の表 98 行で status・Location・CSP・pageview・描いた Page・読みの数が前後全一致(https)。棚卸しは未分類 0、薄い ★ は F6 の行と呼び出しの口だけ
+- 証拠は `gen/build/gate/`
+
+## 確かめていないこと
+
+- 生成物の `src/gen` 全体を写しの面に載せた build(写しの Page が 0.11 の宣言に未追随で、基線から runtime build が exit 1 × 3)。門は写しの `src/gen` に `gate.mjs` / `route.gleam` を重ねて確かめた
+- 空の検索の短絡が要らなくなること(F6 r1 の `/search` が `q` の Var をまだ宣言していない)
+- 実 API(PG)での門。Workerd の APP は F5 の stub で、読みの 11 種は stub の固定応答が decoder に合わず、門を通った後の描画が前後とも 500
+
 # yumemi-hw-1 真壁 r2 ── 柏木ゲートの差し戻しの直し(2026-09-25)
 
 ## 状態

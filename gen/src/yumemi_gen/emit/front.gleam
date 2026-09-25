@@ -14,6 +14,7 @@ import gleam/string
 import yumemi_gen/digest
 import yumemi_gen/emit/draft
 import yumemi_gen/emit/entry
+import yumemi_gen/emit/gate as gate_emit
 import yumemi_gen/emit/hash
 import yumemi_gen/emit/types.{type File, File}
 import yumemi_gen/face
@@ -21,6 +22,7 @@ import yumemi_gen/glance_util as g
 import yumemi_gen/model
 import yumemi_gen/naming
 import yumemi_gen/reader/front as reader_front
+import yumemi_gen/reader/gate as reader_gate
 import yumemi_gen/source.{type Unit, Unit}
 import yumemi_gen/stop
 
@@ -112,6 +114,7 @@ pub fn emit(
       path: face_name <> "/src/gen/shell.mjs",
       text: shell_text(app, type_units, package, model_, hashes),
     ),
+    gate_file(app, back_units, package, model_, hashes),
     File(
       path: face_name <> "/src/gen/blocks_preview.gleam",
       text: blocks_preview_text(
@@ -196,7 +199,7 @@ pub fn emit(
       ),
       File(
         path: face_name <> "/priv/static/_yumemi/client.mjs",
-        text: client_text(face_name, model_, app, hashes),
+        text: client_text(face_name, model_, package.units, app, hashes),
       ),
     ]
   }
@@ -1692,21 +1695,6 @@ fn component_services(component: reader_front.Component) -> List(String) {
   })
 }
 
-fn island_components(
-  components: List(reader_front.Component),
-) -> List(reader_front.Component) {
-  let empty: List(reader_front.Component) = []
-  components
-  |> list.filter(fn(component) { component.calls != [] })
-  |> list.fold(empty, fn(acc, component) {
-    case list.any(acc, fn(found) { found.module == component.module }) {
-      True -> acc
-      False -> list.append(acc, [component])
-    }
-  })
-  |> list.sort(fn(left, right) { string.compare(left.module, right.module) })
-}
-
 fn transport_text(
   face_name: String,
   front: reader_front.Front,
@@ -1785,13 +1773,70 @@ fn transport_text(
   <> "}\n"
 }
 
+/// client の入口に登録する島 ── `components/` のうち `pub fn app()` を持つもの全部
+/// (`calls` の無い島も登録する。島の登録の源は component の `app()`)。
+fn client_components(
+  front: reader_front.Front,
+  units: List(Unit),
+) -> List(reader_front.Component) {
+  let empty: List(reader_front.Component) = []
+  front.components
+  |> list.filter(fn(component) { component_has_app(units, component) })
+  |> list.fold(empty, fn(acc, component) {
+    case list.any(acc, fn(found) { found.module == component.module }) {
+      True -> acc
+      False -> list.append(acc, [component])
+    }
+  })
+  |> list.sort(fn(left, right) { string.compare(left.module, right.module) })
+}
+
+fn component_has_app(
+  units: List(Unit),
+  component: reader_front.Component,
+) -> Bool {
+  case list.find(units, fn(unit) { unit.path == component.module }) {
+    Ok(unit) ->
+      case g.find_function(g.in_order(unit.module), "app") {
+        Some(function) -> function.publicity == glance.Public
+        None -> False
+      }
+    Error(_) -> False
+  }
+}
+
+/// `calls` / `target` を持つ島(送る先がある component)に `pub fn app()` が無ければ exit 3。
+/// client の入口は `app()` を登録するだけで、島の組み立て(init / update / view / 属性)は component が持つ。
+pub fn client_notes(
+  package: face.Package,
+  front: reader_front.Front,
+) -> List(stop.Note) {
+  front.components
+  |> list.filter(fn(component) {
+    component.calls != [] && !component_has_app(package.units, component)
+  })
+  |> list.map(fn(component) { component.module })
+  |> list.unique
+  |> list.sort(string.compare)
+  |> list.map(fn(module) {
+    stop.Note(
+      stop.Missing,
+      package.name
+        <> "/"
+        <> module
+        <> ": `pub fn app()` が無い(client の入口は島を `app()` で登録する)",
+    )
+  })
+}
+
 fn client_text(
   face_name: String,
   front: reader_front.Front,
+  units: List(Unit),
   app: model.App,
   hashes: hash.Hashes,
 ) -> String {
-  let components = island_components(front.components)
+  let components = client_components(front, units)
   let imports =
     string.concat([
       "import { register as lustreRegister } from \"__YUMEMI_BUILD__/lustre/lustre.mjs\";\n",
@@ -4421,16 +4466,49 @@ fn route_text(
 ) -> String {
   let rows =
     pages
-    |> list.map(fn(page) {
-      "  PageRoute(path: \"" <> reader_front.route_path(page.path) <> "\"),"
-    })
-    |> list.sort(string.compare)
+    |> list.map(fn(page) { reader_front.route_path(page.path) })
+    |> list.sort(route_order)
+    |> list.map(fn(path) { "  PageRoute(path: \"" <> path <> "\")," })
     |> string.join("\n")
   header(face_name <> "/src/pages/**/page.gleam", input_hash)
   <> "\npub type PageRoute {\n  PageRoute(path: String)\n}\n\n"
   <> "pub const routes: List(PageRoute) = [\n"
   <> rows
   <> "\n]\n"
+}
+
+/// route 表の順 ── 段ごとに比べ、同じ位置で literal の段を param の段より先に置く
+/// (`/articles/new` は `/articles/:id` より先)。shell も門もこの順で最初に当たった Page を採る。
+pub fn route_order(left: String, right: String) -> order.Order {
+  route_segments_order(route_segments(left), route_segments(right))
+}
+
+fn route_segments(path: String) -> List(String) {
+  string.split(path, "/") |> list.filter(fn(segment) { segment != "" })
+}
+
+fn route_segments_order(
+  left: List(String),
+  right: List(String),
+) -> order.Order {
+  case left, right {
+    [], [] -> order.Eq
+    [], _ -> order.Lt
+    _, [] -> order.Gt
+    [a, ..left_rest], [b, ..right_rest] -> {
+      let a_param = string.starts_with(a, ":")
+      let b_param = string.starts_with(b, ":")
+      case a_param, b_param {
+        False, True -> order.Lt
+        True, False -> order.Gt
+        _, _ ->
+          case string.compare(a, b) {
+            order.Eq -> route_segments_order(left_rest, right_rest)
+            other -> other
+          }
+      }
+    }
+  }
 }
 
 fn blocks_text(
@@ -4595,6 +4673,67 @@ fn shell_text(
   )
 }
 
+fn gate_file(
+  app: model.App,
+  back_units: List(Unit),
+  package: face.Package,
+  front: reader_front.Front,
+  hashes: hash.Hashes,
+) -> File {
+  let #(gate, _) = read_gate(app, back_units, package, front)
+  let input_hash =
+    digest.short(
+      hash.entry(hashes)
+      <> source_hash(package.units, fn(unit) {
+        unit.path == "gate"
+        || string.starts_with(unit.path, "pages/")
+        && string.ends_with(unit.path, "/page")
+      }),
+    )
+  File(
+    path: package.name <> "/src/gen/gate.mjs",
+    text: gate_emit.text(
+      js_header(
+        package.name <> "/src/{gate.gleam,pages/**} and src/entry.gleam",
+        input_hash,
+      ),
+      gate,
+      front_route_paths(front),
+    ),
+  )
+}
+
+fn read_gate(
+  app: model.App,
+  back_units: List(Unit),
+  package: face.Package,
+  front: reader_front.Front,
+) -> #(reader_gate.Gate, List(stop.Note)) {
+  reader_gate.read(
+    package.name,
+    package.units,
+    back_units,
+    app.entries,
+    front_route_paths(front),
+  )
+}
+
+fn front_route_paths(front: reader_front.Front) -> List(String) {
+  front.pages
+  |> list.map(fn(page) { reader_front.route_path(page.path) })
+  |> list.sort(route_order)
+}
+
+/// 門の宣言(`src/gate.gleam`)の診断。
+pub fn gate_notes(
+  app: model.App,
+  back_units: List(Unit),
+  package: face.Package,
+  front: reader_front.Front,
+) -> List(stop.Note) {
+  read_gate(app, back_units, package, front).1
+}
+
 fn shell_imports(
   services: List(model.Service),
   front: reader_front.Front,
@@ -4607,6 +4746,7 @@ fn shell_imports(
     "import * as frontCss from \"../../yumemi/framework/front/css.mjs\";",
     "import * as api from \"./api.mjs\";",
     "import * as blocksPreview from \"./blocks_preview.mjs\";",
+    "import * as gate from \"./gate.mjs\";",
     "import * as layoutDefinition from \"../layout.mjs\";",
     "import * as route from \"./route.mjs\";",
     "import * as service from \"./service.mjs\";",
@@ -5459,11 +5599,11 @@ fn shell_runtime_text(include_client: Bool, grid_css: String) -> String {
   <> "function failure(status, body) {\n"
   <> "  return new Response(body, {status, headers: {\"content-type\": \"text/plain; charset=utf-8\"}});\n"
   <> "}\n\n"
-  <> "async function renderPage(request, env, matched) {\n"
+  <> "async function renderPage(request, env, matched, gateSession) {\n"
   <> "  const vars = {};\n"
   <> "  const query = new URL(request.url).searchParams;\n"
-  <> "  let sessionLoaded = false;\n"
-  <> "  let session = null;\n"
+  <> "  let sessionLoaded = gateSession !== undefined;\n"
+  <> "  let session = gateSession ?? null;\n"
   <> "  for (const field of matched.spec.vars) {\n"
   <> "    const source = field.from;\n"
   <> "    let value;\n"
@@ -5471,7 +5611,7 @@ fn shell_runtime_text(include_client: Bool, grid_css: String) -> String {
   <> "      value = matched.params[source.name];\n"
   <> "    } else if (source.type === \"query\") {\n"
   <> "      const found = query.get(source.name);\n"
-  <> "      value = found === null ? Option$None$const : new Some(found);\n"
+  <> "      value = found === null || found === \"\" ? Option$None$const : new Some(found);\n"
   <> "    } else if (source.type === \"origin\") {\n"
   <> "      const envName = \"PUBLIC_\" + source.name.toUpperCase() + \"_ORIGIN\";\n"
   <> "      const origin = env[envName];\n"
@@ -5577,17 +5717,15 @@ fn shell_runtime_text(include_client: Bool, grid_css: String) -> String {
   <> "    : html.replace(\"<head>\", \"<head><style></style>\");\n"
   <> "  return new Response(withStyle.replace(\"</head>\", '<script type=\"module\" src=\"/_yumemi/client.mjs\"></script></head>'), {status: 200, headers: {\"content-type\": \"text/html; charset=utf-8\"}});\n"
   <> "}\n\n"
-  <> "export default {\n"
-  <> "  async fetch(request, env) {\n"
-  <> "    if (new URL(request.url).pathname === \"/_blocks\" && env.YUMEMI_DEV === \"1\") return renderBlocksPreview();\n"
-  <> "    const matched = matchPage(new URL(request.url).pathname);\n"
-  <> "    if (!matched) {\n"
-  <> "      if (env.SVELTE) return env.SVELTE.fetch(request);\n"
-  <> "      return failure(404, \"page not found\");\n"
-  <> "    }\n"
-  <> "    return renderPage(request, env, matched);\n"
-  <> "  },\n"
-  <> "};\n"
+  <> "export default gate.serve(async (request, env, before) => {\n"
+  <> "  if (new URL(request.url).pathname === \"/_blocks\" && env.YUMEMI_DEV === \"1\") return renderBlocksPreview();\n"
+  <> "  const matched = matchPage(new URL(request.url).pathname);\n"
+  <> "  if (!matched) {\n"
+  <> "    if (env.SVELTE) return env.SVELTE.fetch(request);\n"
+  <> "    return failure(404, \"page not found\");\n"
+  <> "  }\n"
+  <> "  return renderPage(request, env, matched, before.session);\n"
+  <> "});\n"
 }
 
 fn method_variant(method: String) -> String {

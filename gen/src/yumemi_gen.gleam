@@ -125,10 +125,12 @@ pub fn generate(
       discovered.notes,
       list.flat_map(front_models, fn(item) {
         let #(package, model) = item
-        list.append(
+        list.flatten([
           front.notes(model, app.services),
           front_emit.route_notes(app, package.name, model, hashes),
-        )
+          front_emit.gate_notes(app, units, package, model),
+          front_emit.client_notes(package, model),
+        ])
       }),
     )
   let front_notes =
