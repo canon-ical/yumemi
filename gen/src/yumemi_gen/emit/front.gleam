@@ -13,6 +13,7 @@ import gleam/order
 import gleam/result
 import gleam/string
 import yumemi_gen/digest
+import yumemi_gen/emit/accepted
 import yumemi_gen/emit/draft
 import yumemi_gen/emit/entry
 import yumemi_gen/emit/gate as gate_emit
@@ -2050,6 +2051,7 @@ fn live_text(
   }
   let blob_args = blob_args(service.args)
   let wires = arg_wires(units, service)
+  let accepting = accepted.accepts(app, units, service)
   generated_header
   <> "\n"
   <> live_imports(
@@ -2058,7 +2060,10 @@ fn live_text(
     validations != [],
     component.after_send == Some("ReloadPage"),
     blob_args != [],
-    send_imports(wires, route),
+    list.append(
+      send_imports(wires, route),
+      reply_imports(accepting && option.is_some(route)),
+    ),
   )
   <> "\n\n"
   <> args_type_text(service.args)
@@ -2067,7 +2072,8 @@ fn live_text(
   <> "\n"
   <> service_error_type_text(service_errors)
   <> failure_type_text(service_errors)
-  <> state_type_text(service, given_service)
+  <> reply_type_text(service, accepting)
+  <> state_type_text(service, given_service, accepting)
   <> "\n"
   <> init_text(service, given_service)
   <> "\n"
@@ -2077,7 +2083,7 @@ fn live_text(
   <> validate_text(validations)
   <> validation_error_text(validations)
   <> error_handling
-  <> send_text(service, wires, route, component.after_send)
+  <> send_text(service, wires, route, component.after_send, accepting)
 }
 
 fn validation_error_text(
@@ -2305,18 +2311,63 @@ fn file_input_text(args: List(model.Arg)) -> String {
 fn state_type_text(
   service: model.Service,
   given_service: Option(model.Service),
+  accepting: Bool,
 ) -> String {
   let given = given_type(given_service)
+  let out = case accepting {
+    True -> "Reply"
+    False -> service.module <> ".Out"
+  }
   "pub type State = live.State(Args, "
   <> given
   <> ", "
-  <> service.module
-  <> ".Out, Failure)\n\n"
+  <> out
+  <> ", Failure)\n\n"
   <> "pub type Event = live.Event(Field, "
   <> given
   <> ", "
+  <> out
+  <> ", Failure)\n"
+}
+
+/// 0.11.3(H4)── commit の後に続きを持つ Service(`accepted.accepts`)の live は、Out の代わりに
+/// `Reply` を持つ。HTTP は 202 Accepted と 1 欄の本文(`{<root>: id}`、欄の名は ★ `respond` が替えてよい)を
+/// 返すので、send はそれを `Accepted(id)` に読み、`Done(Ok(_))` として after_send へ進む。
+/// commit の前に `step.done` で終わる道の 200 は、今までどおり Out を読んで `Replied(out)`。
+fn reply_type_text(service: model.Service, accepting: Bool) -> String {
+  case accepting {
+    False -> ""
+    True ->
+      "/// commit の後に続きを持つ Service。HTTP は 202 Accepted と `{<root>: id}` で応える\n"
+      <> "pub type Reply {\n"
+      <> "  Replied("
+      <> service.module
+      <> ".Out)\n"
+      <> "  Accepted(id: String)\n"
+      <> "}\n\n"
+  }
+}
+
+fn reply_imports(accepting: Bool) -> List(String) {
+  case accepting {
+    True -> ["gleam/dict"]
+    False -> []
+  }
+}
+
+fn reply_decoder_text(service: model.Service) -> String {
+  "\nfn reply_decoder() -> decode.Decoder(Reply) {\n"
+  <> "  decode.one_of(decode.map("
   <> service.module
-  <> ".Out, Failure)\n"
+  <> ".decoder(), Replied), [\n"
+  <> "    accepted_decoder(),\n"
+  <> "  ])\n}\n\n"
+  <> "fn accepted_decoder() -> decode.Decoder(Reply) {\n"
+  <> "  use fields <- decode.then(decode.dict(decode.string, decode.string))\n"
+  <> "  case dict.to_list(fields) {\n"
+  <> "    [#(_, id)] -> decode.success(Accepted(id))\n"
+  <> "    _ -> decode.failure(Accepted(\"\"), \"Accepted\")\n"
+  <> "  }\n}\n"
 }
 
 fn given_type(given_service: Option(model.Service)) -> String {
@@ -2476,7 +2527,12 @@ fn send_text(
   wires: List(#(model.Arg, Wire)),
   route: Option(ApiRoute),
   after_send: Option(String),
+  accepting: Bool,
 ) -> String {
+  let #(response_decoder, reply) = case accepting {
+    True -> #("reply_decoder()", "reply")
+    False -> #(service.module <> ".decoder()", "out")
+  }
   let blob_fields =
     blob_args(service.args)
     |> list.map(fn(arg) { quoted(arg.name) })
@@ -2522,9 +2578,13 @@ fn send_text(
       <> ",\n"
       <> "      fn(value) {\n"
       <> "        case decode.run(value, "
-      <> service.module
-      <> ".decoder()) {\n"
-      <> "          Ok(out) -> dispatch(live.Done(Ok(out)))\n"
+      <> response_decoder
+      <> ") {\n"
+      <> "          Ok("
+      <> reply
+      <> ") -> dispatch(live.Done(Ok("
+      <> reply
+      <> ")))\n"
       <> "          Error(_) -> dispatch(live.Done(Error(Broke(\"invalid response\"))))\n"
       <> "        }\n"
       <> "      },\n"
@@ -2540,6 +2600,10 @@ fn send_text(
           <> "  }\n}\n"
         "GET", _ -> ""
         _, _ -> wire_helpers_text(wires)
+      }
+      <> case accepting {
+        True -> reply_decoder_text(service)
+        False -> ""
       }
   }
   send <> reload
