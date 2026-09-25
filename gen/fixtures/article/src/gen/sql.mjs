@@ -1,4 +1,4 @@
-//// GENERATED from db/queries/** [sha256:032d56dd277b] — 手で編集しない
+//// GENERATED from db/queries/** [sha256:bbf198d7f83a] — 手で編集しない
 export const SQL = {
   "article_create/to_category": "-- GENERATED from service.article_create / ArticleToCategory [sha256:f1d1d3f20711] — 手で編集しない\nSELECT t.*\nFROM jsonb_array_elements_text($1::jsonb) WITH ORDINALITY AS keys(value,ord)\nJOIN app.category t ON t.name=keys.value::text\nORDER BY keys.ord;\n",
   "article_create/to_tags": "-- GENERATED from service.article_create / ArticleToTags [sha256:f1d1d3f20711] — 手で編集しない\nSELECT t.*\nFROM jsonb_array_elements_text($1::jsonb) WITH ORDINALITY AS keys(value,ord)\nJOIN app.tag t ON t.name=keys.value::text\nORDER BY keys.ord;\n",

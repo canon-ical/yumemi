@@ -126,7 +126,7 @@ export function runtime(spec) {
 
  // ── actor ─────────────────────────────────────────────────────────────
  function subjectValue(resolved,kind) {
-  if(resolved?.subject_kind!==kind&&!(kind==='staff'&&resolved?.staff)) return null;
+  if(resolved?.subject_kind!==kind) return null;
   const row=resolved?.[kind];
   return row?spec.relationDecoders[kind](row):null;
  }

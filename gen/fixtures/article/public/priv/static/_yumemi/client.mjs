@@ -5731,6 +5731,9 @@ var Attached$BlobCopy$const = new BlobCopy();
 var FixtureBrowser = class extends CustomType {
 };
 var Attached$FixtureBrowser$const = new FixtureBrowser();
+var FixtureSession = class extends CustomType {
+};
+var Attached$FixtureSession$const = new FixtureSession();
 var FixtureSync = class extends CustomType {
 };
 var Attached$FixtureSync$const = new FixtureSync();

@@ -73,6 +73,7 @@ pub fn attached_is_read_from_the_server_declaration_test() {
   })
   |> should.equal([
     "FixtureBrowser GET anyone", "FixtureSync POST party", "BlobCopy POST party",
+    "FixtureSession GET anyone",
   ])
   let assert Ok(bare) = reader.read(without(article_fixture, "server"))
   bare.attached |> should.equal([])
@@ -777,4 +778,111 @@ pub fn attached_roles_without_their_attached_are_exit_four_test() {
       "src/gen/http_runtime.mjs",
     )
   string.contains(text, "const browserCookie=null;") |> should.be_true
+}
+
+// ── queue の consumer の party(gate-1 r2)────────────────────────────────────
+
+fn queue_units(server_text: String) -> List(source.Unit) {
+  let assert Ok(units) = source.load(article_fixture)
+  let assert Ok(publish) =
+    list.find(units, fn(item) { item.path == "service/article_publish" })
+  units_with(article_fixture, [
+    unit(
+      "service/article_publish",
+      publish.text <> "\n// step.call_write(queue.article_retract(args))\n",
+    ),
+    unit("server", server_text),
+  ])
+}
+
+fn queue_runtime(units: List(source.Unit)) -> String {
+  let assert Ok(app) = reader.read(units)
+  back.emit(
+    app,
+    units,
+    hash.of(units),
+    [#("article_publish/root", "SELECT 1")],
+    [],
+  ).files
+  |> list.map(fn(file) { #(file.path, file.text) })
+  |> file("src/gen/queue_runtime.mjs")
+}
+
+/// 借りた root を読む party は `roots` の `QueueParty` から。framework の outbox は主体の名を知らない
+/// (前は生成器が who の `Staff` を見て `staffRoot` を出し、outbox が Staff の行を作っていた)。
+pub fn queue_consumer_party_follows_the_declaration_test() {
+  let declared =
+    queue_units(
+      "import framework/server.{QueueParty}\n\n"
+      <> "pub const roots: List(server.RootShape) = [\n"
+      <> "  QueueParty(service: \"article_retract\", party: \"queue\"),\n"
+      <> "]\n",
+    )
+    |> queue_runtime
+  string.contains(
+    declared,
+    " article_retract:{base:'article_publish',module:articleRetract,root:rootArticleRetract,actor:()=>new allowArticle.SystemActor(),field:'article',party:'queue'},\n",
+  )
+  |> should.be_true
+  string.contains(declared, "staffRoot") |> should.be_false
+  let bare =
+    queue_units("pub const roots = []\n")
+    |> queue_runtime
+  string.contains(bare, "field:'article'},\n") |> should.be_true
+  string.contains(bare, "party:") |> should.be_false
+}
+
+// ── 出力先が app を含む dir のときの置き場(gate-1 r2、WGy r4 の積み残し)─────────────────
+
+/// `-- <root>/api <root>` なら back は `api/..`、面は面の package(`www/..`)へ。`-- <root>/api <root>/api` なら
+/// back はそのまま、面は `../www/..`。別の dir に出すなら従来どおり(`src/gen/..`・`<面>/..`)。
+pub fn place_puts_back_and_faces_where_they_live_test() {
+  let root =
+    yumemi_gen.Placement(app: "api", faces: [
+      #("www", "www"),
+      #("console", "console"),
+    ])
+  yumemi_gen.place(root, "src/gen/runtime.mjs")
+  |> should.equal("api/src/gen/runtime.mjs")
+  yumemi_gen.place(root, "db/queries/allow/ledger.sql")
+  |> should.equal("api/db/queries/allow/ledger.sql")
+  yumemi_gen.place(root, "www/src/gen/gate.mjs")
+  |> should.equal("www/src/gen/gate.mjs")
+  yumemi_gen.place(root, "_diagnostics.txt") |> should.equal("_diagnostics.txt")
+  let app = yumemi_gen.Placement(app: "", faces: [#("console", "../console")])
+  yumemi_gen.place(app, "src/gen/runtime.mjs")
+  |> should.equal("src/gen/runtime.mjs")
+  yumemi_gen.place(app, "console/priv/static/_yumemi/client.mjs")
+  |> should.equal("../console/priv/static/_yumemi/client.mjs")
+  let apart = yumemi_gen.Placement(app: "", faces: [])
+  yumemi_gen.place(apart, "console/src/gen/gate.mjs")
+  |> should.equal("console/src/gen/gate.mjs")
+}
+
+// ── subject_free(gate-1 r2)──────────────────────────────────────────────────
+
+/// 入口の主体の集合の検査を外す Service は宣言から `subjectFree` へ(framework の http.mjs は Service の名を
+/// 知らない)。Service に無い名は exit 4。宣言が無ければ空。
+pub fn subject_free_follows_the_declaration_test() {
+  let units =
+    units_with(article_fixture, [
+      server("pub const subject_free = [\"article_read\", \"ghost\"]\n"),
+    ])
+    |> list.filter(fn(item) { item.path != "noop" })
+  let assert Ok(app) = reader.read(units)
+  app.server.subject_free |> should.equal(["article_read", "ghost"])
+  server_reader.notes(app)
+  |> list.map(fn(note) { note.text })
+  |> should.equal(["server.gleam: subject_free の Service が無い: ghost"])
+  let text = file(back_files(units), "src/gen/http_runtime.mjs")
+  string.contains(text, "const subjectFree=['article_read','ghost'];")
+  |> should.be_true
+  string.contains(text, "browserCookie,subjectFree,apiKeyPattern")
+  |> should.be_true
+  let bare =
+    file(
+      back_files(without(article_fixture, "noop")),
+      "src/gen/http_runtime.mjs",
+    )
+  string.contains(bare, "const subjectFree=[];") |> should.be_true
 }

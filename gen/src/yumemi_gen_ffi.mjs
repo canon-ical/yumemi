@@ -277,13 +277,13 @@ function compileCurrentOutDecoders(sourceFace, outputFace, tempRoot, face) {
   return { error: null, modules: modules.length, name: packageName(toml) };
 }
 
-function bundleOne(outDir, appDir, face) {
+function bundleOne(outDir, appDir, face, output = face) {
   const cwd = process.cwd();
   const appPath = path.resolve(cwd, appDir);
   const sourceFace = fs.existsSync(path.join(appPath, face))
     ? path.join(appPath, face)
     : path.resolve(path.dirname(appPath), face);
-  const outputFace = path.resolve(outDir, face);
+  const outputFace = path.resolve(outDir, output);
   const sourcePath = path.join(
     outputFace,
     "priv/static/_yumemi/client.mjs",
@@ -370,9 +370,11 @@ function bundleOne(outDir, appDir, face) {
 
 export function bundle_front(outDir, appDir, faces) {
   const errors = [];
-  const faceNames = faces?.toArray ? faces.toArray() : faces;
-  for (const face of faceNames) {
-    const result = bundleOne(outDir, appDir, face);
+  const pairs = faces?.toArray ? faces.toArray() : faces;
+  // 要素は面の名か [面の名, 出力先からの面の dir](出力先が app を含むとき、面は面の package に書く)
+  for (const pair of pairs) {
+    const [face, output] = typeof pair === "string" ? [pair, pair] : pair;
+    const result = bundleOne(outDir, appDir, face, output);
     if (result) errors.push(result);
   }
   return toList(errors);
@@ -421,10 +423,15 @@ export function sql_files(dir) {
 }
 
 // 出力先が app そのものか(symlink と `..` を解いて比べる)。出力先がまだ無ければ app ではない。
-export function same_dir(left, right) {
+export function holds_dir(outer, inner) {
   try {
-    return fs.realpathSync(left) === fs.realpathSync(right);
+    const relative = path.relative(fs.realpathSync(outer), fs.realpathSync(inner));
+    return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
   } catch {
     return false;
   }
+}
+
+export function relative_dir(from, to) {
+  return path.relative(fs.realpathSync(from), fs.realpathSync(to)).split(path.sep).join("/");
 }

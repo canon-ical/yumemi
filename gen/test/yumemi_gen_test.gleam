@@ -2174,7 +2174,7 @@ pub fn attached_declaration_table_matches_generated_face_api_test() {
     |> list.length
     |> int.subtract(1)
     |> int.subtract(1)
-  declared_rows |> should.equal(3)
+  declared_rows |> should.equal(4)
   face_rows |> should.equal(declared_rows)
   [
     "AttachedRoute(entry: FixtureBrowser, method: Get, path: \"/fixture/browser\")",

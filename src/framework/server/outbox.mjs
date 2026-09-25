@@ -3,8 +3,9 @@
 //
 // - `kinds`: 送る kind の名(`framework/outbox_sweep` の `$1`)
 // - `ids`: kind -> { id: <scalar の名>, versioned?: true }。versioned は Args が (id, version)、それ以外は (id, event)
-// - `consumers`: kind -> { base, module, root, actor, staffRoot?, field }。root の 1 文を持たない consumer は、
-//   base の Service の root を読み、`field` の Entity と相だけを写して自分の Root を作る
+// - `consumers`: kind -> { base, module, root, actor, party?, field }。root の 1 文を持たない consumer は、
+//   base の Service の root を読み、`field` の Entity と相だけを写して自分の Root を作る。`party` は借りた root を
+//   読む session の party(app の `server.roots` の `QueueParty`)。無ければ party 無しで読む
 // - `registry`(byName)/ `codec` / `runtime`(run・invoke・loadRoot・makeContext・step)は app の生成物の
 //   module 名前空間。生成物どうしが循環して import するので、中身は呼ばれた時に読む
 export function outbox({ kinds, ids, consumers, registry, codec, runtime }) {
@@ -37,9 +38,7 @@ export function outbox({ kinds, ids, consumers, registry, codec, runtime }) {
   } else args=new record.module.Args(id,codec.parse('event_id',row.id));
   if(consumer) {
    const baseRecord=byName[consumer.base];
-   const resolved=consumer.staffRoot
-    ? {party:'queue',staff:{id:crypto.randomUUID(),party:'queue',name:'Queue'}}
-    : null;
+   const resolved=consumer.party?{party:consumer.party}:null;
    const state={record:baseRecord,args,db,env,connectors,resolved,clauses:[{phases:null,owner:'no_owner'}],at:new Date().toISOString(),seed:crypto.randomUUID(),eventId:row.id};
    await loadRoot(state);
    const loaded=state.root;

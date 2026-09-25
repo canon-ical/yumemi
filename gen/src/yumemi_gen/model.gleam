@@ -467,6 +467,7 @@ pub type RootShape {
   RootOf(service: String, entity: String)
   WithVersion(service: String)
   Carried(service: String, name: String, type_: String, import_: String)
+  QueueParty(service: String, party: String)
 }
 
 /// `server.storage` の 1 行(Entity の器と列の写像)。entity は module 名。
@@ -497,6 +498,8 @@ pub type Server {
     roots: List(RootShape),
     attached_roles: List(AttachedRole),
     browser: Option(BrowserCookie),
+    /// 入口の主体の集合の検査を外す Service の名(`subject_free`)
+    subject_free: List(String),
   )
 }
 
@@ -530,6 +533,7 @@ pub fn empty_server() -> Server {
     roots: [],
     attached_roles: [],
     browser: None,
+    subject_free: [],
   )
 }
 

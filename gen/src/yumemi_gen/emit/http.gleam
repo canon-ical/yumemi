@@ -285,13 +285,16 @@ pub fn text(
       "const browserCookie=",
       browser_cookie,
       ";\n",
+      "const subjectFree=[",
+      string.join(list.map(app.server.subject_free, quoted), ","),
+      "];\n",
       "const keyPattern=",
       case list.contains(hook_names, "api_key_pattern") {
         True -> "h_apiKeyPattern"
         False -> "'[0-9a-f]{64}'"
       },
       ";\n",
-      "export const {sessionCookie,cookies,signBrowser,verifyBrowser,host,route,origin,browser,admit,resolve,subject,decode,judge,execute,apiEncode,logicFailureStatus}=http({Ok,Error,registry,attached,c,runtime,hosts,args,modules,phaseGates,accepted,ports,hooks,subjects,roles,browserCookie,apiKeyPattern:keyPattern});\n",
+      "export const {sessionCookie,cookies,signBrowser,verifyBrowser,host,route,origin,browser,admit,resolve,subject,decode,judge,execute,apiEncode,logicFailureStatus}=http({Ok,Error,registry,attached,c,runtime,hosts,args,modules,phaseGates,accepted,ports,hooks,subjects,roles,browserCookie,subjectFree,apiKeyPattern:keyPattern});\n",
     ])
   #(header <> imports <> body, notes)
 }

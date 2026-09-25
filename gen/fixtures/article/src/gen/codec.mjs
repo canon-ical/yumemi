@@ -1,4 +1,4 @@
-//// GENERATED from entity / types declarations [sha256:032d56dd277b] — 手で編集しない
+//// GENERATED from entity / types declarations [sha256:bbf198d7f83a] — 手で編集しない
 // 宣言から導けない decoder(hook も無い): article(tags が Multi), staff(framework/idp.Name の module が読めない)
 import { Some, None } from '../../gleam_stdlib/gleam/option.mjs';
 import { toList, List } from '../gleam.mjs';

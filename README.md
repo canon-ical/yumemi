@@ -26,7 +26,7 @@ gleam build
 
 ## `framework/server` ── what the app must provide (0.11.1)
 
-The back-end runtime (`framework/server/*.mjs`) is JavaScript that the generated `src/gen/*.mjs` imports. It knows no application names: route names, cookie names and key bindings come from the app's `src/server.gleam` (`attached_roles`, `browser`, `hooks`). Gleam packages cannot declare npm dependencies, so the app supplies the following itself.
+The back-end runtime (`framework/server/*.mjs`) is JavaScript that the generated `src/gen/*.mjs` imports. It knows no application names: route names, cookie names, key bindings and the party a queue consumer reads its borrowed root as come from the app's `src/server.gleam` (`attached_roles`, `browser`, `hooks`, `roots`' `QueueParty`). The generated face gate (`<face>/src/gen/gate.mjs`, declared in `<face>/src/gate.gleam` with `framework/gate`) reads the session through the `ReadSession` attached route. Gleam packages cannot declare npm dependencies, so the app supplies the following itself.
 
 **Imports outside the package**
 

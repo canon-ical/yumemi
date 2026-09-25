@@ -1,4 +1,4 @@
-//// GENERATED from entity declarations [sha256:032d56dd277b] — 手で編集しない
+//// GENERATED from entity declarations [sha256:bbf198d7f83a] — 手で編集しない
 
 import entity/article
 import entity/category

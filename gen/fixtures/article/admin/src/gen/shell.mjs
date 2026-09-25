@@ -3,6 +3,7 @@
 import * as api from "./api.mjs";
 import * as blocksPreview from "./blocks_preview.mjs";
 import * as frontCss from "../../yumemi/framework/front/css.mjs";
+import * as gate from "./gate.mjs";
 import * as layoutDefinition from "../layout.mjs";
 import * as pageDefinition0 from "../pages/home/page.mjs";
 import * as pageLoader0 from "./load/home/page.mjs";
@@ -149,11 +150,11 @@ function failure(status, body) {
   return new Response(body, {status, headers: {"content-type": "text/plain; charset=utf-8"}});
 }
 
-async function renderPage(request, env, matched) {
+async function renderPage(request, env, matched, gateSession) {
   const vars = {};
   const query = new URL(request.url).searchParams;
-  let sessionLoaded = false;
-  let session = null;
+  let sessionLoaded = gateSession !== undefined;
+  let session = gateSession ?? null;
   for (const field of matched.spec.vars) {
     const source = field.from;
     let value;
@@ -161,7 +162,7 @@ async function renderPage(request, env, matched) {
       value = matched.params[source.name];
     } else if (source.type === "query") {
       const found = query.get(source.name);
-      value = found === null ? Option$None$const : new Some(found);
+      value = found === null || found.trim() === "" ? Option$None$const : new Some(found);
     } else if (source.type === "origin") {
       const envName = "PUBLIC_" + source.name.toUpperCase() + "_ORIGIN";
       const origin = env[envName];
@@ -269,14 +270,12 @@ function renderBlocksPreview() {
   return new Response(withStyle.replace("</head>", '<script type="module" src="/_yumemi/client.mjs"></script></head>'), {status: 200, headers: {"content-type": "text/html; charset=utf-8"}});
 }
 
-export default {
-  async fetch(request, env) {
-    if (new URL(request.url).pathname === "/_blocks" && env.YUMEMI_DEV === "1") return renderBlocksPreview();
-    const matched = matchPage(new URL(request.url).pathname);
-    if (!matched) {
-      if (env.SVELTE) return env.SVELTE.fetch(request);
-      return failure(404, "page not found");
-    }
-    return renderPage(request, env, matched);
-  },
-};
+export default gate.serve(async (request, env, before) => {
+  if (new URL(request.url).pathname === "/_blocks" && env.YUMEMI_DEV === "1") return renderBlocksPreview();
+  const matched = matchPage(new URL(request.url).pathname);
+  if (!matched) {
+    if (env.SVELTE) return env.SVELTE.fetch(request);
+    return failure(404, "page not found");
+  }
+  return renderPage(request, env, matched, before.session);
+});

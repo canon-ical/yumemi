@@ -1,4 +1,4 @@
-//// GENERATED from framework session contract [sha256:032d56dd277b] — 手で編集しない
+//// GENERATED from framework session contract [sha256:bbf198d7f83a] — 手で編集しない
 
 import framework/io.{type Promise}
 

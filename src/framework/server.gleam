@@ -20,6 +20,9 @@
 //// - `pub const attached_roles: List(AttachedRole)` ── 機関を framework が持つ attached の口の役(session・
 ////   browser の申告・path の残りを取る口)。framework の JS は app の口の名を知らず、ここから受ける
 //// - `pub const browser: BrowserCookie` ── 成人の申告を焼く browser の署名 cookie の名・鍵の binding・期間
+//// - `pub const subject_free: List(String)` ── 入口の主体の集合(`Subjects([..])`)に session の主体が入っていなくても
+////   通す Service の名。主体を切り替える前に読む口(店の面の `/switch` が並べる、party の持つ店の主体)だけを書く
+////   (gate-1 r2。framework の JS は Service の名を知らない)
 ////
 //// framework の JS が app に求めるもの(npm の依存と `db/queries/framework/**` の SQL)は README を見よ。
 ////
@@ -181,6 +184,10 @@ pub type RootShape {
   /// root に入口が運ぶ値を載せる(`browser` = 署名した browser cookie の id)。`type_` は Gleam の綴り、
   /// `import_` はその綴りが要る import の行の中身
   Carried(service: String, name: String, type_: String, import_: String)
+  /// queue の consumer `service`(root の 1 文を持たず、自分を queue で呼ぶ Service の root を借りる)が、
+  /// 借りた root を session の party `party` として読む(root の 1 文と verb の `party` の穴・audit の party)。
+  /// 書かなければ consumer は party 無しで読む(gate-1 r2、framework の JS から主体の名を抜いた)
+  QueueParty(service: String, party: String)
 }
 
 /// attached の口のうち、機関を framework の JS(`framework/server/http.mjs`)が持つものの役(WGy r4)。

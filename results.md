@@ -1,3 +1,54 @@
+# yumemi-gate-1 真壁 r2 ── 載せ直し(WGy の merge)と直し、版 0.11.1(2026-09-26)
+
+## 状態
+
+- main `32604ca`(WGy)を merge。衝突は `results.md` だけ。門の session の口を `attached_roles` の `ReadSession` から引く(無ければ exit 3)
+- 直したもの:空白だけの query を None(柏木 P2)、`attached_live_text` の `transport_send` に `blob_fields` / `[]`、framework の JS の Staff の特別扱いを `roots` の `QueueParty` へ、出力先が app を含む dir の全走で back と面を在るべき場所へ(`place`)、版 0.11.1。F6 の `store_list_mine` のために `subject_free` の宣言を足した
+- WGm 向け:`docs/reports/yumemi-gen-8-patches/star-4504b36.patch`(musearch 4504b36 に WGy の star を載せ直し + F6 の Service の ★ の直し、275 file)、645ec49 向けの `star.patch` に `QueueParty`
+- 残り(名指し):F6 の Service の root の 1 文と入口(api 2 fail)、空の検索の「API を呼ばない」要求の食い違い(鷹野宛 1)、全走は古い file を消さない(鷹野宛 2)。詳細は `docs/reports/yumemi-gate-1.md` の「r2」節
+
+## DDL
+
+無し。
+
+## 検証
+
+- root `gleam build` 0(warning 1、既存)。`cd gen && gleam test` **283 passed**。format root・gen とも 0
+- fixture ×2 で diff 0、tracked 66 と一致。`git diff v0.11.0 -- src/framework` は 11 file とも A(+1339 / -0)。`gleam export hex-tarball` で 0.11.1 の tar(publish はしていない)
+- 写し(musearch 4504b36 + star-4504b36)×2、1 手 `-- <写し>/api <写し>`:exit 3(www の `app()` 無し 7)、生成物の diff 0。api `npm test` **692 / 694 を 2 回**(新しい DB、PG 55540 は pid 3033448 を起こして kill)。3 面 `gleam build` 0。Workerd の門の表 102 行で status・Location・CSP・pageview・Page が前後全一致
+- 証拠は `gen/build/gate2/`
+
+## 確かめていないこと
+
+- api の 2 fail の直し(F6 の Service の root と入口、WGm)、実 API での門、http の Workerd の表、`-- <root>/api <root>/api` の実走、auth の test
+
+# yumemi-gate-1 真壁 ── 面の門・URL の綴り・CSP・pageview・route の順・client の入口を生成器へ(2026-09-26)
+
+## 状態
+
+- 門の宣言の型 `src/framework/gate.gleam`(新しい module だけ。0.11.0 の公開型は変えていない)、reader `reader/gate.gleam`、emit `emit/gate.gleam` → 面の `src/gen/gate.mjs`(`before_route` / `after_response` / `serve`)。生成 shell の export default は `gate.serve(..)`
+- route 表を literal-first に(`route_order`)。URL の段の `-` はフォルダの `_`(裁定 1 (a)、宣言なし)。空の Page query は `None`
+- client の入口(裁定 2 (a)):`app()` を持つ component を全部登録、`calls` があって `app()` の無い島は exit 3。`blob_copy*` は名指しの残り
+- 詳細・写しの表・前と変わるところ(鷹野宛 5 点)・WGm への申し送り(www / console の `gate.gleam` の本文つき)は `docs/reports/yumemi-gate-1.md`
+
+## DDL
+
+無し。
+
+## 検証
+
+- root `gleam build` 0(warning 1、既存)。`cd gen && gleam test` **252 passed**(241 + 11)。`gleam format --check src test` 0(root / gen)
+- fixture ×2 で diff 0、tracked 一致(`shell.mjs` ×2 更新、`gate.mjs` ×2 追加)
+- 写し `645ec49` ×2:exit 4、差は runtime build の時間 1 行。診断は基線 + www の `app()` 無し 7 行
+- 写しの 3 面:`entry-gates.test.mjs` 11 / 16 / 18 pass(前後同じ)、Workerd の表 98 行で status・Location・CSP・pageview・描いた Page・読みの数が前後全一致(https)。棚卸しは未分類 0、薄い ★ は F6 の行と呼び出しの口だけ
+- 証拠は `gen/build/gate/`
+
+## 確かめていないこと
+
+- 生成物の `src/gen` 全体を写しの面に載せた build(写しの Page が 0.11 の宣言に未追随で、基線から runtime build が exit 1 × 3)。門は写しの `src/gen` に `gate.mjs` / `route.gleam` を重ねて確かめた
+- 空の検索の短絡が要らなくなること(F6 r1 の `/search` が `q` の Var をまだ宣言していない)
+- 実 API(PG)での門。Workerd の APP は F5 の stub で、読みの 11 種は stub の固定応答が decoder に合わず、門を通った後の描画が前後とも 500
+
 # yumemi-gen-8(WGy)真壁 r4 ── 柏木の差し戻し(P0-1)と P1 / P2、鷹野の裁定 1 = (c)(2026-09-26)
 
 ## 状態

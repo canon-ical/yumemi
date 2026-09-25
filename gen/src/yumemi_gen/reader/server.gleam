@@ -35,6 +35,11 @@ pub fn read(units: List(Unit)) -> Result(Read, String) {
       use roots <- result.try(items(module, "roots", root_shape_of))
       use roles <- result.try(items(module, "attached_roles", attached_role_of))
       use browser <- result.try(browser_of(module))
+      use subject_free <- result.try(
+        items(module, "subject_free", fn(item) {
+          g.string_value(item) |> option.to_result("String の literal でない")
+        }),
+      )
       Ok(Read(
         server: model.Server(
           declared: True,
@@ -49,6 +54,7 @@ pub fn read(units: List(Unit)) -> Result(Read, String) {
           roots: roots,
           attached_roles: roles,
           browser: browser,
+          subject_free: subject_free,
         ),
         attached: attached,
       ))
@@ -402,7 +408,14 @@ fn root_shape_of(
         import_: import_,
       ))
     }
-    _ -> Error("Rootless / OwnRoot / RootOf / WithVersion / Carried でない項")
+    Some("QueueParty") -> {
+      use party <- result.try(text(expression, "party"))
+      Ok(model.QueueParty(service: service, party: party))
+    }
+    _ ->
+      Error(
+        "Rootless / OwnRoot / RootOf / WithVersion / Carried / QueueParty でない項",
+      )
   }
 }
 
@@ -669,7 +682,15 @@ pub fn notes(app: model.App) -> List(stop.Note) {
         True, _, _ -> Error(Nil)
       }
     })
+  let unknown_subject_free =
+    list.filter_map(app.server.subject_free, fn(name) {
+      case list.contains(services, name) {
+        True -> Error(Nil)
+        False -> Ok("subject_free の Service が無い: " <> name)
+      }
+    })
   list.flatten([
+    unknown_subject_free,
     unknown_roles,
     unknown_roots,
     unknown_reads,

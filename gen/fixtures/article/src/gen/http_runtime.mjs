@@ -1,4 +1,4 @@
-//// GENERATED from entry.entries / service declarations / framework dispatch [sha256:032d56dd277b] — 手で編集しない
+//// GENERATED from entry.entries / service declarations / framework dispatch [sha256:bbf198d7f83a] — 手で編集しない
 import { Ok, Error } from '../gleam.mjs';
 import { registry } from './registry.mjs';
 import { attached } from './attached.mjs';
@@ -24,7 +24,8 @@ const accepted={article_create:'article',article_publish:'article',article_read:
 const ports={fixture_browser:h_attachedFixtureBrowser,fixture_sync:h_attachedFixtureSync,blob_copy:h_attachedBlobCopy};
 const hooks={};
 const subjects=[];
-const roles={};
+const roles={fixture_session:['read_session']};
 const browserCookie=null;
+const subjectFree=[];
 const keyPattern='[0-9a-f]{64}';
-export const {sessionCookie,cookies,signBrowser,verifyBrowser,host,route,origin,browser,admit,resolve,subject,decode,judge,execute,apiEncode,logicFailureStatus}=http({Ok,Error,registry,attached,c,runtime,hosts,args,modules,phaseGates,accepted,ports,hooks,subjects,roles,browserCookie,apiKeyPattern:keyPattern});
+export const {sessionCookie,cookies,signBrowser,verifyBrowser,host,route,origin,browser,admit,resolve,subject,decode,judge,execute,apiEncode,logicFailureStatus}=http({Ok,Error,registry,attached,c,runtime,hosts,args,modules,phaseGates,accepted,ports,hooks,subjects,roles,browserCookie,subjectFree,apiKeyPattern:keyPattern});

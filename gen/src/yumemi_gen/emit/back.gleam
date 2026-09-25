@@ -873,11 +873,13 @@ fn consumer_of(
     Some(entity), Ok(base), Some(allow) -> {
       let name = camel(service.module)
       let allow_alias = "allow" <> naming.pascal(last_path(allow))
-      let staff_root =
-        list.all(clauses_of(app, base.module), fn(clause) {
-          case clause {
-            model.Clause(who: who, ..) -> string.ends_with(who, "Staff")
-            _ -> False
+      let party =
+        list.find_map(app.server.roots, fn(shape) {
+          case shape {
+            model.QueueParty(service: name, party: party)
+              if name == service.module
+            -> Ok(party)
+            _ -> Error(Nil)
           }
         })
       Ok(Consumer(
@@ -910,9 +912,9 @@ fn consumer_of(
           <> allow_alias
           <> ".SystemActor(),field:"
           <> quoted(entity.module)
-          <> case staff_root {
-          True -> ",staffRoot:true"
-          False -> ""
+          <> case party {
+          Ok(party) -> ",party:" <> quoted(party)
+          Error(_) -> ""
         }
           <> "},\n",
       ))
@@ -924,10 +926,6 @@ fn consumer_of(
         <> " の root を借りる Service が無い(root の 1 文を持ち、自分を queue で呼ぶ Service)",
       )
   }
-}
-
-fn clauses_of(app: App, module: String) -> List(model.Clause) {
-  list.key_find(app.clauses, module) |> result.unwrap([])
 }
 
 fn allow_entity(app: App, service: Service) -> Option(Entity) {

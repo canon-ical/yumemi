@@ -14,6 +14,7 @@
 // - `roles`: attached の口の名 -> 役の名の並び(`declare_browser` / `read_session` / `switch_subject` /
 //   `tail_path` / `needs_browser`)。app の `src/server.gleam` の `attached_roles` から。framework は口の名を知らない
 // - `browserCookie`: 成人の申告を焼く署名 cookie(`{cookie,binding,claim,maxAgeDays}`)か null。`browser` の宣言から
+// - `subjectFree`: 入口の主体の集合の検査を外す Service の名(`subject_free` の宣言から。主体を切り替える前に読む口)
 // - `hooks`: ★ の業務の行(下の `hook(...)` の名)。どれも無くてよい
 import * as framework_entry from '../entry.mjs';
 
@@ -251,7 +252,7 @@ export function http(spec) {
   // Service routes are the only routes whose subject must match the entry's
   // declared subject set.  The attached session routes intentionally expose
   // the current session before a face switch.
-  if(s.record?.module&&s.resolved?.subject_kind&&c.tag(s.entry.subject)==='subjects'&&![...s.entry.subject[0]].some(x=>c.tag(x)===s.resolved.subject_kind)) fail('forbidden',403);
+  if(s.record?.module&&!(spec.subjectFree??[]).includes(s.record.name)&&s.resolved?.subject_kind&&c.tag(s.entry.subject)==='subjects'&&![...s.entry.subject[0]].some(x=>c.tag(x)===s.resolved.subject_kind)) fail('forbidden',403);
  });
  const decode=check('decode',8,async s=>{
   let body={};

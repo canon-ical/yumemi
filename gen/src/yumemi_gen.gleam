@@ -3,8 +3,10 @@
 //// 出すのは生成束 ── `src/gen/types/*`、`src/gen/query.gleam` と
 //// `src/gen/query/{from,field}.gleam`、`src/gen/reads/*`、`src/gen/root/*`、
 //// `db/queries/<service>/<name>.sql`(読み)、verb / phase、`src/gen/allow/*`(root が指す allow)。
-//// 出力先が app そのものなら、`db/queries` へは既に在る `-- GENERATED` の file だけを書く
-//// (生成器だけが出す SQL は `src/gen/sql.mjs` に束ねる ── `into_app`)。
+//// 出力先が app そのものか app を含む dir(musearch なら `<root>/api` か `<root>`)なら、生成物を在るべき場所に
+//// 置く ── back は app の下、面は面の package の下(`place`)。このとき `db/queries` へは既に在る
+//// `-- GENERATED` の file だけを書く(生成器だけが出す SQL は `src/gen/sql.mjs` に束ねる ── `into_app`)。
+//// 出力先が別の dir なら、back は `<out>/src/gen/..`、面は `<out>/<面>/..` に並べる。
 ////
 //// **出力が揃わなかったら 0 で終わらない。**理由は 20 の exit code 表で分類し(`stop`)、
 //// stderr と `_diagnostics.txt` の両方に同じ1行で出す。ファイル自体は書いてから止まる
@@ -75,11 +77,16 @@ fn halt(code: Int) -> Nil
 fn bundle_front(
   out_dir: String,
   app_dir: String,
-  faces: List(String),
+  faces: List(#(String, String)),
 ) -> List(String)
 
-@external(javascript, "./yumemi_gen_ffi.mjs", "same_dir")
-fn same_dir(left: String, right: String) -> Bool
+/// `inner` が `outer` そのものかその下の dir か(実体の path で比べる)。
+@external(javascript, "./yumemi_gen_ffi.mjs", "holds_dir")
+fn holds_dir(outer: String, inner: String) -> Bool
+
+/// `from` から `to` への相対 path(同じ dir なら "")。
+@external(javascript, "./yumemi_gen_ffi.mjs", "relative_dir")
+fn relative_dir(from: String, to: String) -> String
 
 @external(javascript, "./yumemi_gen_ffi.mjs", "sql_files")
 fn sql_files(dir: String) -> List(#(String, String))
@@ -91,6 +98,14 @@ fn format_gleam(out_dir: String, files: List(String)) -> String
 pub fn generate(
   app_dir: String,
 ) -> Result(#(List(types.File), List(Note)), Note) {
+  generate_with_faces(app_dir)
+  |> result.map(fn(made) { #(made.0, made.1) })
+}
+
+/// `generate` に、見つけた面の (名, package の path) を添える(`place` が面の置き場に使う)。
+fn generate_with_faces(
+  app_dir: String,
+) -> Result(#(List(types.File), List(Note), List(#(String, String))), Note) {
   use units <- result.try(
     source.load(app_dir)
     |> result.map_error(fn(error) {
@@ -132,10 +147,12 @@ pub fn generate(
       discovered.notes,
       list.flat_map(front_models, fn(item) {
         let #(package, model) = item
-        list.append(
+        list.flatten([
           front.notes(model, app.services),
           front_emit.route_notes(app, package.name, model, hashes),
-        )
+          front_emit.gate_notes(app, units, package, model),
+          front_emit.client_notes(package, model),
+        ])
       }),
     )
   let front_notes =
@@ -201,7 +218,11 @@ pub fn generate(
       ),
     ]
   }
-  Ok(#(list.flatten([made, back_output.files, diagnostics]), notes))
+  Ok(#(
+    list.flatten([made, back_output.files, diagnostics]),
+    notes,
+    list.map(discovered.packages, fn(package) { #(package.name, package.path) }),
+  ))
 }
 
 fn read_note(error: reader.Error) -> Note {
@@ -255,13 +276,37 @@ fn front_note(error: front.Error) -> Note {
 }
 
 fn run(app_dir: String, out_dir: String) -> Result(#(Int, List(Note)), Note) {
-  use #(generated, notes) <- result.try(generate(app_dir))
+  use #(generated, notes, face_dirs) <- result.try(generate_with_faces(app_dir))
+  let in_place = holds_dir(out_dir, app_dir)
+  let placement = case in_place {
+    True ->
+      Placement(
+        app: relative_dir(out_dir, app_dir),
+        faces: list.map(face_dirs, fn(face) {
+          #(face.0, relative_dir(out_dir, face.1))
+        }),
+      )
+    False -> Placement(app: "", faces: [])
+  }
+  let faces =
+    generated
+    |> list.filter_map(fn(file) {
+      case string.ends_with(file.path, "/priv/static/_yumemi/client.mjs") {
+        True -> first_segment(file.path)
+        False -> Error(Nil)
+      }
+    })
+    |> list.unique
+    |> list.map(fn(face) { #(face, face_dir(placement, face)) })
   let files =
-    into_app(generated, same_dir(app_dir, out_dir), fn(path) {
-      case simplifile.read(out_dir <> "/" <> path) {
+    into_app(generated, in_place, fn(path) {
+      case simplifile.read(out_dir <> "/" <> place(placement, path)) {
         Ok(text) -> string.starts_with(text, "-- GENERATED")
         Error(_) -> False
       }
+    })
+    |> list.map(fn(file) {
+      types.File(..file, path: place(placement, file.path))
     })
   use _ <- result.try(
     simplifile.create_directory_all(out_dir)
@@ -292,15 +337,6 @@ fn run(app_dir: String, out_dir: String) -> Result(#(Int, List(Note)), Note) {
         text: "gleam format に失敗した: " <> detail,
       ))
   })
-  let faces =
-    files
-    |> list.filter_map(fn(file) {
-      case string.ends_with(file.path, "/priv/static/_yumemi/client.mjs") {
-        True -> first_segment(file.path)
-        False -> Error(Nil)
-      }
-    })
-    |> list.unique
   let bundle_errors = bundle_front(out_dir, app_dir, faces)
   let all_notes = list.append(notes, bundle_notes(bundle_errors))
   use _ <- result.try(case bundle_errors {
@@ -333,6 +369,42 @@ fn value_source_bundle_error(error: String) -> Bool {
   && {
     string.contains(error, "view(Nil)")
     || string.contains(error, "space_title.view(it.space_list)")
+  }
+}
+
+/// 生成物の置き場。`app` は出力先から app への相対(別の dir に出すなら "")、`faces` は面の名から
+/// 面の package への相対(別の dir に出すなら空 ── 面は `<out>/<面>/..`)。
+pub type Placement {
+  Placement(app: String, faces: List(#(String, String)))
+}
+
+/// 生成束の path(back は app からの相対、面は `<面>/..`)を、出力先からの相対に直す。
+pub fn place(placement: Placement, path: String) -> String {
+  case path {
+    "_diagnostics.txt" -> path
+    _ -> {
+      let face = case string.split_once(path, "/") {
+        Ok(#(first, rest)) ->
+          list.key_find(placement.faces, first)
+          |> result.map(fn(dir) { join(dir, rest) })
+        Error(_) -> Error(Nil)
+      }
+      case face {
+        Ok(placed) -> placed
+        Error(_) -> join(placement.app, path)
+      }
+    }
+  }
+}
+
+fn face_dir(placement: Placement, face: String) -> String {
+  list.key_find(placement.faces, face) |> result.unwrap(face)
+}
+
+fn join(dir: String, path: String) -> String {
+  case dir {
+    "" -> path
+    _ -> dir <> "/" <> path
   }
 }
 
