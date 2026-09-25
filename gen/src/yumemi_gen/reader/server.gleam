@@ -3,6 +3,7 @@
 //// 読めない形は `Error(<名指し>)` で返し、reader が exit 4 にする ── 黙って落とすと口が消える。
 
 import glance
+import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/result
@@ -28,6 +29,7 @@ pub fn read(units: List(Unit)) -> Result(Read, String) {
       use cron <- result.try(items(module, "cron", cron_of))
       use objects <- result.try(items(module, "durable_objects", object_of))
       use hooks <- result.try(items(module, "hooks", hook_of))
+      use connectors <- result.try(items(module, "connectors", connector_of))
       Ok(Read(
         server: model.Server(
           declared: True,
@@ -36,6 +38,7 @@ pub fn read(units: List(Unit)) -> Result(Read, String) {
           cron: cron,
           durable_objects: objects,
           hooks: hooks,
+          connectors: connectors,
         ),
         attached: attached,
       ))
@@ -217,6 +220,73 @@ fn hook_of(expression: glance.Expression) -> Result(model.Hook, String) {
       Ok(model.Hook(name: name, module: module))
     }
     _ -> Error("Hook でない項")
+  }
+}
+
+fn connector_of(
+  expression: glance.Expression,
+) -> Result(model.Connector, String) {
+  case g.ctor_name(expression) {
+    Some("Connector") -> {
+      use name <- result.try(text(expression, "name"))
+      use ports <- result.try(case g.labelled(expression, "ports") {
+        Some(glance.List(elements: elements, rest: None, ..)) ->
+          list.try_map(elements, port_of)
+        _ -> Error("ports が List の literal でない")
+      })
+      Ok(model.Connector(name: name, ports: ports))
+    }
+    _ -> Error("Connector でない項")
+  }
+}
+
+fn port_of(
+  expression: glance.Expression,
+) -> Result(model.ConnectorPort, String) {
+  case g.ctor_name(expression) {
+    Some("Call") -> {
+      use name <- result.try(text(expression, "name"))
+      use op <- result.try(text(expression, "op"))
+      Ok(model.CallPort(name: name, op: op))
+    }
+    Some("Send") -> {
+      use name <- result.try(text(expression, "name"))
+      use op <- result.try(text(expression, "op"))
+      Ok(model.SendPort(name: name, op: op))
+    }
+    Some("Enqueue") -> {
+      use name <- result.try(text(expression, "name"))
+      use kind <- result.try(text(expression, "kind"))
+      Ok(model.EnqueuePort(name: name, kind: kind))
+    }
+    Some("Fetch") -> {
+      use name <- result.try(text(expression, "name"))
+      use module <- result.try(text(expression, "module"))
+      use js <- result.try(text(expression, "js"))
+      use arity <- result.try(integer(expression, "arity"))
+      Ok(model.FetchPort(name: name, module: module, js: js, arity: arity))
+    }
+    Some("Pure") -> {
+      use name <- result.try(text(expression, "name"))
+      use module <- result.try(text(expression, "module"))
+      use js <- result.try(text(expression, "js"))
+      use arity <- result.try(integer(expression, "arity"))
+      Ok(model.PurePort(name: name, module: module, js: js, arity: arity))
+    }
+    _ -> Error("Call / Send / Enqueue / Fetch / Pure でない口")
+  }
+}
+
+fn integer(
+  expression: glance.Expression,
+  label: String,
+) -> Result(Int, String) {
+  case g.labelled(expression, label) {
+    Some(value) ->
+      g.int_value(value)
+      |> option.then(fn(found) { option.from_result(int.parse(found)) })
+      |> option.to_result(label <> " が Int の literal でない")
+    None -> Error(label <> " が無い")
   }
 }
 

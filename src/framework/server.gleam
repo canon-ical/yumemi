@@ -104,3 +104,22 @@ pub type Hook {
   /// `module` は `src/` からの ★ の道(`hooks`)、`name` はその module が export する関数の名。
   Hook(name: String, module: String)
 }
+
+/// connector の FFI の口(WGy r2、鷹野の裁定 2)。型と typed な包みは ★ に置き、
+/// 生成物(`src/gen/connector/<name>.gleam`)は口だけを持つ ── 引数と戻りは型変数で、★ の包みが型を決める。
+pub type Connector {
+  Connector(name: String, ports: List(Port))
+}
+
+pub type Port {
+  /// framework の operations の `call`(Read の境界)。`op` は operations の口の名
+  Call(name: String, op: String)
+  /// framework の operations の `call`(Write の境界)。通知のように応答を使わない口
+  Send(name: String, op: String)
+  /// framework の operations の `enqueue`(Write の境界)。`kind` は Queue の kind
+  Enqueue(name: String, kind: String)
+  /// ★ の JS の関数(`module` は `src/` からの道、拡張子無し)。ctx を先頭に取り Promise を返す(Read の境界)
+  Fetch(name: String, module: String, js: String, arity: Int)
+  /// ★ の JS の純関数
+  Pure(name: String, module: String, js: String, arity: Int)
+}

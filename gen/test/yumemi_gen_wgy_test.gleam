@@ -315,3 +315,72 @@ pub fn attached_table_for_the_runtime_comes_from_the_declaration_test() {
   ]
   |> list.each(fn(row) { string.contains(attached, row) |> should.be_true })
 }
+
+// ── connector(r2、鷹野の裁定 2)────────────────────────────────────────────
+
+/// connector の宣言から FFI の口だけを出す。型は ★ の包みが決める(引数と戻りは型変数)。
+pub fn connector_ports_follow_the_declaration_test() {
+  let units =
+    units_with(article_fixture, [
+      server(
+        "pub const connectors = [
+  Connector(name: \"heaven\", ports: [
+    Pure(name: \"is_girl_page\", module: \"heaven_ffi\", js: \"isGirlPage\", arity: 1),
+    Fetch(name: \"resolve\", module: \"heaven_ffi\", js: \"resolve\", arity: 2),
+  ]),
+  Connector(name: \"idp\", ports: [
+    Call(name: \"invite\", op: \"invite\"),
+    Send(name: \"notify\", op: \"notify\"),
+    Enqueue(name: \"article_index\", kind: \"article_index\"),
+  ]),
+]",
+      ),
+    ])
+  let files = back_files(units)
+  let heaven = file(files, "src/gen/connector/heaven.gleam")
+  string.starts_with(
+    heaven,
+    "//// GENERATED from server.connectors.heaven [sha256:",
+  )
+  |> should.be_true
+  string.contains(
+    heaven,
+    "@external(javascript, \"../../heaven_ffi.mjs\", \"isGirlPage\")\npub fn is_girl_page(a1: a1) -> r",
+  )
+  |> should.be_true
+  string.contains(
+    heaven,
+    "fn resolve_raw(ctx: Context, a1: a1, a2: a2) -> Promise(r)",
+  )
+  |> should.be_true
+  string.contains(heaven, "pub fn resolve(a1: a1, a2: a2) -> connector.Read(r)")
+  |> should.be_true
+  string.contains(heaven, "operations_ffi") |> should.be_false
+  let idp = file(files, "src/gen/connector/idp.gleam")
+  string.contains(
+    idp,
+    "connector.read(fn(ctx) { call(ctx, \"invite\", input) })",
+  )
+  |> should.be_true
+  string.contains(
+    idp,
+    "pub fn notify(input: a) -> connector.Write(Nil) {\n  connector.write(fn(ctx) { call(ctx, \"notify\", input) })",
+  )
+  |> should.be_true
+  string.contains(
+    idp,
+    "connector.write(fn(ctx) { enqueue(ctx, \"article_index\", input) })",
+  )
+  |> should.be_true
+}
+
+/// 口の構成子が違う項は reader が止める。
+pub fn unreadable_connector_port_stops_the_reader_test() {
+  let units =
+    units_with(article_fixture, [
+      server(
+        "pub const connectors = [Connector(name: \"x\", ports: [Other(name: \"y\")])]",
+      ),
+    ])
+  let assert Error(_) = reader.read(units)
+}

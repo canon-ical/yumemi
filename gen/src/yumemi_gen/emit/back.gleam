@@ -17,6 +17,7 @@
 //// | `src/gen/operations_ffi.mjs` | with の逆向き矢印(root の子の List) |
 //// | `src/gen/entry/{auth,queue,system}.gleam` | framework の session / outbox の契約(固定) |
 
+import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
@@ -89,6 +90,7 @@ pub fn emit(
           ],
           subject_file(app, input),
           key_file(app, input),
+          connector_files(app, input),
           sum_files(app, units, input),
           queue_file,
           cron_file,
@@ -1168,4 +1170,140 @@ fn system_text(input: String) -> String {
   <> "pub fn session(\n  database: Database,\n  party: String,\n  expires_at: String,\n  credential_version: Int,\n) -> Promise(Issued)\n\n"
   <> "@external(javascript, \"../runtime.mjs\", \"revokeParty\")\n"
   <> "pub fn revoke(database: Database, party: String, floor: Int) -> Promise(Int)\n"
+}
+
+// connector ─────────────────────────────────────────────────────────────
+
+/// `server.connectors` の口。型は ★ の包みが決める(引数と戻りは型変数)。
+/// operations の口は framework の `call` / `enqueue`、★ の JS は `src/` からの道で指す。
+fn connector_files(app: App, input: String) -> List(File) {
+  list.map(app.server.connectors, fn(found) {
+    File(
+      path: "src/gen/connector/" <> found.name <> ".gleam",
+      text: gleam_header("server.connectors." <> found.name, input)
+        <> connector_text(found),
+    )
+  })
+}
+
+fn connector_text(found: model.Connector) -> String {
+  let calls =
+    list.any(found.ports, fn(port) {
+      case port {
+        model.CallPort(..) | model.SendPort(..) -> True
+        _ -> False
+      }
+    })
+  let enqueues =
+    list.any(found.ports, fn(port) {
+      case port {
+        model.EnqueuePort(..) -> True
+        _ -> False
+      }
+    })
+  let context =
+    list.any(found.ports, fn(port) {
+      case port {
+        model.PurePort(..) -> False
+        _ -> True
+      }
+    })
+  let head = case context {
+    True -> [
+      "import framework/connector",
+      "import framework/io.{type Context, type Promise}",
+    ]
+    False -> []
+  }
+  let call_port = case calls {
+    True -> [
+      "@external(javascript, \"../operations_ffi.mjs\", \"call\")\nfn call(ctx: Context, name: String, input: a) -> Promise(b)",
+    ]
+    False -> []
+  }
+  let enqueue_port = case enqueues {
+    True -> [
+      "@external(javascript, \"../operations_ffi.mjs\", \"enqueue\")\nfn enqueue(ctx: Context, name: String, input: a) -> Promise(Nil)",
+    ]
+    False -> []
+  }
+  let ports = list.map(found.ports, port_text)
+  string.join(
+    list.flatten([
+      case head {
+        [] -> []
+        _ -> [string.join(head, "\n")]
+      },
+      call_port,
+      enqueue_port,
+      ports,
+    ]),
+    "\n\n",
+  )
+  <> "\n"
+}
+
+fn port_text(port: model.ConnectorPort) -> String {
+  case port {
+    model.CallPort(name: name, op: op) ->
+      "pub fn "
+      <> name
+      <> "(input: a) -> connector.Read(b) {\n  connector.read(fn(ctx) { call(ctx, \""
+      <> op
+      <> "\", input) })\n}"
+    model.SendPort(name: name, op: op) ->
+      "pub fn "
+      <> name
+      <> "(input: a) -> connector.Write(Nil) {\n  connector.write(fn(ctx) { call(ctx, \""
+      <> op
+      <> "\", input) })\n}"
+    model.EnqueuePort(name: name, kind: kind) ->
+      "pub fn "
+      <> name
+      <> "(input: a) -> connector.Write(Nil) {\n  connector.write(fn(ctx) { enqueue(ctx, \""
+      <> kind
+      <> "\", input) })\n}"
+    model.FetchPort(name: name, module: module, js: js, arity: arity) -> {
+      let names = port_arguments(arity)
+      "@external(javascript, \"../../"
+      <> module
+      <> ".mjs\", \""
+      <> js
+      <> "\")\nfn "
+      <> name
+      <> "_raw(ctx: Context"
+      <> string.concat(
+        list.map(names, fn(item) { ", " <> item <> ": " <> item }),
+      )
+      <> ") -> Promise(r)\n\npub fn "
+      <> name
+      <> "("
+      <> string.join(list.map(names, fn(item) { item <> ": " <> item }), ", ")
+      <> ") -> connector.Read(r) {\n  connector.read(fn(ctx) { "
+      <> name
+      <> "_raw(ctx"
+      <> string.concat(list.map(names, fn(item) { ", " <> item }))
+      <> ") })\n}"
+    }
+    model.PurePort(name: name, module: module, js: js, arity: arity) -> {
+      let names = port_arguments(arity)
+      "@external(javascript, \"../../"
+      <> module
+      <> ".mjs\", \""
+      <> js
+      <> "\")\npub fn "
+      <> name
+      <> "("
+      <> string.join(list.map(names, fn(item) { item <> ": " <> item }), ", ")
+      <> ") -> r"
+    }
+  }
+}
+
+fn port_arguments(arity: Int) -> List(String) {
+  case arity <= 0 {
+    True -> []
+    False ->
+      list.append(port_arguments(arity - 1), ["a" <> int.to_string(arity)])
+  }
 }

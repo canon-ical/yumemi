@@ -435,6 +435,19 @@ pub type Hook {
   Hook(name: String, module: String)
 }
 
+/// `server.connectors`。口だけ ── 型は ★。
+pub type Connector {
+  Connector(name: String, ports: List(ConnectorPort))
+}
+
+pub type ConnectorPort {
+  CallPort(name: String, op: String)
+  SendPort(name: String, op: String)
+  EnqueuePort(name: String, kind: String)
+  FetchPort(name: String, module: String, js: String, arity: Int)
+  PurePort(name: String, module: String, js: String, arity: Int)
+}
+
 /// `src/server.gleam` の宣言。`declared` は module があったか(無い app は back の表を出さない)。
 pub type Server {
   Server(
@@ -444,6 +457,7 @@ pub type Server {
     cron: List(Cron),
     durable_objects: List(DurableObject),
     hooks: List(Hook),
+    connectors: List(Connector),
   )
 }
 
@@ -455,6 +469,7 @@ pub fn empty_server() -> Server {
     cron: [],
     durable_objects: [],
     hooks: [],
+    connectors: [],
   )
 }
 
