@@ -1,3 +1,22 @@
+# yumemi-fix-0112 真壁 ── 生成器の穴 H1〜H3 と List / record の Args(r2)、版 0.11.2(2026-09-26)
+
+## 状態
+
+- H1:生成の live の body を Args の型で encode(Bool → 真偽、Int / Float → 数、Option の中身も)。`emit/front.gleam`
+- H2:GET は path の穴の残りの Args を query に(`with_query`、Option の空は載せない)。back の framework `server/http.mjs` は GET / HEAD の query の `bool` / `float` の綴りを読む。POST / PUT / DELETE は変えていない
+- H3:読みの別名が `import service/*` の先の `gen/reads/*` を推移で辿る(`emit/runtime.gleam` の `reads_reached`)
+- r2:live の `List(X)`(X がスカラ)の欄は JSON の文字列の配列を読み、要素を X の規則(H1)で JSON の配列に。record・組・Dict・スカラでない要素の List は欄の文字列を JSON の本文として送る(`Wire`)。fixture の `pick_tag` を JSON の配列で Set する形に、tracked の生成物 2 つを更新
+- 版 0.11.2。gen test 289 / 0、fixture ×2 差 0、写し(musearch `efd93d6e`)の 1 手 ×2 差 0、api 698 / 698、3 面 build 0、roster_reorder・muse_set_theme の live を実 API(wrangler 8841 / PG 55540)で 200
+- 残り:GET の List / record の Args は query に欄の文字列のまま載る(写しに GET の List / record は無い)。back の query の bool / float と link_import_apply の links は実 request で通していない
+
+## DDL
+
+無し
+
+## 報告
+
+`docs/reports/yumemi-fix-0112.md` の r1・r2 節(証跡は `gen/build/fix0112/`)
+
 # yumemi-gate-1 真壁 r2 ── 載せ直し(WGy の merge)と直し、版 0.11.1(2026-09-26)
 
 ## 状態

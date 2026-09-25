@@ -83,6 +83,15 @@ export function http(spec) {
   if(!Number.isSafeInteger(value)) invalid(field);
   return value;
  }
+ // GET の query から来た欄(0.11.2 H2)は綴りが文字列 ── `bool` は `true` / `false`、`float` は数の綴りを読む。
+ // body(POST / PUT / DELETE の JSON)から来た欄は今までどおり JSON の型で読む。
+ function queryRaw(type,raw) {
+  if(typeof raw!=='string') return raw;
+  const head=type[0]==='option'?type[1][0]:type[0];
+  if(head==='bool') return raw==='true'?true:raw==='false'?false:raw;
+  if(head==='float'&&/^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][-+]?[0-9]+)?$/.test(raw)) return Number(raw);
+  return raw;
+ }
  function decodeArg(type,raw,field,s) {
   const [head,a,b]=type;
   switch(head) {
@@ -121,7 +130,7 @@ export function http(spec) {
   const before=hook('args_before');
   if(before) before(record.name,raw,{c,s,fail,invalid});
   return types.map(([key,type])=>{
-   try { return decodeArg(type,raw[key],key,s); }
+   try { return decodeArg(type,s.queryKeys?.has(key)?queryRaw(type,raw[key]):raw[key],key,s); }
    catch(error) { if(error.message==='invalid_argument') error.field=key; throw error; }
   });
  }
@@ -275,6 +284,7 @@ export function http(spec) {
   let path;
   try {path=Object.fromEntries(Object.entries(s.pathArgs).map(([k,v])=>[k,decodeURIComponent(v)]));} catch {fail('invalid_argument',400,'path');}
   const raw={...Object.fromEntries(s.url.searchParams),...body,...path};
+  s.queryKeys=['POST','PUT','DELETE'].includes(s.request.method)?null:new Set([...s.url.searchParams.keys()].filter(key=>!(key in path)));
   if(!s.record.module) {
    if(roleOf(s.record.name,'switch_subject')) {
     const kinds=spec.subjects;

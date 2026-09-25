@@ -231,25 +231,16 @@ fn staged_names(units: List(Unit)) -> List(String) {
 }
 
 /// 他の Service の読みの module を import する ★ Service -> その Service の名(import の順)。
+/// `import service/<Y>` の先も辿る(0.11.2 H3)── Y が import する `gen/reads/<Z>` を、Y を呼ぶ
+/// Service の別名にも足す(直に import した名が先、辿った名は後、重なりは先の 1 つ)。
 fn read_aliases(app: App, units: List(Unit)) -> String {
   app.services
   |> list.filter_map(fn(service) {
-    let text = case
-      list.find(units, fn(unit) { unit.path == "service/" <> service.module })
-    {
-      Ok(unit) -> unit.text
-      Error(_) -> ""
-    }
-    let others = case string.split(text, "import gen/reads/") {
-      [_, ..rest] ->
-        list.filter_map(rest, fn(piece) {
-          case string.split_once(piece, " ") {
-            Ok(#(name, _)) if name != service.module -> Ok(quoted(name))
-            _ -> Error(Nil)
-          }
-        })
-      [] -> []
-    }
+    let others =
+      reads_reached(units, "service/" <> service.module, [])
+      |> list.filter(fn(name) { name != service.module })
+      |> list.unique
+      |> list.map(quoted)
     case others {
       [] -> Error(Nil)
       _ ->
@@ -257,6 +248,63 @@ fn read_aliases(app: App, units: List(Unit)) -> String {
     }
   })
   |> string.concat
+}
+
+/// `path` の module が import する `gen/reads/<Z>` の Z(import の順)と、`import service/<Y>` の先で
+/// 同じく辿った Z。`seen` は辿った module の道(循環の止め)。
+fn reads_reached(
+  units: List(Unit),
+  path: String,
+  seen: List(String),
+) -> List(String) {
+  let text = case list.find(units, fn(unit) { unit.path == path }) {
+    Ok(unit) -> unit.text
+    Error(_) -> ""
+  }
+  let seen = [path, ..seen]
+  let direct = imported_modules(text, "gen/reads/")
+  let reached =
+    imported_modules(text, "service/")
+    |> list.map(fn(name) { "service/" <> name })
+    |> list.fold(#([], seen), fn(acc, next) {
+      let #(found, seen) = acc
+      case list.contains(seen, next) {
+        True -> acc
+        False -> #(list.append(found, reads_reached(units, next, seen)), [
+          next,
+          ..seen
+        ])
+      }
+    })
+  list.append(direct, reached.0)
+}
+
+/// `import <prefix><名>` の名(行頭の import だけ、alias・`.{..}` は外す)。
+fn imported_modules(text: String, prefix: String) -> List(String) {
+  string.split(text, "\n")
+  |> list.filter_map(fn(line) {
+    case string.starts_with(line, "import " <> prefix) {
+      False -> Error(Nil)
+      True -> {
+        let rest = string.drop_start(line, string.length("import " <> prefix))
+        case module_token(string.to_graphemes(rest), "") {
+          "" -> Error(Nil)
+          name -> Ok(name)
+        }
+      }
+    }
+  })
+}
+
+fn module_token(chars: List(String), acc: String) -> String {
+  case chars {
+    [char, ..rest] ->
+      case string.contains("abcdefghijklmnopqrstuvwxyz0123456789_/", char) {
+        True -> module_token(rest, acc <> char)
+        False -> acc
+      }
+    [] -> acc
+  }
 }
 
 /// `Call` / `Send` の口の op と connector の名。
