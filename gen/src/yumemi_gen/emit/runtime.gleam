@@ -12,6 +12,7 @@ import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
+import yumemi_gen/emit/accepted
 import yumemi_gen/emit/root
 import yumemi_gen/emit/types.{type File}
 import yumemi_gen/emit/typing
@@ -785,30 +786,8 @@ fn outbox_text(app: App, units: List(Unit), kinds: List(String)) -> String {
       Error(_) -> False
     }
   }
-  let send_connectors =
-    app.server.connectors
-    |> list.filter(fn(connector) {
-      list.any(connector.ports, fn(port) {
-        case port {
-          model.SendPort(..) -> True
-          _ -> False
-        }
-      })
-    })
-    |> list.map(fn(connector) { "gen/connector/" <> connector.name })
   let boundaries =
-    list.filter(kinds, fn(kind) {
-      let source = case
-        list.find(units, fn(unit) { unit.path == "service/" <> kind })
-      {
-        Ok(unit) -> unit.text
-        Error(_) -> ""
-      }
-      list.any(send_connectors, fn(path) {
-        string.contains(source, "import " <> path)
-        || string.contains(source, "import " <> string.drop_start(path, 4))
-      })
-    })
+    list.filter(kinds, fn(kind) { accepted.boundary(app, units, kind) })
   string.concat([
     "const folds={\n",
     list.map(kinds, fn(kind) {
