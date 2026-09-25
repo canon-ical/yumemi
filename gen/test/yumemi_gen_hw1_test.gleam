@@ -442,8 +442,9 @@ pub fn allow_without_restriction_adds_nothing_test() {
   string.contains(found, "jsonb_array_elements") |> should.be_false
 }
 
-/// 入れられない形は exit 4 ── Self(party の穴で表せない)、相の無い Entity を Only で絞る、
-/// party の列が無い Entity、from / join から辿れない Entity。どれも SQL を出さない。
+/// 入れられない形は exit 4 ── Self の who が主体でない、Self の主体が allow の Entity と違い
+/// from / join から辿れない(WGy r4)、相の無い Entity を Only で絞る、party の列が無い Entity、
+/// from / join から辿れない Entity。どれも SQL を出さない。
 pub fn allow_clause_that_cannot_be_placed_is_exit_four_test() {
   let out =
     generate(
@@ -452,7 +453,14 @@ pub fn allow_clause_that_cannot_be_placed_is_exit_four_test() {
         memo_service(
           "memo_self",
           "article",
-          "allow.Clause(who: allow.AsStaff, at: allow.AnyPhase, owner: allow.Self)",
+          "allow.Clause(who: allow.Anyone, at: allow.AnyPhase, owner: allow.Self)",
+        ),
+        from_service(
+          "staff_self_far",
+          "memo",
+          "allow.Clause(who: allow.AsArticle, at: allow.AnyPhase, owner: allow.Self)",
+          "Staff",
+          "",
         ),
         memo_service(
           "memo_phase",
@@ -475,7 +483,11 @@ pub fn allow_clause_that_cannot_be_placed_is_exit_four_test() {
     )
   let self_note = note_with(out, "memo_self/items")
   self_note.class |> should.equal(stop.Conflict)
-  string.contains(self_note.text, "owner Self は party の穴で表せない")
+  string.contains(self_note.text, "owner Self の who が主体でない")
+  |> should.be_true
+  let self_far_note = note_with(out, "staff_self_far/items")
+  self_far_note.class |> should.equal(stop.Conflict)
+  string.contains(self_far_note.text, "allow 句の Article が from / join から辿れない")
   |> should.be_true
   let phase_note = note_with(out, "memo_phase/items")
   phase_note.class |> should.equal(stop.Conflict)
@@ -488,7 +500,7 @@ pub fn allow_clause_that_cannot_be_placed_is_exit_four_test() {
   far_note.class |> should.equal(stop.Conflict)
   string.contains(far_note.text, "allow 句の Article が from / join から辿れない")
   |> should.be_true
-  ["memo_self", "memo_phase", "memo_party", "staff_far"]
+  ["memo_self", "staff_self_far", "memo_phase", "memo_party", "staff_far"]
   |> list.each(fn(name) {
     has_file(out, "db/queries/" <> name <> "/items.sql") |> should.be_false
   })
@@ -589,7 +601,7 @@ pub fn manual_verbs_are_quiet_and_listed_in_the_header_test() {
   })
   |> should.equal([])
   let assert [generated] = verb.emit(app, hash.of(units))
-  string.contains(generated.text, "//// handwritten: rebuild_article_index\n")
+  string.contains(generated.text, "//// manual: rebuild_article_index\n")
   |> should.be_true
 }
 
@@ -1146,4 +1158,54 @@ pub fn pick_of_child_columns_that_cannot_be_chosen_is_exit_four_test() {
   |> should.be_true
   has_file(out, "db/queries/album_odd/stray.sql") |> should.be_false
   has_file(out, "db/queries/album_odd/twice.sql") |> should.be_false
+}
+
+/// owner `Self` で、句の `As<X>` の X が allow の Entity と違う形(WGy の裁定 4、r4)── 「その行の X が
+/// 自分」の意味なので主体の鍵の穴 `subject=$K` を足し、X の key の列と比べる。柏木の再現
+/// (`gen/allow/memo` × `AsStaff` × `Self`)と、allow が別の Entity の形(`gen/allow/article`)の 2 つ。
+pub fn allow_clause_self_on_another_entity_uses_the_subject_key_hole_test() {
+  let out =
+    generate(
+      units_with(article_fixture, [
+        memo_entity(),
+        memo_service(
+          "memo_self",
+          "memo",
+          "allow.Clause(who: allow.AsStaff, at: allow.AnyPhase, owner: allow.Self)",
+        ),
+        memo_service(
+          "memo_self_article",
+          "article",
+          "allow.Clause(who: allow.AsStaff, at: allow.AnyPhase, owner: allow.Self)",
+        ),
+      ]),
+    )
+  ["memo_self", "memo_self_article"]
+  |> list.each(fn(name) {
+    let found = file(out, "db/queries/" <> name <> "/items.sql")
+    string.contains(found, "-- allow: clauses=$2 subject=$3") |> should.be_true
+    string.contains(found, "->>'owner'='self' AND ") |> should.be_true
+    string.contains(found, "=$3)") |> should.be_true
+    no_note_with(out, name <> "/items")
+  })
+}
+
+/// owner `Self` で、どの句の `As<X>` も allow の Entity そのもの(主体の行 = allow の行)の形(WGy r3)──
+/// `Self` は主体(actor)を絞る句で、読みの行を絞らない(基点の SQL と同じ意味)。穴の契約も持たない。
+pub fn allow_clause_self_on_the_subject_entity_leaves_rows_open_test() {
+  let out =
+    generate(
+      units_with(article_fixture, [
+        memo_entity(),
+        memo_service(
+          "memo_self",
+          "staff",
+          "allow.Clause(who: allow.AsStaff, at: allow.AnyPhase, owner: allow.Self)",
+        ),
+      ]),
+    )
+  let found = file(out, "db/queries/memo_self/items.sql")
+  string.contains(found, "-- allow:") |> should.be_false
+  string.contains(found, "->>'owner'") |> should.be_false
+  no_note_with(out, "memo_self/items")
 }

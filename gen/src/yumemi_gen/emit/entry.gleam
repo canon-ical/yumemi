@@ -5,6 +5,7 @@ import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/order
+import gleam/result
 import gleam/string
 import yumemi_gen/emit/hash
 import yumemi_gen/emit/root
@@ -19,7 +20,8 @@ pub type Output {
   Output(files: List(File), notes: List(stop.Note))
 }
 
-type Route {
+/// 入口 1 つ × Service 1 つの口。`path` は `{name}` の変数を持つ(registry の `:name` の手前の綴り)。
+pub type Route {
   Route(
     face: String,
     method: String,
@@ -49,6 +51,33 @@ pub fn emit(app: App, hashes: hash.Hashes) -> Output {
   case app.entries {
     [] -> Output(files: [], notes: [])
     _ -> {
+      let #(routes, notes) = collect(app)
+      Output(
+        files: [
+          File(
+            path: "src/gen/face.gleam",
+            text: face_text(app.entries, hash.entry(hashes)),
+          ),
+          File(
+            path: "src/gen/entry/http.gleam",
+            text: http_text(routes, hash.entry(hashes), app.server.declared),
+          ),
+        ],
+        notes: list.append(notes, route_overlap_notes(routes)),
+      )
+    }
+  }
+}
+
+/// 全入口の口(service → face の順に並べる)。面の `api.gleam` と back の `registry.mjs` が同じ表を読む。
+pub fn routes(app: App) -> List(Route) {
+  collect(app).0
+}
+
+fn collect(app: App) -> #(List(Route), List(stop.Note)) {
+  case app.entries {
+    [] -> #([], [])
+    _ -> {
       let #(routes, notes) =
         list.fold(app.services, #([], []), fn(acc, service) {
           let #(routes, notes) = acc
@@ -67,7 +96,11 @@ pub fn emit(app: App, hashes: hash.Hashes) -> Output {
                         False -> #(face_routes, face_notes)
                         True ->
                           case route_for(app, service, entry) {
-                            Ok(route) -> #([route, ..face_routes], face_notes)
+                            Ok(Some(route)) -> #(
+                              [route, ..face_routes],
+                              face_notes,
+                            )
+                            Ok(None) -> #(face_routes, face_notes)
                             Error(RouteError(text: detail)) -> #(face_routes, [
                               stop.Note(
                                 class: stop.Conflict,
@@ -87,20 +120,7 @@ pub fn emit(app: App, hashes: hash.Hashes) -> Output {
               )
           }
         })
-      let routes = list.sort(routes, route_compare)
-      Output(
-        files: [
-          File(
-            path: "src/gen/face.gleam",
-            text: face_text(app.entries, hash.entry(hashes)),
-          ),
-          File(
-            path: "src/gen/entry/http.gleam",
-            text: http_text(routes, hash.entry(hashes)),
-          ),
-        ],
-        notes: list.append(list.reverse(notes), route_overlap_notes(routes)),
-      )
+      #(list.sort(routes, route_compare), list.reverse(notes))
     }
   }
 }
@@ -118,7 +138,11 @@ fn face_text(entries: List(Entry), input_hash: String) -> String {
   <> "\n}\n"
 }
 
-fn http_text(routes: List(Route), input_hash: String) -> String {
+fn http_text(
+  routes: List(Route),
+  input_hash: String,
+  dispatch: Bool,
+) -> String {
   let rows =
     routes
     |> list.map(route_text)
@@ -126,6 +150,11 @@ fn http_text(routes: List(Route), input_hash: String) -> String {
   "//// GENERATED from entry.gleam / service declarations [sha256:"
   <> input_hash
   <> "] — 手で編集しない\n\n"
+  <> case dispatch {
+    True ->
+      "import entry\nimport framework/entry.{type Entry} as entry_types\nimport framework/io.{type Promise}\n\n"
+    False -> ""
+  }
   <> "pub type Credential {\n  Session\n  ApiKey\n}\n\n"
   <> "pub type Route {\n"
   <> "  Route(face: String, method: String, path: String, service: String,\n"
@@ -134,6 +163,41 @@ fn http_text(routes: List(Route), input_hash: String) -> String {
   <> "pub const routes: List(Route) = [\n"
   <> rows
   <> "\n]\n"
+  <> case dispatch {
+    True -> dispatch_text()
+    False -> ""
+  }
+}
+
+/// `src/server.gleam` を宣言した app の back の入口 ── 検査 1〜10 を順に通す(framework の dispatch)。
+/// 各検査の実体は `http_runtime.mjs`。Route の表と同じ module に置く(1 本に揃える)。
+fn dispatch_text() -> String {
+  let checks = [
+    "route", "origin", "browser", "admit", "resolve", "subject", "decode",
+    "judge",
+  ]
+  "\npub type Request\n\npub type Response\n\npub type State\n\n"
+  <> "@external(javascript, \"../http_runtime.mjs\", \"host\")\n"
+  <> "fn host(\n  request: Request,\n  entries: List(Entry(subject, host)),\n) -> Promise(Result(State, Response))\n\n"
+  <> string.concat(
+    list.map(checks, fn(name) {
+      "@external(javascript, \"../http_runtime.mjs\", \""
+      <> name
+      <> "\")\nfn "
+      <> name
+      <> "(state: State) -> Promise(Result(State, Response))\n\n"
+    }),
+  )
+  <> "@external(javascript, \"../http_runtime.mjs\", \"execute\")\n"
+  <> "fn execute(state: State) -> Promise(Response)\n\n"
+  <> "fn next(\n  result: Promise(Result(State, Response)),\n  then: fn(State) -> Promise(Response),\n) -> Promise(Response) {\n"
+  <> "  use value <- io.then(result)\n  case value {\n    Ok(state) -> then(state)\n    Error(response) -> io.resolve(response)\n  }\n}\n\n"
+  <> "pub fn dispatch(request: Request) -> Promise(Response) {\n"
+  <> "  use state <- next(host(request, entry.entries))\n"
+  <> string.concat(
+    list.map(checks, fn(name) { "  use state <- next(" <> name <> "(state))\n" }),
+  )
+  <> "  execute(state)\n}\n"
 }
 
 fn route_text(route: Route) -> String {
@@ -233,12 +297,78 @@ fn entry_allows(entry: Entry, effect: Effect) -> Bool {
   }
 }
 
+/// `src/server.gleam` の上書きがあればそれを使い、無ければ導出する。上書きの口は媒体の合う入口だけが持ち、
+/// `Internal` は口を持たない。
 fn route_for(
   app: App,
   service: Service,
   entry: Entry,
+) -> Result(Option(Route), RouteError) {
+  case model.server_route(app.server, service.module) {
+    Some(model.InternalRoute(..)) -> Ok(None)
+    Some(model.OverrideRoute(method: method, path: path, credential: via, ..)) ->
+      case credential_matches(entry.credential, via) {
+        False -> Ok(None)
+        True -> {
+          let braced = braced_path(path)
+          Ok(
+            Some(Route(
+              face: entry.name,
+              method: method,
+              path: braced,
+              service: service.module,
+              path_keys: path_variables(braced),
+              credential: credential_text(entry.credential),
+            )),
+          )
+        }
+      }
+    None -> derived_route(app, service, entry) |> result.map(Some)
+  }
+}
+
+fn credential_matches(
+  credential: model.Credential,
+  via: Option(String),
+) -> Bool {
+  case credential, via {
+    model.ApiKeyCredential, Some("api_key") -> True
+    model.ApiKeyCredential, _ -> False
+    model.SessionCredential, Some("api_key") -> False
+    model.SessionCredential, _ -> True
+  }
+}
+
+/// `:name` → `{name}`。
+fn braced_path(path: String) -> String {
+  path
+  |> string.split("/")
+  |> list.map(fn(segment) {
+    case string.starts_with(segment, ":") {
+      True -> "{" <> string.drop_start(segment, 1) <> "}"
+      False -> segment
+    }
+  })
+  |> string.join("/")
+}
+
+fn path_variables(path: String) -> List(String) {
+  path
+  |> string.split("/")
+  |> list.filter_map(fn(segment) {
+    case string.starts_with(segment, "{") && string.ends_with(segment, "}") {
+      True -> Ok(segment |> string.drop_start(1) |> string.drop_end(1))
+      False -> Error(Nil)
+    }
+  })
+}
+
+fn derived_route(
+  app: App,
+  service: Service,
+  entry: Entry,
 ) -> Result(Route, RouteError) {
-  let root_entity = root.root_for(app, service)
+  let root_entity = root.path_root(app, service)
   case target_for(app, service) {
     Error(error) -> Error(error)
     Ok(#(target, suffix)) -> {
@@ -363,20 +493,80 @@ fn target_for(
   let matches =
     all_targets(app)
     |> list.flat_map(fn(target) { matches_for(service.module, target) })
-  case best_matches(matches) {
-    [] -> Error(RouteError("対象が無い: " <> service.module))
-    [Match(target: target, suffix: suffix, ..)] -> Ok(#(target, suffix))
-    ambiguous ->
-      Error(RouteError(
-        "対象が曖昧: "
-        <> service.module
-        <> " -> 候補 "
-        <> string.join(
-          list.map(ambiguous, fn(found) { target_module(found.target) }),
-          " / ",
-        ),
-      ))
+  case best_matches(matches), allow_entity(app, service) {
+    [], Some(entity) -> Ok(#(EntityTarget(entity), last_word_prefix(service)))
+    [], None -> Error(RouteError("対象が無い: " <> service.module))
+    [Match(target: target, suffix: suffix, ..)], _ -> Ok(#(target, suffix))
+    ambiguous, allow ->
+      case by_allow_entity(ambiguous, allow) {
+        [Match(target: target, suffix: suffix, ..)] -> Ok(#(target, suffix))
+        _ -> Error(ambiguous_error(service, ambiguous))
+      }
   }
+}
+
+/// 名前の前置きで決まらない Service の対象は、allow の Entity(root の候補)から解く。改名しない
+/// (2b-7 の裁定 2)── `schedule_*` は allow の Entity か、それを held で指す候補を採る。
+fn allow_entity(app: App, service: Service) -> Option(Entity) {
+  case service.allow_module {
+    None -> None
+    Some(path) ->
+      model.entity_by_module(
+        app.entities,
+        path |> string.split("/") |> list.last |> result.unwrap(""),
+      )
+  }
+}
+
+fn by_allow_entity(matches: List(Match), allow: Option(Entity)) -> List(Match) {
+  case allow {
+    None -> []
+    Some(entity) -> {
+      let same =
+        list.filter(matches, fn(found) {
+          target_module(found.target) == entity.module
+        })
+      case same {
+        [] ->
+          list.filter(matches, fn(found) {
+            case found.target {
+              EntityTarget(candidate) ->
+                list.any(candidate.props, fn(prop) {
+                  case prop.kind {
+                    model.RelProp(kind: model.Held, target_module: module, ..) ->
+                      last_path(module) == entity.module
+                    _ -> False
+                  }
+                })
+              CollectionTarget(_) -> False
+            }
+          })
+        _ -> same
+      }
+    }
+  }
+}
+
+fn last_path(module: String) -> String {
+  module |> string.split("/") |> list.last |> result.unwrap(module)
+}
+
+/// 前置きが Entity に当たらない名(`pageview_record`)は、最後の語を動詞にする。
+fn last_word_prefix(service: Service) -> String {
+  let words = string.split(service.module, "_")
+  words |> list.take(list.length(words) - 1) |> string.join("_")
+}
+
+fn ambiguous_error(service: Service, ambiguous: List(Match)) -> RouteError {
+  RouteError(
+    "対象が曖昧: "
+    <> service.module
+    <> " -> 候補 "
+    <> string.join(
+      list.map(ambiguous, fn(found) { target_module(found.target) }),
+      " / ",
+    ),
+  )
 }
 
 fn all_targets(app: App) -> List(Target) {

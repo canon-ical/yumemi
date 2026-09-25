@@ -375,9 +375,172 @@ pub type Entry {
   )
 }
 
-/// Static non-Service HTTP entries mirrored from `api/src/gen/http_runtime.mjs`.
+/// Service でない HTTP の口。`src/server.gleam` の `attached` から読む(WGy ── 生成器は
+/// `http_runtime.mjs` を読まない)。`name` は PascalCase、`who` は "anyone" / "party"。
 pub type AttachedRoute {
-  AttachedRoute(name: String, method: String, path: String)
+  AttachedRoute(name: String, method: String, path: String, who: String)
+}
+
+/// `src/server.gleam` の `routes` の 1 行。method は "GET" などの大文字。
+pub type ServerRoute {
+  /// credential は `RouteVia` のときだけ Some("session" / "api_key")。
+  OverrideRoute(
+    service: String,
+    method: String,
+    path: String,
+    credential: Option(String),
+  )
+  InternalRoute(service: String)
+}
+
+/// `src/server.gleam` の `aliases` の 1 行。
+pub type ServerAlias {
+  ServiceAlias(
+    name: String,
+    service: String,
+    method: String,
+    path: String,
+    credential: String,
+    external_id: Bool,
+  )
+  AttachedAlias(
+    name: String,
+    attached: String,
+    method: String,
+    path: String,
+    credential: String,
+    who: String,
+  )
+}
+
+pub type CronJob {
+  EachDue(service: String, query: String)
+  HookedJob(service: String, hook: String)
+}
+
+pub type Cron {
+  Cron(schedule: String, jobs: List(CronJob))
+}
+
+pub type DurableObject {
+  DurableObject(
+    class: String,
+    module: String,
+    adapter: String,
+    methods: List(String),
+  )
+}
+
+pub type Hook {
+  Hook(name: String, module: String)
+}
+
+/// `server.connectors`。口だけ ── 型は ★。
+pub type Connector {
+  Connector(name: String, ports: List(ConnectorPort))
+}
+
+pub type ConnectorPort {
+  CallPort(name: String, op: String)
+  SendPort(name: String, op: String)
+  EnqueuePort(name: String, kind: String)
+  FetchPort(name: String, module: String, js: String, arity: Int)
+  PurePort(name: String, module: String, js: String, arity: Int)
+}
+
+/// `server.reads` の 1 行(手書きの SQL の読み)。
+pub type ManualRead {
+  ManualRead(
+    service: String,
+    query: String,
+    args: List(#(String, String)),
+    returns: String,
+    imports: List(String),
+    hook: String,
+  )
+}
+
+/// `server.roots` の 1 行(root の形の上書き)。
+pub type RootShape {
+  Rootless(service: String)
+  OwnRoot(service: String)
+  RootOf(service: String, entity: String)
+  WithVersion(service: String)
+  Carried(service: String, name: String, type_: String, import_: String)
+}
+
+/// `server.storage` の 1 行(Entity の器と列の写像)。entity は module 名。
+pub type Storage {
+  InObject(entity: String, object: String)
+  ColumnName(entity: String, property: String, column: String)
+  TextSum(entity: String, property: String, values: List(#(String, String)))
+  SplitColumns(
+    entity: String,
+    property: String,
+    columns: List(#(String, String)),
+  )
+  ArrayColumn(entity: String, property: String, element: String)
+}
+
+/// `src/server.gleam` の宣言。`declared` は module があったか(無い app は back の表を出さない)。
+pub type Server {
+  Server(
+    declared: Bool,
+    routes: List(ServerRoute),
+    aliases: List(ServerAlias),
+    cron: List(Cron),
+    durable_objects: List(DurableObject),
+    hooks: List(Hook),
+    connectors: List(Connector),
+    storage: List(Storage),
+    reads: List(ManualRead),
+    roots: List(RootShape),
+    attached_roles: List(AttachedRole),
+    browser: Option(BrowserCookie),
+  )
+}
+
+/// `src/server.gleam` の `attached_roles` の 1 行(WGy r4)。`role` は framework の JS の綴り
+/// (`declare_browser` / `read_session` / `switch_subject` / `tail_path` / `needs_browser`)。
+pub type AttachedRole {
+  AttachedRole(attached: String, role: String)
+}
+
+/// `src/server.gleam` の `browser`(WGy r4)。
+pub type BrowserCookie {
+  BrowserCookie(
+    cookie: String,
+    key_binding: String,
+    claim: String,
+    max_age_days: Int,
+  )
+}
+
+pub fn empty_server() -> Server {
+  Server(
+    declared: False,
+    routes: [],
+    aliases: [],
+    cron: [],
+    durable_objects: [],
+    hooks: [],
+    connectors: [],
+    storage: [],
+    reads: [],
+    roots: [],
+    attached_roles: [],
+    browser: None,
+  )
+}
+
+pub fn server_route(server: Server, service: String) -> Option(ServerRoute) {
+  list.find(server.routes, fn(route) {
+    case route {
+      OverrideRoute(service: name, ..) -> name == service
+      InternalRoute(service: name) -> name == service
+    }
+  })
+  |> option.from_result
 }
 
 pub type Effect {
@@ -450,6 +613,8 @@ pub type App {
     clauses: List(#(String, List(Clause))),
     entries: List(Entry),
     attached: List(AttachedRoute),
+    /// `src/server.gleam` の宣言(HTTP の上書き・別名・cron・DO・hook)。
+    server: Server,
     /// Entity / ER 外 module の手書き verb 名。header と警告に使う。
     handwritten_verbs: List(#(String, List(String))),
     /// ER 外 module の `manual_verbs`。header に載せ、警告は出さない。

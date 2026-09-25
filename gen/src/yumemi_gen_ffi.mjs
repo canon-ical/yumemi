@@ -377,3 +377,54 @@ export function bundle_front(outDir, appDir, faces) {
   }
   return toList(errors);
 }
+
+// ── back の生成物(WGy)────────────────────────────────────────────────────────
+import { foldable as foldableSource } from "../yumemi/framework/server/contracts.mjs";
+
+/** registry の `folded` を生成時に決める(framework の判定をそのまま使う ── 実行時には呼ばない)。 */
+export function foldable(source, kinds) {
+  return foldableSource(source, [...kinds]);
+}
+
+/** Service の source が `step.call_write(queue.<kind>(` で呼ぶ kind(出てきた順、重複なし)。 */
+export function queue_calls(source) {
+  const found = [];
+  for (const match of source.matchAll(/step\.call_write\(\s*queue\.(\w+)\(/g)) {
+    if (!found.includes(match[1])) found.push(match[1]);
+  }
+  return toList(found);
+}
+
+export function json_string(text) {
+  return JSON.stringify(text);
+}
+
+/** `<dir>/**\/*.sql` を `<相対の道(.sql 無し)>` と本文の組で返す。無い dir は空。 */
+export function sql_files(dir) {
+  const found = [];
+  const walk = (current, prefix) => {
+    let entries;
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
+      const full = path.join(current, entry.name);
+      if (entry.isDirectory()) walk(full, prefix + entry.name + "/");
+      else if (entry.name.endsWith(".sql"))
+        found.push([prefix + entry.name.slice(0, -4), fs.readFileSync(full, "utf8")]);
+    }
+  };
+  walk(dir, "");
+  return toList(found);
+}
+
+// 出力先が app そのものか(symlink と `..` を解いて比べる)。出力先がまだ無ければ app ではない。
+export function same_dir(left, right) {
+  try {
+    return fs.realpathSync(left) === fs.realpathSync(right);
+  } catch {
+    return false;
+  }
+}
