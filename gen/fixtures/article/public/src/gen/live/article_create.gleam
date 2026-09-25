@@ -1,4 +1,4 @@
-//// GENERATED from src/components/pick_tag.gleam [sha256:3ffb93fe5090] — 手で編集しない
+//// GENERATED from src/components/pick_tag.gleam [sha256:cb6c05f590ba] — 手で編集しない
 
 import framework/front/live
 import framework/spec
@@ -190,7 +190,10 @@ fn send(args: Args) -> Effect(Event) {
         #("title", json.string(args.title)),
         #("body", json.string(args.body)),
         #("category", json.string(args.category)),
-        #("tags", json.string(args.tags)),
+        #("tags", case list_items(args.tags) {
+          Ok(items) -> json.array(items, fn(value) { json.string(value) })
+          Error(_) -> json.string(args.tags)
+        }),
       ]),
       [],
       fn(value) {
@@ -202,6 +205,18 @@ fn send(args: Args) -> Effect(Event) {
       fn(value) { dispatch(live.Done(Error(error_failure(value)))) },
     )
   })
+}
+
+/// List の欄は JSON の文字列の配列(`["a","b"]`、空の欄は `[]`)。
+fn list_items(text: String) -> Result(List(String), Nil) {
+  case text {
+    "" -> Ok([])
+    _ ->
+      case json.parse(text, decode.list(decode.string)) {
+        Ok(items) -> Ok(items)
+        Error(_) -> Error(Nil)
+      }
+  }
 }
 
 fn reload_page() -> Effect(Event) {

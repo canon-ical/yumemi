@@ -2049,6 +2049,7 @@ fn live_text(
     None -> ""
   }
   let blob_args = blob_args(service.args)
+  let wires = arg_wires(units, service)
   generated_header
   <> "\n"
   <> live_imports(
@@ -2057,6 +2058,7 @@ fn live_text(
     validations != [],
     component.after_send == Some("ReloadPage"),
     blob_args != [],
+    send_imports(wires, route),
   )
   <> "\n\n"
   <> args_type_text(service.args)
@@ -2075,7 +2077,7 @@ fn live_text(
   <> validate_text(validations)
   <> validation_error_text(validations)
   <> error_handling
-  <> send_text(service, route, component.after_send)
+  <> send_text(service, wires, route, component.after_send)
 }
 
 fn validation_error_text(
@@ -2187,6 +2189,7 @@ fn live_imports(
   has_validation: Bool,
   reloads_page: Bool,
   has_blob_fields: Bool,
+  send: List(String),
 ) -> String {
   let validation = case has_validation {
     True -> ["framework/spec", "gleam/list", "gleam/string"]
@@ -2218,6 +2221,7 @@ fn live_imports(
   |> list.append(reload)
   |> list.append(file_input)
   |> list.append(given)
+  |> list.append(send)
   |> list.unique
   |> list.sort(string.compare)
   |> list.map(fn(path) { "import " <> path })
@@ -2469,6 +2473,7 @@ fn field_name(field: String) -> String {
 
 fn send_text(
   service: model.Service,
+  wires: List(#(model.Arg, Wire)),
   route: Option(ApiRoute),
   after_send: Option(String),
 ) -> String {
@@ -2501,10 +2506,16 @@ fn send_text(
       <> quoted(route.method)
       <> ",\n"
       <> "      "
-      <> path_expression(route.path)
+      <> case route.method {
+        "GET" -> query_path_expression(route.path, service.args)
+        _ -> path_expression(route.path)
+      }
       <> ",\n"
       <> "      "
-      <> body_expression(service.args)
+      <> case route.method {
+        "GET" -> "json.object([])"
+        _ -> body_expression(wires)
+      }
       <> ",\n"
       <> "      "
       <> blob_fields
@@ -2520,6 +2531,16 @@ fn send_text(
       <> "      fn(value) { dispatch(live.Done(Error(error_failure(value)))) },\n"
       <> "    )\n"
       <> "  })\n}\n"
+      <> case route.method, send_imports(wires, Some(route)) {
+        "GET", [_, ..] ->
+          "\nfn with_query(path: String, pairs: List(#(String, String))) -> String {\n"
+          <> "  case pairs {\n"
+          <> "    [] -> path\n"
+          <> "    _ -> path <> \"?\" <> uri.query_to_string(pairs)\n"
+          <> "  }\n}\n"
+        "GET", _ -> ""
+        _, _ -> wire_helpers_text(wires)
+      }
   }
   send <> reload
 }
@@ -2546,30 +2567,343 @@ fn path_part(part: String) -> #(String, String) {
   }
 }
 
-fn body_expression(args: List(model.Arg)) -> String {
+fn body_expression(wires: List(#(model.Arg, Wire))) -> String {
   "json.object([\n"
   <> string.concat(
-    list.map(args, fn(arg) {
-      "    #(\"" <> arg.name <> "\", " <> body_value_expression(arg) <> "),\n"
+    list.map(wires, fn(pair) {
+      let #(arg, wire) = pair
+      "    #(\""
+      <> arg.name
+      <> "\", "
+      <> wire_value_expression(wire, "args." <> arg.name)
+      <> "),\n"
     }),
   )
   <> "  ])"
 }
 
-fn body_value_expression(arg: model.Arg) -> String {
+/// Args の欄の送り方(0.11.2)。live は欄を文字列で持ち、send で Args の型の JSON にする。
+type Wire {
+  /// Bool / Int / Float は H1 の規則で真偽・数に、それ以外(値型・Id・列挙・日付…)は文字列
+  ScalarWire(ScalarKind)
+  /// `Option(X)` ── `""` は null、それ以外は X
+  OptionWire(Wire)
+  /// `List(X)`(X がスカラ)── 欄は JSON の文字列の配列(`["a","b"]`)、要素を X の規則で送る
+  ListWire(ScalarKind)
+  /// record・組・Dict・スカラでない要素の List ── 欄の文字列を JSON の本文として読み、そのまま送る
+  /// (形は back の decoder が決める。読めない綴りは文字列のまま送り、back が `invalid_argument` で返す)
+  JsonWire
+}
+
+fn arg_wires(
+  units: List(Unit),
+  service: model.Service,
+) -> List(#(model.Arg, Wire)) {
+  list.map(service.args, fn(arg) { #(arg, arg_wire(units, service, arg.type_)) })
+}
+
+fn arg_wire(
+  units: List(Unit),
+  service: model.Service,
+  shape: model.TypeShape,
+) -> Wire {
+  case shape {
+    model.NamedShape(
+      module: Some("gleam/option"),
+      name: "Option",
+      parameters: [inner],
+    ) -> OptionWire(arg_wire(units, service, inner))
+    model.NamedShape(module: None, name: "List", parameters: [inner]) ->
+      case arg_wire(units, service, inner) {
+        ScalarWire(kind) -> ListWire(kind)
+        _ -> JsonWire
+      }
+    model.NamedShape(module: Some("gleam/dict"), name: "Dict", ..) -> JsonWire
+    model.TupleShape(_) -> JsonWire
+    model.NamedShape(module: module, name: name, ..) ->
+      case record_type(units, service, module, name) {
+        True -> JsonWire
+        False -> ScalarWire(scalar_kind(shape))
+      }
+  }
+}
+
+/// 構成子が 1 つで、欄が全部名付きの opaque でない custom type(record)か。構成子が複数の sum
+/// (`Place` など)と値型(`gen/types/*`・framework の opaque な型、`LinkId(value: String)` の形)は
+/// back が文字列で読むので record としない。
+fn record_type(
+  units: List(Unit),
+  service: model.Service,
+  module: Option(String),
+  name: String,
+) -> Bool {
+  let path = case module {
+    Some(path) -> path
+    None -> "service/" <> service.module
+  }
+  let value_type =
+    string.starts_with(path, "gen/") || string.starts_with(path, "framework/")
+  case value_type, unit_for(units, path) {
+    True, _ | _, None -> False
+    False, Some(unit) ->
+      case g.find_custom_type(g.in_order(unit.module), name) {
+        Some(glance.CustomType(opaque_: False, variants: [variant], ..)) ->
+          variant.fields != []
+          && list.all(variant.fields, fn(field) {
+            case field {
+              glance.LabelledVariantField(..) -> True
+              glance.UnlabelledVariantField(..) -> False
+            }
+          })
+        _ -> False
+      }
+  }
+}
+
+/// Args の欄の値(live は文字列で持つ)を Args の型で JSON に(0.11.2 H1・r2)。Bool は真偽、
+/// Int / Float は数(読めない綴りは文字列のまま送り、back が `invalid_argument` で返す)。
+fn wire_value_expression(wire: Wire, value: String) -> String {
+  case wire {
+    OptionWire(inner) ->
+      "case "
+      <> value
+      <> " {\n"
+      <> "  \"\" -> json.null()\n"
+      <> "  value -> "
+      <> wire_value_expression(inner, "value")
+      <> "\n"
+      <> "}"
+    ScalarWire(kind) -> json_value_expression(kind, value)
+    ListWire(kind) ->
+      "case list_items("
+      <> value
+      <> ") {\n"
+      <> "  Ok(items) -> json.array(items, fn(value) { "
+      <> json_value_expression(kind, "value")
+      <> " })\n"
+      <> "  Error(_) -> json.string("
+      <> value
+      <> ")\n"
+      <> "}"
+    JsonWire -> "json_text(" <> value <> ")"
+  }
+}
+
+fn wire_helpers_text(wires: List(#(model.Arg, Wire))) -> String {
+  let flat = list.map(wires, fn(pair) { inner_wire(pair.1) })
+  let lists = case list.any(flat, fn(wire) { is_list_wire(wire) }) {
+    True ->
+      "\n/// List の欄は JSON の文字列の配列(`[\"a\",\"b\"]`、空の欄は `[]`)。\n"
+      <> "fn list_items(text: String) -> Result(List(String), Nil) {\n"
+      <> "  case text {\n"
+      <> "    \"\" -> Ok([])\n"
+      <> "    _ ->\n"
+      <> "      case json.parse(text, decode.list(decode.string)) {\n"
+      <> "        Ok(items) -> Ok(items)\n"
+      <> "        Error(_) -> Error(Nil)\n"
+      <> "      }\n"
+      <> "  }\n}\n"
+    False -> ""
+  }
+  let texts = case list.contains(flat, JsonWire) {
+    True ->
+      "\n/// record・組・Dict の欄は JSON の本文。読めなければ文字列のまま送る。\n"
+      <> "fn json_text(text: String) -> json.Json {\n"
+      <> "  case json.parse(text, json_value()) {\n"
+      <> "    Ok(value) -> value\n"
+      <> "    Error(_) -> json.string(text)\n"
+      <> "  }\n}\n\n"
+      <> "fn json_value() -> decode.Decoder(json.Json) {\n"
+      <> "  use <- decode.recursive\n"
+      <> "  decode.one_of(decode.map(decode.string, json.string), [\n"
+      <> "    decode.map(decode.bool, json.bool),\n"
+      <> "    decode.map(decode.int, json.int),\n"
+      <> "    decode.map(decode.float, json.float),\n"
+      <> "    decode.map(decode.list(json_value()), json.preprocessed_array),\n"
+      <> "    decode.map(decode.dict(decode.string, json_value()), fn(entries) {\n"
+      <> "      json.object(dict.to_list(entries))\n"
+      <> "    }),\n"
+      <> "    decode.success(json.null()),\n"
+      <> "  ])\n}\n"
+    False -> ""
+  }
+  lists <> texts
+}
+
+fn inner_wire(wire: Wire) -> Wire {
+  case wire {
+    OptionWire(inner) -> inner_wire(inner)
+    _ -> wire
+  }
+}
+
+fn is_list_wire(wire: Wire) -> Bool {
+  case wire {
+    ListWire(_) -> True
+    _ -> False
+  }
+}
+
+fn wire_kinds(wire: Wire) -> List(ScalarKind) {
+  case wire {
+    OptionWire(inner) -> wire_kinds(inner)
+    ScalarWire(kind) | ListWire(kind) -> [kind]
+    JsonWire -> []
+  }
+}
+
+fn json_value_expression(kind: ScalarKind, value: String) -> String {
+  case kind {
+    BoolArg ->
+      "case "
+      <> value
+      <> " {\n"
+      <> "  \"true\" | \"True\" | \"on\" -> json.bool(True)\n"
+      <> "  \"false\" | \"False\" | \"\" -> json.bool(False)\n"
+      <> "  other -> json.string(other)\n"
+      <> "}"
+    IntArg ->
+      "case int.parse("
+      <> value
+      <> ") {\n"
+      <> "  Ok(number) -> json.int(number)\n"
+      <> "  Error(_) -> json.string("
+      <> value
+      <> ")\n"
+      <> "}"
+    FloatArg ->
+      "case float.parse("
+      <> value
+      <> "), int.parse("
+      <> value
+      <> ") {\n"
+      <> "  Ok(number), _ -> json.float(number)\n"
+      <> "  _, Ok(number) -> json.float(int.to_float(number))\n"
+      <> "  _, _ -> json.string("
+      <> value
+      <> ")\n"
+      <> "}"
+    TextArg -> "json.string(" <> value <> ")"
+  }
+}
+
+/// GET の path(0.11.2 H2)── path の穴に入らない Args を query に載せる。Option の空は載せない、
+/// Bool は `true` / `false` の綴りに揃える(back の query の読みと同じ綴り)。
+fn query_path_expression(path: String, args: List(model.Arg)) -> String {
+  let holes = path_holes(path)
+  let pairs =
+    args
+    |> list.filter(fn(arg) { !list.contains(holes, arg.name) })
+    |> list.map(query_pair_expression)
+  case pairs {
+    [] -> path_expression(path)
+    _ ->
+      "with_query(\n"
+      <> "        "
+      <> path_expression(path)
+      <> ",\n"
+      <> "        list.flatten([\n"
+      <> string.concat(
+        list.map(pairs, fn(pair) { "          " <> pair <> ",\n" }),
+      )
+      <> "        ]),\n"
+      <> "      )"
+  }
+}
+
+fn query_pair_expression(arg: model.Arg) -> String {
   case arg.type_ {
     model.NamedShape(
       module: Some("gleam/option"),
       name: "Option",
-      parameters: [_inner],
+      parameters: [inner],
     ) ->
       "case args."
       <> arg.name
-      <> " {\n"
-      <> "  \"\" -> json.null()\n"
-      <> "  value -> json.string(value)\n"
-      <> "}"
-    _ -> "json.string(args." <> arg.name <> ")"
+      <> " { \"\" -> [] value -> [#("
+      <> quoted(arg.name)
+      <> ", "
+      <> query_value_expression(inner, "value")
+      <> ")] }"
+    shape ->
+      "[#("
+      <> quoted(arg.name)
+      <> ", "
+      <> query_value_expression(shape, "args." <> arg.name)
+      <> ")]"
+  }
+}
+
+fn query_value_expression(shape: model.TypeShape, value: String) -> String {
+  case scalar_kind(shape) {
+    BoolArg ->
+      "case "
+      <> value
+      <> " { \"true\" | \"True\" | \"on\" -> \"true\" \"false\" | \"False\" | \"\" -> \"false\" other -> other }"
+    _ -> value
+  }
+}
+
+fn path_holes(path: String) -> List(String) {
+  case string.split(path, ":") {
+    [] | [_] -> []
+    [_, ..rest] -> list.map(rest, fn(part) { path_part(part).0 })
+  }
+}
+
+type ScalarKind {
+  BoolArg
+  IntArg
+  FloatArg
+  TextArg
+}
+
+fn scalar_kind(shape: model.TypeShape) -> ScalarKind {
+  case shape {
+    model.NamedShape(module: None, name: "Bool", parameters: []) -> BoolArg
+    model.NamedShape(module: None, name: "Int", parameters: []) -> IntArg
+    model.NamedShape(module: None, name: "Float", parameters: []) -> FloatArg
+    _ -> TextArg
+  }
+}
+
+/// live の send が使う import(Args の型の encode と GET の query)。
+fn send_imports(
+  wires: List(#(model.Arg, Wire)),
+  route: Option(ApiRoute),
+) -> List(String) {
+  case route {
+    None -> []
+    Some(route) -> {
+      let holes = path_holes(route.path)
+      let kinds = list.flat_map(wires, fn(pair) { wire_kinds(pair.1) })
+      case route.method {
+        "GET" ->
+          case
+            list.any(wires, fn(pair) { !list.contains(holes, { pair.0 }.name) })
+          {
+            True -> ["gleam/list", "gleam/uri"]
+            False -> []
+          }
+        _ ->
+          list.flatten([
+            case
+              list.contains(kinds, IntArg) || list.contains(kinds, FloatArg)
+            {
+              True -> ["gleam/int"]
+              False -> []
+            },
+            case list.contains(kinds, FloatArg) {
+              True -> ["gleam/float"]
+              False -> []
+            },
+            case list.any(wires, fn(pair) { inner_wire(pair.1) == JsonWire }) {
+              True -> ["gleam/dict"]
+              False -> []
+            },
+          ])
+      }
+    }
   }
 }
 

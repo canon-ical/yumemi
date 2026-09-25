@@ -1603,6 +1603,24 @@ var Kill = class extends CustomType {
 };
 var KillFlag$Kill$const = new Kill();
 
+// public/build/dev/javascript/gleam_stdlib/gleam/result.mjs
+function map_error(result, fun) {
+  if (result instanceof Ok) {
+    return result;
+  } else {
+    let error = result[0];
+    return new Error2(fun(error));
+  }
+}
+function try$(result, fun) {
+  if (result instanceof Ok) {
+    let x = result[0];
+    return fun(x);
+  } else {
+    return result;
+  }
+}
+
 // public/build/dev/javascript/gleam_otp/gleam/otp/system.mjs
 var Running = class extends CustomType {
 };
@@ -1644,20 +1662,142 @@ function identity2(x) {
 }
 
 // public/build/dev/javascript/gleam_json/gleam_json_ffi.mjs
+function json_to_string(json2) {
+  return JSON.stringify(json2);
+}
 function object(entries) {
   return Object.fromEntries(entries);
 }
 function identity3(x) {
   return x;
 }
+function array(list4) {
+  const array3 = [];
+  while (List$isNonEmpty(list4)) {
+    array3.push(List$NonEmpty$first(list4));
+    list4 = List$NonEmpty$rest(list4);
+  }
+  return array3;
+}
 function do_null() {
   return null;
+}
+function decode(string5) {
+  try {
+    const result = JSON.parse(string5);
+    return Result$Ok(result);
+  } catch (err) {
+    return Result$Error(getJsonDecodeError(err, string5));
+  }
+}
+function getJsonDecodeError(stdErr, json2) {
+  if (isUnexpectedEndOfInput(stdErr)) return DecodeError$UnexpectedEndOfInput();
+  return toUnexpectedByteError(stdErr, json2);
+}
+function isUnexpectedEndOfInput(err) {
+  const unexpectedEndOfInputRegex = /((unexpected (end|eof))|(end of data)|(unterminated string)|(json( parse error|\.parse)\: expected '(\:|\}|\])'))/i;
+  return unexpectedEndOfInputRegex.test(err.message);
+}
+function toUnexpectedByteError(err, json2) {
+  let converters = [
+    v8UnexpectedByteError,
+    oldV8UnexpectedByteError,
+    jsCoreUnexpectedByteError,
+    spidermonkeyUnexpectedByteError
+  ];
+  for (let converter of converters) {
+    let result = converter(err, json2);
+    if (result) return result;
+  }
+  return DecodeError$UnexpectedByte("");
+}
+function v8UnexpectedByteError(err) {
+  const regex = /unexpected token '(.)', ".+" is not valid JSON/i;
+  const match = regex.exec(err.message);
+  if (!match) return null;
+  const byte = toHex(match[1]);
+  return DecodeError$UnexpectedByte(byte);
+}
+function oldV8UnexpectedByteError(err) {
+  const regex = /unexpected token (.) in JSON at position (\d+)/i;
+  const match = regex.exec(err.message);
+  if (!match) return null;
+  const byte = toHex(match[1]);
+  return DecodeError$UnexpectedByte(byte);
+}
+function spidermonkeyUnexpectedByteError(err, json2) {
+  const regex = /(unexpected character|expected .*) at line (\d+) column (\d+)/i;
+  const match = regex.exec(err.message);
+  if (!match) return null;
+  const line = Number(match[2]);
+  const column = Number(match[3]);
+  const position = getPositionFromMultiline(line, column, json2);
+  const byte = toHex(json2[position]);
+  return DecodeError$UnexpectedByte(byte);
+}
+function jsCoreUnexpectedByteError(err) {
+  const regex = /unexpected (identifier|token) "(.)"/i;
+  const match = regex.exec(err.message);
+  if (!match) return null;
+  const byte = toHex(match[2]);
+  return DecodeError$UnexpectedByte(byte);
+}
+function toHex(char) {
+  return "0x" + char.charCodeAt(0).toString(16).toUpperCase();
+}
+function getPositionFromMultiline(line, column, string5) {
+  if (line === 1) return column - 1;
+  let currentLn = 1;
+  let position = 0;
+  string5.split("").find((char, idx) => {
+    if (char === "\n") currentLn += 1;
+    if (currentLn === line) {
+      position = idx + column;
+      return true;
+    }
+    return false;
+  });
+  return position;
 }
 
 // public/build/dev/javascript/gleam_json/gleam/json.mjs
 var UnexpectedEndOfInput = class extends CustomType {
 };
 var DecodeError$UnexpectedEndOfInput$const = new UnexpectedEndOfInput();
+var DecodeError$UnexpectedEndOfInput = () => DecodeError$UnexpectedEndOfInput$const;
+var UnexpectedByte = class extends CustomType {
+  constructor($0) {
+    super();
+    this[0] = $0;
+  }
+};
+var DecodeError$UnexpectedByte = ($0) => new UnexpectedByte($0);
+var UnableToDecode = class extends CustomType {
+  constructor($0) {
+    super();
+    this[0] = $0;
+  }
+};
+function do_parse(json2, decoder5) {
+  return try$(
+    decode(json2),
+    (dynamic_value) => {
+      let _pipe = run(dynamic_value, decoder5);
+      return map_error(
+        _pipe,
+        (var0) => {
+          return new UnableToDecode(var0);
+        }
+      );
+    }
+  );
+}
+function parse(json2, decoder5) {
+  return do_parse(json2, decoder5);
+}
+function to_string2(json2) {
+  return json_to_string(json2);
+}
 function string3(input) {
   return identity3(input);
 }
@@ -1669,6 +1809,14 @@ function null$() {
 }
 function object2(entries) {
   return object(entries);
+}
+function preprocessed_array(from3) {
+  return array(from3);
+}
+function array2(entries, inner_type) {
+  let _pipe = entries;
+  let _pipe$1 = map2(_pipe, inner_type);
+  return preprocessed_array(_pipe$1);
 }
 
 // public/build/dev/javascript/houdini/houdini.ffi.mjs
@@ -2434,7 +2582,7 @@ function do_to_string(loop$full, loop$path, loop$acc) {
     }
   }
 }
-function to_string3(path) {
+function to_string4(path) {
   return do_to_string(true, path, empty_list);
 }
 function do_matches(loop$path, loop$candidates) {
@@ -2460,7 +2608,7 @@ function matches(path, candidates) {
   if (candidates instanceof Empty) {
     return false;
   } else {
-    return do_matches(to_string3(path), candidates);
+    return do_matches(to_string4(path), candidates);
   }
 }
 function split_subtree_path(path) {
@@ -6394,7 +6542,7 @@ var Multi = class extends CustomType {
   }
 };
 var Article = class extends CustomType {
-  constructor(slug, title, body, version, order, category, tags) {
+  constructor(slug, title, body, version, order, category, tags2) {
     super();
     this.slug = slug;
     this.title = title;
@@ -6402,7 +6550,7 @@ var Article = class extends CustomType {
     this.version = version;
     this.order = order;
     this.category = category;
-    this.tags = tags;
+    this.tags = tags2;
   }
 };
 function decoder2() {
@@ -6444,7 +6592,7 @@ function decoder2() {
                                 return success(new Multi(keys2));
                               }
                             ),
-                            (tags) => {
+                            (tags2) => {
                               return success(
                                 new Article(
                                   slug,
@@ -6453,7 +6601,7 @@ function decoder2() {
                                   version,
                                   order,
                                   category,
-                                  tags
+                                  tags2
                                 )
                               );
                             }
@@ -6797,7 +6945,7 @@ var Multi2 = class extends CustomType {
   }
 };
 var Article2 = class extends CustomType {
-  constructor(slug, title, body, version, order, category, tags) {
+  constructor(slug, title, body, version, order, category, tags2) {
     super();
     this.slug = slug;
     this.title = title;
@@ -6805,7 +6953,7 @@ var Article2 = class extends CustomType {
     this.version = version;
     this.order = order;
     this.category = category;
-    this.tags = tags;
+    this.tags = tags2;
   }
 };
 var Category = class extends CustomType {
@@ -6865,7 +7013,7 @@ function decoder4() {
                                       return success(new Multi2(keys2));
                                     }
                                   ),
-                                  (tags) => {
+                                  (tags2) => {
                                     return success(
                                       new Article2(
                                         slug,
@@ -6874,7 +7022,7 @@ function decoder4() {
                                         version,
                                         order,
                                         category,
-                                        tags
+                                        tags2
                                       )
                                     );
                                   }
@@ -6965,13 +7113,13 @@ function decoder4() {
 
 // public/build/dev/javascript/public/gen/live/article_create.mjs
 var Args4 = class extends CustomType {
-  constructor(slug, title, body, category, tags) {
+  constructor(slug, title, body, category, tags2) {
     super();
     this.slug = slug;
     this.title = title;
     this.body = body;
     this.category = category;
-    this.tags = tags;
+    this.tags = tags2;
   }
 };
 var Slug3 = class extends CustomType {
@@ -7057,6 +7205,18 @@ function error_failure3(value2) {
   let code = $;
   return new Broke3(code);
 }
+function list_items(text5) {
+  if (text5 === "") {
+    return new Ok(List$Empty$const);
+  } else {
+    let $ = parse(text5, list2(string2));
+    if ($ instanceof Ok) {
+      return $;
+    } else {
+      return new Error2(void 0);
+    }
+  }
+}
 function send6(args) {
   return from2(
     (dispatch2) => {
@@ -7069,7 +7229,23 @@ function send6(args) {
             ["title", string3(args.title)],
             ["body", string3(args.body)],
             ["category", string3(args.category)],
-            ["tags", string3(args.tags)]
+            [
+              "tags",
+              (() => {
+                let $ = list_items(args.tags);
+                if ($ instanceof Ok) {
+                  let items = $[0];
+                  return array2(
+                    items,
+                    (value2) => {
+                      return string3(value2);
+                    }
+                  );
+                } else {
+                  return string3(args.tags);
+                }
+              })()
+            ]
           ])
         ),
         List$Empty$const,
@@ -7282,6 +7458,10 @@ function update5(model, msg) {
 }
 
 // public/build/dev/javascript/public/components/pick_tag.mjs
+function tags(names) {
+  let _pipe = array2(names, string3);
+  return to_string2(_pipe);
+}
 function view4(it) {
   return div_(
     List$Empty$const,
@@ -7292,7 +7472,7 @@ function view4(it) {
             (value2) => {
               return new Set2(
                 Field$Tags$const,
-                value2
+                tags(toList([value2]))
               );
             }
           )
@@ -7360,7 +7540,10 @@ function app4() {
         "selected",
         (value2) => {
           return new Ok(
-            new Set2(Field$Tags$const, value2)
+            new Set2(
+              Field$Tags$const,
+              tags(toList([value2]))
+            )
           );
         }
       )

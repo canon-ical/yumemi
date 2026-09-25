@@ -6,6 +6,7 @@ import framework/front/live as front_live
 import gen/live/article_create
 import gen/out/article_list
 import gen/service
+import gleam/json
 import gleam/list
 import lustre
 import lustre/attribute
@@ -27,7 +28,9 @@ pub fn view(it: article_create.State) -> el.Element(article_create.Event) {
   html.div_([], [
     html.select_(
       [
-        event.on_change(fn(value) { front_live.Set(article_create.Tags, value) }),
+        event.on_change(fn(value) {
+          front_live.Set(article_create.Tags, tags([value]))
+        }),
       ],
       list.map(it.given.counts, fn(item) {
         let #(category, _count) = item
@@ -62,7 +65,12 @@ pub fn app() -> lustre.App(
       Ok(front_live.Set(article_create.Category, value))
     }),
     component.on_attribute_change("selected", fn(value) {
-      Ok(front_live.Set(article_create.Tags, value))
+      Ok(front_live.Set(article_create.Tags, tags([value])))
     }),
   ])
+}
+
+/// List の Args は JSON の文字列の配列で Set する(0.11.2)。
+fn tags(names: List(String)) -> String {
+  json.array(names, json.string) |> json.to_string
 }
