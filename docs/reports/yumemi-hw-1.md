@@ -100,3 +100,52 @@ heaven_link/by_shop, heaven_link/top_order, link_import/current_identity, link_i
 
 - 確かめたこと:上の検収表の全部。加えて、生成した reads 4 本と Pick の reads を写しの api に重ねた `gleam build` が 0 であること
 - 確かめていないこと:生成した SQL を Postgres で走らせていない(allow 句の EXISTS、Pick の SELECT)。musearch の runtime(`runtime.mjs` / `sql.mjs`)は `-- allow:` の行を読まない ── 契約を書いただけで、runtime 側は追随便の仕事。新しい test が直す前の生成器で落ちることは、model の欄が増えて旧コードでは compile しないため、走らせて確かめてはいない(`'draft'` の test は、旧 helper なら `'pending'` の行を 3 と数えて落ちる、と式から確認した)
+
+## r2(真壁、2026-09-25)── 柏木のゲートの差し戻し P0-1 と、人見の裁定・P1-3・P1-4
+
+基点は r1 の先端 `b174cbf`。証拠は全部 `gen/build/hw1r2/`(git 管理外)。写しは musearch `728adfa` を `git archive`(`api www muses console docs`)で `gen/build/hw1r2/snap/` に置いた。musearch には書いていない。
+
+### 直したもの
+
+| # | 何をしたか | 置き場 |
+|---|---|---|
+| P0-1 allow 句の const / spread | `who` だけの略記として読むのは、大文字で始まる構成子(`Anyone`・`allow.AsMuse`)と、allow の import への参照(`allow.staff`)だけにした。修飾の無い小文字の変数(`published_only`)、allow 以外の module への小文字の参照(`shared.published_only`)、`Clause` 以外の呼び出し(`allow.clause_of(..)`)は `UnreadClause` にする。`allow:` の spread(`[allow.staff, ..public_clauses]`)は、読めた句の後ろに `UnreadClause("allow の spread(..)")` を足す。`Only([.., ..more])` の spread も `UnreadAt` にする。どれも読みの SQL を出さずに exit 4(`allow の句が読めない: …`) | `reader/clauses.gleam` |
+| P1-4 List の literal でない欄 | `q.Select` の List の欄(`join` / `where` / `group` / `having` / `agg` / `along` / `with` / `order`)が literal でない(定数の参照)とき、または spread を持つときは、`Select.unshaped` に名指しを残し、SQL を出さずに exit 4(`読めない項: where が List の literal でない` など)。`where` は、条件として読めない項(`[one]` のような定数の参照)と、`Has` / `HasNone` の中の List も同じ扱いにした。`q.Pick` の `columns` の spread も同じ。r1 の「矢印として読めない項」はそのまま残した | `reader.gleam`、`model.gleam`(`Select.unshaped`)、`emit/sql.gleam` |
+| 3 framework の `Select` | `src/framework/query.gleam` の `Select` に `Pick(columns: List(field), select: Select(..))` を足した。型引数は 9 → 10 で、`field` を 2 番目に置いた(`from, field, arrow, …`)。生成の `gen/query.gleam` と、構成子の名とラベルが 1 対 1 になる。`model.gleam:250` と `emit/query.gleam:7` の注記もこれに合わせた。1 対 1 は test で確かめる(framework の source と生成物を glance で読み、Cond / Agg / CondAgg / Unit / Group / Order / Along / Limit / Select の構成子の名とラベルを比べる。Operand は framework の構成子を含むことを見る) | `src/framework/query.gleam`、`emit/query.gleam`、`model.gleam` |
+| P1-3 Pick を with の子へ | `q.Pick` の `columns` に with の子の Entity の列を混ぜると、その子は `jsonb_agg(jsonb_build_object('<欄>',p.<列>,…) ORDER BY …)` で、選んだ列だけを返す。reads では子の欄が `List(<Const><With の欄>Row)` になり、子の record を同じ reads module に置く(例 `ListedPhotosRow`)。子の列を選ばなければ、今までどおり `to_jsonb(p)` で全列(`List(子の Entity)`)。書き方は今の `q.Pick(columns: [...], select: q.Select(...))` のまま。exit 4 にする形:同じ Entity が行と子の両方に居る、または子 2 本に居て、どちらの列か決まらない。from / join / with のどこにも無い列 | `emit/typing.gleam`(`owner` / `row_columns` / `child_columns` / `child_records`)、`emit/sql.gleam`、`emit/reads.gleam` |
+
+join について:Pick を使う読みでは、join した Entity は選んだ列(`<entity>_<prop>`)だけを返す。1 列も選ばなければ、JOIN はするが欄には出さない(r1 から)。Pick を使わない読みの `to_jsonb(x)` は、「書かなければ今までどおり全列」の側に入るので変えていない。親ゴールのうち join の分は、★ に Pick を書けば閉じる。
+
+`Self` の 28 本は (b) のまま(exit 4、musearch の ▲ に残す)。P1-1(allow の Entity から辿る道)は本便の指示に無いので触っていない(下の鷹野宛)。
+
+### 契約の追記 ── 列の選択(with の子)
+
+- 子の行の JSON の key は、子の record の欄の名と同じで、子の Entity の Property の名(`RosterPhotoBlob` → `blob`、`RosterPhotoOrder` → `order`)。関係の列は `<prop>`(`RosterPhotoRoster` → `roster`、型は `Key(Roster)`)。欄の並びは `columns` に書いた順
+- 子の record の名は `<Pascal(const)><Pascal(with の欄の名)>Row`(`listed` の `photos` → `ListedPhotosRow`)。親の record の欄は `photos: List(ListedPhotosRow)`
+- 子の並び(`ORDER BY p."order",p.id`)は、選んだ列に依らず今までどおり
+
+### 検収
+
+| 項目 | 結果 | 証拠 |
+|---|---|---|
+| root `gleam build` | exit 0、warning 1(既存の `src/framework/secret.gleam:5`) | `root-build.txt` |
+| `cd gen && gleam test` | **219 passed, no failures**(r1 212 + 7)。`gleam format --check src test` は gen・root とも 0 | `test-d.txt` |
+| 新しい test の負の確認 | P0-1 の 2 本(`allow_clause_wrapped_in_a_constant_is_exit_four_test`・`allow_clause_spread_is_exit_four_test`)は、`clauses.gleam` を r1 に戻すと落ちる(214 passed, 2 failures) | `test-old-clauses.txt` |
+| Article fixture ×2 | 2 回とも exit 0 で 112 file、`diff -r` は 0 行。tracked の 51 file は `cmp` で全部一致。r1 の出力との差は `src/gen/query.gleam` の `Select` の上の注記 1 行(「`columns` に with の子の列を混ぜると…」)だけ | `fx-a`、`fx-b` |
+| 写し ×2 | 2 回とも exit 4 で 1344 file、`diff -r` は 0 行(r1 で出ていた runtime build の時間の 1 行も今回は出ない) | `out-a`、`out-b`、`snap-ab-diff.txt` |
+| 写しの診断 | r1 の `_diagnostics.txt` と **1 行も違わない**(exit 4 は 139、うち back 50 = 基点の 22 + `Self` の 28。警告 48、module 名 24 は同一)。写しの ★ には、allow の const / spread も、List の literal でない欄も無い。そのため P0-1・P1-4 で exit 4 は増えも減りもしない。生成物の r1 との差は `src/gen/query.gleam` の注記 1 行だけ | `out-a/_diagnostics.txt` |
+| 子の列を選んだ写し | `roster_list.listed` を `q.Pick(columns: [q.RosterId, q.RosterName, q.RosterCatch, q.RosterOrder, q.RosterPhase, q.RosterMuse, q.RosterPhotoBlob, q.RosterPhotoOrder], select: …)` にした写し(`snap-pick`)。SQL は `…,r.muse_id AS muse,COALESCE((SELECT jsonb_agg(jsonb_build_object('blob',p.blob,'order',p."order") ORDER BY p."order",p.id) … AS photos` で、record は `ListedRow(…, photos: List(ListedPhotosRow))` と `ListedPhotosRow(blob: Blob, order: PhotoOrder)`。診断は `out-a` と同一。この reads を写しの api に重ね、★ の `row` を 2 つの record を分解する形に変えた `gleam build` は exit 0 | `out-pick`、`snap-pick-overlay`、`pick-overlay-build.txt` |
+| hw-2 との merge | `git merge-tree --write-tree impl/yumemi-hw-1 impl/yumemi-hw-2`(hw-2 は `1b5ca05`)は exit 0、衝突無し(tree `3da1e88`)。この tree を `git archive` で出すと、root `gleam build` 0、`gen && gleam test` **237 passed**(hw-2 は framework の `Select` を使っていないので、型引数が増えても壊れない) | `merge-tree.txt`、`merged-root.txt`、`merged-test.txt` |
+
+test の内訳(+7、全部 `gen/test/yumemi_gen_hw1_test.gleam` の末尾への追記):P0-1 が 3 本(const・他 module・呼び出し / spread・`Only` の spread / 略記は今までどおり読める)、P1-4 が 1 本(where の const・spread・項・`Has` の中、with の const・spread、join の const の 7 形)、3 が 1 本(framework と生成の 1 対 1)、P1-3 が 2 本(子の列を選ぶ / 選べない形)。`yumemi_gen_test.gleam` は触っていない。
+
+### 鷹野宛(r2)
+
+1. **framework の `Select` の型引数が 9 → 10 になった(人見の裁定どおりの破壊的変更)。** `field` を 2 番目に入れた。repo に CHANGELOG が無いので、0.11.0 の告知に書く場所が要るなら指示をください
+2. **P1-4 は `join` / `with` / `where` より広く取った。** List の欄は 8 つとも literal でない・spread なら exit 4 にした。`order` / `group` / `having` / `agg` / `along` も同じ形で項が黙って落ちるから。写しと fixture で当たる読みは 0 本
+3. **P1-1(allow の Entity から辿る道)は直していない。** 本便の指示の 1〜5 に無いため。写しで当たる読みは 0 本(allow 句が入るのは `nearest.sql` だけ)。hw-2 の `party_of` の実物と揃えるときに、一緒に閉じるのがよいと思う
+4. P2-2・P2-3(報告の誤記)は記録として残し、r1 の節は書き換えていない。正しくは、`gen/root` の import が増えたのは `roster_list` と `store_roster_list`。`yumemi_gen_test.gleam` への変更は、helper の置き換え 1 行と注記 1 行
+
+### 追随便への申し送り(r2 の追加)
+
+- ★ で `SELECT x.*` を細くするときは、with の子の列も `q.Pick` の `columns` に書けば、子の `to_jsonb` も細くなる(例:`roster_list.listed` の photos は `blob`・`order` の 2 列)。runtime は子の行の JSON を、上の key のまま子の record に写す

@@ -7,6 +7,7 @@ import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
 import gleeunit/should
+import simplifile
 import yumemi_gen/emit/hash
 import yumemi_gen/emit/query
 import yumemi_gen/emit/reads
@@ -825,4 +826,324 @@ pub fn pick_is_non_destructive_for_plain_selects_test() {
     "SELECT p.*\n",
   )
   |> should.be_true
+}
+
+// ── r2 P0-1 allow 句を定数に包む・spread で書く ──────────────────────────────────
+
+/// Service の module に const を足す(`pub const service` の直前)。
+fn with_prelude(found: source.Unit, prelude: String) -> source.Unit {
+  unit(
+    found.path,
+    string.replace(
+      found.text,
+      "pub const service",
+      prelude <> "\n\npub const service",
+    ),
+  )
+}
+
+const published_only = "allow.Clause(who: allow.Anyone, at: allow.Only([article.Published]), owner: allow.NoOwner)"
+
+/// 句を module の const に包むと、中身を読まずに「絞らない句」と取り違えていた
+/// (allow 句が SQL から消えて exit 0)。読めない句として exit 4 で名指しし、SQL を出さない。
+pub fn allow_clause_wrapped_in_a_constant_is_exit_four_test() {
+  let out =
+    generate(
+      units_with(article_fixture, [
+        memo_entity(),
+        memo_service("memo_const", "article", "published_only")
+          |> with_prelude("const published_only = " <> published_only),
+        memo_service("memo_foreign", "article", "shared.published_only"),
+        memo_service(
+          "memo_call",
+          "article",
+          "allow.clause_of(article.Published)",
+        ),
+      ]),
+    )
+  let note = note_with(out, "memo_const/items")
+  note.class |> should.equal(stop.Conflict)
+  string.contains(note.text, "allow の句が読めない: allow の句 published_only")
+  |> should.be_true
+  string.contains(
+    note_with(out, "memo_foreign/items").text,
+    "allow の句が読めない: allow の句 published_only",
+  )
+  |> should.be_true
+  string.contains(
+    note_with(out, "memo_call/items").text,
+    "allow の句が読めない: allow の句 clause_of",
+  )
+  |> should.be_true
+  ["memo_const", "memo_foreign", "memo_call"]
+  |> list.each(fn(name) {
+    has_file(out, "db/queries/" <> name <> "/items.sql") |> should.be_false
+  })
+}
+
+/// `allow: [allow.staff, ..public_clauses]` の spread の後ろは読めない ── exit 4、SQL を出さない。
+/// `Only([..])` の spread も同じ。
+pub fn allow_clause_spread_is_exit_four_test() {
+  let out =
+    generate(
+      units_with(article_fixture, [
+        memo_entity(),
+        memo_service("memo_spread", "article", "allow.staff, ..public_clauses")
+          |> with_prelude("const public_clauses = [" <> published_only <> "]"),
+        memo_service(
+          "memo_phases",
+          "article",
+          "allow.Clause(who: allow.Anyone, at: allow.Only([article.Published, ..more]), owner: allow.NoOwner)",
+        ),
+      ]),
+    )
+  let note = note_with(out, "memo_spread/items")
+  note.class |> should.equal(stop.Conflict)
+  string.contains(note.text, "allow の句が読めない: allow の spread(..)")
+  |> should.be_true
+  string.contains(
+    note_with(out, "memo_phases/items").text,
+    "allow の at が読めない: Only の引数",
+  )
+  |> should.be_true
+  has_file(out, "db/queries/memo_spread/items.sql") |> should.be_false
+  has_file(out, "db/queries/memo_phases/items.sql") |> should.be_false
+}
+
+/// 略記として読む形(大文字の構成子、allow の import の句)は今までどおり通る。
+pub fn allow_shorthand_is_still_read_test() {
+  let out =
+    generate(
+      units_with(article_fixture, [
+        memo_entity(),
+        memo_service(
+          "memo_short",
+          "article",
+          "allow.staff, allow.Anyone, Anyone, " <> published_only,
+        ),
+      ]),
+    )
+  no_note_with(out, "memo_short/")
+  string.contains(
+    file(out, "db/queries/memo_short/items.sql"),
+    "-- allow: clauses=$2\n",
+  )
+  |> should.be_true
+}
+
+// ── r2 P1-4 join / with / where が List の literal でない ─────────────────────
+
+fn photo_select(name: String, join: String, where: String, with: String) {
+  "pub const " <> name <> ": q.Select(P) = q.Select(
+  from: q.Album,
+  join: " <> join <> ",
+  where: " <> where <> ",
+  group: [],
+  having: [],
+  agg: [],
+  along: [],
+  with: " <> with <> ",
+  order: [q.Asc(q.AlbumId)],
+  limit: q.NoLimit,
+)"
+}
+
+/// 定数の参照・spread・読めない条件は、読めた項だけで SQL を出すと絞りや欄が黙って消える。
+/// 両方の層で exit 4 にし、SQL を出さない。
+pub fn non_literal_select_lists_are_exit_four_test() {
+  let named = "q.Eq(q.AlbumTitle, q.Param(Name))"
+  let out =
+    generate(
+      units_with(relation_fixture, [
+        photo_service(
+          "album_loose",
+          "const narrow = [q.Eq(q.AlbumTitle, q.Param(Name))]\n\n"
+            <> "const one = q.Eq(q.AlbumTitle, q.Param(Name))\n\n"
+            <> photo_select("by_const", "[]", "narrow", "[]")
+            <> "\n\n"
+            <> photo_select(
+            "by_spread",
+            "[]",
+            "[" <> named <> ", ..narrow]",
+            "[]",
+          )
+            <> "\n\n"
+            <> photo_select("by_item", "[]", "[one]", "[]")
+            <> "\n\n"
+            <> photo_select(
+            "by_has",
+            "[]",
+            "[q.Has(q.PhotoToAlbum, narrow)]",
+            "[]",
+          )
+            <> "\n\n"
+            <> photo_select("with_const", "[]", "[]", "children")
+            <> "\n\n"
+            <> photo_select("with_spread", "[]", "[]", "[..children]")
+            <> "\n\n"
+            <> photo_select("join_const", "joins", "[]", "[]"),
+        ),
+      ]),
+    )
+  [
+    #("by_const", "読めない項: where が List の literal でない"),
+    #("by_spread", "読めない項: where の spread(..)"),
+    #("by_item", "読めない項: where の 1 番目(条件として読めない)"),
+    #("by_has", "読めない項: where の 1 番目 の条件が List の literal でない"),
+    #("with_const", "読めない項: with が List の literal でない"),
+    #("with_spread", "読めない項: with の spread(..)"),
+    #("join_const", "読めない項: join が List の literal でない"),
+  ]
+  |> list.each(fn(pair) {
+    let note = note_with(out, "album_loose/" <> pair.0)
+    note.class |> should.equal(stop.Conflict)
+    string.contains(note.text, pair.1) |> should.be_true
+    has_file(out, "db/queries/album_loose/" <> pair.0 <> ".sql")
+    |> should.be_false
+  })
+}
+
+// ── r2 3 framework の Select と生成の Select を 1 対 1 に戻す ─────────────────────
+
+/// 構成子の名とラベル(ラベルの無い欄は "_")。
+fn variants_of(
+  module: glance.Module,
+  name: String,
+) -> List(#(String, List(String))) {
+  let assert Ok(found) =
+    list.find(module.custom_types, fn(definition) {
+      definition.definition.name == name
+    })
+  list.map(found.definition.variants, fn(variant) {
+    #(
+      variant.name,
+      list.map(variant.fields, fn(field) {
+        case field {
+          glance.LabelledVariantField(label: label, ..) -> label
+          glance.UnlabelledVariantField(..) -> "_"
+        }
+      }),
+    )
+  })
+}
+
+/// framework/query.gleam の語彙と生成の gen/query.gleam の語彙は、構成子の名とラベルが
+/// 1 対 1(Operand は生成側が PhaseOf / KeyOf を足すので、framework の構成子を含むこと)。
+/// `Select` の `Pick` も framework に在る(役員 人見 09-25 の裁定)。
+pub fn framework_query_is_one_to_one_with_the_generated_query_test() {
+  let assert Ok(framework_text) =
+    simplifile.read("../src/framework/query.gleam")
+  let assert Ok(framework) = glance.module(framework_text)
+  let out = generate(units_with(relation_fixture, []))
+  let assert Ok(generated) = glance.module(file(out, "src/gen/query.gleam"))
+  [
+    "Cond", "Agg", "CondAgg", "Unit", "Group", "Order", "Along", "Limit",
+    "Select",
+  ]
+  |> list.each(fn(name) {
+    variants_of(generated, name) |> should.equal(variants_of(framework, name))
+  })
+  variants_of(framework, "Select")
+  |> should.equal([
+    #("Select", [
+      "from", "join", "where", "group", "having", "agg", "along", "with",
+      "order", "limit",
+    ]),
+    #("Pick", ["columns", "select"]),
+  ])
+  let generated_operands = variants_of(generated, "Operand")
+  variants_of(framework, "Operand")
+  |> list.all(fn(variant) { list.contains(generated_operands, variant) })
+  |> should.be_true
+}
+
+// ── r2 4 Pick を with の子に届かせる ──────────────────────────────────────────
+
+/// columns に with の子の列を混ぜると、子は `jsonb_build_object` で選んだ列だけを返し、
+/// reads の欄は子の record の List になる。子の列を選ばなければ従来どおり `to_jsonb`(全列)。
+pub fn pick_reaches_with_children_test() {
+  let out =
+    generate(
+      units_with(relation_fixture, [
+        photo_service(
+          "album_thin",
+          pick(
+            "listed",
+            "q.AlbumId, q.AlbumTitle, q.PhotoCaption, q.PhotoOrder",
+            select_value(
+              "Album",
+              "",
+              "q.AlbumToPhotos",
+              "q.Asc(q.AlbumTitle)",
+              "q.NoLimit",
+            ),
+          ),
+        ),
+      ]),
+    )
+  let found = file(out, "db/queries/album_thin/listed.sql")
+  string.contains(
+    found,
+    "SELECT a.id AS id,a.title AS title,COALESCE((SELECT jsonb_agg(jsonb_build_object('caption',p.caption,'order',p.\"order\") ORDER BY p.\"order\",p.id)\nFROM app.photo p\nWHERE p.album_id=a.id),'[]'::jsonb) AS photos\n",
+  )
+  |> should.be_true
+  string.contains(found, "to_jsonb") |> should.be_false
+  let reads_text = file(out, "src/gen/reads/album_thin.gleam")
+  string.contains(
+    reads_text,
+    "  ListedRow(\n    id: AlbumId,\n    title: AlbumTitle,\n    photos: List(ListedPhotosRow),\n  )",
+  )
+  |> should.be_true
+  string.contains(
+    reads_text,
+    "pub type ListedPhotosRow {\n  ListedPhotosRow(\n    caption: PhotoCaption,\n    order: PhotoOrder,\n  )\n}",
+  )
+  |> should.be_true
+  no_note_with(out, "album_thin/")
+}
+
+/// 子の列を選べない形は exit 4 ── 同じ Entity が行と子に居て列の持ち主が決まらない、
+/// from / join / with のどれにも無い列。どれも SQL を出さない。
+pub fn pick_of_child_columns_that_cannot_be_chosen_is_exit_four_test() {
+  let out =
+    generate(
+      units_with(relation_fixture, [
+        photo_service(
+          "album_odd",
+          string.join(
+            [
+              pick(
+                "twice",
+                "q.AlbumId, q.PhotoCaption",
+                select_value(
+                  "Album",
+                  "",
+                  "q.AlbumToPhotos, q.AlbumToPhotos",
+                  "",
+                  "q.NoLimit",
+                ),
+              ),
+              pick(
+                "stray",
+                "q.AlbumId, q.ShelfName",
+                select_value("Album", "", "q.AlbumToPhotos", "", "q.NoLimit"),
+              ),
+            ],
+            "\n\n",
+          ),
+        ),
+      ]),
+    )
+  string.contains(
+    note_with(out, "album_odd/stray:").text,
+    "列 ShelfName の Entity が from にも join にも無い(with の子にも無い)",
+  )
+  |> should.be_true
+  string.contains(
+    note_with(out, "album_odd/twice:").text,
+    "列の選択の列 PhotoCaption の Entity が from / join と with の子(または with の子 2 本)に居て",
+  )
+  |> should.be_true
+  has_file(out, "db/queries/album_odd/stray.sql") |> should.be_false
+  has_file(out, "db/queries/album_odd/twice.sql") |> should.be_false
 }

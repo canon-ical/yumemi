@@ -5,7 +5,8 @@
 //// From と Field を同じ module に置くと構成子の名前空間が衝突する(Entity `consent_version` の
 //// From と Entity Consent の `version` 列が `ConsentVersion` で衝突し `Duplicate definition`)。
 //// From / Field / Arrow / Operand は Entity 宣言から、残りは framework/query.gleam の
-//// 構成子をそのまま単型に写す(アプリは語彙を足せない、20:664)。
+//// 構成子をそのまま単型に写す(アプリは語彙を足せない、20:664)。`Select` の `Pick` も
+//// framework 側に同じ形で在る(役員 人見 09-25、1 対 1 は test が見る)。
 
 import gleam/list
 import gleam/string
@@ -207,6 +208,7 @@ fn text(app: App, input_hash: String) -> String {
     ]),
     "\n",
     "/// `Pick` は返す列を選ぶ口。`select` は `Select` を直に書き、行は選んだ列の record になる。\n",
+    "/// `columns` に with の子の列を混ぜると、その子も選んだ列だけの record になる。\n",
     "pub type Select(p) {\n",
     "  Select(\n",
     "    from: From,\n",

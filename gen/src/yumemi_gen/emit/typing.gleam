@@ -204,14 +204,127 @@ pub fn picked_label(app: App, select: Select, field_name: String) -> String {
   case model.field_by_name(app.entities, field_name) {
     Some(field) ->
       case field.entity_name == select.from {
-        True ->
-          naming.snake(string.drop_start(
-            field.name,
-            string.length(field.entity_name),
-          ))
+        True -> own_label(field)
         False -> naming.snake(field.name)
       }
     None -> naming.snake(field_name)
+  }
+}
+
+/// Property の名(`RosterPhotoUrl` -> `url`)。from の列と with の子の列の欄の名。
+fn own_label(field: model.FieldDef) -> String {
+  naming.snake(string.drop_start(field.name, string.length(field.entity_name)))
+}
+
+/// with の子。with の名・欄の名(SQL の `AS`)・子の Entity の名。解けない項は落とす
+/// (SQL 層が同じ `relation` で exit 4 / 1 を出す)。
+pub type Child {
+  Child(name: String, output: String, entity: String)
+}
+
+pub fn children(app: App, select: Select) -> List(Child) {
+  case model.entity_by_name(app.entities, select.from) {
+    None -> []
+    Some(from) ->
+      list.filter_map(select.with, fn(name) {
+        case relation.with_arrow(app.entities, app.arrows, from, name) {
+          Ok(arrow) ->
+            Ok(Child(
+              name: name,
+              output: relation.with_output(from, name),
+              entity: arrow.target_entity,
+            ))
+          Error(_) -> Error(Nil)
+        }
+      })
+  }
+}
+
+/// 選んだ列の持ち主。from / join の行の列か、with の子の列か。
+/// 同じ Entity が行と子(または子 2 本)に居ると、どちらの列か決まらない。
+pub type Owner {
+  RowColumn
+  ChildColumn(Child)
+  Ambiguous
+}
+
+pub fn owner(app: App, select: Select, field_name: String) -> Owner {
+  case model.field_by_name(app.entities, field_name) {
+    None -> RowColumn
+    Some(field) -> {
+      let in_row =
+        field.entity_name == select.from
+        || list.any(select.join, fn(arrow_name) {
+          case relation.join_arrow(app, arrow_name) {
+            Ok(arrow) -> arrow.target_entity == field.entity_name
+            Error(_) -> False
+          }
+        })
+      let owners =
+        list.filter(children(app, select), fn(child) {
+          child.entity == field.entity_name
+        })
+      case in_row, owners {
+        _, [] -> RowColumn
+        False, [child] -> ChildColumn(child)
+        _, _ -> Ambiguous
+      }
+    }
+  }
+}
+
+/// 行の列(from / join)として選んだ列。with の子の列は含めない。
+pub fn row_columns(app: App, select: Select) -> List(String) {
+  option.unwrap(select.columns, [])
+  |> list.filter(fn(field_name) {
+    case owner(app, select, field_name) {
+      ChildColumn(_) -> False
+      _ -> True
+    }
+  })
+}
+
+/// with の子について選んだ列。空なら子は従来どおり全列(`to_jsonb`、`List(子の Entity)`)。
+pub fn child_columns(app: App, select: Select, child: Child) -> List(String) {
+  option.unwrap(select.columns, [])
+  |> list.filter(fn(field_name) {
+    owner(app, select, field_name) == ChildColumn(child)
+  })
+}
+
+/// 子の列の欄の名。子の record の欄と SQL の `jsonb_build_object` の key は同じ。
+pub fn child_label(app: App, field_name: String) -> String {
+  case model.field_by_name(app.entities, field_name) {
+    Some(field) -> own_label(field)
+    None -> naming.snake(field_name)
+  }
+}
+
+/// 列を選んだ子の record 型の名。`listed` の `photos` -> `ListedPhotosRow`。
+pub fn child_picked_name(query_name: String, output: String) -> String {
+  naming.pascal(query_name) <> naming.pascal(output) <> "Row"
+}
+
+/// 列を選んだ子の record(名と欄)。選んでいない子は載せない。reads module に置く。
+pub fn child_records(
+  app: App,
+  query: NamedQuery,
+) -> List(#(String, List(#(String, Ty)))) {
+  case query.select.columns {
+    None -> []
+    Some(_) ->
+      list.filter_map(children(app, query.select), fn(child) {
+        case child_columns(app, query.select, child) {
+          [] -> Error(Nil)
+          columns ->
+            Ok(#(
+              child_picked_name(query.name, child.output),
+              list.map(columns, fn(field_name) {
+                #(child_label(app, field_name), column_ty(app, field_name))
+              }),
+            ))
+        }
+      })
   }
 }
 
@@ -233,12 +346,24 @@ pub fn column_ty(app: App, field_name: String) -> Ty {
   }
 }
 
-/// record の欄(名と型)。選んだ列 + with の子 + along の値の順。SQL の SELECT 句と同じ並び。
-pub fn picked_fields(app: App, select: Select) -> List(#(String, Ty)) {
+/// record の欄(名と型)。選んだ行の列 + with の子 + along の値の順。SQL の SELECT 句と同じ並び。
+/// 列を選んだ子は `List(<子の record>)`、選んでいない子は `List(子の Entity)`。
+pub fn picked_fields(app: App, query: NamedQuery) -> List(#(String, Ty)) {
+  let select = query.select
   let columns =
-    option.unwrap(select.columns, [])
+    row_columns(app, select)
     |> list.map(fn(field_name) {
       #(picked_label(app, select, field_name), column_ty(app, field_name))
+    })
+  let attached =
+    list.map(children(app, select), fn(child) {
+      case child_columns(app, select, child) {
+        [] -> #(child.output, list_of(child_entity_ty(app, child)))
+        _ -> #(
+          child.output,
+          list_of(TyRef(None, child_picked_name(query.name, child.output))),
+        )
+      }
     })
   let alongs =
     list.map(select.along, fn(along) {
@@ -248,7 +373,26 @@ pub fn picked_fields(app: App, select: Select) -> List(#(String, Ty)) {
         model.LRunning(value) -> #("running", agg_base(app, value))
       }
     })
-  list.flatten([columns, with_types(app, select), alongs])
+  list.flatten([columns, attached, alongs])
+}
+
+fn child_entity_ty(app: App, child: Child) -> Ty {
+  option.unwrap(entity_ty(app, child.entity), TyRef(None, child.entity))
+}
+
+/// record の欄の名だけ(SQL 層の衝突の検査用)。並びは `picked_fields` と同じ。
+pub fn picked_labels(app: App, select: Select) -> List(String) {
+  list.flatten([
+    list.map(row_columns(app, select), picked_label(app, select, _)),
+    list.map(children(app, select), fn(child) { child.output }),
+    list.map(select.along, fn(along) {
+      case along {
+        model.LDistance -> "distance"
+        model.LRank -> "rank"
+        model.LRunning(_) -> "running"
+      }
+    }),
+  ])
 }
 
 fn agg_base(app: App, value: model.Agg) -> Ty {

@@ -1911,6 +1911,10 @@ fn parse_select(
         g.labelled(expression, "columns")
         |> option.to_result(Unsupported(where, "Pick の columns が無い")),
       )
+      let columns_unread = case items {
+        glance.List(rest: Some(_), ..) -> ["columns の spread(..)"]
+        _ -> []
+      }
       use columns <- result.try(
         g.list_elements(items)
         |> list.try_map(fn(item) {
@@ -1918,7 +1922,13 @@ fn parse_select(
           |> option.to_result(Unsupported(where, "Pick の columns の項が Field でない"))
         }),
       )
-      Ok(model.Select(..select, columns: Some(columns)))
+      Ok(
+        model.Select(
+          ..select,
+          columns: Some(columns),
+          unshaped: list.append(select.unshaped, columns_unread),
+        ),
+      )
     }
     _ -> Error(Unsupported(where, "Select の構成子でない"))
   }
@@ -1935,6 +1945,8 @@ fn plain_select(
   )
   let #(join, join_unread) = arrow_names(expression, "join")
   let #(with, with_unread) = arrow_names(expression, "with")
+  let shape_unread =
+    list.flat_map(select_lists, fn(label) { literal_unread(expression, label) })
   Ok(model.Select(
     from: from,
     join: join,
@@ -1947,8 +1959,61 @@ fn plain_select(
     order: orders(expression, "order"),
     limit: limit(expression),
     unread: list.append(join_unread, with_unread),
+    unshaped: list.append(shape_unread, where_unread(expression)),
     columns: None,
   ))
+}
+
+/// Select の List の欄。
+const select_lists = [
+  "join", "where", "group", "having", "agg", "along", "with", "order",
+]
+
+/// 欄が List の literal でない(定数の参照など)か、spread(`..rest`)を持つ。
+/// 読みは literal の項しか辿れないので、そのまま読むと項が黙って落ちる ──
+/// `where` なら絞りが消えて返る行が増え、`join` / `with` なら欄が消える。
+/// 捨てずに `unshaped` に残し、SQL 層で exit 4 にする。
+fn literal_unread(
+  expression: glance.Expression,
+  label: String,
+) -> List(String) {
+  case g.labelled(expression, label) {
+    None -> []
+    Some(glance.List(rest: None, ..)) -> []
+    Some(glance.List(rest: Some(_), ..)) -> [label <> " の spread(..)"]
+    Some(_) -> [label <> " が List の literal でない"]
+  }
+}
+
+/// `where` の項のうち条件として読めないもの。`Has` / `HasNone` の中の List も辿る。
+/// 読めない条件を落とすと絞りが緩むので、捨てずに名指しする。
+fn where_unread(expression: glance.Expression) -> List(String) {
+  case g.labelled(expression, "where") {
+    Some(glance.List(elements: elements, ..)) -> cond_unread(elements, "where")
+    _ -> []
+  }
+}
+
+fn cond_unread(items: List(glance.Expression), place: String) -> List(String) {
+  items
+  |> list.index_map(fn(item, index) {
+    let here = place <> " の " <> int.to_string(index + 1) <> " 番目"
+    case cond(item) {
+      None -> [here <> "(条件として読めない)"]
+      Some(_) ->
+        case g.ctor_name(item), g.args(item) {
+          Some("Has"), [_, inner] | Some("HasNone"), [_, inner] ->
+            case inner {
+              glance.List(elements: elements, rest: None, ..) ->
+                cond_unread(elements, here)
+              glance.List(rest: Some(_), ..) -> [here <> " の spread(..)"]
+              _ -> [here <> " の条件が List の literal でない"]
+            }
+          _, _ -> []
+        }
+    }
+  })
+  |> list.flatten
 }
 
 fn labelled_list(

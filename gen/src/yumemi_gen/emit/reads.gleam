@@ -28,7 +28,12 @@ fn one(app: model.App, service: model.Service, input_hash: String) -> File {
     list.flat_map(service.queries, fn(query) {
       case query.select.columns {
         Some(_) ->
-          list.map(typing.picked_fields(app, query.select), fn(pair) { pair.1 })
+          list.flatten([
+            list.map(typing.picked_fields(app, query), fn(pair) { pair.1 }),
+            list.flat_map(typing.child_records(app, query), fn(record) {
+              list.map(record.1, fn(pair) { pair.1 })
+            }),
+          ])
         None -> []
       }
     })
@@ -296,6 +301,8 @@ fn arrow_function(
 
 /// 列を選んだ読み(`q.Pick`)の 1 行の record。欄の名と並びは SQL の SELECT 句と同じ
 /// (`AS <欄の名>`)── 実行側は行の JSON の欄をこの名でそのまま record の欄へ写す。
+/// with の子の列を選んだときは、子の 1 行の record も続けて置く(欄の名は
+/// `jsonb_build_object` の key と同じ)。
 fn picked_record(
   app: model.App,
   style: Style,
@@ -303,27 +310,50 @@ fn picked_record(
 ) -> String {
   case query.select.columns {
     None -> ""
-    Some(_) -> {
-      let name = typing.picked_name(query.name)
-      let fields =
-        typing.picked_fields(app, query.select)
-        |> list.map(fn(pair) {
-          "    " <> pair.0 <> ": " <> render.ty(style, pair.1) <> ",\n"
-        })
+    Some(_) ->
       string.concat([
-        "/// 列を選んだ読み ",
-        query.name,
-        " の 1 行。欄の名は SQL の `AS` と同じ。\n",
-        "pub type ",
-        name,
-        " {\n  ",
-        name,
-        "(\n",
-        string.concat(fields),
-        "  )\n}\n\n",
+        record(
+          style,
+          "/// 列を選んだ読み " <> query.name <> " の 1 行。欄の名は SQL の `AS` と同じ。\n",
+          typing.picked_name(query.name),
+          typing.picked_fields(app, query),
+        ),
+        string.concat(
+          list.map(typing.child_records(app, query), fn(child) {
+            record(
+              style,
+              "/// 列を選んだ読み "
+                <> query.name
+                <> " の with の子の 1 行。欄の名は SQL の `jsonb_build_object` の key と同じ。\n",
+              child.0,
+              child.1,
+            )
+          }),
+        ),
       ])
-    }
   }
+}
+
+fn record(
+  style: Style,
+  doc: String,
+  name: String,
+  fields: List(#(String, typing.Ty)),
+) -> String {
+  string.concat([
+    doc,
+    "pub type ",
+    name,
+    " {\n  ",
+    name,
+    "(\n",
+    string.concat(
+      list.map(fields, fn(pair) {
+        "    " <> pair.0 <> ": " <> render.ty(style, pair.1) <> ",\n"
+      }),
+    ),
+    "  )\n}\n\n",
+  ])
 }
 
 fn function(app: model.App, style: Style, query: model.NamedQuery) -> String {

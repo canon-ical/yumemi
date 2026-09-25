@@ -310,6 +310,10 @@ fn statement(
   service: model.Service,
   select: Select,
 ) -> Result(String, Reason) {
+  use _ <- try(case select.unshaped {
+    [] -> Ok(Nil)
+    items -> Error(clash("読めない項: " <> string.join(items, ", ")))
+  })
   use _ <- try(case select.unread {
     [] -> Ok(Nil)
     items -> Error(clash("矢印として読めない項: " <> string.join(items, ", ")))
@@ -474,7 +478,7 @@ fn select_list(
           }
         })
       let distance = distance_columns(app, scope, select)
-      use attached <- try(with_clauses(app, scope, from, select.with))
+      use attached <- try(with_clauses(app, scope, from, select))
       Ok(string.join(
         list.flatten([[alias <> ".*"], joined, attached, distance]),
         ",",
@@ -562,8 +566,30 @@ fn picked_list(
     [] -> Ok(Nil)
     names -> Error(clash("列の選択に重複: " <> string.join(names, ", ")))
   })
-  use found <- try(list.try_map(columns, column(app, scope, _)))
-  let labels = list.map(typing.picked_fields(app, select), fn(pair) { pair.0 })
+  use _ <- try(
+    list.try_each(columns, fn(field_name) {
+      case typing.owner(app, select, field_name) {
+        typing.Ambiguous ->
+          Error(clash(
+            "列の選択の列 "
+            <> field_name
+            <> " の Entity が from / join と with の子(または with の子 2 本)に居て、どちらの列か決まらない",
+          ))
+        _ -> Ok(Nil)
+      }
+    }),
+  )
+  let rows = typing.row_columns(app, select)
+  use found <- try(
+    list.try_map(rows, fn(field_name) {
+      case column(app, scope, field_name) {
+        Ok(found) -> Ok(found)
+        Error(reason) ->
+          Error(Reason(..reason, text: reason.text <> "(with の子にも無い)"))
+      }
+    }),
+  )
+  let labels = typing.picked_labels(app, select)
   use _ <- try(case duplicated(labels) {
     [] -> Ok(Nil)
     names -> Error(clash("列の選択の欄の名が衝突: " <> string.join(names, ", ")))
@@ -578,12 +604,12 @@ fn picked_list(
       }
   })
   let picked =
-    list.map2(found, columns, fn(item, field_name) {
+    list.map2(found, rows, fn(item, field_name) {
       item.reference
       <> " AS "
       <> quoted(typing.picked_label(app, select, field_name))
     })
-  use attached <- try(with_clauses(app, scope, from, select.with))
+  use attached <- try(with_clauses(app, scope, from, select))
   Ok(string.join(
     list.flatten([picked, attached, distance_columns(app, scope, select)]),
     ",",
@@ -1069,12 +1095,18 @@ fn with_clauses(
   app: App,
   scope: Scope,
   from: Entity,
-  names: List(String),
+  select: Select,
 ) -> Result(List(String), Reason) {
+  let children = typing.children(app, select)
   use #(texts, _) <- try(
-    list.try_fold(names, #([], scope), fn(acc, name) {
+    list.try_fold(select.with, #([], scope), fn(acc, name) {
       let #(texts, current) = acc
-      use #(next, text) <- try(with_clause(app, current, from, name))
+      // 列を選んだ子(`q.Pick` の columns に子の列がある)は、選んだ列だけを返す。
+      let picked = case list.find(children, fn(child) { child.name == name }) {
+        Ok(child) -> typing.child_columns(app, select, child)
+        Error(_) -> []
+      }
+      use #(next, text) <- try(with_clause(app, current, from, name, picked))
       Ok(#(list.append(texts, [text]), next))
     }),
   )
@@ -1086,6 +1118,7 @@ fn with_clause(
   scope: Scope,
   from: Entity,
   name: String,
+  picked: List(String),
 ) -> Result(#(Scope, String), Reason) {
   use arrow <- try(
     relation.with_arrow(app.entities, app.arrows, from, name)
@@ -1114,7 +1147,24 @@ fn with_clause(
     <> owner
     <> "."
     <> quoted(from.key_column)
-  let aggregate = "jsonb_agg(to_jsonb(" <> child_alias <> ")" <> order <> ")"
+  use value <- try(case picked {
+    [] -> Ok("to_jsonb(" <> child_alias <> ")")
+    _ -> {
+      use pairs <- try(
+        list.try_map(picked, fn(field_name) {
+          use found <- try(column(app, nested, field_name))
+          Ok(
+            "'"
+            <> typing.child_label(app, field_name)
+            <> "',"
+            <> found.reference,
+          )
+        }),
+      )
+      Ok("jsonb_build_object(" <> string.join(pairs, ",") <> ")")
+    }
+  })
+  let aggregate = "jsonb_agg(" <> value <> order <> ")"
   Ok(#(
     nested,
     "COALESCE((SELECT "

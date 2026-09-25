@@ -247,7 +247,7 @@ pub fn advance_bump(entity: Entity) -> VerbBump {
   }
 }
 
-/// 読みの語彙。構成子は framework/query.gleam と1対1。
+/// 読みの語彙。構成子は framework/query.gleam と1対1(`Pick` は `Select.columns` に畳む)。
 pub type Operand {
   OpParam(String)
   OpNum(Int)
@@ -325,7 +325,11 @@ pub type Select {
     limit: Limit,
     /// `join:` / `with:` の項のうち矢印として読めなかったもの(`join: <綴り>` の形)。
     unread: List(String),
+    /// List の欄が literal でない・spread を持つ・`where` の条件が読めない、の名指し
+    /// (`where の spread(..)` の形)。読めた項だけで SQL を出すと絞りや欄が黙って消える。
+    unshaped: List(String),
     /// `q.Pick(columns:, select:)` で選んだ列(Field の名)。None は従来どおり全列。
+    /// with の子の Entity の列も混ざる(`typing.owner` が行の列と子の列に分ける)。
     columns: Option(List(String)),
   )
 }

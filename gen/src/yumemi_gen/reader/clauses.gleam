@@ -2,7 +2,11 @@
 //// (`emit/sql`)だけが使う。Actor と `gen/allow` の生成(hw-2)とは別の口に置く。
 ////
 //// 句の形は `allow.Clause(who: .., at: .., owner: ..)` と、`who` だけの略記
-//// (`allow.Anyone` = `at: AnyPhase, owner: NoOwner`)。読めない句は捨てずに
+//// (`allow.Anyone` = `at: AnyPhase, owner: NoOwner`)。略記と読むのは、大文字で始まる
+//// 構成子(`Anyone` / `allow.AsMuse`)と、allow の import の別名への参照
+//// (`allow.staff`、`gen/allow/*` の句)だけ。定数の参照(`published_only`、
+//// `other.clauses`)・関数呼び出し・spread・List でない `allow:` は、中身を読まずに
+//// 「絞らない句」と取り違えると allow 句が SQL から黙って消えるので、捨てずに
 //// `UnreadClause` で持つ ── 入れる時に exit 4 で名指しするため。
 
 import glance
@@ -24,9 +28,22 @@ pub fn read(units: List(Unit)) -> List(#(String, List(model.Clause))) {
       None -> Error(Nil)
       Some(service) ->
         case g.labelled(service.value, "allow") {
-          Some(glance.List(elements: elements, ..)) ->
+          Some(glance.List(elements: elements, rest: None, ..)) ->
             Ok(#(last_segment(unit.path), list.map(elements, clause)))
-          _ -> Error(Nil)
+          Some(glance.List(elements: elements, rest: Some(_), ..)) ->
+            Ok(#(
+              last_segment(unit.path),
+              list.append(list.map(elements, clause), [
+                model.UnreadClause("allow の spread(..)"),
+              ]),
+            ))
+          Some(_) ->
+            Ok(
+              #(last_segment(unit.path), [
+                model.UnreadClause("allow が List の literal でない"),
+              ]),
+            )
+          None -> Error(Nil)
         }
     }
   })
@@ -52,8 +69,30 @@ fn clause(expression: glance.Expression) -> model.Clause {
         _, _, _ -> model.UnreadClause("allow.Clause の who / at / owner")
       }
     Some(name) ->
-      model.Clause(who: name, at: model.AnyPhaseAt, owner: "NoOwner")
+      case shorthand(expression) {
+        True -> model.Clause(who: name, at: model.AnyPhaseAt, owner: "NoOwner")
+        False -> model.UnreadClause("allow の句 " <> name)
+      }
     None -> model.UnreadClause("allow の句")
+  }
+}
+
+/// `who` だけの略記として読んでよい項か。大文字で始まる構成子(修飾の有無は問わない)と、
+/// allow の import(別名は reader の `allow_module_of` どおり `allow`)の句の参照だけ。
+fn shorthand(expression: glance.Expression) -> Bool {
+  case expression {
+    glance.Variable(name: name, ..) -> capitalised(name)
+    glance.FieldAccess(container: glance.Variable(name: "allow", ..), ..) ->
+      True
+    glance.FieldAccess(label: label, ..) -> capitalised(label)
+    _ -> False
+  }
+}
+
+fn capitalised(name: String) -> Bool {
+  case string.first(name) {
+    Ok(head) -> string.uppercase(head) == head && string.lowercase(head) != head
+    Error(_) -> False
   }
 }
 
@@ -62,7 +101,7 @@ fn at_of(expression: glance.Expression) -> model.ClauseAt {
     Some("AnyPhase") -> model.AnyPhaseAt
     Some("Only") ->
       case g.args(expression) {
-        [glance.List(elements: elements, ..)] -> {
+        [glance.List(elements: elements, rest: None, ..)] -> {
           let names =
             list.filter_map(elements, fn(item) {
               g.ctor_name(item) |> option.to_result(Nil)

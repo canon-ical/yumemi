@@ -1,3 +1,21 @@
+# yumemi-hw-1 真壁 r2 ── 柏木ゲートの差し戻しの直し(2026-09-25)
+
+## 状態
+
+- 直したもの:P0-1(allow 句の const / spread)、P1-4(List の literal でない欄)、framework の `Select` の `Pick`(人見の裁定)、P1-3(Pick を with の子へ)。`Self` の 28 本は (b) のまま。詳細・契約・検収は `docs/reports/yumemi-hw-1.md` の「r2」節
+- hw-2 の持ち分と front は触っていない。test は `gen/test/yumemi_gen_hw1_test.gleam` の末尾に 7 本を追記しただけ(`yumemi_gen_test.gleam` は変更無し)
+
+## DDL
+
+無し。
+
+## 検証
+
+- root `gleam build` 0(warning 1、既存)。`cd gen && gleam test` **219 passed**。`gleam format --check src test` 0
+- fixture ×2 で diff 0、tracked 51 一致。写し ×2 で diff 0、診断は r1 と同一(exit 4 139 / back 50)
+- `git merge-tree impl/yumemi-hw-1 impl/yumemi-hw-2` 衝突無し。merge した tree で root build 0・gen test 237 passed
+- 証拠は `gen/build/hw1r2/`
+
 # yumemi-hw-1 真壁 r1 ── back の宿題 6 件(2026-09-25)
 
 ## 状態
