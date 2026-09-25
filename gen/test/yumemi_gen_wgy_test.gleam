@@ -303,3 +303,15 @@ pub fn sql_bundle_keeps_the_app_file_on_the_same_key_test() {
 fn model_file(path: String, text: String) -> types.File {
   types.File(path: path, text: text)
 }
+
+/// 入口の検査が引く attached の表も同じ宣言から出す(実行時に手書きの表を持たない)。
+pub fn attached_table_for_the_runtime_comes_from_the_declaration_test() {
+  let assert Ok(units) = source.load(article_fixture)
+  let attached = file(back_files(units), "src/gen/attached.mjs")
+  [
+    " {name:'fixture_browser',method:'GET',path:'/fixture/browser',who:'anyone'},",
+    " {name:'fixture_sync',method:'POST',path:'/fixture/sync',who:'party'},",
+    " {name:'blob_copy',method:'POST',path:'/api/blobs',who:'party'},",
+  ]
+  |> list.each(fn(row) { string.contains(attached, row) |> should.be_true })
+}

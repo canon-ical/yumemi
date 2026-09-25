@@ -12,6 +12,8 @@
 //// | `src/gen/queue_runtime.mjs` | Service が `queue.<kind>` で呼ぶ kind と、その Service の Args / root |
 //// | `src/gen/cron_runtime.mjs` | `server.cron` |
 //// | `src/gen/shell.mjs` | `server.cron` / `server.durable_objects` |
+//// | `src/gen/attached.mjs` | `server.attached`(入口の検査が registry と並べて引く) |
+//// | `src/gen/codec.mjs` | Entity と値型(`emit/codec`) |
 //// | `src/gen/operations_ffi.mjs` | with の逆向き矢印(root の子の List) |
 //// | `src/gen/entry/{auth,queue,system}.gleam` | framework の session / outbox の契約(固定) |
 
@@ -72,6 +74,7 @@ pub fn emit(
             ),
             File(path: "src/gen/sql.mjs", text: sql_text(queries, input)),
             File(path: "src/gen/codec.mjs", text: codec.text(app, units, input)),
+            File(path: "src/gen/attached.mjs", text: attached_text(app, input)),
             File(path: "src/gen/shell.mjs", text: shell_text(app, input)),
             File(
               path: "src/gen/operations_ffi.mjs",
@@ -1086,6 +1089,29 @@ fn shell_text(app: App, input: String) -> String {
   <> " }\n};\n"
   <> "export const AppSystem=appSystem({database,observe,issueSession,revokeParty,resolveSession,run});\n"
   <> string.concat(objects)
+}
+
+// ── attached ────────────────────────────────────────────────────────────────
+
+/// Service でない HTTP の口の表(`server.attached`)。入口の検査(route・judge)が registry と並べて引く。
+/// 面の `api.gleam` の `attached` と同じ宣言から出す(手書きの表を持たない)。
+fn attached_text(app: App, input: String) -> String {
+  js_header("server.attached", input)
+  <> "export const attached=[\n"
+  <> string.concat(
+    list.map(app.attached, fn(route) {
+      " {name:"
+      <> quoted(naming.snake(route.name))
+      <> ",method:"
+      <> quoted(route.method)
+      <> ",path:"
+      <> quoted(route.path)
+      <> ",who:"
+      <> quoted(route.who)
+      <> "},\n"
+    }),
+  )
+  <> "];\n"
 }
 
 // ── operations / entry ──────────────────────────────────────────────────────
