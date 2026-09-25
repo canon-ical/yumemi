@@ -5728,17 +5728,23 @@ fn out_file(
     None -> "pub type Out\n"
     Some(_) -> declarations_text(state, app)
   }
-  let imports = case
-    with_decoder,
-    string.contains(string.inspect(state.custom), "Page")
-  {
-    True, True ->
-      imports_text(state, with_decoder)
-      |> string.replace(
-        "import framework/page.{type Page}",
-        "import framework/page.{type Page, Page, cursor}",
-      )
-    _, _ -> imports_text(state, with_decoder)
+  let imports = case with_decoder {
+    False -> imports_text(state, with_decoder)
+    True -> {
+      let rendered = imports_text(state, with_decoder)
+      case string.contains(decoder, "Page(items:") {
+        True ->
+          rendered
+          |> string.replace("type Page}", "type Page, Page, cursor}")
+        False ->
+          case string.contains(decoder, "cursor(raw)") {
+            True ->
+              rendered
+              |> string.replace("type Cursor}", "type Cursor, cursor}")
+            False -> rendered
+          }
+      }
+    }
   }
   let decoder_imports = case with_decoder {
     True -> "import gleam/dynamic/decode"
@@ -6071,7 +6077,13 @@ fn tagged_union_decoder(
     variants
     |> list.map(fn(variant) {
       "      "
-      <> string.inspect(variant.name)
+      <> string.inspect(tagged_variant_tag(
+        state,
+        scope,
+        variants,
+        discriminator,
+        variant.name,
+      ))
       <> " ->\n        "
       <> tagged_variant_decoder(
         app,
@@ -6150,6 +6162,61 @@ fn tagged_variant_decoder(
       let remaining = list.filter(all, fn(field) { field.0 != discriminator })
       field_decoder_chain_from(remaining, all, constructor)
     }
+  }
+}
+
+fn tagged_variant_tag(
+  state: State,
+  scope: Scope,
+  variants: List(glance.Variant),
+  discriminator: String,
+  variant: String,
+) -> String {
+  case discriminator_enum(state, scope, variants, discriminator) {
+    True -> codec_tag(variant)
+    False -> variant
+  }
+}
+
+fn discriminator_enum(
+  state: State,
+  scope: Scope,
+  variants: List(glance.Variant),
+  discriminator: String,
+) -> Bool {
+  case discriminator_type(variants, discriminator) {
+    Some(type_) ->
+      case type_ {
+        glance.NamedType(name: name, parameters: [], ..) ->
+          case resolved_path(scope, type_) {
+            Some(path) -> list.contains(state.enum_aliases, path <> ":" <> name)
+            None -> False
+          }
+        _ -> False
+      }
+    None -> False
+  }
+}
+
+fn discriminator_type(
+  variants: List(glance.Variant),
+  discriminator: String,
+) -> Option(glance.Type) {
+  case variants {
+    [first, ..] ->
+      case
+        list.find(first.fields, fn(field) {
+          case field {
+            glance.LabelledVariantField(label: label, ..) ->
+              label == discriminator
+            glance.UnlabelledVariantField(_) -> False
+          }
+        })
+      {
+        Ok(glance.LabelledVariantField(item: item, ..)) -> Some(item)
+        _ -> None
+      }
+    [] -> None
   }
 }
 
@@ -6450,7 +6517,11 @@ fn page_decoder(
       <> "      decode.success(Page(items: items, next: next))\n"
       <> "    })\n"
       <> "  })"
-    "Cursor", _ -> "decode.string"
+    "Cursor", _ ->
+      "decode.map(decode.string, fn(raw) {\n"
+      <> "      let assert Ok(value) = cursor(raw)\n"
+      <> "      value\n"
+      <> "    })"
     _, _ -> "decode.dynamic"
   }
 }
@@ -6708,15 +6779,15 @@ fn opaque_parser_decoder(
 }
 
 fn has_decoder() -> String {
-  "decode.field(\"value\", decode.string, fn(value) { decode.success(Has(value: value)) })"
+  "decode.map(decode.string, fn(value) { Has(value: value) })"
 }
 
 fn held_decoder() -> String {
-  "decode.field(\"value\", decode.string, fn(value) { decode.success(Held(value: value)) })"
+  "decode.map(decode.string, fn(value) { Held(value: value) })"
 }
 
 fn multi_decoder() -> String {
-  "decode.field(\"values\", decode.list(of: decode.string), fn(values) { decode.success(Multi(values: values)) })"
+  "decode.field(\"keys\", decode.list(of: decode.string), fn(keys) { decode.success(Multi(values: keys)) })"
 }
 
 fn out_state(
@@ -7363,27 +7434,91 @@ pub fn decoder_notes(app: model.App, units: List(Unit)) -> List(stop.Note) {
       None -> []
       Some(_) ->
         state.custom
-        |> list.filter_map(fn(declaration) {
+        |> list.flat_map(fn(declaration) {
           let CustomDecl(scope: scope, definition: definition) = declaration
-          case
-            list.length(definition.variants) > 1
-            && !decodable_variant_shapes(state, scope, definition.variants)
-          {
-            True ->
-              Ok(stop.Note(
-                class: stop.NotImplemented,
+          case missing_row_enum_tag(state, scope, definition) {
+            Some(constructor) -> [
+              stop.Note(
+                class: stop.Conflict,
                 text: unit.path
                   <> ": "
-                  <> scope.module
-                  <> "."
                   <> definition.name
-                  <> " の複数 variant を判別できない。汎用 encode の欄名または tag が重なる",
-              ))
-            False -> Error(Nil)
+                  <> " の構成子 "
+                  <> constructor
+                  <> " に対応する discriminator enum 構成子が無い",
+              ),
+            ]
+            None ->
+              case
+                list.length(definition.variants) > 1
+                && !decodable_variant_shapes(state, scope, definition.variants)
+              {
+                True -> [
+                  stop.Note(
+                    class: stop.NotImplemented,
+                    text: unit.path
+                      <> ": "
+                      <> scope.module
+                      <> "."
+                      <> definition.name
+                      <> " の複数 variant を判別できない。汎用 encode の欄名または tag が重なる",
+                  ),
+                ]
+                False -> []
+              }
           }
         })
     }
   })
+}
+
+fn missing_row_enum_tag(
+  state: State,
+  scope: Scope,
+  definition: glance.CustomType,
+) -> Option(String) {
+  case discriminator_field(state, scope, definition.variants) {
+    Some(discriminator) ->
+      case
+        discriminator_enum(state, scope, definition.variants, discriminator)
+      {
+        False -> None
+        True ->
+          case discriminator_type(definition.variants, discriminator) {
+            Some(type_) ->
+              case type_ {
+                glance.NamedType(name: name, parameters: [], ..) ->
+                  case resolved_path(scope, type_) {
+                    Some(path) ->
+                      case
+                        list.find(state.custom, fn(declaration) {
+                          let CustomDecl(scope: enum_scope, definition: enum) =
+                            declaration
+                          enum_scope.module == path && enum.name == name
+                        })
+                      {
+                        Ok(CustomDecl(definition: enum, ..)) ->
+                          case
+                            list.find(definition.variants, fn(row_variant) {
+                              !list.any(enum.variants, fn(enum_variant) {
+                                enum_variant.name == row_variant.name
+                              })
+                            })
+                          {
+                            Ok(row_variant) -> Some(row_variant.name)
+                            Error(_) -> None
+                          }
+                        Error(_) -> None
+                      }
+                    None -> None
+                  }
+                _ -> None
+              }
+            None -> None
+          }
+      }
+    None -> None
+  }
 }
 
 fn decodable_variant_shapes(

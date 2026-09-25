@@ -6408,21 +6408,20 @@ function decoder2() {
                     (order) => {
                       return field(
                         "category",
-                        field(
-                          "value",
+                        map3(
                           string2,
                           (value2) => {
-                            return success(new Has(value2));
+                            return new Has(value2);
                           }
                         ),
                         (category) => {
                           return field(
                             "tags",
                             field(
-                              "values",
+                              "keys",
                               list2(string2),
-                              (values3) => {
-                                return success(new Multi(values3));
+                              (keys2) => {
+                                return success(new Multi(keys2));
                               }
                             ),
                             (tags) => {
@@ -6830,21 +6829,20 @@ function decoder4() {
                           (order) => {
                             return field(
                               "category",
-                              field(
-                                "value",
+                              map3(
                                 string2,
                                 (value2) => {
-                                  return success(new Has2(value2));
+                                  return new Has2(value2);
                                 }
                               ),
                               (category) => {
                                 return field(
                                   "tags",
                                   field(
-                                    "values",
+                                    "keys",
                                     list2(string2),
-                                    (values3) => {
-                                      return success(new Multi2(values3));
+                                    (keys2) => {
+                                      return success(new Multi2(keys2));
                                     }
                                   ),
                                   (tags) => {
@@ -6890,15 +6888,15 @@ function decoder4() {
                     "let_assert",
                     FILEPATH,
                     "gen/out/article_list",
-                    97,
+                    95,
                     "decoder",
                     "Pattern match failed, no pattern matched the value.",
                     {
                       value: $,
-                      start: 2430,
-                      end: 2464,
-                      pattern_start: 2441,
-                      pattern_end: 2450
+                      start: 2355,
+                      end: 2389,
+                      pattern_start: 2366,
+                      pattern_end: 2375
                     }
                   );
                 }

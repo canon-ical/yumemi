@@ -46,17 +46,13 @@ pub fn decoder() -> decode.Decoder(Out) {
           decode.field("order", decode.int, fn(order) {
             decode.field(
               "category",
-              decode.field("value", decode.string, fn(value) {
-                decode.success(Has(value: value))
-              }),
+              decode.map(decode.string, fn(value) { Has(value: value) }),
               fn(category) {
                 decode.field(
                   "tags",
-                  decode.field(
-                    "values",
-                    decode.list(of: decode.string),
-                    fn(values) { decode.success(Multi(values: values)) },
-                  ),
+                  decode.field("keys", decode.list(of: decode.string), fn(keys) {
+                    decode.success(Multi(values: keys))
+                  }),
                   fn(tags) {
                     decode.success(Article(
                       slug: slug,

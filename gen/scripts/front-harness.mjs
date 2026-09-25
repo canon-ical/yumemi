@@ -33,6 +33,10 @@ export function prepareFrontScratch(label) {
   fs.rmSync(work, { recursive: true, force: true });
   fs.mkdirSync(work, { recursive: true });
   copyDirectoryContents(templateDir, work);
+  fs.copyFileSync(
+    path.join(here, "codec-encode.mjs"),
+    path.join(work, "codec-encode.mjs"),
+  );
   copyDirectoryContents(
     path.join(genDir, "fixtures/article/public/src"),
     path.join(work, "src"),

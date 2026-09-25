@@ -15,8 +15,8 @@ function assert(condition, message) {
 const work = prepareFrontScratch("front-overlay");
 const workerEntryPath = path.join(work, "worker-entry.mjs");
 const workerEntry = fs.readFileSync(workerEntryPath, "utf8");
-const singleRow = 'return json({ rows: [{ kind: "Article", article: article(1) }] });';
-const twoRows = 'return json({ rows: [{ kind: "Article", article: article(1) }, { kind: "Summary", article: article(2) }] });';
+const singleRow = "return json(back.widget_list());";
+const twoRows = "return json(back.widget_list_with_summary());";
 assert(workerEntry.includes(singleRow), "Worker fixture row response has changed");
 fs.writeFileSync(workerEntryPath, workerEntry.replace(singleRow, twoRows));
 let worker;
