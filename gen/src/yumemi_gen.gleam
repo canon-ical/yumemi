@@ -2,7 +2,7 @@
 ////
 //// 出すのは生成束 ── `src/gen/types/*`、`src/gen/query.gleam` と
 //// `src/gen/query/{from,field}.gleam`、`src/gen/reads/*`、`src/gen/root/*`、
-//// `db/queries/<service>/<name>.sql`(読み)、verb / phase。
+//// `db/queries/<service>/<name>.sql`(読み)、verb / phase、`src/gen/allow/*`(root が指す allow)。
 ////
 //// **出力が揃わなかったら 0 で終わらない。**理由は 20 の exit code 表で分類し(`stop`)、
 //// stderr と `_diagnostics.txt` の両方に同じ1行で出す。ファイル自体は書いてから止まる
@@ -16,6 +16,7 @@ import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
 import simplifile
+import yumemi_gen/emit/allow as allow_emit
 import yumemi_gen/emit/draft
 import yumemi_gen/emit/entry
 import yumemi_gen/emit/front as front_emit
@@ -32,6 +33,7 @@ import yumemi_gen/face
 import yumemi_gen/model
 import yumemi_gen/naming
 import yumemi_gen/reader
+import yumemi_gen/reader/allow as allow_reader
 import yumemi_gen/reader/front
 import yumemi_gen/source
 import yumemi_gen/static_source
@@ -116,6 +118,7 @@ pub fn generate(
     }),
   )
   let hashes = hash.of(units)
+  let allow_usages = allow_reader.read(units)
   let entry_output = entry.emit(app, hashes)
   let front_notes =
     list.append(
@@ -152,7 +155,13 @@ pub fn generate(
                 )
               }),
               list.append(
-                list.append(root.notes(app), sql.notes(app, hashes)),
+                list.append(
+                  list.append(
+                    root.notes(app),
+                    allow_emit.notes(app, allow_usages),
+                  ),
+                  sql.notes(app, hashes),
+                ),
                 entry_output.notes,
               ),
             ),
@@ -195,6 +204,7 @@ pub fn generate(
       verb.emit(app, hashes),
       verb.sql(app, hashes),
       root.emit(app, hashes),
+      allow_emit.emit(app, allow_usages, units),
       diagnostics,
     ]),
     notes,

@@ -1201,3 +1201,26 @@ P1、back 側、musearch、DDL、Hex publish、push、main、push は触って�
 
 - 1〜3 の完了条件はすべて満たした。merge commit を残し、今回の実装・検証 checkpoint は1本へ squash した。
 - B の patch artifact に含まれる whitespace 194箇所はそのまま保持。今回の実装・verify 差分の whitespace は0件。
+
+# yumemi-hw-2 ── Actor の統一(`gen/allow` を生成物に、Sum の root の Actor を `allow.Actor` の別名に)
+
+hw-1 との merge で先頭の節がぶつからないよう、末尾に置く。正本は `docs/reports/yumemi-hw-2.md`。
+
+## DDL
+
+無し。
+
+## 状態
+
+- `reader/allow.gleam`(新)が ★ の allow の用法を allow module ごとに集め、`emit/allow.gleam`(新)が `src/gen/allow/<m>.gleam` を sha256 ヘッダ付きで出す。root の Sum は `pub type Actor = allow.Actor`。Direct は変更なし
+- owner から party への道は `Via<X>Party` = Entity `X` の `party` 欄(hw-1 の SQL 側と同じ規則)
+- `cd gen && gleam test` は 212 passed(194 + 18)、root の `gleam build` は 0
+- Article fixture を 2 回生成:113 file で diff 0、tracked 51 本は一致。増えたのは `src/gen/allow/article.gleam`
+- 写し `728adfa` に 2 回当てた:1394 file で diff 0、`_diagnostics.txt` は基線と同一(exit 4 の back 22 行、警告 48)
+- 写しの api に、生成 allow 21 本と生成 root 103 本を被せた `gleam build` は 0。▲ に残したのは allow `page_view` と、root の `schedule_availability` と Root の欄が違う 18 本
+
+## 詰まった点(鷹野さん宛、詳細は report)
+
+- 既存の test 3 行(`yumemi_gen_test.gleam:727-729`)は、Sum の旧形を固定していたので差し替えた。指示書の「既存の test を書き換えない」とは矛盾する
+- `schedule_availability` の ★ は、root から `Anonymous` を import する。一律に別名にすると、★ 1 本が compile しない
+- runtime.mjs:233 が `allowArticle.AuthenticatedActor` を組むが、生成した article allow にはその構成子が無い(compile では出ない)
