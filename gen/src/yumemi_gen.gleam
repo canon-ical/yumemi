@@ -17,6 +17,7 @@ import gleam/result
 import gleam/string
 import simplifile
 import yumemi_gen/emit/allow as allow_emit
+import yumemi_gen/emit/back
 import yumemi_gen/emit/draft
 import yumemi_gen/emit/entry
 import yumemi_gen/emit/front as front_emit
@@ -74,6 +75,9 @@ fn bundle_front(
   app_dir: String,
   faces: List(String),
 ) -> List(String)
+
+@external(javascript, "./yumemi_gen_ffi.mjs", "sql_files")
+fn sql_files(dir: String) -> List(#(String, String))
 
 @external(javascript, "./yumemi_gen_ffi.mjs", "format_gleam")
 fn format_gleam(out_dir: String, files: List(String)) -> String
@@ -152,19 +156,7 @@ pub fn generate(
       sql.notes(app, hashes),
       entry_output.notes,
     ])
-  let diagnostics = case notes {
-    [] -> []
-    _ -> [
-      types.File(
-        path: "_diagnostics.txt",
-        text: stop.report(notes)
-          <> "\n停止コード: "
-          <> int.to_string(stop.worst(notes))
-          <> "\n",
-      ),
-    ]
-  }
-  Ok(#(
+  let made =
     list.flatten([
       types.emit(app.value_types, hashes.types),
       draft.emit(app, hashes),
@@ -188,10 +180,23 @@ pub fn generate(
       verb.sql(app, hashes),
       root.emit(app, hashes),
       allow_emit.emit(app, allow_usages, units),
-      diagnostics,
-    ]),
-    notes,
-  ))
+    ])
+  let back_output =
+    back.emit(app, units, hashes, sql_files(app_dir <> "/db/queries"), made)
+  let notes = list.append(notes, back_output.notes)
+  let diagnostics = case notes {
+    [] -> []
+    _ -> [
+      types.File(
+        path: "_diagnostics.txt",
+        text: stop.report(notes)
+          <> "\n停止コード: "
+          <> int.to_string(stop.worst(notes))
+          <> "\n",
+      ),
+    ]
+  }
+  Ok(#(list.flatten([made, back_output.files, diagnostics]), notes))
 }
 
 fn read_note(error: reader.Error) -> Note {

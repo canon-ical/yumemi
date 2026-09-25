@@ -962,7 +962,10 @@ pub fn every_file_carries_the_generated_header_test() {
       True -> string.starts_with(found, "-- GENERATED ")
       False ->
         case string.ends_with(path, ".mjs") {
-          True -> string.starts_with(found, "// GENERATED ")
+          // back の JS(`src/gen/*.mjs`、WGy)は api の既存の頭 `////` に揃える。
+          True ->
+            string.starts_with(found, "// GENERATED ")
+            || string.starts_with(found, "//// GENERATED ")
           False ->
             case string.ends_with(path, ".css") {
               True -> string.starts_with(found, "/* GENERATED ")

@@ -60,7 +60,7 @@ pub fn emit(app: App, hashes: hash.Hashes) -> Output {
           ),
           File(
             path: "src/gen/entry/http.gleam",
-            text: http_text(routes, hash.entry(hashes)),
+            text: http_text(routes, hash.entry(hashes), app.server.declared),
           ),
         ],
         notes: list.append(notes, route_overlap_notes(routes)),
@@ -138,7 +138,11 @@ fn face_text(entries: List(Entry), input_hash: String) -> String {
   <> "\n}\n"
 }
 
-fn http_text(routes: List(Route), input_hash: String) -> String {
+fn http_text(
+  routes: List(Route),
+  input_hash: String,
+  dispatch: Bool,
+) -> String {
   let rows =
     routes
     |> list.map(route_text)
@@ -146,6 +150,11 @@ fn http_text(routes: List(Route), input_hash: String) -> String {
   "//// GENERATED from entry.gleam / service declarations [sha256:"
   <> input_hash
   <> "] — 手で編集しない\n\n"
+  <> case dispatch {
+    True ->
+      "import entry\nimport framework/entry.{type Entry} as entry_types\nimport framework/io.{type Promise}\n\n"
+    False -> ""
+  }
   <> "pub type Credential {\n  Session\n  ApiKey\n}\n\n"
   <> "pub type Route {\n"
   <> "  Route(face: String, method: String, path: String, service: String,\n"
@@ -154,6 +163,41 @@ fn http_text(routes: List(Route), input_hash: String) -> String {
   <> "pub const routes: List(Route) = [\n"
   <> rows
   <> "\n]\n"
+  <> case dispatch {
+    True -> dispatch_text()
+    False -> ""
+  }
+}
+
+/// `src/server.gleam` を宣言した app の back の入口 ── 検査 1〜10 を順に通す(framework の dispatch)。
+/// 各検査の実体は `http_runtime.mjs`。Route の表と同じ module に置く(1 本に揃える)。
+fn dispatch_text() -> String {
+  let checks = [
+    "route", "origin", "browser", "admit", "resolve", "subject", "decode",
+    "judge",
+  ]
+  "\npub type Request\n\npub type Response\n\npub type State\n\n"
+  <> "@external(javascript, \"../http_runtime.mjs\", \"host\")\n"
+  <> "fn host(\n  request: Request,\n  entries: List(Entry(subject, host)),\n) -> Promise(Result(State, Response))\n\n"
+  <> string.concat(
+    list.map(checks, fn(name) {
+      "@external(javascript, \"../http_runtime.mjs\", \""
+      <> name
+      <> "\")\nfn "
+      <> name
+      <> "(state: State) -> Promise(Result(State, Response))\n\n"
+    }),
+  )
+  <> "@external(javascript, \"../http_runtime.mjs\", \"execute\")\n"
+  <> "fn execute(state: State) -> Promise(Response)\n\n"
+  <> "fn next(\n  result: Promise(Result(State, Response)),\n  then: fn(State) -> Promise(Response),\n) -> Promise(Response) {\n"
+  <> "  use value <- io.then(result)\n  case value {\n    Ok(state) -> then(state)\n    Error(response) -> io.resolve(response)\n  }\n}\n\n"
+  <> "pub fn dispatch(request: Request) -> Promise(Response) {\n"
+  <> "  use state <- next(host(request, entry.entries))\n"
+  <> string.concat(
+    list.map(checks, fn(name) { "  use state <- next(" <> name <> "(state))\n" }),
+  )
+  <> "  execute(state)\n}\n"
 }
 
 fn route_text(route: Route) -> String {
