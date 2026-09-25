@@ -724,9 +724,9 @@ pub fn root_bundle_uses_allow_and_args_key_test() {
   string.contains(read, "phase: article.Phase,") |> should.be_true
   string.contains(read, "at: Datetime,") |> should.be_true
   string.contains(read, "seed: String,") |> should.be_true
-  string.contains(read, "pub type Actor {") |> should.be_true
-  string.contains(read, "Anonymous") |> should.be_true
-  string.contains(read, "AsStaff(staff.Staff)") |> should.be_true
+  string.contains(read, "pub type Actor =\n  allow.Actor") |> should.be_true
+  string.contains(read, "Anonymous") |> should.be_false
+  string.contains(read, "AsStaff(staff.Staff)") |> should.be_false
 
   let publish = text("src/gen/root/article_publish.gleam")
   string.contains(publish, "logic: fn(staff.Staff, Root, args)")
