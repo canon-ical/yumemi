@@ -1,3 +1,28 @@
+# yumemi-hw-1 真壁 r1 ── back の宿題 6 件(2026-09-25)
+
+## 状態
+
+- 6 項(逆向き矢印・無診断・allow 句・札の素通り・`'draft'`・列の選択)を全部実装し、各項に正と負の test を付けた。詳細・契約・対照表は `docs/reports/yumemi-hw-1.md`
+- **残り 1 点は鷹野の裁定待ち**:allow 句の owner `Self` は party の穴で表せないので、brief どおり exit 4 にした。写しでは読み 28 本の SQL が出なくなり、そこに musearch 採用済みの `store_roster_list/mine`・`link_import_{read,apply}/latest` も入る。案(subject の穴)は report の「鷹野宛」1
+- hw-2 の持ち分(`emit/root.gleam`・`emit/allow.gleam`・`reader/allow.gleam`)と front は触っていない。新しい test は `gen/test/yumemi_gen_hw1_test.gleam` に置いた。`yumemi_gen_test.gleam` は、5 の helper 本体の 4 行と末尾への 1 本の追記だけ
+
+## DDL
+
+無し。
+
+## 検証
+
+- root `gleam build`: exit 0、warning 1(既存)。`gen/build/hw1/root-build-final.txt`
+- `cd gen && gleam test`: **212 passed, no failures**(194 + 18)。`gleam format --check src test` は 0。`gen/build/hw1/test-3.txt`
+- fixture article ×2: exit 0 で 112 file、diff は 0。tracked の生成物 51 file も一致。基線との差は allow 句 3 本と `gen/query.gleam`
+- 写し `728adfa` ×2: exit 4、1344 file(back 697)。差は runtime build の記録の時間 1 行だけ。exit 1/3/4 = 3/1/139(back 22→50、+28 は全部 `Self`。face 89 は同一)。警告は 48(module 名 24 は同一)。`gen/build/hw1/snap-summary.txt`
+- 札 24 名を `manual_verbs` へ移した写し:札の警告は 0、exit 4 は同一
+- 生成した reads 4 本と、Pick の reads を写しの api に重ねて `gleam build`:exit 0。`gen/build/hw1/{overlay,pick-overlay}-build.txt`
+
+## 確かめていないこと
+
+- 生成した SQL(allow 句・Pick)を Postgres で走らせていない。musearch の runtime は `-- allow:` の行をまだ読まない(追随便の仕事)
+
 # gen-7 柏木ゲート 2 P0 直し (巡 9)
 
 ## 状態

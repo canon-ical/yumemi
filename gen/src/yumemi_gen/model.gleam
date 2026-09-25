@@ -156,6 +156,8 @@ pub type Entity {
     verbs: List(VerbRule),
     /// 生成せず、手書きの実体へ委ねる verb 名。
     handwritten_verbs: List(String),
+    /// 生成候補を持たない手書き verb 名(`manual_verbs`)。候補と一致したら exit 4。
+    manual_verbs: List(String),
     /// reorder の宣言。無ければ None。
     ordered_by: Option(OrderedBy),
     /// put の鍵。無ければ空。
@@ -174,6 +176,8 @@ pub type Collection {
     collection: String,
     /// 生成せず、手書きの実体へ委ねる verb 名。
     handwritten_verbs: List(String),
+    /// 生成候補を持たない手書き verb 名(`manual_verbs`)。
+    manual_verbs: List(String),
   )
 }
 
@@ -319,6 +323,10 @@ pub type Select {
     with: List(String),
     order: List(Order),
     limit: Limit,
+    /// `join:` / `with:` の項のうち矢印として読めなかったもの(`join: <綴り>` の形)。
+    unread: List(String),
+    /// `q.Pick(columns:, select:)` で選んだ列(Field の名)。None は従来どおり全列。
+    columns: Option(List(String)),
   )
 }
 
@@ -410,6 +418,20 @@ pub type Arrow {
   )
 }
 
+/// allow 句 1 つ。`who` / `at` / `owner` は構成子の名のまま持つ。
+pub type Clause {
+  Clause(who: String, at: ClauseAt, owner: String)
+  /// 句が読めなかった(構成子でない式など)。読みへ allow 句を入れる時に exit 4。
+  UnreadClause(text: String)
+}
+
+pub type ClauseAt {
+  AnyPhaseAt
+  /// `Only([...])` の相の構成子名。
+  OnlyAt(List(String))
+  UnreadAt(text: String)
+}
+
 pub type App {
   App(
     value_types: List(ValueType),
@@ -417,10 +439,17 @@ pub type App {
     collections: List(Collection),
     services: List(Service),
     arrows: List(Arrow),
+    /// `with:` に書かれた Held の逆向き(親 -> 子)。`arrows` には混ぜない ──
+    /// join / Has / root の矢印 read は順向きだけを見る。
+    reverse_arrows: List(Arrow),
+    /// Service ごとの allow 句(module 名 -> 句)。
+    clauses: List(#(String, List(Clause))),
     entries: List(Entry),
     attached: List(AttachedRoute),
     /// Entity / ER 外 module の手書き verb 名。header と警告に使う。
     handwritten_verbs: List(#(String, List(String))),
+    /// ER 外 module の `manual_verbs`。header に載せ、警告は出さない。
+    manual_verbs: List(#(String, List(String))),
   )
 }
 
