@@ -10,6 +10,7 @@ import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/order
+import gleam/result
 import gleam/string
 import yumemi_gen/digest
 import yumemi_gen/emit/draft
@@ -1534,7 +1535,7 @@ fn attached_live_text(
   <> "    }\n"
   <> "  }\n}\n\n"
   <> "@external(javascript, \"./transport_ffi.mjs\", \"send\")\n"
-  <> "fn transport_send(method: String, path: String, body: json.Json, on_ok: fn(Dynamic) -> Nil, on_error: fn(Dynamic) -> Nil) -> Nil\n\n"
+  <> "fn transport_send(method: String, path: String, body: json.Json, blob_fields: List(String), on_ok: fn(Dynamic) -> Nil, on_error: fn(Dynamic) -> Nil) -> Nil\n\n"
   <> "fn request() -> Effect(Event) {\n"
   <> "  use dispatch <- effect.from\n"
   <> "  transport_send(\n"
@@ -1545,6 +1546,7 @@ fn attached_live_text(
   <> quoted(route.path)
   <> ",\n"
   <> "    json.null(),\n"
+  <> "    [],\n"
   <> "    fn(value) { dispatch(live.Done(Ok(value))) },\n"
   <> "    fn(value) { dispatch(live.Done(Error(Broke(error_text(value))))) },\n"
   <> "  )\n  Nil\n}\n\n"
@@ -1597,7 +1599,7 @@ fn blob_entry_live_text(
   hashes: hash.Hashes,
 ) -> String {
   let input_hash = digest.short(hash.entry(hashes) <> string.inspect(route))
-  "//// GENERATED from api/src/gen/http_runtime.mjs [sha256:"
+  "//// GENERATED from src/server.gleam [sha256:"
   <> input_hash
   <> "] — 手で編集しない\n\n"
   <> "import framework/front/live\n"
@@ -4557,7 +4559,10 @@ fn api_text(
   hashes: hash.Hashes,
   front: reader_front.Front,
 ) -> String {
-  let routes = api_routes(app, hashes, face_name)
+  let used = face_service_names(front)
+  let routes =
+    api_routes(app, hashes, face_name)
+    |> list.filter(fn(route) { list.contains(used, route.service) })
   let attached_names = attached_names(front, app.attached)
   let attached_methods =
     app.attached
@@ -4596,6 +4601,22 @@ fn api_text(
   <> "pub const routes: List(Route) = [\n"
   <> rows
   <> "\n]\n"
+}
+
+/// 面の `api.gleam` に載せる Service ── 面が参照する(page の置き場・block・component の calls と
+/// reload)ものだけ。面が呼ばない Service の route を載せない(www に `Put` が出ない)。
+fn face_service_names(front: reader_front.Front) -> List(String) {
+  list.append(
+    front.services,
+    list.flat_map(front.components, fn(component) {
+      list.append(
+        component_services(component),
+        list.map(component.reloads, fn(reload) { reload.1 }),
+      )
+    }),
+  )
+  |> list.flat_map(fn(name) { [name, naming.snake(name)] })
+  |> list.unique
 }
 
 fn attached_names(
@@ -4688,13 +4709,15 @@ fn gate_file(
         unit.path == "gate"
         || string.starts_with(unit.path, "pages/")
         && string.ends_with(unit.path, "/page")
-      }),
+      })
+      <> string.inspect(gate.session_path),
     )
   File(
     path: package.name <> "/src/gen/gate.mjs",
     text: gate_emit.text(
       js_header(
-        package.name <> "/src/{gate.gleam,pages/**} and src/entry.gleam",
+        package.name
+          <> "/src/{gate.gleam,pages/**} and src/{entry,server}.gleam",
         input_hash,
       ),
       gate,
@@ -4715,7 +4738,21 @@ fn read_gate(
     back_units,
     app.entries,
     front_route_paths(front),
+    session_path(app),
   )
+}
+
+/// 門が session を読む口 ── `attached_roles` の `ReadSession` が指す attached の path。
+fn session_path(app: model.App) -> Option(String) {
+  app.server.attached_roles
+  |> list.find(fn(row) { row.role == "read_session" })
+  |> result.try(fn(row) {
+    list.find(app.attached, fn(route) {
+      route.name == naming.pascal(row.attached)
+    })
+  })
+  |> result.map(fn(route) { route.path })
+  |> option.from_result
 }
 
 fn front_route_paths(front: reader_front.Front) -> List(String) {
@@ -5611,7 +5648,7 @@ fn shell_runtime_text(include_client: Bool, grid_css: String) -> String {
   <> "      value = matched.params[source.name];\n"
   <> "    } else if (source.type === \"query\") {\n"
   <> "      const found = query.get(source.name);\n"
-  <> "      value = found === null || found === \"\" ? Option$None$const : new Some(found);\n"
+  <> "      value = found === null || found.trim() === \"\" ? Option$None$const : new Some(found);\n"
   <> "    } else if (source.type === \"origin\") {\n"
   <> "      const envName = \"PUBLIC_\" + source.name.toUpperCase() + \"_ORIGIN\";\n"
   <> "      const origin = env[envName];\n"
@@ -5744,28 +5781,18 @@ fn api_route_text(route: ApiRoute) -> String {
 
 fn api_routes(
   app: model.App,
-  hashes: hash.Hashes,
+  _hashes: hash.Hashes,
   face_name: String,
 ) -> List(ApiRoute) {
-  let output = entry.emit(app, hashes)
-  case
-    list.find(output.files, fn(file) { file.path == "src/gen/entry/http.gleam" })
-  {
-    Ok(file) ->
-      file.text
-      |> string.split("  Route(")
-      |> list.filter_map(fn(rest) {
-        case string.split(rest, ")") {
-          [row, ..] ->
-            case string.contains(row, "face: ") {
-              True -> api_route_from_row(row, face_name)
-              False -> Error(Nil)
-            }
-          _ -> Error(Nil)
-        }
-      })
-    Error(_) -> []
-  }
+  entry.routes(app)
+  |> list.filter(fn(route) { route.face == face_name })
+  |> list.map(fn(route) {
+    ApiRoute(
+      service: route.service,
+      method: route.method,
+      path: colon_path(route.path),
+    )
+  })
 }
 
 pub fn route_notes(
@@ -5815,35 +5842,6 @@ fn api_route_for(
   api_routes(app, hashes, face_name)
   |> list.find(fn(route) { route.service == service })
   |> option.from_result
-}
-
-fn api_route_from_row(row: String, face_name: String) -> Result(ApiRoute, Nil) {
-  case
-    quoted_field(row, "face"),
-    quoted_field(row, "method"),
-    quoted_field(row, "path"),
-    quoted_field(row, "service")
-  {
-    Some(face), Some(method), Some(path), Some(service) ->
-      case face == face_name {
-        True ->
-          Ok(ApiRoute(service: service, method: method, path: colon_path(path)))
-        False -> Error(Nil)
-      }
-    _, _, _, _ -> Error(Nil)
-  }
-}
-
-fn quoted_field(row: String, label: String) -> Option(String) {
-  let marker = label <> ": \""
-  case string.split(row, marker) {
-    [_, rest, ..] ->
-      case string.split(rest, "\"") {
-        [value, ..] -> Some(value)
-        [] -> None
-      }
-    _ -> None
-  }
 }
 
 fn colon_path(path: String) -> String {

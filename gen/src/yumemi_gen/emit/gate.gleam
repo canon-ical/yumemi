@@ -14,14 +14,11 @@ import gleam/option.{None, Some}
 import gleam/string
 import yumemi_gen/reader/gate.{
   type Check, type Fail, type Gate, type Match, type Redirect, type Rule,
+  reads_session,
 }
 
 pub fn text(header: String, gate: Gate, route_paths: List(String)) -> String {
-  let reads_session = gate.rules != [] || gate.redirects != []
-  let reads_session = case gate.pageview {
-    Some(_) -> True
-    None -> reads_session
-  }
+  let reads_session = reads_session(gate)
   let pageview_routes = case gate.pageview {
     Some(pageview) -> expand(pageview.pages, route_paths)
     None -> []
@@ -44,6 +41,12 @@ pub fn text(header: String, gate: Gate, route_paths: List(String)) -> String {
   <> "};\n"
   <> "const readsSession = "
   <> bool(reads_session)
+  <> ";\n"
+  <> "const sessionPath = "
+  <> case gate.session_path {
+    Some(path) -> quoted(path)
+    None -> "null"
+  }
   <> ";\n"
   <> "const rules = "
   <> js_list(list.map(gate.rules, rule_js), "\n  ")
@@ -334,8 +337,9 @@ function failed(fail, request, env) {
 }
 
 async function readSession(request, env) {
+  if (sessionPath === null) return {status: 502, ok: false, session: null};
   try {
-    const response = await env.APP.fetch(new Request(new URL(\"/api/session\", request.url), request));
+    const response = await env.APP.fetch(new Request(new URL(sessionPath, request.url), request));
     if (!response.ok) return {status: response.status, ok: false, session: null};
     const session = await response.json().catch(() => null);
     return {status: response.status, ok: true, session};

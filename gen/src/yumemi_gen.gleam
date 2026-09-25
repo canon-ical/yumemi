@@ -3,6 +3,10 @@
 //// 出すのは生成束 ── `src/gen/types/*`、`src/gen/query.gleam` と
 //// `src/gen/query/{from,field}.gleam`、`src/gen/reads/*`、`src/gen/root/*`、
 //// `db/queries/<service>/<name>.sql`(読み)、verb / phase、`src/gen/allow/*`(root が指す allow)。
+//// 出力先が app そのものか app を含む dir(musearch なら `<root>/api` か `<root>`)なら、生成物を在るべき場所に
+//// 置く ── back は app の下、面は面の package の下(`place`)。このとき `db/queries` へは既に在る
+//// `-- GENERATED` の file だけを書く(生成器だけが出す SQL は `src/gen/sql.mjs` に束ねる ── `into_app`)。
+//// 出力先が別の dir なら、back は `<out>/src/gen/..`、面は `<out>/<面>/..` に並べる。
 ////
 //// **出力が揃わなかったら 0 で終わらない。**理由は 20 の exit code 表で分類し(`stop`)、
 //// stderr と `_diagnostics.txt` の両方に同じ1行で出す。ファイル自体は書いてから止まる
@@ -17,6 +21,7 @@ import gleam/result
 import gleam/string
 import simplifile
 import yumemi_gen/emit/allow as allow_emit
+import yumemi_gen/emit/back
 import yumemi_gen/emit/draft
 import yumemi_gen/emit/entry
 import yumemi_gen/emit/front as front_emit
@@ -30,11 +35,10 @@ import yumemi_gen/emit/static as static_emit
 import yumemi_gen/emit/types
 import yumemi_gen/emit/verb
 import yumemi_gen/face
-import yumemi_gen/model
-import yumemi_gen/naming
 import yumemi_gen/reader
 import yumemi_gen/reader/allow as allow_reader
 import yumemi_gen/reader/front
+import yumemi_gen/reader/server as server_reader
 import yumemi_gen/source
 import yumemi_gen/static_source
 import yumemi_gen/stop.{type Note, Note}
@@ -73,8 +77,19 @@ fn halt(code: Int) -> Nil
 fn bundle_front(
   out_dir: String,
   app_dir: String,
-  faces: List(String),
+  faces: List(#(String, String)),
 ) -> List(String)
+
+/// `inner` が `outer` そのものかその下の dir か(実体の path で比べる)。
+@external(javascript, "./yumemi_gen_ffi.mjs", "holds_dir")
+fn holds_dir(outer: String, inner: String) -> Bool
+
+/// `from` から `to` への相対 path(同じ dir なら "")。
+@external(javascript, "./yumemi_gen_ffi.mjs", "relative_dir")
+fn relative_dir(from: String, to: String) -> String
+
+@external(javascript, "./yumemi_gen_ffi.mjs", "sql_files")
+fn sql_files(dir: String) -> List(#(String, String))
 
 @external(javascript, "./yumemi_gen_ffi.mjs", "format_gleam")
 fn format_gleam(out_dir: String, files: List(String)) -> String
@@ -83,6 +98,14 @@ fn format_gleam(out_dir: String, files: List(String)) -> String
 pub fn generate(
   app_dir: String,
 ) -> Result(#(List(types.File), List(Note)), Note) {
+  generate_with_faces(app_dir)
+  |> result.map(fn(made) { #(made.0, made.1) })
+}
+
+/// `generate` に、見つけた面の (名, package の path) を添える(`place` が面の置き場に使う)。
+fn generate_with_faces(
+  app_dir: String,
+) -> Result(#(List(types.File), List(Note), List(#(String, String))), Note) {
   use units <- result.try(
     source.load(app_dir)
     |> result.map_error(fn(error) {
@@ -95,7 +118,6 @@ pub fn generate(
     }),
   )
   use app <- result.try(reader.read(units) |> result.map_error(read_note))
-  let app = model.App(..app, attached: attached_routes(app_dir))
   use discovered <- result.try(
     face.discover(app_dir, units)
     |> result.map_error(source_note),
@@ -135,55 +157,28 @@ pub fn generate(
     )
   let front_notes =
     list.append(front_notes, front_emit.decoder_notes(app, units))
+  let collision_notes =
+    list.map(query.collisions(app), fn(entry) {
+      let #(module, name) = entry
+      Note(
+        class: stop.Conflict,
+        text: "名前の衝突 " <> module <> ": " <> name <> "(構成子は module ごとに1つの名前空間)",
+      )
+    })
   let notes =
-    list.append(
+    list.flatten([
       front_notes,
-      list.append(
-        verb.notes(app),
-        list.append(
-          reader.missing_key_notes(units),
-          list.append(
-            reader.entry_notes(app),
-            list.append(
-              list.map(query.collisions(app), fn(entry) {
-                let #(module, name) = entry
-                Note(
-                  class: stop.Conflict,
-                  text: "名前の衝突 "
-                    <> module
-                    <> ": "
-                    <> name
-                    <> "(構成子は module ごとに1つの名前空間)",
-                )
-              }),
-              list.append(
-                list.append(
-                  list.append(
-                    root.notes(app),
-                    allow_emit.notes(app, allow_usages),
-                  ),
-                  sql.notes(app, hashes),
-                ),
-                entry_output.notes,
-              ),
-            ),
-          ),
-        ),
-      ),
-    )
-  let diagnostics = case notes {
-    [] -> []
-    _ -> [
-      types.File(
-        path: "_diagnostics.txt",
-        text: stop.report(notes)
-          <> "\n停止コード: "
-          <> int.to_string(stop.worst(notes))
-          <> "\n",
-      ),
-    ]
-  }
-  Ok(#(
+      verb.notes(app),
+      reader.missing_key_notes(units),
+      reader.entry_notes(app),
+      server_reader.notes(app),
+      collision_notes,
+      root.notes(app),
+      allow_emit.notes(app, allow_usages),
+      sql.notes(app, hashes),
+      entry_output.notes,
+    ])
+  let made =
     list.flatten([
       types.emit(app.value_types, hashes.types),
       draft.emit(app, hashes),
@@ -207,64 +202,27 @@ pub fn generate(
       verb.sql(app, hashes),
       root.emit(app, hashes),
       allow_emit.emit(app, allow_usages, units),
-      diagnostics,
-    ]),
+    ])
+  let back_output =
+    back.emit(app, units, hashes, sql_files(app_dir <> "/db/queries"), made)
+  let notes = list.append(notes, back_output.notes)
+  let diagnostics = case notes {
+    [] -> []
+    _ -> [
+      types.File(
+        path: "_diagnostics.txt",
+        text: stop.report(notes)
+          <> "\n停止コード: "
+          <> int.to_string(stop.worst(notes))
+          <> "\n",
+      ),
+    ]
+  }
+  Ok(#(
+    list.flatten([made, back_output.files, diagnostics]),
     notes,
+    list.map(discovered.packages, fn(package) { #(package.name, package.path) }),
   ))
-}
-
-fn attached_routes(app_dir: String) -> List(model.AttachedRoute) {
-  case simplifile.read(app_dir <> "/api/src/gen/http_runtime.mjs") {
-    Ok(source_text) -> attached_routes_from_source(source_text)
-    Error(_) ->
-      case simplifile.read(app_dir <> "/src/gen/http_runtime.mjs") {
-        Ok(source_text) -> attached_routes_from_source(source_text)
-        Error(_) -> []
-      }
-  }
-}
-
-fn attached_routes_from_source(
-  source_text: String,
-) -> List(model.AttachedRoute) {
-  case string.split(source_text, "const attached=[") {
-    [_, rest, ..] ->
-      case string.split(rest, "];") {
-        [table, ..] ->
-          table
-          |> string.split("}")
-          |> list.filter_map(parse_attached_route)
-        [] -> []
-      }
-    _ -> []
-  }
-}
-
-fn parse_attached_route(row: String) -> Result(model.AttachedRoute, Nil) {
-  case
-    single_quoted_field(row, "name"),
-    single_quoted_field(row, "method"),
-    single_quoted_field(row, "path")
-  {
-    Some(name), Some(method), Some(path) ->
-      Ok(model.AttachedRoute(
-        name: naming.pascal(name),
-        method: method,
-        path: path,
-      ))
-    _, _, _ -> Error(Nil)
-  }
-}
-
-fn single_quoted_field(row: String, label: String) -> Option(String) {
-  case string.split(row, label <> ":'") {
-    [_, rest, ..] ->
-      case string.split(rest, "'") {
-        [value, ..] -> Some(value)
-        [] -> None
-      }
-    _ -> None
-  }
 }
 
 fn read_note(error: reader.Error) -> Note {
@@ -318,7 +276,38 @@ fn front_note(error: front.Error) -> Note {
 }
 
 fn run(app_dir: String, out_dir: String) -> Result(#(Int, List(Note)), Note) {
-  use #(files, notes) <- result.try(generate(app_dir))
+  use #(generated, notes, face_dirs) <- result.try(generate_with_faces(app_dir))
+  let in_place = holds_dir(out_dir, app_dir)
+  let placement = case in_place {
+    True ->
+      Placement(
+        app: relative_dir(out_dir, app_dir),
+        faces: list.map(face_dirs, fn(face) {
+          #(face.0, relative_dir(out_dir, face.1))
+        }),
+      )
+    False -> Placement(app: "", faces: [])
+  }
+  let faces =
+    generated
+    |> list.filter_map(fn(file) {
+      case string.ends_with(file.path, "/priv/static/_yumemi/client.mjs") {
+        True -> first_segment(file.path)
+        False -> Error(Nil)
+      }
+    })
+    |> list.unique
+    |> list.map(fn(face) { #(face, face_dir(placement, face)) })
+  let files =
+    into_app(generated, in_place, fn(path) {
+      case simplifile.read(out_dir <> "/" <> place(placement, path)) {
+        Ok(text) -> string.starts_with(text, "-- GENERATED")
+        Error(_) -> False
+      }
+    })
+    |> list.map(fn(file) {
+      types.File(..file, path: place(placement, file.path))
+    })
   use _ <- result.try(
     simplifile.create_directory_all(out_dir)
     |> result.map_error(io_note),
@@ -348,15 +337,6 @@ fn run(app_dir: String, out_dir: String) -> Result(#(Int, List(Note)), Note) {
         text: "gleam format に失敗した: " <> detail,
       ))
   })
-  let faces =
-    files
-    |> list.filter_map(fn(file) {
-      case string.ends_with(file.path, "/priv/static/_yumemi/client.mjs") {
-        True -> first_segment(file.path)
-        False -> Error(Nil)
-      }
-    })
-    |> list.unique
   let bundle_errors = bundle_front(out_dir, app_dir, faces)
   let all_notes = list.append(notes, bundle_notes(bundle_errors))
   use _ <- result.try(case bundle_errors {
@@ -392,10 +372,64 @@ fn value_source_bundle_error(error: String) -> Bool {
   }
 }
 
+/// 生成物の置き場。`app` は出力先から app への相対(別の dir に出すなら "")、`faces` は面の名から
+/// 面の package への相対(別の dir に出すなら空 ── 面は `<out>/<面>/..`)。
+pub type Placement {
+  Placement(app: String, faces: List(#(String, String)))
+}
+
+/// 生成束の path(back は app からの相対、面は `<面>/..`)を、出力先からの相対に直す。
+pub fn place(placement: Placement, path: String) -> String {
+  case path {
+    "_diagnostics.txt" -> path
+    _ -> {
+      let face = case string.split_once(path, "/") {
+        Ok(#(first, rest)) ->
+          list.key_find(placement.faces, first)
+          |> result.map(fn(dir) { join(dir, rest) })
+        Error(_) -> Error(Nil)
+      }
+      case face {
+        Ok(placed) -> placed
+        Error(_) -> join(placement.app, path)
+      }
+    }
+  }
+}
+
+fn face_dir(placement: Placement, face: String) -> String {
+  list.key_find(placement.faces, face) |> result.unwrap(face)
+}
+
+fn join(dir: String, path: String) -> String {
+  case dir {
+    "" -> path
+    _ -> dir <> "/" <> path
+  }
+}
+
 fn first_segment(path: String) -> Result(String, Nil) {
   case string.split(path, "/") {
     [first, ..] -> Ok(first)
     [] -> Error(Nil)
+  }
+}
+
+/// 出力先が app そのもののとき、`db/queries/**` へは既に在る file だけを書く(WGy r4、鷹野の裁定 1 (c))。
+/// 生成器だけが出す SQL は `src/gen/sql.mjs` に束ねてあるので、app の `db/queries` には増やさない。
+/// 既に在る file のうち上書きするのは `-- GENERATED` を名乗るもの(`generated` が真)だけで、★ の手書きは
+/// そのまま残す(`back` の `bundle` と同じ規則 ── app の SQL が勝つのは ★ だけ)。出力先が別の dir なら全部を書く。
+pub fn into_app(
+  files: List(types.File),
+  app: Bool,
+  generated: fn(String) -> Bool,
+) -> List(types.File) {
+  case app {
+    False -> files
+    True ->
+      list.filter(files, fn(file) {
+        !string.starts_with(file.path, "db/queries/") || generated(file.path)
+      })
   }
 }
 

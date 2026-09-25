@@ -1,5 +1,83 @@
 # yumemi-gate-1(門)── 面の入口の門・rewrite・CSP・pageview・route の順・client の入口を生成器へ(真壁、2026-09-26)
 
+## r2(2026-09-26 05:16〜、載せ直しと直し、鷹野[PDM] の直書き)
+
+**DDL:無し**(migration / schema に触れていない。staging / production にも触れていない)。
+
+**結論:main `32604ca`(WGy)を merge し、門の session の口を WGy の `attached_roles` から引く形に直した。柏木の P2(空白だけの query)・生成器の穴 `transport_send`・WGy r4 の積み残し 2 つ(framework の JS の Staff、出力先が app を含む dir の全走)・版 0.11.1 を入れた。**musearch `4504b36`(F6 の後)の写しに WGy の star を 3-way で載せ直し、`gleam run -m yumemi_gen -- <写し>/api <写し>` の 1 手で back と 3 面が在るべき場所に出る(×2 で差 0)。写しの api `npm test` は **692 / 694**(新しい DB で 2 回同じ)── 落ちる 2 本は F6 が足した Service(`widget_list_mine` / `widget_read` / `widget_choices` / `space_read`)の WGy の生成器への載せ替えの残りで、下に名指しした。Workerd の門の表は 102 行で status・Location・CSP・pageview・描いた Page が前後全一致。証跡は `gen/build/gate2/`。
+
+### 載せ直し(merge `32604ca`)の衝突と解き方
+
+- 衝突は `results.md` の 1 file だけ(門の節を頭に、WGy の節をその後に)。`emit/front.gleam` は区画どおり自動で混ざった(WGy は `api_routes` / `face_service_names` / `blob_entry_live_text` の頭、門は route 表・shell・client・門の接続)。merge 直後の gen test **278 passed**(WGy 267 + 門 11)
+- **門が宣言から読むものを WGy に合わせた:session の口。**r1 の `gate.mjs` は `/api/session` を直書きしていた。WGy r4 で framework は口の名を知らず `attached_roles` の `ReadSession` で渡す形になったので、門も同じ宣言から引く(`emit/front.gleam` の `session_path`、`const sessionPath = "<ReadSession の attached の path>"`)。門が session を読む(rules・redirects・pageview のどれかを持つ)のに `ReadSession` が無ければ **exit 3**(`<面>/gate: 門が session を読むのに src/server.gleam の attached_roles に ReadSession が無い`)、生成物は `sessionPath = null` で 502。fixture の `server.gleam` に `fixture_session` の口と `ReadSession` を足した(admin の既定の門が session を読むため)。`gate.mjs` の入力 hash に session の口を足した
+- route 表:WGy の `api_routes` は `entry.routes` から直に引く形に変わったが、門が使う Page の route 表(`front_route_paths`)は面の Page から作るので影響なし
+
+### 直したもの
+
+| # | 何 | 在処 |
+|---|---|---|
+| 1 | **空白だけの query を None**(柏木 P2 / 鷹野の裁定 5)。生成 shell の Page の Query は `found === null \|\| found.trim() === ""` で None。空白でない値は trim せずそのまま送る(前の www は trim した値を送っていた ── 語の前後の空白だけ違う) | `emit/front.gleam` の `shell_runtime_text`、`gate_test` |
+| 2 | **`transport_send` の穴。**`attached_live_text` の外部宣言に `blob_fields: List(String)`、呼び出しに `[]`。写しの www / muses の `gen/live/browser_adult.gleam` は sha256 ヘッダ付きの生成物に戻り、`www/test/external-arity.test.mjs` は 2 / 2 pass | `emit/front.gleam`、`gate_test.attached_entry_live_sends_blob_fields_test` |
+| 3 (a) | **framework の JS から Staff を抜いた。**`runtime.mjs:129` の `kind==='staff'&&resolved?.staff` を消し、`outbox.mjs:41` の偽の Staff 行(`{id,party:'queue',name:'Queue'}`)を消した。偽の行は actor を組むためだけに在り、その actor は consumer の `SystemActor` で上書きされる ── 効いていたのは party `'queue'`(root の 1 文と verb の `party` の穴・audit)だけ。**新しい宣言 `roots` の `QueueParty(service, party)`** で consumer ごとに渡す(生成器は `queue_runtime.mjs` の consumer に `party:'queue'`)。生成器の `who が "Staff" で終わる` の判定も消した。musearch の宣言は star.patch の `api/src/server.gleam` に 1 行(`QueueParty(service: "store_request_notify", party: "queue")`)。写しで `2b-8 consumers write the Page path of the recipient face`(store_request_notify を consume する)が pass | `src/framework/server.gleam`・`server/{runtime,outbox}.mjs`、`emit/back.gleam`、`reader/server.gleam`、`wgy_test.queue_consumer_party_follows_the_declaration_test` |
+| 4 (b) | **出力先が app か app を含む dir なら在るべき場所へ(`place`)。**`-- <root>/api <root>`:back は `api/src/gen/..`・`api/db/queries/..`、面は面の package(`www/src/gen/..`)。`-- <root>/api <root>/api`:back はそのまま、面は `../www/..`。別の dir なら従来の並び(`src/gen/..`・`<面>/..`)。`db/queries` へは既に在る GENERATED だけ(WGy の `into_app` を、同じ dir だけでなく含む dir にも)。`bundle_front` は面の出力の dir を受ける | `gen/src/yumemi_gen.gleam`(`Placement` / `place`)、`yumemi_gen_ffi.mjs`(`holds_dir` / `relative_dir`)、`wgy_test.place_puts_back_and_faces_where_they_live_test` |
+| 5 | 版 `0.11.1`(root の `gleam.toml`)、gen の `manifest.toml` の path 依存の版も 0.11.1。CHANGELOG は無い(作っていない)。README の framework/server の節に `QueueParty` と門の session の口を 1 文 | `gleam.toml`、`gen/manifest.toml`、`README.md` |
+| 足した | **`subject_free: List(String)`**(新しい const、型は増やしていない)── 入口の主体の集合(`Subjects([..])`)の検査を外す Service の名。F6 の `store_list_mine`(console の `/switch` が店でない主体のまま店の一覧を読む)は、0.11.0 の手書きの http_runtime に `sessionSubjectReads = new Set(['store_list_mine'])` を持っていた。WGy の framework `http.mjs` は Service の名を知らないので宣言から `subjectFree` で渡す。Service に無い名は exit 4 | `src/framework/server.gleam`(doc)・`server/http.mjs`、`model` / `reader/server` / `emit/http`、`wgy_test.subject_free_follows_the_declaration_test` |
+
+### WGm に渡す patch
+
+- `docs/reports/yumemi-gen-8-patches/star.patch`(645ec49 向け、WGy の 270 file)に `QueueParty` の 1 行を足した(`api/src/server.gleam` の hunk だけ)
+- **新しい `docs/reports/yumemi-gen-8-patches/star-4504b36.patch`**(275 file、一覧は `star-4504b36-files.txt`)── musearch `4504b36` に WGy の star を 3-way で載せ直し、F6 の Service を 0.11.1 に合わせた ★ の直しを足したもの。`git apply --check` と `patch -p1 --dry-run` が `4504b36` の `git archive` に通る。載せ直しで手で解いたのは 3 file(`api/gen/sql_manifest.json` は両方の行、`api/test/sql-cases.mjs` は両方の define、`api/test/source_contract.test.mjs` は F6 の yumemi-6 の層を残して WGy の `starHash` に)と、F6 と star の両方が変えた ★ 4 本(`article_search` / `store_schedule_list` / `widget_list` / `user_do.mjs`)の `wgy-star-sha256.txt` の対を F6 の hash に付け替えたこと
+- F6 の Service への ★ の直し(star-4504b36 だけに在る):`arg_widget_list_mine_space` の hook と `argWidgetListSpace` を F6 の `Option(Place)`(None / `top` / `all` / 置き場の id)に、`course_list` の `own_ledger` を `ManualRead` + hook、`store_list_mine` の `subjects` を `ManualRead` + hook(型 `Subject` は ★ `api/src/session_subject.gleam` へ、`store_list_mine` / `muse_list_mine` の pattern をそれに)、`widget_list_mine` / `widget_read` は自分の Root を `widget_list` の Root に詰め替えて `widget_list.place` へ、`failureStatus` に F6 の 404 の行(`widget_list_mine` / `widget_read` / `space_read` の `space_not_found`、`roster_read_mine` の `not_found`)、`subject_free = ["store_list_mine"]`、書き換えた ★ 4 本の hash の対
+
+### 確かめたこと(r2)
+
+| 検収 | 結果 | 証跡(`gen/build/gate2/`) |
+|---|---|---|
+| root `gleam build` | 0(warning 1、既存の `framework/secret.gleam:5`) | `root-build-final.txt` |
+| `cd gen && gleam test` | **283 passed, no failures**(merge 後 278 + 新しい 5:ReadSession 無しの exit 3・Attached Entry の blob_fields・QueueParty・place・subject_free) | `test-final.txt` |
+| `gleam format --check src test` | root・gen とも 0 | ── |
+| Article fixture ×2 | 2 回とも exit 0、`diff -r` 0 行。tracked 66 file と `cmp` で不一致 0(本便で変えたのは入力の `src/server.gleam`(`fixture_session` の口と `ReadSession`)と、生成物の back 12 file(hash と attached の 1 行・`roles`・`subjectFree`)・面の `api.gleam` ×2・`gate.mjs` ×2・`shell.mjs` ×2・public の `client.mjs`) | `fx-one`、`fx-two` |
+| `git diff v0.11.0 -- src/framework` | 11 file とも `A`(`gate.gleam` と WGy の `server*`)、+1339 / 削除 0。`src test gleam.toml` は `A` 11・`M` 1(`gleam.toml` の版だけ) | ── |
+| Hex の package(`gleam export hex-tarball`、publish はしていない) | `build/yumemi-0.11.1.tar`、`metadata.config` の版 0.11.1、45 file(`src/framework/gate.gleam`・`server/*.mjs` 9 本・README・LICENSE を含む) | `hex-tarball.txt`、`hex/` |
+| 写し(musearch `4504b36` + `star-4504b36.patch` + www / console の `src/gate.gleam` + 4 package の yumemi を path 依存に)の生成器 ×2、1 手(`-- <写し>/api <写し>`) | 2 回とも exit 3(www の島 7 本の `app()` 無し、r1 と同じ)・1255 file。`diff -r`(build・node_modules を除く)は npm test が書いた `api/manifest.toml` だけ。`<写し>/src`・`api/www` などの誤った置き場は 0。変わった file は api/src/gen 291・www 73・muses 96・console 76・db/queries 9(既に在る GENERATED) | `gen-snap{A,B}.log`、`snapA-status.txt` |
+| 写しの api `npm test`(auth を先に build、dropdb からの新しい DB、PG 55540) | **692 / 694 を 2 回**(`api-test-4.txt`・`api-test-5.txt`)。落ちる 2 本は下の「F6 の Service の残り」 | `api-test-{4,5}.txt` |
+| 3 面の `gleam build`(生成物の `src/gen` 全部、yumemi 0.11.1) | www / muses / console とも exit 0。warning の数は 4504b36 の面(Hex 0.11.0)と同じ(333 / 207 / 136) | `face-build-*.txt`、`base-build-*.txt` |
+| 3 面の node test | 前(4504b36)www 48 / 2 fail・muses 16・console 18、後 www 49 / 2 fail・muses 16・console 18。前の 2 fail は archive に docs と wrangler が無い環境要因、後の 2 fail は下の「鷹野宛 1」 | `facetest-*.txt` |
+| **Workerd の門の表**(r1 の 98 行の道具 + 空の検索 4 行、https) | **102 行で status・Location・CSP・pageview・描いた Page が前後全一致。**前 = 4504b36 の面(殻の `gates.mjs`、Hex 0.11.0)、後 = 写しの生成物に薄い `gates.mjs`(生成 shell の export default を出すだけ)。差は空の検索 6 行の読みの数と送った `q`(前は殻が短絡して API を呼ばない、後は `q` 無しで API へ ── `?q=%20` も `no-q` で送られる = P2)と body(adult の pageview の script の書き方・500 の頁の stack の path) | `workerd/table-{before,after}-https.tsv`、`workerd/compare.py` |
+
+PG 55540 は本便で起こし(`snapA/api/test/build/pgdata-public`、pid 3033448)、終端で `kill 3033448`。`pg_isready -p 55540` は no response、pid は消えた。wrangler(9184 / 9182 / 9183、inspector 9632〜9634)は前後とも `pids-*.txt` の pid で止め、port が空いたのを見た。55541 / 55496 / 5552x / 55502 / 55503 / 55506 には触れていない。musearch は `git archive` で読み、node_modules を写しに cp しただけで、作業木には書いていない。
+
+### F6 の Service の残り(WGm へ、名指し)
+
+api の 2 fail(`N2: every API read place ...`・`yumemi-6 widget_list_mine / widget_read / widget_choices / space_read ...`)はどちらも F6 が足した Service で、WGy の生成器へ載せ替える形が決まっていない:
+
+1. **root の 1 文が無い。**`widget_list_mine` / `widget_read` / `space_read` は 0.11.0 では手書きの `gen/root/*.gleam` が `widget_list.Root` の別名で、registry は `root_widget_list` の root を借りていた。WGy の生成器は Service ごとに Root を作り、`db/queries/<service>/root.sql` が無いと `sql:null` で実行時に `decodeMuse(null)`(WGy r3 の「届かないもの 6」── 生成器は名指ししない)。★ で root の SQL を足すなら manifest の semantic test が要る
+2. **入口の食い違い。**WGy の registry は `faces` から `entry` を付ける。`widget_list_mine` / `widget_read` / `widget_choices` は `faces: [Muses]` なのに、F6 の N2 test は www の host から呼ぶ → `forbidden`(403)。0.11.0 の registry は `entry` を持たなかった。`faces` を直すか test を直すかは F6 の意図次第
+
+### 鷹野宛(r2)
+
+1. **空の検索の「API を呼ばない」要求が食い違う。**BRIEF(本便)は「F6 が `article_search.q` を `Option` にした後は back が空で返すので、短絡そのものが要らなくなる」。musearch の `docs/yumemi-5/exceptions.md` は「消した後も同じ要求(`q` 無しで 200、**API を呼ばない**)は生成 shell の試験として残す」。生成 shell は空・空白だけの `q` を None で **API に送る**(back が空で返す)ので、www の `test/entry-queries.test.mjs` の `search Page without q` 2 本は、殻を薄くすると落ちる。生成 shell に Page ごとの短絡の宣言を足すか、test を「`q` を付けずに送る」に直すかの裁き
+2. **出力先が app を含む dir の全走は、生成器が出さなくなった file を消さない。**写しの api/src/gen に 4 本残る(`driver.mjs` / `contracts.mjs` は framework へ、`heaven_ffi.mjs` / `litlink_ffi.mjs` は ★ `api/src/` へ移ったもの)。WGm は 1 手の前に `rm -rf api/src/gen <面>/src/gen` を置く(面の ▲ の例外は本便の `transport_send` で 0 になった)。生成器に消させるのは本便でしていない
+3. `QueueParty` と `subject_free` は 0.11.0 の公開型に足しただけ(`RootShape` は WGy で足した未公開の型、`subject_free` は const の約束だけで型は無い)
+
+### WGm への申し送り(r1 の節の更新)
+
+- **生成は 1 手:**`gleam run -m yumemi_gen -- musearch/api musearch`(その前に `rm -rf api/src/gen www/src/gen muses/src/gen console/src/gen`)。r1 / WGy の「別の出力先に出して写す」手順は要らない。api の `db/queries` は既に在る GENERATED だけが書き換わる
+- musearch に当てる ★ は `star-4504b36.patch`(645ec49 向けの `star.patch` ではない)
+- www / console の `src/gate.gleam` は r1 の本文のまま(写しでそのまま通った)。`src/gates.mjs` は `export default (await import("../build/dev/javascript/<package>/gen/shell.mjs")).default;` の 1 行で足りる(値の運びは F6 で消えた)。上の鷹野宛 1 の裁き次第で www の 2 test を直す
+- `browser_adult.gleam` の ▲ 2 本(www / muses)は生成物に戻る。`external-arity.test.mjs` は残す
+- 残り:www の島 7 本の `app()`(r1 から)、上の「F6 の Service の残り」2 つ、console の ★ `blob_copy*`
+
+### 確かめていないこと(r2)
+
+- 写しの api の 2 fail の中身の直し(F6 の Service の root と入口、上の名指し)
+- 実 API(本物の PG・Neon)と本物の session での門。Workerd の APP は r1 の stub のまま
+- `-- <root>/api <root>/api`(面を `../<面>` に書く形)の実走。test(`place`)では見たが、写しでは `-- <写し>/api <写し>` だけ回した
+- http(`--local-protocol http`)の Workerd の表。r1 の `claim_anonymous` の Location の差の行は取り直していない
+- `gleam publish` の実際の Hex 側の検査(`export hex-tarball` まで)
+- auth の test(auth は build だけ)
+
+
 基点 yumemi main `3209703`(v0.11.0 + docs)、branch `impl/yumemi-gate-1`。写しは musearch `645ec49` の `git archive`(`gen/build/gate/snap/`)。musearch には 1 file も書いていない。証跡は `gen/build/gate/`。
 
 ## 何を足したか

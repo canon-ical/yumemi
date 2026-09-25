@@ -13,6 +13,7 @@ import yumemi_gen/emit/typing
 import yumemi_gen/model
 import yumemi_gen/naming
 import yumemi_gen/stop
+import yumemi_gen/storage
 
 type Param {
   Param(label: String, ty: typing.Ty)
@@ -159,6 +160,7 @@ fn handwritten_notes(
 
 pub fn sql(app: model.App, hashes: hash.Hashes) -> List(File) {
   app.entities
+  |> list.filter(fn(entity) { !storage.in_object(app, entity.module) })
   |> list.sort(fn(left, right) { string.compare(left.module, right.module) })
   |> list.flat_map(sql_files(_, app, hashes))
 }
@@ -191,7 +193,7 @@ fn emits_reorder(app: model.App, entity: model.Entity, name: String) -> Bool {
 }
 
 fn handwritten_header(app: model.App) -> String {
-  // manual_verbs も札と同じくヘッダの `handwritten:` に載せる。
+  // 手書きの verb(札の handwritten_verbs と manual_verbs)はヘッダの `manual:` に載せる(WGy r3、閉じた判定 A-3)。
   let names =
     list.unique(
       list.flatten([
@@ -207,7 +209,7 @@ fn handwritten_header(app: model.App) -> String {
     )
   case names {
     [] -> ""
-    _ -> "//// handwritten: " <> string.join(names, ", ") <> "\n"
+    _ -> "//// manual: " <> string.join(names, ", ") <> "\n"
   }
 }
 
@@ -1590,10 +1592,11 @@ fn parameter_value(
   place: Int,
 ) -> String {
   let placeholder = "$" <> int.to_string(place)
-  case field.value {
-    model.TypeValue(reference) if reference.name == "Sealed" ->
+  case storage.values(app, field, placeholder), field.value {
+    Some(values), _ -> string.join(values, ",")
+    None, model.TypeValue(reference) if reference.name == "Sealed" ->
       "decode(" <> placeholder <> ",'hex')"
-    _ -> placeholder <> cast_of(sql_type_field(app, field))
+    None, _ -> placeholder <> cast_of(sql_type_field(app, field))
   }
 }
 
@@ -1655,9 +1658,13 @@ fn update_sql(
   let assignments =
     props
     |> list.index_map(fn(prop, index) {
-      quoted(verb_prop_column(app, entity, prop))
-      <> "="
-      <> parameter_for_prop(app, entity, prop, first_value + index)
+      let column = verb_prop_column(app, entity, prop)
+      let value = parameter_for_prop(app, entity, prop, first_value + index)
+      // `Split` の列は `a,b` の綴り ── 組の代入にする
+      case string.contains(column, ",") {
+        True -> "(" <> column <> ")=(" <> value <> ")"
+        False -> quoted(column) <> "=" <> value
+      }
     })
   let assignments = case update_bumps_version(entity, name) {
     True -> list.append(assignments, ["version=version+1"])
@@ -2391,6 +2398,13 @@ fn sql_type(app: model.App, value: model.FieldValue) -> String {
 }
 
 fn sql_type_field(app: model.App, field: model.FieldDef) -> String {
+  case storage.sql_type(app, field) {
+    Some(kind) -> kind
+    None -> derived_type_field(app, field)
+  }
+}
+
+fn derived_type_field(app: model.App, field: model.FieldDef) -> String {
   case field.repeated, string.ends_with(field.name, "Kind") {
     True, _ -> "jsonb"
     False, True -> "text"
@@ -2418,7 +2432,11 @@ fn enum_field(field: model.FieldDef) -> Bool {
 fn cast_of(kind: String) -> String {
   case kind {
     "jsonb" | "uuid" | "date" | "timestamptz" | "boolean" -> "::" <> kind
-    _ -> ""
+    _ ->
+      case string.ends_with(kind, "[]") {
+        True -> "::" <> kind
+        False -> ""
+      }
   }
 }
 
@@ -2450,5 +2468,310 @@ fn quoted(column: String) -> String {
   {
     True -> "\"" <> column <> "\""
     False -> column
+  }
+}
+
+// ── runtime の表(WGy r3)─────────────────────────────────────────────────────
+// 生成の verb ごとに、Gleam の口の input から SQL の穴を作る並びを JS の値で出す。
+// 語彙は framework/server/runtime.mjs の `stageVerb`:`['a', i, scalar]`(組の i 番目)・
+// `['f', prop, scalar]`(draft の欄)・`['ja', i]` / `['jf', prop]`(jsonb の穴へ JSON)・`['id']`(新しい鍵)・
+// `['at']`・`['from' | 'to', i]`(i 番目の Step の辺)・`['sealed' | 'sealed_key', prop, kek]`。
+
+/// verb の名 -> JS の値(`{key, tuple, params, ...}`)。手書きの verb と Durable Object の Entity は出さない。
+pub fn runtime_table(app: model.App) -> List(#(String, String)) {
+  entities_in_order(app)
+  |> list.filter(fn(entity) { !storage.in_object(app, entity.module) })
+  |> list.flat_map(fn(entity) {
+    functions_for(entity, app)
+    |> list.flat_map(fn(function) { runtime_rows(app, entity, function) })
+  })
+}
+
+fn js_text(text: String) -> String {
+  "'" <> text <> "'"
+}
+
+fn js_array(items: List(String)) -> String {
+  "[" <> string.join(items, ",") <> "]"
+}
+
+fn scalar_of(ty: typing.Ty) -> String {
+  case ty {
+    typing.TyRef(Some(path), _) ->
+      case string.starts_with(path, "gen/types/") {
+        True -> js_text(string.drop_start(path, 10))
+        False -> "null"
+      }
+    typing.TyApp(typing.TyRef(Some("gleam/option"), "Option"), [inner]) ->
+      scalar_of(inner)
+    _ -> "null"
+  }
+}
+
+fn prop_is_json(app: model.App, entity: model.Entity, prop: String) -> Bool {
+  case model.field_for_prop(entity, prop) {
+    Some(field) -> sql_type_field(app, field) == "jsonb"
+    None -> False
+  }
+}
+
+fn tuple_tokens(
+  app: model.App,
+  entity: model.Entity,
+  params: List(Param),
+) -> List(String) {
+  list.index_map(params, fn(param, index) {
+    case prop_is_json(app, entity, param.label), param.ty {
+      True, _ -> js_array([js_text("ja"), int.to_string(index)])
+      False, typing.TyApp(typing.TyRef(None, "List"), _) ->
+        js_array([js_text("ja"), int.to_string(index)])
+      False, _ ->
+        js_array([js_text("a"), int.to_string(index), scalar_of(param.ty)])
+    }
+  })
+}
+
+fn entry(name: String, fields: List(#(String, String))) -> #(String, String) {
+  #(
+    name,
+    "{"
+      <> string.join(
+      list.map([#("key", js_text("verb/" <> name)), ..fields], fn(pair) {
+        pair.0 <> ":" <> pair.1
+      }),
+      ",",
+    )
+      <> "}",
+  )
+}
+
+fn tuple_flag(params: List(Param)) -> String {
+  case params {
+    [_] -> "false"
+    _ -> "true"
+  }
+}
+
+fn runtime_rows(
+  app: model.App,
+  entity: model.Entity,
+  function: Fn,
+) -> List(#(String, String)) {
+  let name = function.name
+  let create_name = "create_" <> entity.module
+  let advance_name = "advance_" <> entity.module
+  case name {
+    _ if name == create_name -> [create_row(app, entity, name)]
+    _ if name == advance_name -> {
+      let count = list.length(function.params)
+      let step = count - 1
+      let leading = tuple_tokens(app, entity, list.take(function.params, step))
+      let transitions =
+        entity.edges
+        |> list.map(fn(edge) {
+          js_text(naming.snake(
+            entity.name
+            <> naming.pascal(edge.0)
+            <> "To"
+            <> naming.pascal(edge.1),
+          ))
+          <> ":"
+          <> js_array([
+            js_text(naming.snake(edge.0)),
+            js_text(naming.snake(edge.1)),
+          ])
+        })
+      [
+        entry(name, [
+          #("tuple", tuple_flag(function.params)),
+          #(
+            "params",
+            js_array(
+              list.append(leading, [
+                js_array([js_text("from"), int.to_string(step)]),
+                js_array([js_text("to"), int.to_string(step)]),
+                js_array([js_text("at")]),
+              ]),
+            ),
+          ),
+          #("transitions", "{" <> string.join(transitions, ",") <> "}"),
+        ]),
+      ]
+    }
+    _ ->
+      case string.starts_with(name, "reorder_") {
+        True -> reorder_rows(app, entity, function)
+        False -> [
+          entry(name, [
+            #("tuple", tuple_flag(function.params)),
+            #("params", js_array(tuple_tokens(app, entity, function.params))),
+          ]),
+        ]
+      }
+  }
+}
+
+fn reorder_rows(
+  app: model.App,
+  entity: model.Entity,
+  function: Fn,
+) -> List(#(String, String)) {
+  let fields = [
+    #("tuple", tuple_flag(function.params)),
+    #("params", js_array(tuple_tokens(app, entity, function.params))),
+  ]
+  [entry(function.name <> "_stage", fields), entry(function.name, fields)]
+}
+
+fn create_row(
+  app: model.App,
+  entity: model.Entity,
+  name: String,
+) -> #(String, String) {
+  let ordered_field = case entity.ordered_by {
+    Some(ordered) -> ordered.field
+    None -> ""
+  }
+  let tokens =
+    create_fields(entity)
+    |> list.filter_map(fn(field) {
+      let prop = prop_for_field(entity, field.name)
+      case field.column {
+        "phase" -> Error(Nil)
+        _ ->
+          case
+            prop == ordered_field || field.column == ordered_field,
+            string.starts_with(field.column, "entered_"),
+            field.value
+          {
+            True, _, _ -> Error(Nil)
+            _, True, _ -> Ok(js_array([js_text("at")]))
+            _, _, model.TypeValue(reference) if reference.name == "Sealed" ->
+              Ok(
+                js_array([
+                  js_text("sealed"),
+                  js_text(prop),
+                  js_text(kek_binding(entity, field.name)),
+                ]),
+              )
+            _, _, _ ->
+              case
+                list.contains(entity.key_props, prop)
+                && !list.contains(entity.auto_key, prop)
+              {
+                True -> Ok(js_array([js_text("id")]))
+                False ->
+                  case
+                    string.ends_with(field.name, "KeyId") && prop == field.name
+                  {
+                    True ->
+                      Ok(
+                        js_array([
+                          js_text("sealed_key"),
+                          js_text(sealed_owner(entity, field.name)),
+                        ]),
+                      )
+                    False ->
+                      case sql_type_field(app, field) == "jsonb" {
+                        True -> Ok(js_array([js_text("jf"), js_text(prop)]))
+                        False ->
+                          Ok(
+                            js_array([
+                              js_text("f"),
+                              js_text(prop),
+                              scalar_of(typing.field_base(app, field.name)),
+                            ]),
+                          )
+                      }
+                  }
+              }
+          }
+      }
+    })
+  let created_fields =
+    entity.props
+    |> list.filter(fn(prop) {
+      case model.field_for_prop(entity, prop.name), prop.kind {
+        None, model.RelProp(kind: model.Multi, ..) -> False
+        _, _ -> True
+      }
+    })
+    |> list.map(fn(prop) {
+      case
+        list.contains(entity.key_props, prop.name),
+        prop.name == ordered_field
+      {
+        True, _ -> js_text("id")
+        _, True -> js_text("=order")
+        _, _ -> js_text(prop.name)
+      }
+    })
+  let key_scalar = case list.first(entity.key_props) {
+    Ok(prop) ->
+      case model.field_for_prop(entity, prop) {
+        Some(field) -> scalar_of(typing.field_base(app, field.name))
+        None -> "null"
+      }
+    Error(_) -> "null"
+  }
+  let before = case entity.ordered_by {
+    Some(ordered) ->
+      case ordered.within, ordered_parent(entity, app, ordered) {
+        [first, ..], Some(_) -> [
+          #(
+            "before",
+            js_array([
+              js_array([
+                js_text("verb/" <> name <> "_lock"),
+                js_array([js_array([js_text("f"), js_text(first), "null"])]),
+              ]),
+            ]),
+          ),
+        ]
+        _, _ -> []
+      }
+    None -> []
+  }
+  entry(name, [
+    #("tuple", "false"),
+    #("params", js_array(tokens)),
+    #(
+      "created",
+      js_array([
+        js_text(entity.module),
+        js_text(entity.name <> "Created"),
+        js_array(created_fields),
+        key_scalar,
+      ]),
+    ),
+    ..before
+  ])
+}
+
+fn sealed_owner(entity: model.Entity, field_name: String) -> String {
+  case
+    list.find(entity.props, fn(prop) {
+      entity.name <> naming.pascal(prop.name) <> "KeyId" == field_name
+    })
+  {
+    Ok(prop) -> prop.name
+    Error(_) -> field_name
+  }
+}
+
+/// Sealed の鍵の型(`KekS`)から env の binding の名(`KEK_S`)。
+fn kek_binding(entity: model.Entity, field_name: String) -> String {
+  case
+    list.find(entity.verb_fields, fn(field) {
+      field.name == field_name <> "KeyId"
+    })
+  {
+    // framework/sealed の鍵の型 -> Worker の binding(基盤の前提)
+    Ok(model.FieldDef(value: model.TypeValue(reference), ..))
+      if reference.name == "StaffKey"
+    -> "KEK_S"
+    Ok(model.FieldDef(value: model.TypeValue(reference), ..)) ->
+      string.uppercase(naming.snake(reference.name))
+    _ -> "KEK"
   }
 }

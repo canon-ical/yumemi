@@ -2,6 +2,8 @@
 ////
 //// 宣言が無い面は、入口 `Http` の `admit` / `subject` から既定の門を組む(`Authenticated` の面だけ)。
 //// CSP の host は入口 `Http` の `frame_src` 欄から読む(`api/src/entry.gleam`)。
+//// session を読む口は `api/src/server.gleam` の `attached_roles` の `ReadSession` が指す attached の path
+//// (framework は app の口の名を知らない)。門が session を読むのに `ReadSession` が無ければ exit 3。
 //// Page の指し先(`Exact` / `Prefix`)が面の route に無ければ exit 4。
 
 import glance
@@ -27,6 +29,8 @@ pub type Gate {
     frame_src: List(Match),
     frame_hosts: List(String),
     pageview: Option(Pageview),
+    /// session を読む口の path(`ReadSession` の attached)。宣言が無ければ None。
+    session_path: Option(String),
   )
 }
 
@@ -73,6 +77,11 @@ pub type Pageview {
   )
 }
 
+/// 門が session を読むか(rules・redirects・pageview のどれかを持つ)。
+pub fn reads_session(gate: Gate) -> Bool {
+  gate.rules != [] || gate.redirects != [] || gate.pageview != None
+}
+
 /// 門が何かを持つか。持たない面の `gate.mjs` は素通しになる。
 pub fn is_empty(gate: Gate) -> Bool {
   gate.rules == []
@@ -82,6 +91,30 @@ pub fn is_empty(gate: Gate) -> Bool {
 }
 
 pub fn read(
+  face_name: String,
+  face_units: List(Unit),
+  back_units: List(Unit),
+  entries: List(model.Entry),
+  route_paths: List(String),
+  session_path: Option(String),
+) -> #(Gate, List(Note)) {
+  let #(gate, notes) =
+    read_gate(face_name, face_units, back_units, entries, route_paths)
+  let gate = Gate(..gate, session_path: session_path)
+  case reads_session(gate), session_path {
+    True, None -> #(gate, [
+      Note(
+        stop.Missing,
+        face_name
+          <> "/gate: 門が session を読むのに src/server.gleam の attached_roles に `ReadSession` が無い",
+      ),
+      ..notes
+    ])
+    _, _ -> #(gate, notes)
+  }
+}
+
+fn read_gate(
   face_name: String,
   face_units: List(Unit),
   back_units: List(Unit),
@@ -123,6 +156,7 @@ fn empty(hosts: List(String)) -> Gate {
     frame_src: [],
     frame_hosts: hosts,
     pageview: None,
+    session_path: None,
   )
 }
 
@@ -294,6 +328,7 @@ fn gate_of(expression: glance.Expression) -> Result(Gate, String) {
         frame_src: frame_src,
         frame_hosts: [],
         pageview: pageview,
+        session_path: None,
       ))
     }
     _ -> Error("`gate` は `Gate(..)` の literal で書く")

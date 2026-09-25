@@ -162,7 +162,7 @@ async function renderPage(request, env, matched, gateSession) {
       value = matched.params[source.name];
     } else if (source.type === "query") {
       const found = query.get(source.name);
-      value = found === null || found === "" ? Option$None$const : new Some(found);
+      value = found === null || found.trim() === "" ? Option$None$const : new Some(found);
     } else if (source.type === "origin") {
       const envName = "PUBLIC_" + source.name.toUpperCase() + "_ORIGIN";
       const origin = env[envName];

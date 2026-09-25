@@ -15,6 +15,7 @@ import yumemi_gen/model.{type App, type Entity, type Select}
 import yumemi_gen/naming
 import yumemi_gen/relation
 import yumemi_gen/stop
+import yumemi_gen/storage
 
 /// SQL を出せない理由。`class` は 20 の exit code 表(`stop`)へそのまま写る。
 pub type Reason {
@@ -65,7 +66,11 @@ pub fn build(app: App, hashes: hash.Hashes) -> #(List(File), List(Skipped)) {
 /// 受けて関係先の行を鍵の順で返す。実行側は Context の `relation` でこれを流し、復号して返す。
 fn build_arrows(app: App, hashes: hash.Hashes) -> #(List(File), List(Skipped)) {
   list.fold(app.services, #([], []), fn(acc, service) {
-    list.fold(reads.root_arrows(app, service), acc, fn(inner, arrow) {
+    reads.root_arrows(app, service)
+    |> list.filter(fn(arrow) {
+      !storage.in_object_named(app, arrow.target_entity)
+    })
+    |> list.fold(acc, fn(inner, arrow) {
       let #(files, skipped) = inner
       let query = reads.arrow_query(arrow)
       case arrow_statement(app, arrow) {
@@ -135,35 +140,45 @@ fn build_queries(
   list.fold(app.services, #([], []), fn(acc, service) {
     list.fold(service.queries, acc, fn(inner, query) {
       let #(files, skipped) = inner
-      case statement(app, service, query.select) {
-        Ok(text) -> #(
-          [
-            File(
-              path: "db/queries/"
-                <> service.module
-                <> "/"
-                <> query.name
-                <> ".sql",
-              text: "-- GENERATED from service."
-                <> service.module
-                <> "."
-                <> query.name
-                <> " [sha256:"
-                <> hash.service(hashes, service.module)
-                <> "] — 手で編集しない\n"
-                <> text,
-            ),
-            ..files
-          ],
-          skipped,
-        )
-        Error(reason) -> #(files, [
-          Skipped(service: service.module, query: query.name, reason: reason),
-          ..skipped
-        ])
+      case storage.in_object_named(app, query.select.from) {
+        True -> inner
+        False -> query_file(app, hashes, service, query, files, skipped)
       }
     })
   })
+}
+
+fn query_file(
+  app: App,
+  hashes: hash.Hashes,
+  service: model.Service,
+  query: model.NamedQuery,
+  files: List(File),
+  skipped: List(Skipped),
+) -> #(List(File), List(Skipped)) {
+  case statement(app, service, query.select) {
+    Ok(text) -> #(
+      [
+        File(
+          path: "db/queries/" <> service.module <> "/" <> query.name <> ".sql",
+          text: "-- GENERATED from service."
+            <> service.module
+            <> "."
+            <> query.name
+            <> " [sha256:"
+            <> hash.service(hashes, service.module)
+            <> "] — 手で編集しない\n"
+            <> text,
+        ),
+        ..files
+      ],
+      skipped,
+    )
+    Error(reason) -> #(files, [
+      Skipped(service: service.module, query: query.name, reason: reason),
+      ..skipped
+    ])
+  }
 }
 
 // ── 別名 ────────────────────────────────────────────────────────────────────
@@ -817,7 +832,9 @@ type Hop {
 /// musearch の `article_search/nearest.sql` と同じ ── 実行側が渡す句の jsonb を
 /// `jsonb_array_elements` で開き、相は allow の Entity の `phase`、owner
 /// `Via<Entity>Party` はその Entity の `party` 列と party の穴で照らす。
-/// 入れられない形(Self、相の無い Entity、from / join から辿れない Entity)は exit 4。
+/// owner `Self` は主体の鍵の穴で照らす。ただし句が全部 `Self` でどの `As<X>` も allow の Entity
+/// そのものなら、読みの行を絞らない(主体の門と Logic の主体の鍵に任せる)。
+/// 入れられない形(相の無い Entity、from / join から辿れない Entity)は exit 4。
 fn allow_clause(
   app: App,
   service: model.Service,
@@ -852,14 +869,43 @@ fn allow_clause(
         |> list.filter_map(fn(clause) {
           case clause {
             model.Clause(owner: "NoOwner", ..) -> Error(Nil)
+            model.Clause(owner: "Self", ..) -> Error(Nil)
             model.Clause(owner: owner, ..) -> Ok(owner)
             model.UnreadClause(..) -> Error(Nil)
           }
         })
         |> list.unique
-      case phased, owners {
-        False, [] -> Ok(#(scope, None))
-        _, _ -> restricted(app, service, scope, phased, owners)
+      let selves =
+        readable
+        |> list.filter_map(fn(clause) {
+          case clause {
+            model.Clause(owner: "Self", who: who, ..) -> Ok(who)
+            _ -> Error(Nil)
+          }
+        })
+        |> list.unique
+      let all_self =
+        readable != []
+        && list.all(readable, fn(clause) {
+          case clause {
+            model.Clause(owner: "Self", ..) -> True
+            _ -> False
+          }
+        })
+      // 句が全部 `Self` で、どの句の `As<X>` も allow の Entity そのもの(主体の行 = allow の行)の
+      // Service は主体(actor)を絞る句で、読みの行を絞らない(WGy r3)── `Self` は actor の admission と
+      // 入口の相の門で判じ、他の Entity の行(claim の前の Roster、他の嬢の Heaven の連携)は読みの側で
+      // 主体に縛らない(基点の SQL と同じ意味)。X が allow の Entity と違う形(`memo` × `AsStaff` × `Self`)は
+      // 「その行の X が自分」の意味なので、主体の鍵の穴(`subject=$K`)で絞るか、辿れなければ exit 4(WGy r4)
+      let own =
+        all_self
+        && list.all(selves, fn(who) {
+          root.who_is_allow_entity(app, service, who)
+        })
+      case own, phased, owners, selves {
+        True, _, _, _ -> Ok(#(scope, None))
+        _, False, [], [] -> Ok(#(scope, None))
+        _, _, _, _ -> restricted(app, service, scope, phased, owners, selves)
       }
     }
   }
@@ -871,6 +917,7 @@ fn restricted(
   scope: Scope,
   phased: Bool,
   owners: List(String),
+  selves: List(String),
 ) -> Result(#(Scope, Option(Allowed)), Reason) {
   let allow_entity = case service.allow_module {
     Some(path) ->
@@ -914,27 +961,35 @@ fn restricted(
       }
     }),
   )
+  use subjects <- try(list.try_map(selves, subject_of(app, _)))
   let wanted =
-    list.append(
+    list.flatten([
       option.map(phase_target, fn(pair) { [pair.0] }) |> option.unwrap([]),
       list.map(parties, fn(item) { item.1 }),
-    )
+      subjects,
+    ])
     |> list.fold([], fn(acc, entity: Entity) {
       case list.any(acc, fn(other: Entity) { other.name == entity.name }) {
         True -> acc
         False -> list.append(acc, [entity])
       }
     })
+  let clauses_place = scope.next_param
+  let party_place = scope.next_param + 1
+  let subject_place = case parties {
+    [] -> scope.next_param + 1
+    _ -> scope.next_param + 2
+  }
   use #(inner, hops) <- try(
     list.try_fold(wanted, #(scope, []), fn(acc, entity) {
       let #(current, hops) = acc
+      // 辿れない Entity は exit 4。主体の行そのものを鍵の穴で引く逃げ道は、読みの行を縛らないので持たない
+      // (WGy r4 ── 句が全部 `Self` で辿れない形は、主体の形なら上で絞らず、別の Entity なら名指しで止める)
       reach(app, current, hops, entity)
     }),
   )
   let taken = list.map(inner.aliases, fn(pair) { pair.1 })
   let clause_alias = free("cl", taken, 1)
-  let clauses_place = scope.next_param
-  let party_place = scope.next_param + 1
   let phase_part = case phase_target {
     Some(#(entity, column)) -> [
       "("
@@ -949,27 +1004,42 @@ fn restricted(
     ]
     None -> []
   }
-  let owner_part = case parties {
-    [] -> []
-    _ -> [
+  let self_rows =
+    list.map(subjects, fn(entity) {
+      "("
+      <> clause_alias
+      <> "->>'owner'='self' AND "
+      <> option.unwrap(alias_of(inner, entity.name), "t")
+      <> "."
+      <> quoted(entity.key_column)
+      <> "=$"
+      <> int.to_string(subject_place)
+      <> ")"
+    })
+  let owner_part = case parties, self_rows {
+    [], [] -> []
+    _, _ -> [
       "("
       <> clause_alias
       <> "->>'owner'='no_owner' OR "
       <> string.join(
-        list.map(parties, fn(item) {
-          let #(owner, entity, column) = item
-          "("
-          <> clause_alias
-          <> "->>'owner'='"
-          <> naming.snake(owner)
-          <> "' AND "
-          <> option.unwrap(alias_of(inner, entity.name), "t")
-          <> "."
-          <> quoted(column)
-          <> "=$"
-          <> int.to_string(party_place)
-          <> ")"
-        }),
+        list.append(
+          list.map(parties, fn(item) {
+            let #(owner, entity, column) = item
+            "("
+            <> clause_alias
+            <> "->>'owner'='"
+            <> naming.snake(owner)
+            <> "' AND "
+            <> option.unwrap(alias_of(inner, entity.name), "t")
+            <> "."
+            <> quoted(column)
+            <> "=$"
+            <> int.to_string(party_place)
+            <> ")"
+          }),
+          self_rows,
+        ),
         " OR ",
       )
       <> ")",
@@ -997,31 +1067,58 @@ fn restricted(
       <> inside
       <> ")"
     })
-  let #(next, contract) = case parties {
-    [] -> #(
-      clauses_place + 1,
-      "-- allow: clauses=$" <> int.to_string(clauses_place),
-    )
-    _ -> #(
-      party_place + 1,
-      "-- allow: clauses=$"
-        <> int.to_string(clauses_place)
-        <> " party=$"
-        <> int.to_string(party_place),
-    )
+  let party_contract = case parties {
+    [] -> ""
+    _ -> " party=$" <> int.to_string(party_place)
   }
+  let subject_contract = case subjects {
+    [] -> ""
+    _ -> " subject=$" <> int.to_string(subject_place)
+  }
+  let next = case parties, subjects {
+    [], [] -> clauses_place + 1
+    _, [] -> party_place + 1
+    _, _ -> subject_place + 1
+  }
+  let contract =
+    "-- allow: clauses=$"
+    <> int.to_string(clauses_place)
+    <> party_contract
+    <> subject_contract
   Ok(#(
     Scope(..scope, next_param: next),
     Some(Allowed(text: text, contract: contract)),
   ))
 }
 
+/// owner `Self` の句が照らす主体の Entity。`who` の `As<Entity>` の Entity で、その key の列と
+/// 主体の鍵の穴(`subject=$K`、実行側が actor の subject の id を渡す)を比べる(hw-1 の鷹野宛 1 の案、
+/// WGy の裁定 4)。`As` で始まらない `who`(`Anyone` など)に `Self` は付かない。
+/// 句が全部 `Self` でどの `As<X>` も allow の Entity そのものの形は、ここに来ず穴を使わない
+/// (`allow_clause` が読みを絞らない ── WGy r3 / r4)。穴を使うのは X が allow の Entity と違う形と、
+/// `Self` と他の owner が混ざる形だけ。
+fn subject_of(app: App, who: String) -> Result(Entity, Reason) {
+  let name = case string.split(who, ".") |> list.last {
+    Ok(last) -> last
+    Error(_) -> who
+  }
+  case string.starts_with(name, "As") {
+    False -> Error(clash("allow 句の owner Self の who が主体でない: " <> who))
+    True -> {
+      let entity_name = string.drop_start(name, 2)
+      model.entity_by_name(app.entities, entity_name)
+      |> option.to_result(clash(
+        "allow 句の owner Self の who の Entity が無い: " <> entity_name,
+      ))
+    }
+  }
+}
+
 /// owner の名から party を持つ Entity への道。`Via<Entity>Party` = その Entity の party
 /// (`ViaMuseParty` = muse の party)。hw-2 の `party_of` と同じ規則。
-/// `Self` は主体そのものの鍵で照らす句で、party の穴では表せないので止める。
+/// `Self` は `subject_of` の持ち分(party の穴ではなく主体の鍵の穴で照らす)。
 fn party_of(app: App, owner: String) -> Result(Entity, Reason) {
   case owner {
-    "Self" -> Error(clash("allow 句の owner Self は party の穴で表せない(主体の鍵が要る)"))
     _ ->
       case
         string.starts_with(owner, "Via") && string.ends_with(owner, "Party")
@@ -1542,7 +1639,11 @@ fn keyset_branches(
         _ -> "(" <> string.join(prefix, " AND ") <> " AND " <> comparison <> ")"
       }
       let #(found, _) = term
-      let equal = found.reference <> " IS NOT DISTINCT FROM " <> place
+      let equal =
+        found.reference
+        <> " IS NOT DISTINCT FROM "
+        <> place
+        <> keyset_cast(found.kind)
       [
         branch,
         ..keyset_branches(
@@ -1573,7 +1674,7 @@ fn cursor_compare(found: Column, way: String, place: String) -> String {
   case found.optional {
     True ->
       "("
-      <> place
+      <> right
       <> " IS NOT NULL AND ("
       <> found.reference
       <> " IS NULL OR ("

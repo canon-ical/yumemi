@@ -2,6 +2,7 @@
 
 import glance
 import gleam/list
+import gleam/option.{None, Some}
 import gleam/string
 import gleeunit/should
 import simplifile
@@ -92,6 +93,7 @@ fn read_www(text: String) -> #(gate.Gate, List(stop.Note)) {
     [unit("entry", entry_source)],
     entries(),
     www_routes,
+    Some("/api/session"),
   )
 }
 
@@ -170,7 +172,14 @@ pub fn gate_without_const_is_missing_test() {
 
 pub fn authenticated_face_without_declaration_gets_admit_gate_test() {
   let #(read, notes) =
-    gate.read("muses", [], [unit("entry", entry_source)], entries(), ["/"])
+    gate.read(
+      "muses",
+      [],
+      [unit("entry", entry_source)],
+      entries(),
+      ["/"],
+      Some("/api/session"),
+    )
   notes |> should.equal([])
   read.declared |> should.be_false
   read.rules
@@ -181,7 +190,14 @@ pub fn authenticated_face_without_declaration_gets_admit_gate_test() {
 
 pub fn anonymous_face_without_declaration_has_no_gate_test() {
   let #(read, notes) =
-    gate.read("www", [], [unit("entry", entry_source)], entries(), www_routes)
+    gate.read(
+      "www",
+      [],
+      [unit("entry", entry_source)],
+      entries(),
+      www_routes,
+      None,
+    )
   notes |> should.equal([])
   gate.is_empty(read) |> should.be_true
   read.frame_hosts |> should.equal(["frames.example"])
@@ -213,10 +229,31 @@ pub fn gate_mjs_carries_rules_csp_and_expanded_pageview_routes_test() {
   )
   |> should.be_true
   text |> string.contains("const readsSession = true;") |> should.be_true
+  text
+  |> string.contains("const sessionPath = \"/api/session\";")
+  |> should.be_true
+  text |> string.contains("\"/api/session\", request.url") |> should.be_false
+}
+
+/// 門が session を読むのに `attached_roles` の `ReadSession` が無ければ exit 3(口の名を framework は知らない)。
+pub fn gate_reading_session_without_read_session_role_is_missing_test() {
+  let #(read, notes) =
+    gate.read(
+      "muses",
+      [],
+      [unit("entry", entry_source)],
+      entries(),
+      ["/"],
+      None,
+    )
+  notes |> list.map(fn(note) { note.class }) |> should.equal([stop.Missing])
+  gate_emit.text("// header", read, ["/"])
+  |> string.contains("const sessionPath = null;")
+  |> should.be_true
 }
 
 pub fn empty_gate_mjs_does_not_read_session_test() {
-  let #(read, _) = gate.read("www", [], [], entries(), www_routes)
+  let #(read, _) = gate.read("www", [], [], entries(), www_routes, None)
   let text = gate_emit.text("// header", read, www_routes)
   text |> string.contains("const readsSession = false;") |> should.be_true
   text |> string.contains("const pageviewScript = null;") |> should.be_true
@@ -236,16 +273,20 @@ pub fn fixture_shell_is_served_through_gate_hooks_test() {
     "export default gate.serve(async (request, env, before) => {",
   )
   |> should.be_true
-  // 空の query は None(値が無いのと同じ)で送る
+  // 空の query と空白だけの query(`?q=%20`)は None(値が無いのと同じ)で送る
   shell
   |> string.contains(
-    "value = found === null || found === \"\" ? Option$None$const : new Some(found);",
+    "value = found === null || found.trim() === \"\" ? Option$None$const : new Some(found);",
   )
   |> should.be_true
   let assert Ok(admin_gate) =
     simplifile.read("fixtures/article/admin/src/gen/gate.mjs")
   admin_gate
   |> string.contains("checks: [{type: \"admitted\", kinds: [\"staff\"]}]")
+  |> should.be_true
+  // session の口は fixture の `ReadSession(attached: "fixture_session")` の path
+  admin_gate
+  |> string.contains("const sessionPath = \"/fixture/session\";")
   |> should.be_true
 }
 
@@ -318,4 +359,62 @@ pub fn client_registers_every_app_component_and_flags_missing_app_test() {
       "public/components/no_app: `pub fn app()` が無い(client の入口は島を `app()` で登録する)",
     ),
   ])
+}
+
+// ── Attached Entry の live module(musearch の ▲ browser_adult を生成物に戻す形)────────────
+
+const attached_entry_source = "
+import framework/front
+import gen/api
+
+pub const calls: List(api.Target) = [front.Entry(api.FixtureBrowser)]
+
+pub fn app() {
+  Nil
+}
+"
+
+/// `transport_send` の外部宣言は `transport_ffi.mjs` の `send`(6 引数)と同じ数、呼び出しは `blob_fields` に `[]`。
+pub fn attached_entry_live_sends_blob_fields_test() {
+  let assert Ok(back_units) = source.load("fixtures/article")
+  let assert Ok(app) = reader.read(back_units)
+  let assert Ok(face_units) = source.load("fixtures/article/public")
+  let face_units =
+    list.append(face_units, [
+      unit("components/browser_fixture", attached_entry_source),
+    ])
+  let assert Ok(front_model) =
+    reader_front.read("public", face_units, app.services)
+  let package =
+    face.Package(
+      name: "public",
+      path: "fixtures/article/public",
+      pages: face.UndeclaredPages,
+      units: face_units,
+    )
+  let files =
+    front_emit.emit(app, back_units, package, front_model, hash.of(back_units))
+  let assert Ok(live) =
+    list.find(files, fn(file) {
+      file.path == "public/src/gen/live/fixture_browser.gleam"
+    })
+  live.text
+  |> string.contains(
+    "fn transport_send(method: String, path: String, body: json.Json, blob_fields: List(String), on_ok: fn(Dynamic) -> Nil, on_error: fn(Dynamic) -> Nil) -> Nil",
+  )
+  |> should.be_true
+  live.text
+  |> string.contains(
+    "    \"/fixture/browser\",\n    json.null(),\n    [],\n    fn(value) { dispatch(live.Done(Ok(value))) },",
+  )
+  |> should.be_true
+  let assert Ok(ffi) =
+    list.find(files, fn(file) {
+      file.path == "public/src/gen/live/transport_ffi.mjs"
+    })
+  ffi.text
+  |> string.contains(
+    "export function send(method, path, body, blobFields, onOk, onError) {",
+  )
+  |> should.be_true
 }

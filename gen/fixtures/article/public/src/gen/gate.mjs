@@ -1,9 +1,10 @@
-// GENERATED from public/src/{gate.gleam,pages/**} and src/entry.gleam [sha256:68fd7b9477ba] — 手で編集しない
+// GENERATED from public/src/{gate.gleam,pages/**} and src/{entry,server}.gleam [sha256:2cc97fd670ec] — 手で編集しない
 
 import * as route from "./route.mjs";
 
 const signIn = {path: "/auth/sign-in", fallback: ""};
 const readsSession = false;
+const sessionPath = "/fixture/session";
 const rules = [];
 const redirects = [];
 const frameSrc = null;
@@ -70,8 +71,9 @@ function failed(fail, request, env) {
 }
 
 async function readSession(request, env) {
+  if (sessionPath === null) return {status: 502, ok: false, session: null};
   try {
-    const response = await env.APP.fetch(new Request(new URL("/api/session", request.url), request));
+    const response = await env.APP.fetch(new Request(new URL(sessionPath, request.url), request));
     if (!response.ok) return {status: response.status, ok: false, session: null};
     const session = await response.json().catch(() => null);
     return {status: response.status, ok: true, session};
