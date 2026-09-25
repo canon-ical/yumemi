@@ -20,6 +20,7 @@ import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
 import yumemi_gen/digest
+import yumemi_gen/emit/codec
 import yumemi_gen/emit/entry
 import yumemi_gen/emit/hash
 import yumemi_gen/emit/root
@@ -70,6 +71,7 @@ pub fn emit(
               text: registry_text(app, units, input),
             ),
             File(path: "src/gen/sql.mjs", text: sql_text(queries, input)),
+            File(path: "src/gen/codec.mjs", text: codec.text(app, units, input)),
             File(path: "src/gen/shell.mjs", text: shell_text(app, input)),
             File(
               path: "src/gen/operations_ffi.mjs",
