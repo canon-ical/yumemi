@@ -110,7 +110,7 @@ WGm の BRIEF(A / B / C の判定)は、この session から読める場所で�
 
 1. **1・2 は届かなかった。**止め線 4:00 の中で、runtime の分岐 173 本と http_runtime を生成して、生成 SQL の採用と一緒に test を通すところまでは届かないと判断し、確かめられる 3・4・5 の一部と裁定 5 を先に閉じた。次の便は「runtime / http_runtime の emitter + GENERATED の 59 本の採用」を 1 つの単位で持つ必要がある(採用の測りで 105 本割れる)
 2. **生成器と ★ の schema の契約のずれ 19 本**(上の表)。器(DO の SQLite)と列の写像(列名・sum の多列・`uuid[]`)の宣言が無いと、生成器は正しい SQL を出せない。宣言を足すか、名指しの ★ SQL として残すかの裁きが要る
-3. PG 55540 は本便で起こした(`snap-g/api/test/build/pgdata-public`、pid は終端で止める)
+3. PG 55540 は本便で起こし(`snap-g/api/test/build/pgdata-public`)、終端で pid 2728450 を止めた(55541 / 55496 / 5552x / 55502 / 55503 には触れていない)
 
 # r1(以下は r1 の記録のまま)
 
