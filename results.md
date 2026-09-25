@@ -1,3 +1,24 @@
+# yumemi-gen-8(WGy)真壁 r2 ── 人見の裁定 A「全部閉じる」への続き(2026-09-26)
+
+## 状態
+
+- **閉じていない。**`runtime.mjs` / `http_runtime.mjs` の生成(完了条件 1・2)は未着手、だから「`api/src/gen` を丸ごと置き換える」(5)も未達。squash していない(r1 の 8 本 + r2 の checkpoint を残す)
+- 届いたもの:connector の宣言と FFI の口(3)、生成 SQL を PG 55540 で PREPARE 370 / 389・読みの EXECUTE 163 / 165(4 の一部。落ちる 19 は器・列の写像の宣言が無いための名指し)、keyset の cursor の穴に型を付ける生成器の直し、sql.mjs から出した ★ の SQL 30 本の manifest の行と semantic test(裁定 5)、WGm に渡す patch(`docs/reports/yumemi-gen-8-patches/`)
+- 採用の測り:GENERATED を名乗る 59 本を生成物に揃えると、手書きの runtime では 634 pass / 105 fail(打ち切り)。1 と同じ便でないと閉じない
+- 詳細は `docs/reports/yumemi-gen-8.md` の「r2」節
+
+## DDL
+
+無し。
+
+## 検証
+
+- root `gleam build` 0。`cd gen && gleam test` **255 passed**。`gleam format --check src test` root・gen とも 0
+- fixture ×2 で diff 0、tracked 一致。写し ×2 で diff 0、1454 file、診断は r1 と同一
+- 写し(r1 の back 15 本 + connector 9 本 + ★ patch)で api `npm test` **690 / 690**(基点 660 + semantic 30)を 2 回。sha 無し 91、byte 不一致 203、生成器が出さない 19
+- `git diff v0.11.0 -- src/framework`:8 file、+358、削除 0
+- 証拠は `gen/build/wgy/`(`pg-*.txt`、`r2-*.txt`、`sql-adopt-r2.txt`、`nosha-r2.txt`)
+
 # yumemi-gen-8(WGy)真壁 ── back の生成器(2026-09-26)
 
 ## 状態
