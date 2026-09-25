@@ -30,8 +30,9 @@ pub type Front {
     blocks: List(Block),
     components: List(Component),
     style: Style,
-    widget_keys: List(String),
     services: List(String),
+    http_entries: List(HttpEntry),
+    page_service_args: List(PageServiceArgs),
     violations: List(Violation),
     overlay_calls: List(OverlayCall),
   )
@@ -56,7 +57,7 @@ pub type Layout {
     sp: Option(Frame),
     pc: Option(Frame),
     tablet: Option(Frame),
-    reads: List(String),
+    vars: List(Var),
     nested: Bool,
   )
 }
@@ -69,11 +70,24 @@ pub type Page {
     of: Option(String),
     layout: Option(String),
     theme: Option(String),
+    vars: List(Var),
     sp: Option(Frame),
     pc: Option(Frame),
     tablet: Option(Frame),
-    reads: List(String),
   )
+}
+
+pub type Var {
+  Var(name: String, from: From)
+}
+
+pub type From {
+  Path(String)
+  Query(String)
+  Session(String)
+  Origin(String)
+  AuthOrigin
+  InvalidFrom(String)
 }
 
 pub type Frame {
@@ -88,6 +102,7 @@ pub type Frame {
 }
 
 pub type Track {
+  Auto
   Fr(Int)
   Rem(Float)
   Px(Float)
@@ -95,6 +110,7 @@ pub type Track {
 }
 
 pub type TrackSize {
+  AutoSize
   FrSize(Int)
   RemSize(Float)
   PxSize(Float)
@@ -131,7 +147,7 @@ pub type Area {
 
 pub type Placement {
   Fixed(area: String, block: String, cell: Cell)
-  Widget(area: String, name: String, service: String, render: Render)
+  Widget(area: String, service: String, render: Render)
 }
 
 pub type Render {
@@ -148,10 +164,51 @@ pub type Block {
     input_module: Option(String),
     input_definition: Option(glance.CustomType),
     input_imports: List(glance.Definition(glance.Import)),
+    input_kind: BlockInput,
+    args: List(BlockArg),
+    view_arity: Int,
+    view_arg_type: Option(String),
+    arg_type_valid: Bool,
     source: glance.Module,
     has_view: Bool,
     has_sample: Bool,
   )
+}
+
+pub type BlockInput {
+  ServiceOut(String)
+  NilInput
+  OtherInput(String)
+}
+
+pub type BlockArg {
+  BlockArg(name: String, type_: BlockArgType)
+}
+
+pub type BlockArgType {
+  StringArg
+  OptionalStringArg
+  OtherArg(String)
+}
+
+pub type HttpEntry {
+  HttpEntry(name: String, authenticated: Bool)
+}
+
+pub type PageServiceArgs {
+  PageServiceArgs(page: String, services: List(ServiceArgs))
+}
+
+pub type ServiceArgs {
+  ServiceArgs(service: String, args: List(ResolvedArg))
+}
+
+pub type ResolvedArg {
+  ResolvedArg(name: String, source: ResolvedArgSource)
+}
+
+pub type ResolvedArgSource {
+  VariableSource(name: String, from: From)
 }
 
 pub type Component {
@@ -192,7 +249,7 @@ pub fn read(
   units: List(Unit),
   services: List(model.Service),
 ) -> Result(Front, Error) {
-  read_with_package_and_warning(face, face, units, services)
+  read_with_package_and_warning(face, face, units, services, [])
 }
 
 pub fn read_with_package(
@@ -201,14 +258,25 @@ pub fn read_with_package(
   units: List(Unit),
   services: List(model.Service),
 ) -> Result(Front, Error) {
-  read_with_package_and_warning(face, package_name, units, services)
+  read_with_package_and_warning(face, package_name, units, services, [])
+}
+
+pub fn read_with_package_and_entries(
+  face: String,
+  package_name: String,
+  units: List(Unit),
+  services: List(model.Service),
+  entries: List(model.Entry),
+) -> Result(Front, Error) {
+  read_with_package_and_warning(face, package_name, units, services, entries)
 }
 
 fn read_with_package_and_warning(
   face: String,
   package_name: String,
   units: List(Unit),
-  _services: List(model.Service),
+  services: List(model.Service),
+  entries: List(model.Entry),
 ) -> Result(Front, Error) {
   use layout_unit <- result.try(find_unit(units, "layout"))
   use layout <- result.try(parse_layout(face, layout_unit))
@@ -220,7 +288,7 @@ fn read_with_package_and_warning(
   let blocks =
     units
     |> list.filter(fn(unit) { string.starts_with(unit.path, "blocks/") })
-    |> list.filter_map(parse_block)
+    |> list.filter_map(fn(unit) { parse_block(unit, services) })
   let components =
     units
     |> list.filter(fn(unit) { string.starts_with(unit.path, "components/") })
@@ -231,8 +299,14 @@ fn read_with_package_and_warning(
     |> result.map(parse_style)
     |> option_from_result
     |> option.unwrap(Style(tokens: [], media_variants: []))
-  let widget_keys = widget_keys(layout, pages)
-  let services_used = service_references(layout, pages, components)
+  let services_used = service_references(layout, pages, blocks, components)
+  let page_service_args =
+    list.map(pages, fn(page) {
+      PageServiceArgs(
+        page: page.module,
+        services: resolve_page_service_args(layout, page, blocks, services),
+      )
+    })
   let violations =
     list.flatten(
       list.map(units, fn(unit) { unit_violations(unit, components) }),
@@ -247,8 +321,9 @@ fn read_with_package_and_warning(
     blocks: blocks,
     components: components,
     style: style,
-    widget_keys: widget_keys,
     services: services_used,
+    http_entries: http_entries(units, entries),
+    page_service_args: page_service_args,
     violations: violations,
     overlay_calls: overlay_calls,
   ))
@@ -270,15 +345,14 @@ pub fn notes(front: Front, services: List(model.Service)) -> List(stop.Note) {
     ),
     list.flatten(
       list.map(front.pages, fn(page) {
-        list.append(
-          frame_notes(front.face, page.module, page.sp, page.pc, page.tablet),
-          page_arg_notes(front.face, page, services),
-        )
+        frame_notes(front.face, page.module, page.sp, page.pc, page.tablet)
       }),
     ),
-    layout_widget_notes(front.face, front.layout, services),
-    widget_notes(front.face, front.pages, services),
-    reads_type_notes(front, services),
+    variable_notes(front, services),
+    block_input_notes(front, services),
+    block_argument_notes(front, services),
+    service_argument_notes(front, services),
+    of_placement_notes(front, services),
     layout_nested_notes(front.face, front.layout),
     unknown_service_notes(front.face, front.services, services),
   ])
@@ -595,134 +669,6 @@ fn frames(
   )
 }
 
-fn reads_type_notes(
-  front: Front,
-  services: List(model.Service),
-) -> List(stop.Note) {
-  let layout_notes =
-    reads_context_notes(
-      front.face,
-      "layout",
-      front.layout.reads,
-      layout_frames(front.layout),
-      front.blocks,
-      services,
-    )
-  let page_notes =
-    front.pages
-    |> list.flat_map(fn(page) {
-      reads_context_notes(
-        front.face,
-        page.module,
-        page.reads,
-        page_frames(page),
-        front.blocks,
-        services,
-      )
-    })
-  list.append(layout_notes, page_notes)
-}
-
-fn reads_context_notes(
-  face: String,
-  context: String,
-  reads: List(String),
-  frames: List(Frame),
-  blocks: List(Block),
-  services: List(model.Service),
-) -> List(stop.Note) {
-  let placed_blocks =
-    frames
-    |> list.flat_map(fn(frame) {
-      frame.placements
-      |> list.filter_map(fn(placement) {
-        case placement {
-          Fixed(block:, ..) -> Ok(block)
-          Widget(..) -> Error(Nil)
-        }
-      })
-    })
-    |> list.unique
-  reads
-  |> list.flat_map(fn(variant) {
-    case service_by_variant(services, variant) {
-      Some(service) ->
-        placed_blocks
-        |> list.filter_map(fn(name) {
-          case list.find(blocks, fn(block) { block.name == name }) {
-            Ok(block) ->
-              case block_uses_service(block, service) {
-                False -> Error(Nil)
-                True ->
-                  case block_matches_service_out(block, service) {
-                    True -> Error(Nil)
-                    False ->
-                      Ok(stop.Note(
-                        class: stop.Conflict,
-                        text: face
-                          <> "/"
-                          <> context
-                          <> ": reads の "
-                          <> service.module
-                          <> ".Out と Block "
-                          <> block.name
-                          <> " の In が一致しない",
-                      ))
-                  }
-              }
-            Error(_) -> Error(Nil)
-          }
-        })
-      None -> []
-    }
-  })
-}
-
-fn service_by_variant(
-  services: List(model.Service),
-  variant: String,
-) -> Option(model.Service) {
-  services
-  |> list.find(fn(service) {
-    service.module == variant || naming.pascal(service.module) == variant
-  })
-  |> option_from_result
-}
-
-fn block_uses_service(block: Block, service: model.Service) -> Bool {
-  case block.input_module, service.out_type {
-    Some(module), Some(out_type) ->
-      module == "gen/out/" <> service.module
-      || module == service.module
-      || module == "service/" <> service.module
-      || Some(module) == out_type.module
-    Some(module), None ->
-      module == "gen/out/" <> service.module
-      || module == service.module
-      || module == "service/" <> service.module
-    _, _ -> False
-  }
-}
-
-fn block_matches_service_out(block: Block, service: model.Service) -> Bool {
-  case block.input, block.input_module, service.out_type {
-    Some(input), Some(module), Some(out_type) ->
-      case module == "gen/out/" <> service.module {
-        True -> input == "Out" || input == out_type.name
-        False ->
-          case
-            module == service.module || module == "service/" <> service.module
-          {
-            True -> input == "Out" || input == out_type.name
-            False ->
-              module == option.unwrap(out_type.module, "")
-              && input == out_type.name
-          }
-      }
-    _, _, _ -> False
-  }
-}
-
 fn shell_from_units(units: List(Unit), package_name: String) -> Shell {
   case list.find(units, fn(unit) { unit.path == "shell" }) {
     Error(_) ->
@@ -826,7 +772,7 @@ fn parse_layout(face: String, unit: Unit) -> Result(Layout, Error) {
     sp: frame_field(value, "sp", "sp", unit.path),
     pc: frame_field(value, "pc", "pc", unit.path),
     tablet: frame_field(value, "tablet", "tablet", unit.path),
-    reads: service_list_field(value, "reads"),
+    vars: vars_field(value),
     nested: has_nested_constructor(value, "Layout"),
   ))
 }
@@ -844,10 +790,10 @@ fn parse_page(unit: Unit) -> Result(Page, Nil) {
             of: option_service(g.labelled(constant.value, "of")),
             layout: option_name(g.labelled(constant.value, "layout")),
             theme: option_string_name(g.labelled(constant.value, "theme")),
+            vars: vars_field(constant.value),
             sp: frame_field(constant.value, "sp", "sp", unit.path),
             pc: frame_field(constant.value, "pc", "pc", unit.path),
             tablet: frame_field(constant.value, "tablet", "tablet", unit.path),
-            reads: service_list_field(constant.value, "reads"),
           ))
         _, _ -> Error(Nil)
       }
@@ -855,15 +801,276 @@ fn parse_page(unit: Unit) -> Result(Page, Nil) {
   }
 }
 
-fn parse_block(unit: Unit) -> Result(Block, Nil) {
+fn vars_field(expression: glance.Expression) -> List(Var) {
+  case g.labelled(expression, "vars") {
+    None -> []
+    Some(glance.List(elements: elements, ..)) ->
+      elements
+      |> list.index_map(parse_var)
+    Some(_) -> [Var(name: "vars", from: InvalidFrom("vars はリテラルの列ではない"))]
+  }
+}
+
+fn parse_var(expression: glance.Expression, index: Int) -> Var {
+  let fallback = "invalid_var_" <> int.to_string(index)
+  case g.ctor_name(expression) {
+    Some("Var") -> {
+      let name =
+        constructor_field(expression, "name", ["name", "from"])
+        |> option.then(g.string_value)
+      let from = constructor_field(expression, "from", ["name", "from"])
+      Var(name: option.unwrap(name, fallback), from: case name, from {
+        Some(_), Some(value) -> parse_from(value)
+        None, _ -> InvalidFrom("Var の name は文字列リテラルではない")
+        _, None -> InvalidFrom("Var の from が無い")
+      })
+    }
+    _ -> Var(name: fallback, from: InvalidFrom("Var の構成子がリテラルではない"))
+  }
+}
+
+fn parse_from(expression: glance.Expression) -> From {
+  case g.ctor_name(expression) {
+    Some("Path") -> from_result(string_argument(expression), "Path")
+    Some("Query") -> from_result(string_argument(expression), "Query")
+    Some("Session") ->
+      case g.args(expression) {
+        [key] ->
+          case g.ctor_name(key) {
+            Some("SubjectHandle") -> Session("SubjectHandle")
+            Some("SubjectId") -> Session("SubjectId")
+            _ -> InvalidFrom("Session のキーが SubjectHandle / SubjectId のリテラルでない")
+          }
+        _ -> InvalidFrom("Session のキーが無い")
+      }
+    Some("Origin") ->
+      case
+        constructor_field(expression, "face", ["face"])
+        |> option.then(g.string_value)
+      {
+        Some(face) -> Origin(face)
+        None -> InvalidFrom("Origin の face は文字列リテラルではない")
+      }
+    Some("AuthOrigin") ->
+      case expression {
+        glance.Call(..) -> InvalidFrom("AuthOrigin は値を持たない構成子リテラルでなければならない")
+        _ -> AuthOrigin
+      }
+    _ ->
+      InvalidFrom(
+        "from は Path / Query / Session / Origin / AuthOrigin のリテラルではない",
+      )
+  }
+}
+
+/// 構成子の named field は名前で読み、positional field は未指定の field
+/// の宣言順へ割り当てる。混在した呼び出しでも named field は位置を消費しない。
+fn constructor_field(
+  expression: glance.Expression,
+  name: String,
+  fields: List(String),
+) -> Option(glance.Expression) {
+  case expression {
+    glance.Call(arguments: arguments, ..) -> {
+      let named =
+        arguments
+        |> list.find_map(fn(argument) {
+          case argument {
+            glance.LabelledField(label, _, value) if label == name -> Ok(value)
+            _ -> Error(Nil)
+          }
+        })
+      case named {
+        Ok(value) -> Some(value)
+        Error(_) -> {
+          let supplied =
+            arguments
+            |> list.filter_map(fn(argument) {
+              case argument {
+                glance.LabelledField(label, _, _) -> Ok(label)
+                glance.ShorthandField(label, _) -> Ok(label)
+                _ -> Error(Nil)
+              }
+            })
+          let positional_names =
+            fields
+            |> list.filter(fn(field) { !list.contains(supplied, field) })
+          let position = field_position(positional_names, name)
+          let positional_values =
+            arguments
+            |> list.filter_map(fn(argument) {
+              case argument {
+                glance.UnlabelledField(value) -> Ok(value)
+                _ -> Error(Nil)
+              }
+            })
+          case position {
+            Some(index) -> list_at(positional_values, index)
+            None -> None
+          }
+        }
+      }
+    }
+    _ -> None
+  }
+}
+
+fn field_position(fields: List(String), wanted: String) -> Option(Int) {
+  case fields {
+    [field, ..] if field == wanted -> Some(0)
+    [_, ..rest] ->
+      option.map(field_position(rest, wanted), fn(index) { index + 1 })
+    [] -> None
+  }
+}
+
+fn list_at(values: List(a), index: Int) -> Option(a) {
+  case values {
+    [value, ..] if index == 0 -> Some(value)
+    [_, ..rest] if index > 0 -> list_at(rest, index - 1)
+    _ -> None
+  }
+}
+
+fn string_argument(expression: glance.Expression) -> Option(String) {
+  case g.args(expression) {
+    [value] -> g.string_value(value)
+    _ -> None
+  }
+}
+
+fn from_result(value: Option(String), tag: String) -> From {
+  case value {
+    Some(text) ->
+      case tag {
+        "Path" -> Path(text)
+        _ -> Query(text)
+      }
+    None -> InvalidFrom(tag <> " の値は文字列リテラルではない")
+  }
+}
+
+fn block_args(module: glance.Module) -> List(BlockArg) {
+  case g.find_custom_type(module, "Arg") {
+    Some(definition) ->
+      case definition.variants {
+        [variant] if variant.name == "Arg" ->
+          variant.fields
+          |> list.index_map(fn(field, index) {
+            let name =
+              g.variant_field_label(field)
+              |> option.unwrap("arg[" <> int.to_string(index) <> "]")
+            BlockArg(
+              name: name,
+              type_: block_arg_type(g.variant_field_type(field)),
+            )
+          })
+        _ -> []
+      }
+    None -> []
+  }
+}
+
+fn block_arg_type(type_: glance.Type) -> BlockArgType {
+  case type_ {
+    glance.NamedType(name: "String", parameters: [], ..) -> StringArg
+    glance.NamedType(name: "Option", parameters: [inner], ..) ->
+      case inner {
+        glance.NamedType(name: "String", parameters: [], ..) ->
+          OptionalStringArg
+        _ -> OtherArg(type_text(type_))
+      }
+    _ -> OtherArg(type_text(type_))
+  }
+}
+
+fn type_text(type_: glance.Type) -> String {
+  case type_ {
+    glance.NamedType(name: name, parameters: [], ..) -> name
+    glance.NamedType(name: name, parameters: parameters, ..) ->
+      name <> "(" <> string.join(list.map(parameters, type_text), ", ") <> ")"
+    _ -> "型"
+  }
+}
+
+fn block_input_kind(
+  input: Option(String),
+  input_module: Option(String),
+  services: List(model.Service),
+) -> BlockInput {
+  case input, input_module {
+    Some("Nil"), _ -> NilInput
+    Some(name), Some(module) ->
+      case
+        list.find(services, fn(service) {
+          let module_matches =
+            module == "gen/out/" <> service.module
+            || module == service.module
+            || module == "service/" <> service.module
+            || Some(module)
+            == option.map(service.out_type, fn(out) {
+              option.unwrap(out.module, "")
+            })
+          let type_matches =
+            name == "Out"
+            || case service.out_type {
+              Some(out) -> name == out.name
+              None -> False
+            }
+          module_matches && type_matches
+        })
+      {
+        Ok(service) -> ServiceOut(service.module)
+        Error(_) -> OtherInput(name)
+      }
+    Some(name), None -> OtherInput(name)
+    None, _ -> OtherInput("view input")
+  }
+}
+
+fn parse_block(
+  unit: Unit,
+  services: List(model.Service),
+) -> Result(Block, Nil) {
   let module = g.in_order(unit.module)
   let name = last_segment(unit.path) |> naming.pascal
   let view = public_function(module, "view")
+  let parameters = case view {
+    Some(function) -> function.parameters
+    None -> []
+  }
   let #(input, input_module) =
     view
     |> option.then(fn(function) { first_parameter_input(module, function) })
     |> option.unwrap(#(None, None))
   let input_definition = input |> option.then(g.find_custom_type(module, _))
+  let view_arity = list.length(parameters)
+  let view_arg_type = case parameters {
+    [_, parameter, ..] -> parameter.type_ |> option.then(g.type_name)
+    _ -> None
+  }
+  let local_arg_parameter = case parameters {
+    [_, parameter, ..] ->
+      case parameter.type_ {
+        Some(glance.NamedType(name: "Arg", module: None, parameters: [], ..)) ->
+          True
+        _ -> False
+      }
+    _ -> False
+  }
+  let public_arg_type = case g.find_custom_type(module, "Arg") {
+    Some(definition) if definition.publicity == glance.Public ->
+      case definition.variants {
+        [variant] ->
+          variant.name == "Arg"
+          && list.all(variant.fields, fn(field) {
+            g.variant_field_label(field) != None
+          })
+        _ -> False
+      }
+    _ -> False
+  }
+  let arg_type_valid = local_arg_parameter && public_arg_type
   Ok(Block(
     name: name,
     module: unit.path,
@@ -871,6 +1078,14 @@ fn parse_block(unit: Unit) -> Result(Block, Nil) {
     input_module: input_module,
     input_definition: input_definition,
     input_imports: module.imports,
+    input_kind: block_input_kind(input, input_module, services),
+    args: case arg_type_valid {
+      True -> block_args(module)
+      False -> []
+    },
+    view_arity: view_arity,
+    view_arg_type: view_arg_type,
+    arg_type_valid: arg_type_valid,
     source: module,
     has_view: view != None,
     has_sample: has_public_constant(module, "sample"),
@@ -1038,7 +1253,6 @@ fn parse_placement(expression: glance.Expression) -> Option(Placement) {
     Some("Widget") ->
       Some(Widget(
         area: string_label(expression, "area") |> option.unwrap(""),
-        name: string_label(expression, "name") |> option.unwrap(""),
         service: labelled_constructor(expression, "of") |> option.unwrap(""),
         render: render_of(expression),
       ))
@@ -1065,6 +1279,7 @@ fn parse_tracks(expression: glance.Expression) -> Option(List(Track)) {
 
 fn parse_track(expression: glance.Expression) -> Result(Track, Nil) {
   case g.ctor_name(expression) {
+    Some("Auto") -> Ok(Auto)
     Some("Fr") ->
       case g.args(expression) {
         [value] -> parse_int(value) |> option.map(Fr) |> option.to_result(Nil)
@@ -1087,6 +1302,7 @@ fn parse_track(expression: glance.Expression) -> Result(Track, Nil) {
 
 fn parse_track_size(expression: glance.Expression) -> Result(TrackSize, Nil) {
   case g.ctor_name(expression) {
+    Some("AutoSize") -> Ok(AutoSize)
     Some("FrSize") ->
       case g.args(expression) {
         [value] ->
@@ -1244,45 +1460,17 @@ fn tuple_table(
   }
 }
 
-fn widget_keys(layout: Layout, pages: List(Page)) -> List(String) {
-  let layout_keys = placement_widget_names(layout_frames(layout))
-  let page_keys =
-    pages
-    |> list.flat_map(fn(page) { placement_widget_names(page_frames(page)) })
-  layout_keys
-  |> list.append(page_keys)
-  |> list.unique
-  |> list.map(naming.pascal)
-}
-
-fn placement_widget_names(frames: List(Frame)) -> List(String) {
-  frames
-  |> list.flat_map(fn(frame) {
-    frame.placements
-    |> list.filter_map(fn(placement) {
-      case placement {
-        Widget(name: name, ..) -> Ok(name)
-        Fixed(..) -> Error(Nil)
-      }
-    })
-  })
-}
-
 fn service_references(
   layout: Layout,
   pages: List(Page),
+  blocks: List(Block),
   components: List(Component),
 ) -> List(String) {
-  let from_layout =
-    list.append(layout.reads, placement_services(layout_frames(layout)))
+  let from_layout = placement_service_references(layout_frames(layout), blocks)
   let from_pages =
     pages
     |> list.flat_map(fn(page) {
-      list.flatten([
-        option_to_list(page.of),
-        page.reads,
-        placement_services(page_frames(page)),
-      ])
+      placement_service_references(page_frames(page), blocks)
     })
   let from_components =
     list.flat_map(components, fn(component) {
@@ -1296,17 +1484,137 @@ fn service_references(
   list.unique(list.flatten([from_layout, from_pages, from_components]))
 }
 
-fn placement_services(frames: List(Frame)) -> List(String) {
+fn placement_service_references(
+  frames: List(Frame),
+  blocks: List(Block),
+) -> List(String) {
   frames
   |> list.flat_map(fn(frame) {
     frame.placements
-    |> list.filter_map(fn(placement) {
+    |> list.flat_map(fn(placement) {
       case placement {
-        Widget(service: service, ..) -> Ok(service)
-        Fixed(..) -> Error(Nil)
+        Widget(service: service, ..) -> [service]
+        Fixed(block: name, ..) ->
+          case list.find(blocks, fn(block) { block.name == name }) {
+            Ok(Block(input_kind: ServiceOut(service), ..)) -> [
+              naming.pascal(service),
+            ]
+            _ -> []
+          }
       }
     })
   })
+}
+
+fn resolve_page_service_args(
+  layout: Layout,
+  page: Page,
+  blocks: List(Block),
+  services: List(model.Service),
+) -> List(ServiceArgs) {
+  let layout_args =
+    list.flat_map(layout_frames(layout), fn(frame) {
+      list.flat_map(frame.placements, fn(placement) {
+        placement_service_args(placement, blocks, services, layout.vars)
+      })
+    })
+  let page_scope = list.append(page.vars, layout.vars)
+  let page_args =
+    list.flat_map(page_frames(page), fn(frame) {
+      list.flat_map(frame.placements, fn(placement) {
+        placement_service_args(placement, blocks, services, page_scope)
+      })
+    })
+  list.fold(page_args, layout_args, merge_service_args)
+}
+
+fn placement_service_args(
+  placement: Placement,
+  blocks: List(Block),
+  services: List(model.Service),
+  vars: List(Var),
+) -> List(ServiceArgs) {
+  case placement {
+    Fixed(block: block_name, ..) ->
+      case list.find(blocks, fn(block) { block.name == block_name }) {
+        Ok(Block(input_kind: ServiceOut(service_name), args: block_args, ..)) ->
+          case
+            list.find(services, fn(service) { service.module == service_name })
+          {
+            Ok(service) -> [
+              ServiceArgs(
+                service: service.module,
+                args: service.args
+                  |> list.filter_map(fn(arg) {
+                    case
+                      list.find(block_args, fn(field) { field.name == arg.name })
+                    {
+                      Ok(_) ->
+                        case list.find(vars, fn(var) { var.name == arg.name }) {
+                          Ok(var) ->
+                            Ok(ResolvedArg(
+                              name: arg.name,
+                              source: VariableSource(
+                                name: var.name,
+                                from: var.from,
+                              ),
+                            ))
+                          Error(_) -> Error(Nil)
+                        }
+                      Error(_) -> Error(Nil)
+                    }
+                  }),
+              ),
+            ]
+            Error(_) -> []
+          }
+        _ -> []
+      }
+    Widget(service: service_name, ..) ->
+      case find_service(services, Some(service_name)) {
+        Some(service) -> [
+          ServiceArgs(
+            service: service.module,
+            args: service.args
+              |> list.filter_map(fn(arg) {
+                case list.find(vars, fn(var) { var.name == arg.name }) {
+                  Ok(var) ->
+                    Ok(ResolvedArg(
+                      name: arg.name,
+                      source: VariableSource(name: var.name, from: var.from),
+                    ))
+                  Error(_) -> Error(Nil)
+                }
+              }),
+          ),
+        ]
+        None -> []
+      }
+  }
+}
+
+fn merge_service_args(
+  existing: List(ServiceArgs),
+  addition: ServiceArgs,
+) -> List(ServiceArgs) {
+  case list.find(existing, fn(item) { item.service == addition.service }) {
+    Error(_) -> list.append(existing, [addition])
+    Ok(found) -> {
+      let merged =
+        list.fold(addition.args, found.args, fn(args, arg) {
+          case list.any(args, fn(item) { item.name == arg.name }) {
+            True -> args
+            False -> list.append(args, [arg])
+          }
+        })
+      list.map(existing, fn(item) {
+        case item.service == addition.service {
+          True -> ServiceArgs(..item, args: merged)
+          False -> item
+        }
+      })
+    }
+  }
 }
 
 fn layout_frames(layout: Layout) -> List(Frame) {
@@ -1321,116 +1629,901 @@ fn page_frames(page: Page) -> List(Frame) {
   |> list.append(option_to_list(page.tablet))
 }
 
-fn page_arg_notes(
-  face: String,
-  page: Page,
+fn variable_notes(
+  front: Front,
   services: List(model.Service),
 ) -> List(stop.Note) {
-  case page.of, find_service(services, page.of) {
-    Some(service_name), Some(service) ->
-      page.path
-      |> list.filter_map(fn(segment) {
-        case string.starts_with(segment, "arg_") {
-          True -> {
-            let name = argument_name(segment)
-            case list.any(service.args, fn(arg) { arg.name == name }) {
-              True -> Error(Nil)
-              False ->
-                Ok(stop.Note(
-                  class: stop.Conflict,
-                  text: face
-                    <> "/"
-                    <> page.module
-                    <> ": Page のパス変数 "
-                    <> name
-                    <> " が Service."
-                    <> service_name
-                    <> " の Args に無い",
-                ))
-            }
-          }
-          False -> Error(Nil)
-        }
-      })
-    _, _ -> []
+  let layout_scope = front.layout.vars
+  let layout_shape_notes =
+    list.append(
+      invalid_var_notes(front.face, "layout", layout_scope),
+      placement_var_location_notes(front.face, "layout", layout_scope, True),
+    )
+  let layout_duplicate_notes =
+    duplicate_var_notes(front.face, "layout", layout_scope, [])
+  let layout_origin_notes = origin_notes(front, "layout", layout_scope)
+  let page_notes =
+    front.pages
+    |> list.flat_map(fn(page) {
+      let scope = list.append(page.vars, layout_scope)
+      list.flatten([
+        invalid_var_notes(front.face, page.module, page.vars),
+        placement_var_location_notes(front.face, page.module, page.vars, False),
+        duplicate_var_notes(front.face, page.module, page.vars, layout_scope),
+        path_notes(front.face, page),
+        origin_notes(front, page.module, page.vars),
+        unused_var_notes(
+          front,
+          page.module,
+          page.vars,
+          page_frames(page),
+          front.blocks,
+          services,
+          scope,
+        ),
+      ])
+    })
+  let layout_unused = unused_layout_var_notes(front, layout_scope, services)
+  list.flatten([
+    layout_shape_notes,
+    layout_duplicate_notes,
+    layout_origin_notes,
+    layout_unused,
+    page_notes,
+  ])
+}
+
+fn invalid_var_notes(
+  face: String,
+  context: String,
+  vars: List(Var),
+) -> List(stop.Note) {
+  vars
+  |> list.filter_map(fn(var) {
+    case var.from {
+      InvalidFrom(reason) ->
+        Ok(variable_note(
+          face,
+          context,
+          2,
+          reason <> " (" <> var.name <> ")",
+          stop.Conflict,
+        ))
+      _ -> Error(Nil)
+    }
+  })
+}
+
+fn placement_var_location_notes(
+  face: String,
+  context: String,
+  vars: List(Var),
+  layout: Bool,
+) -> List(stop.Note) {
+  vars
+  |> list.filter_map(fn(var) {
+    let invalid = case layout, var.from {
+      True, Path(_) -> Some("Layout に Path を置けない")
+      True, Query(_) -> Some("Layout に Query を置けない")
+      True, Session(_) -> Some("Layout に Session を置けない")
+      False, Origin(_) -> Some("Page に Origin を置けない")
+      False, AuthOrigin -> Some("Page に AuthOrigin を置けない")
+      _, _ -> None
+    }
+    case invalid {
+      Some(reason) ->
+        Ok(variable_note(
+          face,
+          context,
+          5,
+          var.name <> ": " <> reason,
+          stop.Conflict,
+        ))
+      None -> Error(Nil)
+    }
+  })
+}
+
+fn duplicate_var_notes(
+  face: String,
+  context: String,
+  vars: List(Var),
+  inherited: List(Var),
+) -> List(stop.Note) {
+  let repeated = duplicate_names(list.map(vars, fn(var) { var.name }))
+  let local_notes =
+    repeated
+    |> list.map(fn(name) {
+      variable_note(
+        face,
+        context,
+        5,
+        "Var." <> name <> " が重複している",
+        stop.Conflict,
+      )
+    })
+  let shadowed =
+    vars
+    |> list.filter_map(fn(var) {
+      case list.any(inherited, fn(parent) { parent.name == var.name }) {
+        True ->
+          Ok(variable_note(
+            face,
+            context,
+            5,
+            "Var." <> var.name <> " が Layout の同名 Var を覆っている",
+            stop.Conflict,
+          ))
+        False -> Error(Nil)
+      }
+    })
+  list.append(local_notes, shadowed)
+}
+
+fn duplicate_names(names: List(String)) -> List(String) {
+  case names {
+    [] -> []
+    [name, ..rest] -> {
+      let duplicates = case list.contains(rest, name) {
+        True -> [name]
+        False -> []
+      }
+      list.append(
+        duplicates,
+        duplicate_names(list.filter(rest, fn(item) { item != name })),
+      )
+    }
   }
 }
 
-fn layout_widget_notes(
-  face: String,
-  layout: Layout,
-  services: List(model.Service),
-) -> List(stop.Note) {
-  widget_placements(layout_frames(layout))
-  |> list.filter_map(fn(placement) {
-    note_result(widget_note(face <> "/layout", placement, services))
-  })
-}
-
-fn widget_notes(
-  face: String,
-  pages: List(Page),
-  services: List(model.Service),
-) -> List(stop.Note) {
-  pages
-  |> list.flat_map(fn(page) {
-    widget_placements(page_frames(page))
-    |> list.filter_map(fn(placement) {
-      note_result(widget_note(face <> "/" <> page.module, placement, services))
+fn path_notes(face: String, page: Page) -> List(stop.Note) {
+  let path_vars =
+    page.vars
+    |> list.filter_map(fn(var) {
+      case var.from {
+        Path(name) -> Ok(#(var, name))
+        _ -> Error(Nil)
+      }
     })
-  })
-}
-
-fn widget_note(
-  where: String,
-  placement: Placement,
-  services: List(model.Service),
-) -> Option(stop.Note) {
-  case placement {
-    Fixed(..) -> None
-    Widget(area: area, name: name, service: service_name, ..) ->
-      case find_service(services, Some(service_name)) {
-        Some(service) ->
-          case
-            list.any(service.args, fn(arg) {
-              arg.name == "widget" || arg.name == name || arg.name == area
-            })
-          {
-            True -> None
+  let bad_sources =
+    path_vars
+    |> list.filter_map(fn(item) {
+      let #(var, name) = item
+      case
+        list.any(page.path, fn(segment) {
+          string.starts_with(segment, "arg_") && argument_name(segment) == name
+        })
+      {
+        True -> Error(Nil)
+        False ->
+          Ok(variable_note(
+            face,
+            page.module,
+            2,
+            "Var." <> var.name <> " の Path(\"" <> name <> "\") に対応する arg_ 段が無い",
+            stop.Conflict,
+          ))
+      }
+    })
+  let missing_vars =
+    page.path
+    |> list.filter_map(fn(segment) {
+      case string.starts_with(segment, "arg_") {
+        True -> {
+          let name = argument_name(segment)
+          case list.any(path_vars, fn(item) { item.1 == name }) {
+            True -> Error(Nil)
             False ->
-              Some(stop.Note(
-                class: stop.Conflict,
-                text: where
-                  <> ": Widget."
-                  <> name
-                  <> " の Service."
-                  <> service_name
-                  <> " が枠の名前を Args に持たない",
+              Ok(variable_note(
+                face,
+                page.module,
+                2,
+                "arg_" <> name <> " 段を指す Path Var が無い",
+                stop.Conflict,
               ))
           }
-        None -> None
+        }
+        False -> Error(Nil)
       }
-  }
+    })
+  list.append(bad_sources, missing_vars)
 }
 
-fn note_result(note: Option(stop.Note)) -> Result(stop.Note, Nil) {
-  case note {
-    Some(note) -> Ok(note)
-    None -> Error(Nil)
-  }
+fn origin_notes(
+  front: Front,
+  context: String,
+  vars: List(Var),
+) -> List(stop.Note) {
+  vars
+  |> list.filter_map(fn(var) {
+    let face = case var.from {
+      Origin(name) -> Some(name)
+      _ -> None
+    }
+    case face {
+      Some(name) ->
+        case list.any(front.http_entries, fn(entry) { entry.name == name }) {
+          True -> Error(Nil)
+          False ->
+            Ok(variable_note(
+              front.face,
+              context,
+              2,
+              "Var."
+                <> var.name
+                <> " の Origin(\""
+                <> name
+                <> "\") が entry.gleam の Http(name:) に無い",
+              stop.Conflict,
+            ))
+        }
+      None -> Error(Nil)
+    }
+  })
 }
 
-fn widget_placements(frames: List(Frame)) -> List(Placement) {
+fn block_input_notes(
+  front: Front,
+  _services: List(model.Service),
+) -> List(stop.Note) {
+  let layout =
+    fixed_input_notes(
+      front.face,
+      "layout",
+      layout_frames(front.layout),
+      front.blocks,
+    )
+  let pages =
+    front.pages
+    |> list.flat_map(fn(page) {
+      fixed_input_notes(
+        front.face,
+        page.module,
+        page_frames(page),
+        front.blocks,
+      )
+    })
+  list.append(layout, pages)
+}
+
+fn fixed_input_notes(
+  face: String,
+  context: String,
+  frames: List(Frame),
+  blocks: List(Block),
+) -> List(stop.Note) {
   frames
   |> list.flat_map(fn(frame) {
     frame.placements
-    |> list.filter(fn(placement) {
+    |> list.filter_map(fn(placement) {
       case placement {
-        Widget(..) -> True
-        Fixed(..) -> False
+        Fixed(block: name, ..) ->
+          case list.find(blocks, fn(block) { block.name == name }) {
+            Ok(Block(input_kind: OtherInput(type_name), ..)) ->
+              Ok(variable_note(
+                face,
+                context,
+                6,
+                "Block "
+                  <> name
+                  <> " In "
+                  <> type_name
+                  <> " は Service.Out / Nil ではない",
+                stop.Conflict,
+              ))
+            _ -> Error(Nil)
+          }
+        Widget(..) -> Error(Nil)
       }
     })
   })
+}
+
+fn block_argument_notes(
+  front: Front,
+  services: List(model.Service),
+) -> List(stop.Note) {
+  let layout =
+    context_block_notes(
+      front,
+      "layout",
+      layout_frames(front.layout),
+      front.layout.vars,
+      services,
+    )
+  let pages =
+    front.pages
+    |> list.flat_map(fn(page) {
+      context_block_notes(
+        front,
+        page.module,
+        page_frames(page),
+        list.append(page.vars, front.layout.vars),
+        services,
+      )
+    })
+  list.append(layout, pages)
+}
+
+fn context_block_notes(
+  front: Front,
+  context: String,
+  frames: List(Frame),
+  vars: List(Var),
+  _services: List(model.Service),
+) -> List(stop.Note) {
+  frames
+  |> list.flat_map(fn(frame) {
+    frame.placements
+    |> list.flat_map(fn(placement) {
+      placement_block_names(placement)
+      |> list.flat_map(fn(name) {
+        case list.find(front.blocks, fn(block) { block.name == name }) {
+          Ok(block) -> {
+            let missing =
+              block.args
+              |> list.filter_map(fn(arg) {
+                case var_by_name(vars, arg.name) {
+                  Some(_) -> Error(Nil)
+                  None ->
+                    Ok(variable_note(
+                      front.face,
+                      context,
+                      1,
+                      "Block " <> name <> " Arg." <> arg.name <> " に同名 Var が無い",
+                      stop.Conflict,
+                    ))
+                }
+              })
+            let invalid_shape = case block.view_arity {
+              2 if !block.arg_type_valid -> [
+                variable_note(
+                  front.face,
+                  context,
+                  3,
+                  "Block "
+                    <> name
+                    <> " の2引数 view に pub type Arg { Arg(...) } が無い",
+                  stop.Conflict,
+                ),
+              ]
+              arity if arity > 2 -> [
+                variable_note(
+                  front.face,
+                  context,
+                  3,
+                  "Block " <> name <> " の view は1引数か2引数でなければならない",
+                  stop.Conflict,
+                ),
+              ]
+              _ -> []
+            }
+            let types =
+              block.args
+              |> list.flat_map(fn(arg) {
+                let field_notes = case arg.type_ {
+                  OtherArg(type_name) -> [
+                    variable_note(
+                      front.face,
+                      context,
+                      3,
+                      "Block "
+                        <> name
+                        <> " Arg."
+                        <> arg.name
+                        <> " の型 "
+                        <> type_name
+                        <> " は String / Option(String) ではない",
+                      stop.Conflict,
+                    ),
+                  ]
+                  _ -> []
+                }
+                let source_notes = case var_by_name(vars, arg.name) {
+                  Some(var) ->
+                    block_var_type_notes(front, context, name, arg, var)
+                  None -> []
+                }
+                list.append(field_notes, source_notes)
+              })
+            list.flatten([missing, invalid_shape, types])
+          }
+          Error(_) -> []
+        }
+      })
+    })
+  })
+}
+
+fn block_var_type_notes(
+  front: Front,
+  context: String,
+  block: String,
+  arg: BlockArg,
+  var: Var,
+) -> List(stop.Note) {
+  let query_string = case var.from, arg.type_ {
+    Query(_), StringArg -> True
+    _, _ -> False
+  }
+  let anonymous_session_string = case
+    var.from,
+    arg.type_,
+    face_authenticated(front)
+  {
+    Session(_), StringArg, False -> True
+    _, _, _ -> False
+  }
+  let query_notes = case query_string {
+    True -> [
+      variable_note(
+        front.face,
+        context,
+        3,
+        "Block "
+          <> block
+          <> " Arg."
+          <> arg.name
+          <> " は Query の Option(String) を String で受ける",
+        stop.Conflict,
+      ),
+    ]
+    False -> []
+  }
+  let session_notes = case anonymous_session_string {
+    True -> [
+      variable_note(
+        front.face,
+        context,
+        3,
+        "Block "
+          <> block
+          <> " Arg."
+          <> arg.name
+          <> " は Anonymous 面の Session(Option(String)) を String で受ける",
+        stop.Conflict,
+      ),
+    ]
+    False -> []
+  }
+  list.append(query_notes, session_notes)
+}
+
+fn service_argument_notes(
+  front: Front,
+  services: List(model.Service),
+) -> List(stop.Note) {
+  let layout =
+    context_service_notes(
+      front,
+      "layout",
+      layout_frames(front.layout),
+      front.layout.vars,
+      services,
+    )
+  let pages =
+    front.pages
+    |> list.flat_map(fn(page) {
+      context_service_notes(
+        front,
+        page.module,
+        page_frames(page),
+        list.append(page.vars, front.layout.vars),
+        services,
+      )
+    })
+  list.append(layout, pages)
+}
+
+fn context_service_notes(
+  front: Front,
+  context: String,
+  frames: List(Frame),
+  vars: List(Var),
+  services: List(model.Service),
+) -> List(stop.Note) {
+  frames
+  |> list.flat_map(fn(frame) {
+    frame.placements
+    |> list.flat_map(fn(placement) {
+      let #(service, block_args) = case placement {
+        Fixed(block: name, ..) ->
+          case list.find(front.blocks, fn(block) { block.name == name }) {
+            Ok(Block(input_kind: ServiceOut(module), args: args, ..)) -> #(
+              service_by_module(services, module),
+              args,
+            )
+            _ -> #(None, [])
+          }
+        Widget(service: service_name, ..) -> #(
+          find_service(services, Some(service_name)),
+          [],
+        )
+      }
+      case service {
+        Some(service) ->
+          service.args
+          |> list.flat_map(fn(service_arg) {
+            let block_arg =
+              list.find(block_args, fn(arg) { arg.name == service_arg.name })
+            let var = var_by_name(vars, service_arg.name)
+            let has_binding = case placement {
+              Fixed(..) ->
+                case block_arg {
+                  Ok(_) -> True
+                  Error(_) -> False
+                }
+              Widget(..) ->
+                case var {
+                  Some(_) -> True
+                  None -> False
+                }
+            }
+            let missing = !has_binding
+            let required = !service_arg_optional(service_arg)
+            let missing_note = case missing && required {
+              True -> [
+                variable_note(
+                  front.face,
+                  context,
+                  4,
+                  "Block/Widget "
+                    <> placement_name(placement)
+                    <> " の Service."
+                    <> service.module
+                    <> " Args."
+                    <> service_arg.name
+                    <> " が Block Arg / Var に無い",
+                  stop.Conflict,
+                ),
+              ]
+              False -> []
+            }
+            let option_from_block = case block_arg {
+              Ok(BlockArg(type_: OptionalStringArg, ..)) -> required
+              _ -> False
+            }
+            let option_from_var = case placement, var {
+              Widget(..), Some(value) ->
+                var_is_optional(value, face_authenticated(front)) && required
+              _, _ -> False
+            }
+            let option_notes = case option_from_block || option_from_var {
+              True -> [
+                variable_note(
+                  front.face,
+                  context,
+                  3,
+                  "Block/Widget "
+                    <> placement_name(placement)
+                    <> " の Args."
+                    <> service_arg.name
+                    <> " は Option(String) を必須 Service Args に流す",
+                  stop.Conflict,
+                ),
+              ]
+              False -> []
+            }
+            list.append(missing_note, option_notes)
+          })
+        None -> []
+      }
+    })
+  })
+}
+
+fn of_placement_notes(
+  front: Front,
+  services: List(model.Service),
+) -> List(stop.Note) {
+  front.pages
+  |> list.filter_map(fn(page) {
+    case page.of {
+      None -> Error(Nil)
+      Some(name) ->
+        case find_service(services, Some(name)) {
+          Some(service) -> {
+            let found =
+              page_frames(page)
+              |> list.any(fn(frame) {
+                list.any(frame.placements, fn(placement) {
+                  placement_uses_service(
+                    placement,
+                    service.module,
+                    front.blocks,
+                    services,
+                  )
+                })
+              })
+            case found {
+              True -> Error(Nil)
+              False ->
+                Ok(variable_note(
+                  front.face,
+                  page.module,
+                  7,
+                  "Page.of Service." <> name <> " を描く Block が placements に無い",
+                  stop.Conflict,
+                ))
+            }
+          }
+          None ->
+            Ok(variable_note(
+              front.face,
+              page.module,
+              7,
+              "Page.of Service." <> name <> " を描く Block が placements に無い",
+              stop.Conflict,
+            ))
+        }
+    }
+  })
+}
+
+fn placement_uses_service(
+  placement: Placement,
+  service: String,
+  blocks: List(Block),
+  services: List(model.Service),
+) -> Bool {
+  case placement {
+    Fixed(block: name, ..) ->
+      case list.find(blocks, fn(block) { block.name == name }) {
+        Ok(Block(input_kind: ServiceOut(module), ..)) -> module == service
+        _ -> False
+      }
+    Widget(service: service_name, ..) ->
+      case find_service(services, Some(service_name)) {
+        Some(found) -> found.module == service
+        None -> False
+      }
+  }
+}
+
+fn service_by_module(
+  services: List(model.Service),
+  module: String,
+) -> Option(model.Service) {
+  services
+  |> list.find(fn(service) { service.module == module })
+  |> option_from_result
+}
+
+fn service_arg_optional(arg: model.Arg) -> Bool {
+  case arg.type_ {
+    model.NamedShape(name: "Option", ..) -> True
+    _ -> False
+  }
+}
+
+fn var_by_name(vars: List(Var), name: String) -> Option(Var) {
+  vars |> list.find(fn(var) { var.name == name }) |> option_from_result
+}
+
+fn var_is_optional(var: Var, authenticated: Bool) -> Bool {
+  case var.from {
+    Query(_) -> True
+    Session(_) if !authenticated -> True
+    _ -> False
+  }
+}
+
+fn face_authenticated(front: Front) -> Bool {
+  list.any(front.http_entries, fn(entry) {
+    entry.name == front.face && entry.authenticated
+  })
+}
+
+fn variable_note(
+  face: String,
+  context: String,
+  number: Int,
+  detail: String,
+  class: stop.Class,
+) -> stop.Note {
+  stop.Note(
+    class: class,
+    text: face
+      <> "/"
+      <> context
+      <> ": [変数 "
+      <> int.to_string(number)
+      <> "] "
+      <> detail,
+  )
+}
+
+fn placement_name(placement: Placement) -> String {
+  case placement {
+    Fixed(block: name, ..) -> "Block " <> name
+    Widget(..) -> "Widget"
+  }
+}
+
+fn unused_var_notes(
+  front: Front,
+  context: String,
+  vars: List(Var),
+  frames: List(Frame),
+  blocks: List(Block),
+  services: List(model.Service),
+  scope: List(Var),
+) -> List(stop.Note) {
+  let used =
+    frames
+    |> list.flat_map(fn(frame) {
+      list.flat_map(frame.placements, fn(placement) {
+        placement_used_var_names(placement, blocks, services, scope)
+      })
+    })
+  vars
+  |> list.filter_map(fn(var) {
+    case list.contains(used, var.name) {
+      True -> Error(Nil)
+      False ->
+        Ok(variable_note(
+          front.face,
+          context,
+          0,
+          "未使用の Var." <> var.name,
+          stop.Warning,
+        ))
+    }
+  })
+}
+
+fn unused_layout_var_notes(
+  front: Front,
+  vars: List(Var),
+  services: List(model.Service),
+) -> List(stop.Note) {
+  let layout_used =
+    layout_frames(front.layout)
+    |> list.flat_map(fn(frame) {
+      list.flat_map(frame.placements, fn(placement) {
+        placement_used_var_names(placement, front.blocks, services, vars)
+      })
+    })
+  let page_used =
+    front.pages
+    |> list.flat_map(fn(page) {
+      let visible = list.append(page.vars, vars)
+      let names =
+        page_frames(page)
+        |> list.flat_map(fn(frame) {
+          list.flat_map(frame.placements, fn(placement) {
+            placement_used_var_names(placement, front.blocks, services, visible)
+          })
+        })
+      list.filter(names, fn(name) { var_by_name(page.vars, name) == None })
+    })
+  let used = list.append(layout_used, page_used)
+  vars
+  |> list.filter_map(fn(var) {
+    case list.contains(used, var.name) {
+      True -> Error(Nil)
+      False ->
+        Ok(variable_note(
+          front.face,
+          "layout",
+          0,
+          "未使用の Var." <> var.name,
+          stop.Warning,
+        ))
+    }
+  })
+}
+
+fn placement_used_var_names(
+  placement: Placement,
+  blocks: List(Block),
+  services: List(model.Service),
+  vars: List(Var),
+) -> List(String) {
+  case placement {
+    Fixed(block: name, ..) ->
+      case list.find(blocks, fn(block) { block.name == name }) {
+        Ok(block) ->
+          block.args
+          |> list.filter_map(fn(arg) {
+            case var_by_name(vars, arg.name) {
+              Some(var) -> Ok(var.name)
+              None -> Error(Nil)
+            }
+          })
+        Error(_) -> []
+      }
+    Widget(service: service_name, render: render, ..) -> {
+      let service_names = case find_service(services, Some(service_name)) {
+        Some(service) ->
+          service.args
+          |> list.filter_map(fn(arg) {
+            case var_by_name(vars, arg.name) {
+              Some(var) -> Ok(var.name)
+              None -> Error(Nil)
+            }
+          })
+        None -> []
+      }
+      let block_names = case render {
+        One(block) -> [block]
+        ByKind(by: _, table: rows) -> list.map(rows, fn(row) { row.1 })
+        UnknownRender -> []
+      }
+      let block_vars =
+        block_names
+        |> list.flat_map(fn(name) {
+          case list.find(blocks, fn(block) { block.name == name }) {
+            Ok(block) ->
+              block.args
+              |> list.filter_map(fn(arg) {
+                case var_by_name(vars, arg.name) {
+                  Some(var) -> Ok(var.name)
+                  None -> Error(Nil)
+                }
+              })
+            Error(_) -> []
+          }
+        })
+      list.append(service_names, block_vars)
+    }
+  }
+}
+
+fn http_entries(
+  units: List(Unit),
+  entries: List(model.Entry),
+) -> List(HttpEntry) {
+  let from_model =
+    entries
+    |> list.map(fn(entry) {
+      let authenticated = case entry.admit {
+        model.AuthenticatedAdmit -> True
+        model.AnonymousAdmit -> False
+      }
+      HttpEntry(name: entry.name, authenticated: authenticated)
+    })
+  case from_model {
+    [] ->
+      units
+      |> list.filter_map(fn(unit) {
+        case unit.path == "entry" {
+          False -> Error(Nil)
+          True -> {
+            let module = g.in_order(unit.module)
+            case public_named_constant(module, "entries") {
+              Some(constant) ->
+                case constant.value {
+                  glance.List(elements: elements, ..) ->
+                    Ok(
+                      elements
+                      |> list.filter_map(fn(expression) {
+                        case
+                          g.ctor_name(expression),
+                          g.labelled(expression, "name")
+                          |> option.then(g.string_value)
+                        {
+                          Some("Http"), Some(name) ->
+                            Ok(HttpEntry(
+                              name: name,
+                              authenticated: g.labelled(expression, "admit")
+                              |> option.then(g.ctor_name)
+                                == Some("Authenticated"),
+                            ))
+                          _, _ -> Error(Nil)
+                        }
+                      }),
+                    )
+                  _ -> Error(Nil)
+                }
+              None -> Error(Nil)
+            }
+          }
+        }
+      })
+      |> list.flatten
+    _ -> from_model
+  }
 }
 
 fn frame_notes(
@@ -1650,25 +2743,6 @@ fn expected_constructor(
       Error(Unsupported(where, "構成子が " <> expected <> " でない: " <> name))
     None -> Error(Unsupported(where, expected <> " の構成子が読めない"))
   }
-}
-
-fn service_list_field(
-  expression: glance.Expression,
-  label: String,
-) -> List(String) {
-  g.labelled(expression, label)
-  |> option.then(fn(value) {
-    case value {
-      glance.List(elements: elements, ..) ->
-        Some(
-          list.filter_map(elements, fn(item) {
-            service_target(item) |> option.to_result(Nil)
-          }),
-        )
-      _ -> None
-    }
-  })
-  |> option.unwrap([])
 }
 
 fn call_target_list(module: glance.Module, name: String) -> List(CallTarget) {
@@ -1993,7 +3067,7 @@ fn find_service(
     Some(name) ->
       case
         list.find(services, fn(service) {
-          naming.pascal(service.module) == name
+          naming.pascal(service.module) == name || service.module == name
         })
       {
         Ok(service) -> Some(service)

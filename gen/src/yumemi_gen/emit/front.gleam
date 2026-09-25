@@ -45,10 +45,6 @@ pub fn emit(
     source_hash(package.units, fn(unit) {
       string.starts_with(unit.path, "blocks/")
     })
-  let widgets_hash =
-    source_hash(package.units, fn(unit) {
-      unit.path == "layout" || string.starts_with(unit.path, "pages/")
-    })
   let service_hash =
     source_hash(back_units, fn(unit) {
       string.starts_with(unit.path, "service/")
@@ -103,10 +99,6 @@ pub fn emit(
     File(
       path: face_name <> "/src/gen/blocks.gleam",
       text: blocks_text(face_name, model_.blocks, blocks_hash),
-    ),
-    File(
-      path: face_name <> "/src/gen/widgets.gleam",
-      text: widgets_text(face_name, model_.widget_keys, widgets_hash),
     ),
     File(
       path: face_name <> "/src/gen/service.gleam",
@@ -976,6 +968,7 @@ fn preview_block_text(
     True -> module <> ".sample"
     False -> default_block_input_expression(app, units, block)
   }
+  let arg = preview_block_arg(module, block)
   "html.div_([], [\n"
   <> "        el.text("
   <> quoted(block.module <> " | of " <> service_label <> " | " <> out_label)
@@ -984,8 +977,28 @@ fn preview_block_text(
   <> module
   <> ".view("
   <> value
+  <> arg
   <> "),\n"
   <> "      ])"
+}
+
+fn preview_block_arg(module: String, block: reader_front.Block) -> String {
+  case block.view_arity {
+    2 -> {
+      let fields =
+        block.args
+        |> list.map(fn(arg) {
+          let value = case arg.type_ {
+            reader_front.StringArg -> quoted("preview")
+            reader_front.OptionalStringArg -> "None"
+            reader_front.OtherArg(_) -> "Nil"
+          }
+          arg.name <> ": " <> value
+        })
+      ", " <> module <> ".Arg(" <> string.join(fields, ", ") <> ")"
+    }
+    _ -> ""
+  }
 }
 
 fn default_block_expression(
@@ -2773,11 +2786,7 @@ fn layout_sources(
   blocks: List(reader_front.Block),
   services: List(model.Service),
 ) -> List(LoadSource) {
-  let reads = read_sources(layout.reads, services)
-  case layout.sp {
-    Some(frame) -> placement_sources(frame.placements, blocks, services, reads)
-    None -> reads
-  }
+  placement_sources(layout_placements(layout), blocks, services, [])
 }
 
 fn page_sources(
@@ -2788,24 +2797,7 @@ fn page_sources(
   services: List(model.Service),
 ) -> List(LoadSource) {
   let root_service = page_root_service(page, services)
-  let root = case root_service {
-    Some(module) -> [
-      LoadSource(
-        key: "service:" <> module,
-        name: module,
-        service: module,
-        type_name: "Out",
-        optional: False,
-      ),
-    ]
-    None -> []
-  }
-  let placements = case page.sp {
-    Some(frame) -> frame.placements
-    None -> []
-  }
-  let initial = add_load_sources(root, read_sources(page.reads, services))
-  let sources = placement_sources(placements, blocks, services, initial)
+  let sources = placement_sources(page_placements(page), blocks, services, [])
   case page.theme, root_service {
     Some(name), Some(fallback_module) -> {
       let module = page_theme_service(app, units, sources, fallback_module)
@@ -2821,6 +2813,36 @@ fn page_sources(
     }
     _, _ -> sources
   }
+}
+
+fn layout_placements(
+  layout: reader_front.Layout,
+) -> List(reader_front.Placement) {
+  list.flatten([
+    layout.sp
+      |> option.then(fn(frame) { Some(frame.placements) })
+      |> option.unwrap([]),
+    layout.pc
+      |> option.then(fn(frame) { Some(frame.placements) })
+      |> option.unwrap([]),
+    layout.tablet
+      |> option.then(fn(frame) { Some(frame.placements) })
+      |> option.unwrap([]),
+  ])
+}
+
+fn page_placements(page: reader_front.Page) -> List(reader_front.Placement) {
+  list.flatten([
+    page.sp
+      |> option.then(fn(frame) { Some(frame.placements) })
+      |> option.unwrap([]),
+    page.pc
+      |> option.then(fn(frame) { Some(frame.placements) })
+      |> option.unwrap([]),
+    page.tablet
+      |> option.then(fn(frame) { Some(frame.placements) })
+      |> option.unwrap([]),
+  ])
 }
 
 fn page_theme_service(
@@ -2853,34 +2875,6 @@ fn output_has_custom_type(
   })
 }
 
-fn read_sources(
-  reads: List(String),
-  services: List(model.Service),
-) -> List(LoadSource) {
-  reads
-  |> list.filter_map(fn(variant) {
-    case service_for(services, variant) {
-      Some(service) ->
-        Ok(LoadSource(
-          key: "service:" <> service.module,
-          name: service.module,
-          service: service.module,
-          type_name: "Out",
-          optional: False,
-        ))
-      None -> Error(Nil)
-    }
-  })
-  |> list.fold([], add_load_source)
-}
-
-fn add_load_sources(
-  sources: List(LoadSource),
-  additions: List(LoadSource),
-) -> List(LoadSource) {
-  list.fold(additions, sources, add_load_source)
-}
-
 fn unique_load_sources(sources: List(LoadSource)) -> List(LoadSource) {
   list.fold(sources, [], add_load_source)
 }
@@ -2905,36 +2899,29 @@ fn placement_sources(
     [] -> initial
     [placement, ..rest] -> {
       let next = case placement {
-        reader_front.Fixed(block: block_name, ..) -> {
-          let input_sources = case
-            list.find(blocks, fn(block) { block.name == block_name })
-          {
-            Ok(block) -> add_block_input_sources(initial, block)
-            Error(_) -> initial
-          }
+        reader_front.Fixed(block: block_name, ..) ->
           case block_source(blocks, block_name, services) {
             Some(module) ->
               add_load_source(
-                input_sources,
+                initial,
                 LoadSource(
                   key: "service:" <> module,
                   name: module,
                   service: module,
                   type_name: "Out",
-                  optional: True,
+                  optional: False,
                 ),
               )
-            None -> input_sources
+            None -> initial
           }
-        }
-        reader_front.Widget(name: name, service: service_name, ..) ->
+        reader_front.Widget(service: service_name, ..) ->
           case service_module(services, service_name) {
             Some(module) ->
               add_load_source(
                 initial,
                 LoadSource(
-                  key: "widget:" <> module <> ":" <> name,
-                  name: name,
+                  key: "service:" <> module,
+                  name: module,
                   service: module,
                   type_name: "Out",
                   optional: True,
@@ -2945,51 +2932,6 @@ fn placement_sources(
       }
       placement_sources(rest, blocks, services, next)
     }
-  }
-}
-
-fn add_block_input_sources(
-  sources: List(LoadSource),
-  block: reader_front.Block,
-) -> List(LoadSource) {
-  case block.input_definition {
-    Some(definition) -> {
-      let scope = Scope(module: block.module, imports: block.input_imports)
-      let services =
-        definition.variants
-        |> list.flat_map(fn(variant) {
-          variant.fields
-          |> list.filter_map(fn(field) {
-            let type_ = g.variant_field_type(field)
-            case type_ {
-              glance.NamedType(name: "Out", parameters: [], ..) ->
-                case resolved_path(scope, type_) {
-                  Some(path) ->
-                    case out_service_path(path) {
-                      Some(service) -> Ok(service)
-                      None -> Error(Nil)
-                    }
-                  None -> Error(Nil)
-                }
-              _ -> Error(Nil)
-            }
-          })
-        })
-        |> list.unique
-      list.fold(services, sources, fn(acc, service) {
-        add_load_source(
-          acc,
-          LoadSource(
-            key: "service:" <> service,
-            name: service,
-            service: service,
-            type_name: "Out",
-            optional: False,
-          ),
-        )
-      })
-    }
-    None -> sources
   }
 }
 
@@ -3033,12 +2975,9 @@ fn block_source(
   services: List(model.Service),
 ) -> Option(String) {
   case list.find(blocks, fn(block) { block.name == block_name }) {
-    Ok(block) ->
-      case block.input, block.input_module {
-        Some("Nil"), _ -> None
-        Some(_), Some(module) -> service_module(services, last_segment(module))
-        _, _ -> None
-      }
+    Ok(reader_front.Block(input_kind: reader_front.ServiceOut(service), ..)) ->
+      service_module(services, naming.pascal(service))
+    Ok(_) -> None
     Error(_) -> None
   }
 }
@@ -3126,12 +3065,15 @@ fn load_page_text(
 ) -> String {
   let theme = theme_source(page_sources)
   let theme_background_blob = theme_background_is_blob(units, theme)
+  let vars = list.append(page.vars, front.layout.vars)
   let data_fields =
-    ["    layout: layout.Data,\n"]
+    ["    layout: layout.Data,\n", "    vars: Vars,\n"]
     |> list.append(list.map(page_sources, load_data_field_text))
   let page_path = face_name <> "/src/" <> page.module <> ".gleam"
   let body =
-    load_data_text("Data", data_fields)
+    vars_type_text(vars, front.http_entries, front.face)
+    <> "\n"
+    <> load_data_text("Data", data_fields)
     <> "\n"
     <> page_load_function_text(layout_sources, page_sources)
     <> "\n"
@@ -3522,33 +3464,55 @@ fn page_load_function_text(
   page_sources: List(LoadSource),
 ) -> String {
   let fields = unique_load_sources(list.append(layout_sources, page_sources))
+  "pub fn load(\n  vars: Vars,\n"
+  <> string.concat(
+    list.map(fields, fn(source) {
+      "  " <> source.name <> ": " <> load_source_type(source) <> ",\n"
+    }),
+  )
+  <> ") -> Data {\n  Data(\n    layout: layout.load("
+  <> string.join(
+    list.map(layout_sources, fn(source) {
+      page_load_source_argument(source, fields)
+    }),
+    ", ",
+  )
+  <> "),\n    vars: vars,\n"
+  <> string.concat(
+    list.map(page_sources, fn(source) {
+      "    "
+      <> source.name
+      <> ": "
+      <> page_load_source_argument(source, fields)
+      <> ",\n"
+    }),
+  )
+  <> "  )\n}\n"
+}
+
+fn vars_type_text(
+  vars: List(reader_front.Var),
+  entries: List(reader_front.HttpEntry),
+  face: String,
+) -> String {
+  let authenticated =
+    list.any(entries, fn(entry) { entry.name == face && entry.authenticated })
+  let fields =
+    vars
+    |> list.map(fn(var) {
+      "    " <> var.name <> ": " <> vars_field_type(var, authenticated) <> ",\n"
+    })
   case fields {
-    [] -> "pub fn load() -> Data {\n  Data(layout: layout.load())\n}\n"
-    _ ->
-      "pub fn load(\n"
-      <> string.concat(
-        list.map(fields, fn(source) {
-          "  " <> source.name <> ": " <> load_source_type(source) <> ",\n"
-        }),
-      )
-      <> ") -> Data {\n  Data(\n    layout: layout.load("
-      <> string.join(
-        list.map(layout_sources, fn(source) {
-          page_load_source_argument(source, fields)
-        }),
-        ", ",
-      )
-      <> "),\n"
-      <> string.concat(
-        list.map(page_sources, fn(source) {
-          "    "
-          <> source.name
-          <> ": "
-          <> page_load_source_argument(source, fields)
-          <> ",\n"
-        }),
-      )
-      <> "  )\n}\n"
+    [] -> "pub type Vars {\n  Vars\n}\n"
+    _ -> "pub type Vars {\n  Vars(\n" <> string.concat(fields) <> "  )\n}\n"
+  }
+}
+
+fn vars_field_type(var: reader_front.Var, authenticated: Bool) -> String {
+  case var.from {
+    reader_front.Query(_) -> "Option(String)"
+    reader_front.Session(_) if !authenticated -> "Option(String)"
+    _ -> "String"
   }
 }
 
@@ -3602,6 +3566,8 @@ fn page_view_text(
       layout_placements,
       layout_sources,
       "it.layout",
+      "it.vars",
+      front.layout.vars,
     )
   let page_helpers =
     page_helpers
@@ -3613,6 +3579,8 @@ fn page_view_text(
       page_placements,
       page_sources,
       "it",
+      "it.vars",
+      list.append(page.vars, front.layout.vars),
     )
   "pub fn view(it: Data) -> element.Element(Nil) {\n"
   <> "  html.div_([attribute.attribute(\"data-yumemi-grid\", \"layout\")], [\n"
@@ -3852,6 +3820,8 @@ fn placement_helpers_text(
   placements: List(reader_front.Placement),
   sources: List(LoadSource),
   access: String,
+  vars_access: String,
+  vars: List(reader_front.Var),
 ) -> String {
   indexed_placements(placements, 0)
   |> list.map(fn(item) {
@@ -3865,6 +3835,8 @@ fn placement_helpers_text(
       placement,
       sources,
       access,
+      vars_access,
+      vars,
     )
   })
   |> string.join("\n")
@@ -3879,6 +3851,8 @@ fn placement_helper_text(
   placement: reader_front.Placement,
   sources: List(LoadSource),
   access: String,
+  vars_access: String,
+  vars: List(reader_front.Var),
 ) -> String {
   let helper = prefix <> "_" <> int.to_string(index)
   let body = case placement {
@@ -3887,21 +3861,23 @@ fn placement_helper_text(
         front,
         block_name,
         cell,
-        app.services,
         sources,
         access,
+        vars_access,
+        vars,
       )
-    reader_front.Widget(name: name, service: service_name, render: render, ..) ->
+    reader_front.Widget(service: service_name, render: render, ..) ->
       widget_placement_body(
         app,
         units,
         front,
         helper,
-        name,
         service_name,
         render,
         sources,
         access,
+        vars_access,
+        vars,
       )
   }
   let argument = case
@@ -3910,7 +3886,8 @@ fn placement_helper_text(
     True -> "it"
     False -> "_it"
   }
-  let extra = placement_extra_text(app, units, front, prefix, index, placement)
+  let extra =
+    placement_extra_text(app, units, front, prefix, index, placement, vars)
   "fn "
   <> helper
   <> "("
@@ -3931,23 +3908,16 @@ fn placement_uses_data(
     reader_front.Fixed(block: block_name, ..) ->
       case list.find(front.blocks, fn(block) { block.name == block_name }) {
         Ok(block) ->
-          block_page_input(
-            block,
-            sources,
-            "it",
-            load_source_service_names(sources),
-          )
-          != None
+          block.view_arity == 2
           || case block_source(front.blocks, block_name, services) {
             Some(service) -> load_source(sources, "service:" <> service) != None
             None -> False
           }
         Error(_) -> False
       }
-    reader_front.Widget(name: name, service: service_name, ..) ->
+    reader_front.Widget(service: service_name, ..) ->
       case service_module(services, service_name) {
-        Some(service) ->
-          load_source(sources, "widget:" <> service <> ":" <> name) != None
+        Some(service) -> load_source(sources, "service:" <> service) != None
         None -> False
       }
   }
@@ -3957,9 +3927,10 @@ fn fixed_placement_body(
   front: reader_front.Front,
   block_name: String,
   cell: reader_front.Cell,
-  services: List(model.Service),
   sources: List(LoadSource),
   access: String,
+  vars_access: String,
+  vars: List(reader_front.Var),
 ) -> String {
   let block_path = block_module(front, block_name)
   let service_names = load_source_service_names(sources)
@@ -3967,19 +3938,18 @@ fn fixed_placement_body(
   let children = case
     list.find(front.blocks, fn(block) { block.name == block_name })
   {
-    Ok(block) ->
-      case block_page_input(block, sources, access, service_names) {
-        Some(input) -> "[" <> view <> "(" <> input <> ")]"
-        None ->
-          case block_source(front.blocks, block_name, services) {
-            None -> "[" <> view <> "(Nil)]"
-            Some(service) ->
-              case load_source(sources, "service:" <> service) {
-                Some(source) -> source_view_list(source, access, view)
-                None -> "[]"
-              }
+    Ok(block) -> {
+      let arg = block_arg_suffix(front, block, vars, vars_access, service_names)
+      case block.input_kind {
+        reader_front.ServiceOut(service) ->
+          case load_source(sources, "service:" <> service) {
+            Some(source) -> source_view_list_with_arg(source, access, view, arg)
+            None -> "[]"
           }
+        reader_front.NilInput -> "[" <> view <> "(Nil" <> arg <> ")]"
+        reader_front.OtherInput(_) -> "[" <> view <> "(Nil" <> arg <> ")]"
       }
+    }
     Error(_) -> "[" <> view <> "(Nil)]"
   }
   case cell {
@@ -4009,129 +3979,6 @@ fn fixed_placement_body(
   }
 }
 
-fn block_page_input(
-  block: reader_front.Block,
-  sources: List(LoadSource),
-  access: String,
-  service_names: List(String),
-) -> Option(String) {
-  case block.input_definition {
-    Some(definition) ->
-      case definition.variants {
-        [variant] ->
-          case
-            list.try_map(variant.fields, fn(field) {
-              case field {
-                glance.LabelledVariantField(label: label, item: item) ->
-                  case block_input_expression(block, sources, access, item) {
-                    Some(value) -> Ok(label <> ": " <> value)
-                    None -> Error(Nil)
-                  }
-                glance.UnlabelledVariantField(item) ->
-                  case block_input_expression(block, sources, access, item) {
-                    Some(value) -> Ok(value)
-                    None -> Error(Nil)
-                  }
-              }
-            })
-          {
-            Ok([]) ->
-              Some(
-                block_module_reference(block.module, service_names)
-                <> "."
-                <> variant.name,
-              )
-            Ok(fields) ->
-              Some(
-                block_module_reference(block.module, service_names)
-                <> "."
-                <> variant.name
-                <> "("
-                <> string.join(fields, ", ")
-                <> ")",
-              )
-            Error(_) -> None
-          }
-        _ -> None
-      }
-    None -> None
-  }
-}
-
-fn block_input_expression(
-  block: reader_front.Block,
-  sources: List(LoadSource),
-  access: String,
-  type_: glance.Type,
-) -> Option(String) {
-  case type_ {
-    glance.NamedType(name: "Option", parameters: [inner], ..) ->
-      case inner {
-        glance.NamedType(name: "Out", parameters: [], ..) ->
-          case load_source_for_input(block, sources, inner) {
-            Some(source) -> {
-              let value = access <> "." <> source.name
-              case source.optional {
-                True -> Some(value)
-                False -> Some("Some(" <> value <> ")")
-              }
-            }
-            None -> Some("None")
-          }
-        _ -> None
-      }
-    _ ->
-      case load_source_for_input(block, sources, type_) {
-        Some(source) ->
-          case source.optional {
-            True -> None
-            False -> Some(access <> "." <> source.name)
-          }
-        None -> None
-      }
-  }
-}
-
-fn load_source_for_input(
-  block: reader_front.Block,
-  sources: List(LoadSource),
-  type_: glance.Type,
-) -> Option(LoadSource) {
-  case type_ {
-    glance.NamedType(name: "Out", parameters: [], ..) -> {
-      let scope = Scope(module: block.module, imports: block.input_imports)
-      case resolved_path(scope, type_) {
-        Some(path) ->
-          case out_service_path(path) {
-            Some(service) ->
-              case
-                list.find(sources, fn(source) {
-                  source.service == service && source.type_name == "Out"
-                })
-              {
-                Ok(source) -> Some(source)
-                Error(_) -> None
-              }
-            None -> None
-          }
-        None -> None
-      }
-    }
-    _ -> None
-  }
-}
-
-fn out_service_path(path: String) -> Option(String) {
-  case string.starts_with(path, "gen/out/") {
-    True -> Some(string.drop_start(path, 8))
-    False ->
-      case string.starts_with(path, "service/") {
-        True -> Some(string.drop_start(path, 8))
-        False -> None
-      }
-  }
-}
-
 fn fixed_cell_wrapper(children: String, style: String) -> String {
   "  list.map(\n"
   <> indent_expression(children, "    ")
@@ -4144,6 +3991,62 @@ fn fixed_cell_wrapper(children: String, style: String) -> String {
   <> "  )"
 }
 
+fn block_arg_suffix(
+  front: reader_front.Front,
+  block: reader_front.Block,
+  vars: List(reader_front.Var),
+  vars_access: String,
+  service_names: List(String),
+) -> String {
+  case block.view_arity {
+    2 ->
+      ", "
+      <> block_arg_expression(front, block, vars, vars_access, service_names)
+    _ -> ""
+  }
+}
+
+fn block_arg_expression(
+  front: reader_front.Front,
+  block: reader_front.Block,
+  vars: List(reader_front.Var),
+  vars_access: String,
+  service_names: List(String),
+) -> String {
+  let fields =
+    block.args
+    |> list.map(fn(arg) {
+      let value = case list.find(vars, fn(var) { var.name == arg.name }) {
+        Ok(var) -> {
+          let source = vars_access <> "." <> var.name
+          case arg.type_, var_is_optional(var, front) {
+            reader_front.OptionalStringArg, True -> source
+            reader_front.OptionalStringArg, False -> "Some(" <> source <> ")"
+            _, _ -> source
+          }
+        }
+        Error(_) -> "Nil"
+      }
+      arg.name <> ": " <> value
+    })
+  block_module_reference(block.module, service_names)
+  <> ".Arg("
+  <> string.join(fields, ", ")
+  <> ")"
+}
+
+fn var_is_optional(var: reader_front.Var, front: reader_front.Front) -> Bool {
+  let authenticated =
+    list.any(front.http_entries, fn(entry) {
+      entry.name == front.face && entry.authenticated
+    })
+  case var.from {
+    reader_front.Query(_) -> True
+    reader_front.Session(_) if !authenticated -> True
+    _ -> False
+  }
+}
+
 fn indent_expression(expression: String, indent: String) -> String {
   indent <> string.replace(expression, "\n", "\n" <> indent)
 }
@@ -4153,37 +4056,62 @@ fn widget_placement_body(
   units: List(Unit),
   front: reader_front.Front,
   helper: String,
-  name: String,
   service_name: String,
   render: reader_front.Render,
   sources: List(LoadSource),
   access: String,
+  vars_access: String,
+  vars: List(reader_front.Var),
 ) -> String {
   case service_module(app.services, service_name) {
     None -> "  []"
     Some(service) ->
-      case load_source(sources, "widget:" <> service <> ":" <> name) {
+      case load_source(sources, "service:" <> service) {
         None -> "  []"
         Some(source) ->
           case render {
-            reader_front.One(block_name) ->
-              source_view_list(
-                source,
-                access,
+            reader_front.One(block_name) -> {
+              let service_names =
+                list.unique(
+                  [service]
+                  |> list.append(load_source_service_names(sources))
+                  |> list.append(front.services),
+                )
+              let view =
                 block_module_reference(
                   block_module(front, block_name),
-                  list.unique(
-                    [service]
-                    |> list.append(load_source_service_names(sources))
-                    |> list.append(front.services),
-                  ),
+                  service_names,
                 )
-                  <> ".view",
-              )
-            reader_front.ByKind(table: _table, ..) -> {
+                <> ".view"
+              let arg = case
+                list.find(front.blocks, fn(block) { block.name == block_name })
+              {
+                Ok(block) ->
+                  block_arg_suffix(
+                    front,
+                    block,
+                    vars,
+                    vars_access,
+                    service_names,
+                  )
+                Error(_) -> ""
+              }
+              source_view_list_with_arg(source, access, view, arg)
+            }
+            reader_front.ByKind(table: table, ..) -> {
               let rows_helper = "render_" <> helper
               let row_field = row_field_name(units, service)
-              source_rows_list(source, access, rows_helper, row_field)
+              let vars_access = case block_rows_use_vars(front, table) {
+                True -> vars_access
+                False -> ""
+              }
+              source_rows_list(
+                source,
+                access,
+                rows_helper,
+                row_field,
+                vars_access,
+              )
             }
             reader_front.UnknownRender -> "  []"
           }
@@ -4198,6 +4126,7 @@ fn placement_extra_text(
   prefix: String,
   index: Int,
   placement: reader_front.Placement,
+  vars: List(reader_front.Var),
 ) -> String {
   case placement {
     reader_front.Widget(
@@ -4215,6 +4144,7 @@ fn placement_extra_text(
             table,
             state,
             "render_" <> prefix <> "_" <> int.to_string(index),
+            vars,
           )
         }
         None -> ""
@@ -4230,10 +4160,11 @@ fn load_source(sources: List(LoadSource), key: String) -> Option(LoadSource) {
   }
 }
 
-fn source_view_list(
+fn source_view_list_with_arg(
   source: LoadSource,
   access: String,
   view: String,
+  arg: String,
 ) -> String {
   let value = access <> "." <> source.name
   case source.optional {
@@ -4242,8 +4173,10 @@ fn source_view_list(
       <> value
       <> " {\n    Some(out) -> ["
       <> view
-      <> "(out)]\n    None -> []\n  }"
-    False -> "[" <> view <> "(" <> value <> ")]"
+      <> "(out"
+      <> arg
+      <> ")]\n    None -> []\n  }"
+    False -> "[" <> view <> "(" <> value <> arg <> ")]"
   }
 }
 
@@ -4252,7 +4185,12 @@ fn source_rows_list(
   access: String,
   helper: String,
   row_field: String,
+  vars_access: String,
 ) -> String {
+  let vars_argument = case vars_access {
+    "" -> ""
+    _ -> ", " <> vars_access
+  }
   "  case "
   <> access
   <> "."
@@ -4261,6 +4199,7 @@ fn source_rows_list(
   <> helper
   <> "(out."
   <> row_field
+  <> vars_argument
   <> ")\n    None -> []\n  }"
 }
 
@@ -4270,25 +4209,43 @@ fn rows_helper_text(
   table: List(#(String, String)),
   state: State,
   helper: String,
+  vars: List(reader_front.Var),
 ) -> String {
+  let uses_vars = block_rows_use_vars(front, table)
+  let vars_parameter = case uses_vars {
+    True -> ", vars: Vars"
+    False -> ""
+  }
+  let recursive_vars = case uses_vars {
+    True -> ", vars"
+    False -> ""
+  }
   let out = module_ref("gen/out/" <> service)
   let rows =
     table
     |> list.map(fn(entry) {
       let #(key, block_name) = entry
       let constructor = row_constructor_name(state, service, key)
+      let service_names = list.unique([service] |> list.append(front.services))
+      let arg = case
+        list.find(front.blocks, fn(block) { block.name == block_name })
+      {
+        Ok(block) -> block_arg_suffix(front, block, vars, "vars", service_names)
+        Error(_) -> ""
+      }
       "        "
       <> out
       <> "."
       <> constructor
       <> "(..) -> [\n          "
-      <> block_module_reference(
-        block_module(front, block_name),
-        list.unique([service] |> list.append(front.services)),
-      )
-      <> ".view(row),\n          .."
+      <> block_module_reference(block_module(front, block_name), service_names)
+      <> ".view(row"
+      <> arg
+      <> "),\n          .."
       <> helper
-      <> "(rest),\n        ]\n"
+      <> "(rest"
+      <> recursive_vars
+      <> "),\n        ]\n"
     })
     |> string.concat
   let fallback = case exhaustive_row_table(state, service, table) {
@@ -4299,11 +4256,25 @@ fn rows_helper_text(
   <> helper
   <> "(rows: List("
   <> out
-  <> ".Row)) -> List(element.Element(Nil)) {\n"
+  <> ".Row)"
+  <> vars_parameter
+  <> ") -> List(element.Element(Nil)) {\n"
   <> "  case rows {\n    [] -> []\n    [row, ..rest] ->\n      case row {\n"
   <> rows
   <> fallback
   <> "      }\n  }\n}"
+}
+
+fn block_rows_use_vars(
+  front: reader_front.Front,
+  table: List(#(String, String)),
+) -> Bool {
+  list.any(table, fn(row) {
+    case list.find(front.blocks, fn(block) { block.name == row.1 }) {
+      Ok(block) -> block.view_arity == 2
+      Error(_) -> False
+    }
+  })
 }
 
 fn exhaustive_row_table(
@@ -4476,28 +4447,6 @@ fn blocks_text(
   header(face_name <> "/src/blocks/*.gleam", input_hash)
   <> "\n"
   <> enum_body("Block", variants)
-}
-
-fn widgets_text(
-  face_name: String,
-  widget_keys: List(String),
-  input_hash: String,
-) -> String {
-  let variants =
-    widget_keys
-    |> list.unique
-    |> list.sort(string.compare)
-    |> list.map(fn(name) { "  " <> name })
-    |> string.join("\n")
-  header(
-    face_name
-      <> "/src/layout.gleam and "
-      <> face_name
-      <> "/src/pages/**/*.gleam",
-    input_hash,
-  )
-  <> "\n"
-  <> enum_body("WidgetKey", variants)
 }
 
 fn service_text(
@@ -4759,11 +4708,14 @@ fn shell_page_tables(
       <> "    layout: layoutDefinition."
       <> js_export_name(front.layout.name)
       <> ",\n"
+      <> "    vars: [\n"
+      <> shell_var_rows(front, page)
+      <> "    ],\n"
       <> "    givens: [\n"
-      <> shell_given_rows(app, front)
+      <> shell_given_rows(app, front, page)
       <> "    ],\n"
       <> "    sources: [\n"
-      <> shell_source_rows(sources)
+      <> shell_source_rows(app, front, page, sources)
       <> "    ],\n"
       <> "  }],"
     })
@@ -4777,7 +4729,11 @@ fn shell_page_tables(
   <> "\n]);\n"
 }
 
-fn shell_given_rows(app: model.App, front: reader_front.Front) -> String {
+fn shell_given_rows(
+  app: model.App,
+  front: reader_front.Front,
+  page: reader_front.Page,
+) -> String {
   front.components
   |> list.filter_map(fn(component) {
     case component.reloads |> list.first |> option.from_result {
@@ -4789,7 +4745,9 @@ fn shell_given_rows(app: model.App, front: reader_front.Front) -> String {
               <> quoted(component_tag(component))
               <> ", service: service.Service$"
               <> naming.pascal(service.module)
-              <> "$const, decoder: decode"
+              <> "$const, "
+              <> shell_service_args(app, front, page, service.module)
+              <> ", decoder: decode"
               <> naming.pascal(service.module)
               <> " },\n",
             )
@@ -4801,6 +4759,48 @@ fn shell_given_rows(app: model.App, front: reader_front.Front) -> String {
   |> string.concat
 }
 
+fn shell_var_rows(
+  front: reader_front.Front,
+  page: reader_front.Page,
+) -> String {
+  let vars = list.append(page.vars, front.layout.vars)
+  let authenticated =
+    list.any(front.http_entries, fn(entry) {
+      entry.name == front.face && entry.authenticated
+    })
+  vars
+  |> list.map(fn(var) {
+    let optional = case var.from {
+      reader_front.Query(_) -> True
+      reader_front.Session(_) if !authenticated -> True
+      _ -> False
+    }
+    "      { name: "
+    <> quoted(var.name)
+    <> ", optional: "
+    <> bool_text(optional)
+    <> ", from: "
+    <> shell_var_source(var.from)
+    <> " },\n"
+  })
+  |> string.concat
+}
+
+fn shell_var_source(source: reader_front.From) -> String {
+  case source {
+    reader_front.Path(name) ->
+      "{ type: \"path\", name: " <> quoted(name) <> " }"
+    reader_front.Query(name) ->
+      "{ type: \"query\", name: " <> quoted(name) <> " }"
+    reader_front.Session(name) ->
+      "{ type: \"session\", name: " <> quoted(name) <> " }"
+    reader_front.Origin(face) ->
+      "{ type: \"origin\", name: " <> quoted(face) <> " }"
+    reader_front.AuthOrigin -> "{ type: \"auth-origin\" }"
+    reader_front.InvalidFrom(_) -> "{ type: \"invalid\" }"
+  }
+}
+
 fn js_export_name(name: String) -> String {
   case name {
     "public" -> "public$"
@@ -4810,21 +4810,23 @@ fn js_export_name(name: String) -> String {
   }
 }
 
-fn shell_source_rows(sources: List(LoadSource)) -> String {
+fn shell_source_rows(
+  app: model.App,
+  front: reader_front.Front,
+  page: reader_front.Page,
+  sources: List(LoadSource),
+) -> String {
   sources
   |> list.map(fn(source) {
     case source.type_name == "PageTheme" {
       True -> "      { theme: true },\n"
       False -> {
-        let widget = case string.starts_with(source.key, "widget:") {
-          True -> ", widget: " <> quoted(source.name)
-          False -> ""
-        }
         "      { service: service.Service$"
         <> naming.pascal(source.service)
-        <> "$const, decoder: decode"
+        <> "$const, "
+        <> shell_service_args(app, front, page, source.service)
+        <> ", decoder: decode"
         <> naming.pascal(source.service)
-        <> widget
         <> ", optional: "
         <> bool_text(source.optional)
         <> ", root: "
@@ -4834,6 +4836,56 @@ fn shell_source_rows(sources: List(LoadSource)) -> String {
     }
   })
   |> string.concat
+}
+
+fn shell_service_args(
+  app: model.App,
+  front: reader_front.Front,
+  page: reader_front.Page,
+  service_name: String,
+) -> String {
+  let args = case
+    list.find(front.page_service_args, fn(item) { item.page == page.module })
+  {
+    Ok(reader_front.PageServiceArgs(services: services, ..)) ->
+      case list.find(services, fn(item) { item.service == service_name }) {
+        Ok(reader_front.ServiceArgs(args: args, ..)) -> args
+        Error(_) -> []
+      }
+    Error(_) -> []
+  }
+  "args: ["
+  <> string.join(
+    list.map(args, fn(arg) {
+      case arg.source {
+        reader_front.VariableSource(name: var_name, ..) ->
+          "["
+          <> quoted(arg.name)
+          <> ", "
+          <> quoted(var_name)
+          <> ", "
+          <> bool_text(service_arg_optional(app, service_name, arg.name))
+          <> "]"
+      }
+    }),
+    ", ",
+  )
+  <> "]"
+}
+
+fn service_arg_optional(
+  app: model.App,
+  service_name: String,
+  arg_name: String,
+) -> Bool {
+  case list.find(app.services, fn(service) { service.module == service_name }) {
+    Ok(service) ->
+      case list.find(service.args, fn(arg) { arg.name == arg_name }) {
+        Ok(model.Arg(type_: model.NamedShape(name: "Option", ..), ..)) -> True
+        _ -> False
+      }
+    Error(_) -> False
+  }
 }
 
 fn bool_text(value: Bool) -> String {
@@ -5097,6 +5149,7 @@ fn framework_frame(
 
 fn framework_track_of(track: reader_front.Track) -> framework_track.Track {
   case track {
+    reader_front.Auto -> framework_track.Auto
     reader_front.Fr(value) -> framework_track.Fr(value)
     reader_front.Rem(value) -> framework_track.Rem(value)
     reader_front.Px(value) -> framework_track.Px(value)
@@ -5112,6 +5165,7 @@ fn framework_track_size_of(
   size: reader_front.TrackSize,
 ) -> framework_track.TrackSize {
   case size {
+    reader_front.AutoSize -> framework_track.AutoSize
     reader_front.FrSize(value) -> framework_track.FrSize(value)
     reader_front.RemSize(value) -> framework_track.RemSize(value)
     reader_front.PxSize(value) -> framework_track.PxSize(value)
@@ -5375,15 +5429,27 @@ fn shell_runtime_text(include_client: Bool, grid_css: String) -> String {
   <> "  if (!entry) throw new Error(\"missing front API route\");\n"
   <> "  return entry.path;\n"
   <> "}\n\n"
-  <> "function widgetNameFor(definition, serviceValue) {\n"
-  <> "  const placement = [...definition.sp.placements].find((candidate) => candidate.of === serviceValue && candidate.name !== undefined);\n"
-  <> "  return placement?.name ?? null;\n"
+  <> "function argsFor(vars, mapping) {\n"
+  <> "  return Object.fromEntries(mapping.map(([name, field, optional]) => {\n"
+  <> "    const value = vars[field];\n"
+  <> "    return [name, optional && typeof value === \"string\" ? new Some(value) : value];\n"
+  <> "  }));\n"
   <> "}\n\n"
-  <> "async function readFromApp(app, request, definition, serviceValue, params, sourceWidget) {\n"
-  <> "  const path = apiPathFor(serviceValue).replace(/:([A-Za-z0-9_]+)/g, (_, name) => encodeURIComponent(params[name] ?? \"\"));\n"
+  <> "async function readFromApp(app, request, serviceValue, args) {\n"
+  <> "  const used = new Set();\n"
+  <> "  const path = apiPathFor(serviceValue).replace(/:([A-Za-z0-9_]+)/g, (_, name) => {\n"
+  <> "    used.add(name);\n"
+  <> "    const arg = args[name];\n"
+  <> "    const value = arg instanceof Some ? arg[0] : arg;\n"
+  <> "    if (typeof value !== \"string\") throw new Error(\"missing service path arg: \" + name);\n"
+  <> "    return encodeURIComponent(value);\n"
+  <> "  });\n"
   <> "  const target = new URL(path, request.url);\n"
-  <> "  const widgetName = sourceWidget ?? widgetNameFor(definition, serviceValue);\n"
-  <> "  if (widgetName !== null) target.searchParams.set(\"widget\", widgetName);\n"
+  <> "  for (const [name, arg] of Object.entries(args)) {\n"
+  <> "    if (used.has(name)) continue;\n"
+  <> "    const value = arg instanceof Some ? arg[0] : arg;\n"
+  <> "    if (typeof value === \"string\") target.searchParams.set(name, value);\n"
+  <> "  }\n"
   <> "  return app.fetch(new Request(target, request));\n"
   <> "}\n\n"
   <> "function pageTheme(definition, root) {\n"
@@ -5394,14 +5460,57 @@ fn shell_runtime_text(include_client: Bool, grid_css: String) -> String {
   <> "  return new Response(body, {status, headers: {\"content-type\": \"text/plain; charset=utf-8\"}});\n"
   <> "}\n\n"
   <> "async function renderPage(request, env, matched) {\n"
-  <> "  const values = [];\n"
+  <> "  const vars = {};\n"
+  <> "  const query = new URL(request.url).searchParams;\n"
+  <> "  let sessionLoaded = false;\n"
+  <> "  let session = null;\n"
+  <> "  for (const field of matched.spec.vars) {\n"
+  <> "    const source = field.from;\n"
+  <> "    let value;\n"
+  <> "    if (source.type === \"path\") {\n"
+  <> "      value = matched.params[source.name];\n"
+  <> "    } else if (source.type === \"query\") {\n"
+  <> "      const found = query.get(source.name);\n"
+  <> "      value = found === null ? Option$None$const : new Some(found);\n"
+  <> "    } else if (source.type === \"origin\") {\n"
+  <> "      const envName = \"PUBLIC_\" + source.name.toUpperCase() + \"_ORIGIN\";\n"
+  <> "      const origin = env[envName];\n"
+  <> "      if (typeof origin !== \"string\" || origin.length === 0) return failure(500, envName);\n"
+  <> "      value = origin;\n"
+  <> "    } else if (source.type === \"auth-origin\") {\n"
+  <> "      const envName = \"PUBLIC_IDP_ORIGIN\";\n"
+  <> "      const origin = env[envName];\n"
+  <> "      if (typeof origin !== \"string\" || origin.length === 0) return failure(500, envName);\n"
+  <> "      value = origin;\n"
+  <> "    } else if (source.type === \"session\") {\n"
+  <> "      if (!sessionLoaded) {\n"
+  <> "        sessionLoaded = true;\n"
+  <> "        try {\n"
+  <> "          const target = new URL(\"/api/session\", request.url);\n"
+  <> "          const response = await env.APP.fetch(new Request(target, request));\n"
+  <> "          if (response.ok) session = await response.json();\n"
+  <> "        } catch (_) {\n"
+  <> "          session = null;\n"
+  <> "        }\n"
+  <> "      }\n"
+  <> "      const subject = session?.anonymous === true ? undefined : session?.subject;\n"
+  <> "      const found = source.name === \"SubjectHandle\" ? subject?.handle : subject?.id;\n"
+  <> "      if (typeof found === \"string\") value = field.optional ? new Some(found) : found;\n"
+  <> "      else if (field.optional) value = Option$None$const;\n"
+  <> "      else return failure(401, \"unauthorized\");\n"
+  <> "    } else {\n"
+  <> "      return failure(500, \"invalid variable source\");\n"
+  <> "    }\n"
+  <> "    vars[field.name] = value;\n"
+  <> "  }\n"
+  <> "  const values = [vars];\n"
   <> "  let root = null;\n"
   <> "  for (const source of matched.spec.sources) {\n"
   <> "    if (source.theme) {\n"
   <> "      values.push(pageTheme(matched.definition, root));\n"
   <> "      continue;\n"
   <> "    }\n"
-  <> "    const response = await readFromApp(env.APP, request, matched.definition, source.service, matched.params, source.widget);\n"
+  <> "    const response = await readFromApp(env.APP, request, source.service, argsFor(vars, source.args));\n"
   <> "    if (!response.ok) {\n"
   <> "      if (response.status === 403) return failure(403, \"adult declaration required\");\n"
   <> "      if (response.status === 404 && !source.root) { values.push(Option$None$const); continue; }\n"
@@ -5414,7 +5523,7 @@ fn shell_runtime_text(include_client: Bool, grid_css: String) -> String {
   <> "  }\n"
   <> "  const givens = [];\n"
   <> "  for (const given of matched.spec.givens) {\n"
-  <> "    const response = await readFromApp(env.APP, request, matched.definition, given.service, matched.params, null);\n"
+  <> "    const response = await readFromApp(env.APP, request, given.service, argsFor(vars, given.args));\n"
   <> "    if (!response.ok) continue;\n"
   <> "    const raw = await response.json();\n"
   <> "    given.decoder(raw);\n"

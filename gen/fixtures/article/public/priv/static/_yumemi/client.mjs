@@ -1,4 +1,4 @@
-// GENERATED from public/src/components/*.gleam and src/entry.gleam [sha256:8fde9ebb404a] — 手で編集しない
+// GENERATED from public/src/components/*.gleam and src/entry.gleam [sha256:a2db3813520e] — 手で編集しない
 // public/build/dev/javascript/prelude.mjs
 var CustomType = class {
   withFields(fields) {
@@ -5548,6 +5548,14 @@ function select_(attributes, children) {
   return element_("select", attributes, children);
 }
 
+// public/build/dev/javascript/yumemi/framework/front/track.mjs
+var Auto = class extends CustomType {
+};
+var Track$Auto$const = new Auto();
+var AutoSize = class extends CustomType {
+};
+var TrackSize$AutoSize$const = new AutoSize();
+
 // public/build/dev/javascript/yumemi/framework/front/css.mjs
 var Margin = class extends CustomType {
 };
@@ -5632,6 +5640,15 @@ var Pulse = class extends CustomType {
 var Animation$Pulse$const = new Pulse();
 
 // public/build/dev/javascript/yumemi/framework/front.mjs
+var AuthOrigin = class extends CustomType {
+};
+var From$AuthOrigin$const = new AuthOrigin();
+var SubjectHandle = class extends CustomType {
+};
+var SessionKey$SubjectHandle$const = new SubjectHandle();
+var SubjectId = class extends CustomType {
+};
+var SessionKey$SubjectId$const = new SubjectId();
 var Flow = class extends CustomType {
 };
 var Cell$Flow$const = new Flow();

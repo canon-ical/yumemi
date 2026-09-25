@@ -28,8 +28,8 @@ function copyDirectoryContents(source, destination) {
   }
 }
 
-export function prepareFrontScratch(label) {
-  const work = path.join(genDir, "_out", label);
+export function prepareFrontScratch(label, face = "public") {
+  const work = path.join(genDir, "build", "y1f-a-" + label);
   fs.rmSync(work, { recursive: true, force: true });
   fs.mkdirSync(work, { recursive: true });
   copyDirectoryContents(templateDir, work);
@@ -38,25 +38,30 @@ export function prepareFrontScratch(label) {
     path.join(work, "codec-encode.mjs"),
   );
   copyDirectoryContents(
-    path.join(genDir, "fixtures/article/public/src"),
+    path.join(genDir, "fixtures/article", face, "src"),
     path.join(work, "src"),
+  );
+  const generatedFace = path.join(genDir, "build", "y1f-a-generated-v4-one", face);
+  copyDirectoryContents(
+    path.join(generatedFace, "src/gen"),
+    path.join(work, "src/gen"),
   );
   fs.mkdirSync(path.join(work, "public"), { recursive: true });
   fs.mkdirSync(path.join(work, "public/_yumemi"), { recursive: true });
-  fs.copyFileSync(
-    path.join(
-      genDir,
-      "fixtures/article/public/priv/static/_yumemi/client.mjs",
-    ),
-    path.join(work, "public/_yumemi/client.mjs"),
+  const generatedClient = path.join(
+    generatedFace,
+    "priv/static/_yumemi/client.mjs",
   );
-  fs.copyFileSync(
-    path.join(
-      genDir,
-      "fixtures/article/public/priv/static/_yumemi/style.css",
-    ),
-    path.join(work, "public/_yumemi/style.css"),
+  if (fs.existsSync(generatedClient)) {
+    fs.copyFileSync(generatedClient, path.join(work, "public/_yumemi/client.mjs"));
+  }
+  const fixtureStyle = path.join(
+    genDir,
+    "fixtures/article/public/priv/static/_yumemi/style.css",
   );
+  if (fs.existsSync(fixtureStyle)) {
+    fs.copyFileSync(fixtureStyle, path.join(work, "public/_yumemi/style.css"));
+  }
 
   const tomlPath = path.join(work, "gleam.toml");
   fs.writeFileSync(
@@ -73,7 +78,12 @@ export function prepareFrontScratch(label) {
   return work;
 }
 
-export async function startFrontWorker(work, port) {
+export async function startFrontWorker(
+  work,
+  port,
+  readyPath = "/article/42",
+  expectedStatus = 200,
+) {
   const child = spawn(
     "npx",
     ["--yes", "wrangler", "dev", "--local", "--port", String(port), "--config", "wrangler.jsonc"],
@@ -93,7 +103,7 @@ export async function startFrontWorker(work, port) {
     workerOutput += chunk.toString();
   });
 
-  const baseUrl = `http://127.0.0.1:${port}`;
+  const baseUrl = "http://127.0.0.1:" + port;
   const closed = new Promise((resolve) => child.once("close", resolve));
   let readyResponse;
   for (let attempt = 0; attempt < 80; attempt += 1) {
@@ -101,10 +111,10 @@ export async function startFrontWorker(work, port) {
       throw new Error(`wrangler exited before ready\n${workerOutput}`);
     }
     try {
-      readyResponse = await fetch(`${baseUrl}/article/42`, {
+      readyResponse = await fetch(`${baseUrl}${readyPath}`, {
         signal: AbortSignal.timeout(1000),
       });
-      if (readyResponse.status === 200) {
+      if (readyResponse.status === expectedStatus) {
         await readyResponse.arrayBuffer();
         break;
       }
@@ -113,7 +123,7 @@ export async function startFrontWorker(work, port) {
     }
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
-  if (!readyResponse || readyResponse.status !== 200) {
+  if (!readyResponse || readyResponse.status !== expectedStatus) {
     throw new Error(`wrangler did not become ready\n${workerOutput}`);
   }
 

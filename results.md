@@ -1142,3 +1142,62 @@ P1、back 側、musearch、DDL、Hex publish、push、main、push は触って�
 ## 確かめていないこと
 
 - 追加の build / test は未実行。今回の依頼に含まれる履歴・差分・untracked・DDL の検証を行う。
+
+# yumemi-1f 巡 2 束 A 続き (2026-09-25)
+
+## 状態
+
+- priority 1: root vars test、commit `bbe39c2`。
+- priority 2: Widget 枠名 / 生成 `WidgetKey` を除去。Widget の全 Service Args を同名 Var から解決し、同一 Service の load source を統合。fixture の `widget_list` は `widget: Option(String)` を `Query("widget")` から読む。commit `7f36852`。
+- priority 3: 7検査の負ケースと未使用 Var の警告を検証。診断は対象 source path、検査番号、Block / Arg、1行性を assert。commit `cdaff6b`。
+- `Track.Auto` と `TrackSize` の auto CSS を実装。Gleam は同一 module に同名構成子を定義できず、`TrackSize.Auto` はコンパイル不可のため、`AutoSize` を置いた(`FrSize` / `RemSize` / `PxSize` の流儀、贄川が P2 で改名)。CSS は `auto` を出力する。
+- AuthOrigin は public 面の Layout に置いた。Vars はページごとの `src/gen/load/<page>.gleam` に生成する。DDL 無し。
+
+## 検証
+
+- root `gleam build`: exit 0、既存 warning 1 (`src/framework/secret.gleam:5`)。`gen/build/y1f-a-root-build.txt`。
+- root `gleam test`: exit 0、`Framework checks passed: 8 groups`。`gen/build/y1f-a-root-test.txt`。
+- `cd gen && gleam test`: **189 passed, no failures**。`gen/build/y1f-a-gen-test.txt`。
+- fixture generation を2回: 各 exit 0 / 111 files、`diff -qr` 空。`gen/build/y1f-a-fixture-final-{one,two}.txt` / `gen/build/y1f-a-fixture-final-diff.txt`。
+- 生成物を `gen/fixtures/article/{public,admin}/src/gen` に同期し、各 diff は空。public / admin face build は exit 0、warning 0。`gen/build/y1f-a-{public,admin}-build.txt` と `gen/build/y1f-a-fixture-{public,admin}-sync.txt`。
+- root と gen の変更対象 `gleam format --check` は exit 0。public / admin の `src/gen` format check も exit 0。44 generated `.gleam` の SHA-256 header 欠けは0。
+- 変数検査 1〜7 の CLI 負 fixture は各 exit 4、各ログに検査番号と file / Block / 欄が出た。`gen/build/y1f-a-neg-{arg_without_var,path_without_segment,query_to_string,required_service_arg_missing,layout_path_var,bundled_input,of_not_placed}.txt`。
+- snapshot `/home/yumemism/.codex-agents/runs/niekawa-20260924-220716-1228501-25668/ms-8eed4d8/api` は read-only 入力、out は `gen/build/y1f-a-ms1`。1,372 files。診断: exit 0 警告48、exit 1=3、exit 2=0、exit 3=1、exit 4=111。`gen/build/y1f-a-ms1.txt`。親 run directory を誤指定した最初の probe は `src/types.gleam` 不在で exit 3 になり、出力前に停止した。
+- repo 全体の `gleam format --check` は既存の未整形ファイルで exit 1。今回変更した範囲と生成物の targeted check は通過。証跡は `gen/build/y1f-a-root-format.txt` / `gen/build/y1f-a-gen-format.txt`。
+- `gen/fixtures/article/db/` と `gen/fixtures/article/src/gen/` は開始時から存在せず、差分も空。指示書記載の場当たり生成物として出力に含めていない。
+
+## 残り / 次巡
+
+- 殻の実値読み (`/api/session`、env、Path / Query / Service Args、`given`、401) は次巡。今回の `shell.mjs` は Vars を空値で作って load に渡す仮配線。
+- `TrackSize.Auto` と `Track.Auto` の別構成子名は Gleam の module namespace 制約に衝突する。贄川が `AutoSize`(`<X>Size` の流儀)に決めた。
+- root / gen 全体の format check を通すための無関係な既存未整形ファイルは今回の作業域外。
+
+# yumemi-1f 巡 3 束 A (2026-09-25)
+
+## 状態
+
+- B (impl/yumemi-1f-b, 334dc0d) を no-ff merge。report と patch 2本の計3 file。
+- shell は Path / Query / Session / Origin / AuthOrigin から Vars を読む。Session は Page ごとに最大1回 /api/session を呼び、Cookie を転送する。
+- reader の PageServiceArgs に page root Service の解決も追加。shell は source / given ごとに Args 欄, Vars 欄, Option の3値組を生成器から受け、Args と request path / query を組む。shell 内に対応表は置かない。
+- String の Session 欄が欠けたら renderPage が 401、Option 欄は None。Origin env が欠けたら renderPage が 500 を返し、本文に env 名を出す。redirect と既定 origin は置かない。
+- verify 用 no-session Page を public fixture に追加。fixture app 内へは生成せず、out と preview は gen/build/y1f-a-* に出した。DDL 無し。
+
+## 確かめたこと
+
+- fixture generation を2回: 各 112 files、diff -qr は0行。gen/build/y1f-a-generated-v4-one/、-v4-two/、gen/build/y1f-a-generated-v4-diff.txt。
+- 両 out の gleam format --check exit 0。各74 .gleam、SHA-256 header 欠け0。gen/build/y1f-a-generated-format-check.txt、header 集計は実行ログ。
+- root gleam build: exit 0、既存 warning 1 (src/framework/secret.gleam:5)。gen/build/y1f-a-root-build.txt。
+- cd gen && gleam test: 189 passed, no failures。gen/build/y1f-a-gen-test.txt。
+- public / admin scratch build: 両方 exit 0。warning は既存の secret constructor 1件のみ。gen/build/y1f-a-verify/gleam-build.txt、gen/build/y1f-a-verify-admin/gleam-build.txt。
+- SSR / isolate / given / file / overlay はすべて ALL PASS。証跡は gen/build/y1f-a-verify-{ssr,isolate,given,file,overlay}.txt。Block preview は public 7 Blocks、admin 1 Block が PASS、gen/build/y1f-a-blocks-preview/{public,admin}-blocks.html。
+- SSR request 列: GET /api/session → GET /api/widgets?widget=summary&slug=42 → GET /api/articles/42 → GET /api/articles。gen/build/y1f-a-verify/requests.txt。public Session は匿名 / subject 無し / handle 無しで 200 + None、Session Var 無し Page は0回。admin は3条件で401、subject ありで200。Origin env 欠落は env 名を含む500。
+- code after r8 の git diff --check は exit 0。基点 e82121e から全体では exit 2、B から統合した patch artifact の空 diff 行に trailing whitespace があり、f5min 38行 / f6 156行。証跡: gen/build/y1f-a-final-diff-check.txt、gen/build/y1f-a-code-diff-check.txt。
+
+## 確かめていないこと
+
+- root gleam test は未実行。今回の指示対象は root build と gen test。
+
+## 残り
+
+- 1〜3 の完了条件はすべて満たした。merge commit を残し、今回の実装・検証 checkpoint は1本へ squash した。
+- B の patch artifact に含まれる whitespace 194箇所はそのまま保持。今回の実装・verify 差分の whitespace は0件。

@@ -1,0 +1,3280 @@
+# Apply after y1f-f5min.patch: patch -p1 -d <snapshot> < y1f-f6.patch
+diff -ruN mid/console/src/blocks/api_key_page.gleam after/console/src/blocks/api_key_page.gleam
+--- mid/console/src/blocks/api_key_page.gleam	2026-09-24 20:01:02.000000000 +0900
++++ after/console/src/blocks/api_key_page.gleam	2026-09-25 03:14:52.408501287 +0900
+@@ -7,8 +7,11 @@
+ import sketch/lustre/element/html
+ import style
+ 
+-pub type In {
+-  In(www_origin: String)
++pub type In =
++  Nil
++
++pub type Arg {
++  Arg(www_origin: String)
+ }
+ 
+ const shell: List(css.Style) = [
+@@ -23,7 +26,7 @@
+   style.muted,
+ ]
+ 
+-pub fn view(it: In) -> el.Element(Nil) {
++pub fn view(it: In, arg: Arg) -> el.Element(Nil) {
+   html.section(sketch_css.class(shell), [], [
+     html.h1(sketch_css.class([style.heading, style.ink]), [], [el.text("API鍵")]),
+     html.p(sketch_css.class(copy), [], [
+@@ -40,7 +43,7 @@
+     html.p(sketch_css.class(copy), [], [
+       html.a(
+         sketch_css.class(copy),
+-        [attribute.href(www_url(it.www_origin, "/for-stores/api/v1"))],
++        [attribute.href(www_url(arg.www_origin, "/for-stores/api/v1"))],
+         [el.text("更新ツールの公開仕様書")],
+       ),
+     ]),
+diff -ruN mid/console/src/blocks/consent_page.gleam after/console/src/blocks/consent_page.gleam
+--- mid/console/src/blocks/consent_page.gleam	2026-09-24 20:01:02.000000000 +0900
++++ after/console/src/blocks/consent_page.gleam	2026-09-25 03:14:52.408593178 +0900
+@@ -7,8 +7,11 @@
+ import sketch/lustre/element/html
+ import style
+ 
+-pub type In {
+-  In(idp_origin: String)
++pub type In =
++  Nil
++
++pub type Arg {
++  Arg(idp_origin: String)
+ }
+ 
+ const shell: List(css.Style) = [
+@@ -18,7 +21,7 @@
+   css.Flow(css.Stack(gap: style.s2)),
+ ]
+ 
+-pub fn view(it: In) -> el.Element(Nil) {
++pub fn view(it: In, arg: Arg) -> el.Element(Nil) {
+   html.section(sketch_css.class(shell), [], [
+     html.h1(sketch_css.class([style.heading, style.ink]), [], [
+       el.text("利用開始の同意"),
+@@ -30,7 +33,7 @@
+       attribute.attribute("subject", ""),
+       attribute.attribute("label", "同意して続ける"),
+     ]),
+-    html.a_([attribute.href(idp_url(it.idp_origin, "/auth/sign-out"))], [
++    html.a_([attribute.href(idp_url(arg.idp_origin, "/auth/sign-out"))], [
+       el.text("サインアウト"),
+     ]),
+   ])
+diff -ruN mid/console/src/blocks/console_header.gleam after/console/src/blocks/console_header.gleam
+--- mid/console/src/blocks/console_header.gleam	2026-09-24 20:01:02.000000000 +0900
++++ after/console/src/blocks/console_header.gleam	2026-09-25 03:14:52.408677338 +0900
+@@ -7,8 +7,11 @@
+ import sketch/lustre/element/html
+ import style
+ 
+-pub type In {
+-  In(idp_origin: String)
++pub type In =
++  Nil
++
++pub type Arg {
++  Arg(idp_origin: String)
+ }
+ 
+ const shell: List(css.Style) = [
+@@ -27,7 +30,7 @@
+   style.muted,
+ ]
+ 
+-pub fn view(it: In) -> el.Element(Nil) {
++pub fn view(it: In, arg: Arg) -> el.Element(Nil) {
+   html.header(sketch_css.class(shell), [], [
+     html.h1(sketch_css.class(title), [], [el.text("店コンソール")]),
+     html.nav(sketch_css.class(link), [attribute.aria("label", "店コンソール")], [
+@@ -37,8 +40,8 @@
+       nav_link("API鍵", "/api-key"),
+       nav_link("数字", "/metrics"),
+       nav_link("名義を切り替える", "/switch"),
+-      nav_link("サインイン", idp_url(it.idp_origin, "/auth/sign-in")),
+-      nav_link("サインアウト", idp_url(it.idp_origin, "/auth/sign-out")),
++      nav_link("サインイン", idp_url(arg.idp_origin, "/auth/sign-in")),
++      nav_link("サインアウト", idp_url(arg.idp_origin, "/auth/sign-out")),
+     ]),
+   ])
+ }
+diff -ruN mid/console/src/blocks/roster_editor.gleam after/console/src/blocks/roster_editor.gleam
+--- mid/console/src/blocks/roster_editor.gleam	2026-09-24 20:01:02.000000000 +0900
++++ after/console/src/blocks/roster_editor.gleam	2026-09-25 03:14:52.408768169 +0900
+@@ -5,6 +5,7 @@
+ import framework/front/sketch_css
+ import framework/time
+ import gen/out/store_roster_list
++import gen/out/store_roster_read
+ import gleam/int
+ import gleam/list
+ import gleam/option.{type Option, None, Some}
+@@ -13,8 +14,11 @@
+ import sketch/lustre/element/html
+ import style
+ 
+-pub type In {
+-  In(row: Option(store_roster_list.Row), www_origin: String)
++pub type In =
++  store_roster_read.Out
++
++pub type Arg {
++  Arg(id: String, www_origin: String)
+ }
+ 
+ const shell: List(css.Style) = [
+@@ -27,15 +31,8 @@
+ 
+ const title: List(css.Style) = [style.heading, style.ink]
+ 
+-pub fn view(it: In) -> el.Element(Nil) {
+-  case it.row {
+-    Some(row) -> editor(row, it.www_origin)
+-    None ->
+-      html.section(sketch_css.class(shell), [], [
+-        html.h2(sketch_css.class(title), [], [el.text("在籍が見つかりません")]),
+-        html.p(sketch_css.class(copy), [], [el.text("指定された在籍はありません。")]),
+-      ])
+-  }
++pub fn view(it: In, arg: Arg) -> el.Element(Nil) {
++  editor(it.row, arg.www_origin)
+ }
+ 
+ fn editor(row: store_roster_list.Row, www_origin: String) -> el.Element(Nil) {
+@@ -71,24 +68,24 @@
+ 
+ fn edit_form(roster: store_roster_list.Owned) -> el.Element(Nil) {
+   html.div_([], [
+-      html.noscript_([], [
+-        html.p(sketch_css.class(copy), [], [
+-          el.text("JS を有効にすると編集できます。現在の値:" <> roster.name),
+-        ]),
++    html.noscript_([], [
++      html.p(sketch_css.class(copy), [], [
++        el.text("JS を有効にすると編集できます。現在の値:" <> roster.name),
+       ]),
+-      el.island("roster-edit", [
+-        attribute.attribute("id", roster.id),
+-        attribute.attribute("name", roster.name),
+-        attribute.attribute("catch", roster.catch),
+-        attribute.attribute("body", roster.body),
+-        attribute.attribute("age", int.to_string(roster.age)),
+-        attribute.attribute("height", option_int(roster.height)),
+-        attribute.attribute("size", option_string(roster.size)),
+-        attribute.attribute("order", int.to_string(roster.order)),
+-        attribute.attribute("visible", bool_text(roster.visible)),
+-        attribute.attribute("since", time.date_to_string(roster.since)),
+-      ]),
+-    ])
++    ]),
++    el.island("roster-edit", [
++      attribute.attribute("id", roster.id),
++      attribute.attribute("name", roster.name),
++      attribute.attribute("catch", roster.catch),
++      attribute.attribute("body", roster.body),
++      attribute.attribute("age", int.to_string(roster.age)),
++      attribute.attribute("height", option_int(roster.height)),
++      attribute.attribute("size", option_string(roster.size)),
++      attribute.attribute("order", int.to_string(roster.order)),
++      attribute.attribute("visible", bool_text(roster.visible)),
++      attribute.attribute("since", time.date_to_string(roster.since)),
++    ]),
++  ])
+ }
+ 
+ fn photos(
+diff -ruN mid/console/src/blocks/roster_photo_remove_confirm.gleam after/console/src/blocks/roster_photo_remove_confirm.gleam
+--- mid/console/src/blocks/roster_photo_remove_confirm.gleam	2026-09-24 20:01:02.000000000 +0900
++++ after/console/src/blocks/roster_photo_remove_confirm.gleam	2026-09-25 03:14:52.408863930 +0900
+@@ -7,8 +7,11 @@
+ import sketch/lustre/element/html
+ import style
+ 
+-pub type In {
+-  In(id: String, order: String)
++pub type In =
++  Nil
++
++pub type Arg {
++  Arg(id: String, order: String)
+ }
+ 
+ const shell: List(css.Style) = [
+@@ -21,7 +24,7 @@
+ 
+ const copy: List(css.Style) = [style.body, style.muted]
+ 
+-pub fn view(it: In) -> el.Element(Nil) {
++pub fn view(it: In, arg: Arg) -> el.Element(Nil) {
+   html.section(sketch_css.class(shell), [], [
+     html.h2(sketch_css.class(title), [], [el.text("この写真を削除しますか")]),
+     html.p(sketch_css.class(copy), [], [el.text("この操作は取り消せません。")]),
+@@ -31,11 +34,11 @@
+       ]),
+     ]),
+     el.island("roster-photo-delete", [
+-      attribute.attribute("id", it.id),
+-      attribute.attribute("order", it.order),
++      attribute.attribute("id", arg.id),
++      attribute.attribute("order", arg.order),
+       attribute.attribute("label", "削除する"),
+     ]),
+-    html.a(sketch_css.class(copy), [attribute.href("/rosters/" <> it.id)], [
++    html.a(sketch_css.class(copy), [attribute.href("/rosters/" <> arg.id)], [
+       el.text("やめる"),
+     ]),
+   ])
+diff -ruN mid/console/src/blocks/roster_remove_confirm.gleam after/console/src/blocks/roster_remove_confirm.gleam
+--- mid/console/src/blocks/roster_remove_confirm.gleam	2026-09-24 20:01:02.000000000 +0900
++++ after/console/src/blocks/roster_remove_confirm.gleam	2026-09-25 03:14:52.408948390 +0900
+@@ -8,7 +8,11 @@
+ import style
+ 
+ pub type In =
+-  String
++  Nil
++
++pub type Arg {
++  Arg(id: String)
++}
+ 
+ const shell: List(css.Style) = [
+   style.soft,
+@@ -20,7 +24,7 @@
+ 
+ const copy: List(css.Style) = [style.body, style.muted]
+ 
+-pub fn view(id: In) -> el.Element(Nil) {
++pub fn view(_it: In, arg: Arg) -> el.Element(Nil) {
+   html.section(sketch_css.class(shell), [], [
+     html.h2(sketch_css.class(title), [], [el.text("この在籍を退店させますか")]),
+     html.p(sketch_css.class(copy), [], [el.text("この操作は取り消せません。")]),
+@@ -30,10 +34,10 @@
+       ]),
+     ]),
+     el.island("roster-remove", [
+-      attribute.attribute("id", id),
++      attribute.attribute("id", arg.id),
+       attribute.attribute("label", "退店させる"),
+     ]),
+-    html.a(sketch_css.class(copy), [attribute.href("/rosters/" <> id)], [
++    html.a(sketch_css.class(copy), [attribute.href("/rosters/" <> arg.id)], [
+       el.text("やめる"),
+     ]),
+   ])
+diff -ruN mid/console/src/blocks/session_switch.gleam after/console/src/blocks/session_switch.gleam
+--- mid/console/src/blocks/session_switch.gleam	2026-09-24 20:01:02.000000000 +0900
++++ after/console/src/blocks/session_switch.gleam	2026-09-25 03:14:52.409125892 +0900
+@@ -3,12 +3,16 @@
+ import framework/front/css
+ import framework/front/el
+ import framework/front/sketch_css
++import gen/out/subject_list
+ import lustre/attribute
+ import sketch/lustre/element/html
+ import style
+ 
+-pub type In {
+-  In(has_store: Bool, idp_origin: String)
++pub type In =
++  subject_list.Out
++
++pub type Arg {
++  Arg(idp_origin: String)
+ }
+ 
+ const shell: List(css.Style) = [
+@@ -20,10 +24,10 @@
+ 
+ const copy: List(css.Style) = [style.body, style.muted]
+ 
+-pub fn view(it: In) -> el.Element(Nil) {
+-  case it.has_store {
+-    True -> switch_form()
+-    False -> no_store(it.idp_origin)
++pub fn view(it: In, arg: Arg) -> el.Element(Nil) {
++  case it.stores {
++    [] -> no_store(arg.idp_origin)
++    _ -> switch_form()
+   }
+ }
+ 
+diff -ruN mid/console/src/layout.gleam after/console/src/layout.gleam
+--- mid/console/src/layout.gleam	2026-09-25 03:28:00.696176637 +0900
++++ after/console/src/layout.gleam	2026-09-25 03:14:52.410157910 +0900
+@@ -1,4 +1,7 @@
+-import framework/front.{type Layout, Area, Fixed, Frame, Layout, default_sp_cols, Flow}
++import framework/front.{
++  type Layout, Area, AuthOrigin, Fixed, Flow, Frame, Layout, Origin, Var,
++  default_sp_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -28,5 +31,8 @@
+   ),
+   pc: None,
+   tablet: None,
+-  reads: [],
++  vars: [
++    Var("idp_origin", AuthOrigin),
++    Var("www_origin", Origin("www")),
++  ],
+ )
+diff -ruN mid/console/src/pages/api_key/page.gleam after/console/src/pages/api_key/page.gleam
+--- mid/console/src/pages/api_key/page.gleam	2026-09-25 03:28:00.696257307 +0900
++++ after/console/src/pages/api_key/page.gleam	2026-09-25 03:14:52.409211613 +0900
+@@ -1,4 +1,6 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, Flow}
++import framework/front.{
++  type Page, Area, Fixed, Flow, Frame, Page, default_sp_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -26,5 +28,5 @@
+   ),
+   pc: None,
+   tablet: None,
+-  reads: [],
++  vars: [],
+ )
+diff -ruN mid/console/src/pages/consent/page.gleam after/console/src/pages/consent/page.gleam
+--- mid/console/src/pages/consent/page.gleam	2026-09-25 03:28:00.696338976 +0900
++++ after/console/src/pages/consent/page.gleam	2026-09-25 03:14:52.409298483 +0900
+@@ -1,4 +1,6 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, Flow}
++import framework/front.{
++  type Page, Area, Fixed, Flow, Frame, Page, default_sp_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -26,5 +28,5 @@
+   ),
+   pc: None,
+   tablet: None,
+-  reads: [],
++  vars: [],
+ )
+diff -ruN mid/console/src/pages/metrics/page.gleam after/console/src/pages/metrics/page.gleam
+--- mid/console/src/pages/metrics/page.gleam	2026-09-25 03:28:00.696410576 +0900
++++ after/console/src/pages/metrics/page.gleam	2026-09-25 03:14:52.409380004 +0900
+@@ -1,4 +1,7 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, Flow}
++import framework/front.{
++  type Page, Area, Fixed, Flow, Frame, Page, Query, Session, SubjectHandle, Var,
++  default_sp_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -26,5 +29,9 @@
+   ),
+   pc: None,
+   tablet: None,
+-  reads: [],
++  vars: [
++    Var("handle", Session(SubjectHandle)),
++    Var("from", Query("from")),
++    Var("to", Query("to")),
++  ],
+ )
+diff -ruN mid/console/src/pages/page.gleam after/console/src/pages/page.gleam
+--- mid/console/src/pages/page.gleam	2026-09-25 03:28:00.696479875 +0900
++++ after/console/src/pages/page.gleam	2026-09-25 03:14:52.409464325 +0900
+@@ -1,4 +1,7 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, Flow}
++import framework/front.{
++  type Page, Area, Fixed, Flow, Frame, Page, Session, SubjectHandle, Var,
++  default_sp_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -26,5 +29,5 @@
+   ),
+   pc: None,
+   tablet: None,
+-  reads: [],
++  vars: [Var("handle", Session(SubjectHandle))],
+ )
+diff -ruN mid/console/src/pages/rosters/arg_id/page.gleam after/console/src/pages/rosters/arg_id/page.gleam
+--- mid/console/src/pages/rosters/arg_id/page.gleam	2026-09-25 03:28:00.696556675 +0900
++++ after/console/src/pages/rosters/arg_id/page.gleam	2026-09-25 03:14:52.409550935 +0900
+@@ -1,4 +1,7 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, Flow}
++import framework/front.{
++  type Page, Area, Fixed, Flow, Frame, Page, Path, Session, SubjectHandle, Var,
++  default_sp_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -26,5 +29,8 @@
+   ),
+   pc: None,
+   tablet: None,
+-  reads: [],
++  vars: [
++    Var("handle", Session(SubjectHandle)),
++    Var("id", Path("id")),
++  ],
+ )
+diff -ruN mid/console/src/pages/rosters/arg_id/photos/arg_order/remove/page.gleam after/console/src/pages/rosters/arg_id/photos/arg_order/remove/page.gleam
+--- mid/console/src/pages/rosters/arg_id/photos/arg_order/remove/page.gleam	2026-09-25 03:28:00.696633084 +0900
++++ after/console/src/pages/rosters/arg_id/photos/arg_order/remove/page.gleam	2026-09-25 03:14:52.409649496 +0900
+@@ -1,4 +1,6 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, Flow}
++import framework/front.{
++  type Page, Area, Fixed, Flow, Frame, Page, Path, Var, default_sp_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -19,12 +21,17 @@
+         style: style.page,
+       ),
+     ],
+-    placements: [Fixed(area: "page", block: blocks.RosterPhotoRemoveConfirm, cell: Flow)],
++    placements: [
++      Fixed(area: "page", block: blocks.RosterPhotoRemoveConfirm, cell: Flow),
++    ],
+     cols: default_sp_cols,
+     rows: [],
+     template: [],
+   ),
+   pc: None,
+   tablet: None,
+-  reads: [],
++  vars: [
++    Var("id", Path("id")),
++    Var("order", Path("order")),
++  ],
+ )
+diff -ruN mid/console/src/pages/rosters/arg_id/remove/page.gleam after/console/src/pages/rosters/arg_id/remove/page.gleam
+--- mid/console/src/pages/rosters/arg_id/remove/page.gleam	2026-09-25 03:28:00.696706023 +0900
++++ after/console/src/pages/rosters/arg_id/remove/page.gleam	2026-09-25 03:14:52.409735427 +0900
+@@ -1,4 +1,6 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, Flow}
++import framework/front.{
++  type Page, Area, Fixed, Flow, Frame, Page, Path, Var, default_sp_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -19,12 +21,14 @@
+         style: style.page,
+       ),
+     ],
+-    placements: [Fixed(area: "page", block: blocks.RosterRemoveConfirm, cell: Flow)],
++    placements: [
++      Fixed(area: "page", block: blocks.RosterRemoveConfirm, cell: Flow),
++    ],
+     cols: default_sp_cols,
+     rows: [],
+     template: [],
+   ),
+   pc: None,
+   tablet: None,
+-  reads: [],
++  vars: [Var("id", Path("id"))],
+ )
+diff -ruN mid/console/src/pages/rosters/new/page.gleam after/console/src/pages/rosters/new/page.gleam
+--- mid/console/src/pages/rosters/new/page.gleam	2026-09-25 03:28:00.696776283 +0900
++++ after/console/src/pages/rosters/new/page.gleam	2026-09-25 03:14:52.409824608 +0900
+@@ -1,4 +1,6 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, Flow}
++import framework/front.{
++  type Page, Area, Fixed, Flow, Frame, Page, default_sp_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -26,5 +28,5 @@
+   ),
+   pc: None,
+   tablet: None,
+-  reads: [],
++  vars: [],
+ )
+diff -ruN mid/console/src/pages/rosters/page.gleam after/console/src/pages/rosters/page.gleam
+--- mid/console/src/pages/rosters/page.gleam	2026-09-25 03:28:00.696845252 +0900
++++ after/console/src/pages/rosters/page.gleam	2026-09-25 03:14:52.409910128 +0900
+@@ -1,4 +1,7 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, Flow}
++import framework/front.{
++  type Page, Area, Fixed, Flow, Frame, Page, Session, SubjectHandle, Var,
++  default_sp_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -26,5 +29,5 @@
+   ),
+   pc: None,
+   tablet: None,
+-  reads: [],
++  vars: [Var("handle", Session(SubjectHandle))],
+ )
+diff -ruN mid/console/src/pages/schedule/page.gleam after/console/src/pages/schedule/page.gleam
+--- mid/console/src/pages/schedule/page.gleam	2026-09-25 03:28:00.696914502 +0900
++++ after/console/src/pages/schedule/page.gleam	2026-09-25 03:14:52.409988349 +0900
+@@ -1,4 +1,7 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, Flow}
++import framework/front.{
++  type Page, Area, Fixed, Flow, Frame, Page, Session, SubjectHandle, Var,
++  default_sp_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -26,5 +29,5 @@
+   ),
+   pc: None,
+   tablet: None,
+-  reads: [],
++  vars: [Var("handle", Session(SubjectHandle))],
+ )
+diff -ruN mid/console/src/pages/switch/page.gleam after/console/src/pages/switch/page.gleam
+--- mid/console/src/pages/switch/page.gleam	2026-09-25 03:28:00.696985691 +0900
++++ after/console/src/pages/switch/page.gleam	2026-09-25 03:14:52.410028571 +0900
+@@ -1,4 +1,6 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, Flow}
++import framework/front.{
++  type Page, Area, Fixed, Flow, Frame, Page, default_sp_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -26,5 +28,5 @@
+   ),
+   pc: None,
+   tablet: None,
+-  reads: [],
++  vars: [],
+ )
+diff -ruN mid/muses/src/blocks/article_edit.gleam after/muses/src/blocks/article_edit.gleam
+--- mid/muses/src/blocks/article_edit.gleam	1970-01-01 09:00:00.000000000 +0900
++++ after/muses/src/blocks/article_edit.gleam	2026-09-25 03:14:52.405249110 +0900
+@@ -0,0 +1,16 @@
++//// ArticleEdit Block: existing ArticleRead includes owner Draft rows.
++
++import blocks/article_form
++import framework/front/el
++import gen/out/article_read
++
++pub type In =
++  article_read.Out
++
++pub type Arg {
++  Arg(handle: String, id: String)
++}
++
++pub fn view(it: In, _arg: Arg) -> el.Element(Nil) {
++  article_form.view_mode(article_form.Edit(article: it.article, phase: it.phase))
++}
+diff -ruN mid/muses/src/blocks/article_form.gleam after/muses/src/blocks/article_form.gleam
+--- mid/muses/src/blocks/article_form.gleam	2026-09-24 20:01:02.000000000 +0900
++++ after/muses/src/blocks/article_form.gleam	2026-09-25 03:27:16.546451531 +0900
+@@ -4,16 +4,19 @@
+ import framework/front/el
+ import framework/front/sketch_css
+ import framework/time
+-import gen/out/article_list_mine
++import gen/out/article_read
+ import gleam/int
+ import gleam/option.{type Option, None, Some}
+ import lustre/attribute
+ import sketch/lustre/element/html
+ import style
+ 
+-pub type In {
++pub type In =
++  Nil
++
++pub type Mode {
+   New
+-  Edit(article: article_list_mine.Article, phase: article_list_mine.Phase)
++  Edit(article: article_read.Article, phase: article_read.Phase)
+ }
+ 
+ const shell: List(css.Style) = [
+@@ -32,7 +35,11 @@
+   style.ink,
+ ]
+ 
+-pub fn view(it: In) -> el.Element(Nil) {
++pub fn view(_it: In) -> el.Element(Nil) {
++  view_mode(New)
++}
++
++pub fn view_mode(it: Mode) -> el.Element(Nil) {
+   let values = values(it)
+   html.section(sketch_css.class(shell), [], [
+     html.h2(sketch_css.class(heading), [], [el.text(values.title)]),
+@@ -90,7 +97,7 @@
+   )
+ }
+ 
+-fn values(it: In) -> Values {
++fn values(it: Mode) -> Values {
+   case it {
+     New ->
+       Values(
+@@ -183,12 +190,12 @@
+   ])
+ }
+ 
+-fn phase_name(value: article_list_mine.Phase) -> String {
++fn phase_name(value: article_read.Phase) -> String {
+   case value {
+-    article_list_mine.Draft -> "draft"
+-    article_list_mine.Scheduled -> "scheduled"
+-    article_list_mine.Published -> "published"
+-    article_list_mine.Retracted -> "retracted"
++    article_read.Draft -> "draft"
++    article_read.Scheduled -> "scheduled"
++    article_read.Published -> "published"
++    article_read.Retracted -> "retracted"
+   }
+ }
+ 
+diff -ruN mid/muses/src/blocks/article_new.gleam after/muses/src/blocks/article_new.gleam
+--- mid/muses/src/blocks/article_new.gleam	1970-01-01 09:00:00.000000000 +0900
++++ after/muses/src/blocks/article_new.gleam	2026-09-25 03:14:52.405390031 +0900
+@@ -0,0 +1,11 @@
++//// ArticleNew Block ── 新規記事の入力画面。編集画面と form Component を共有する。
++
++import blocks/article_form
++import framework/front/el
++
++pub type In =
++  Nil
++
++pub fn view(_it: In) -> el.Element(Nil) {
++  article_form.view_mode(article_form.New)
++}
+diff -ruN mid/muses/src/blocks/heaven_list.gleam after/muses/src/blocks/heaven_list.gleam
+--- mid/muses/src/blocks/heaven_list.gleam	1970-01-01 09:00:00.000000000 +0900
++++ after/muses/src/blocks/heaven_list.gleam	2026-09-25 03:27:16.546451531 +0900
+@@ -0,0 +1,16 @@
++//// HeavenList Block: MuseHeavenList.Out.
++
++import blocks/heaven_panel as panel
++import framework/front/el
++import gen/out/muse_heaven_list
++
++pub type In =
++  muse_heaven_list.Out
++
++pub type Arg {
++  Arg(handle: String)
++}
++
++pub fn view(it: In, _arg: Arg) -> el.Element(Nil) {
++  panel.linked_view(it)
++}
+diff -ruN mid/muses/src/blocks/heaven_panel.gleam after/muses/src/blocks/heaven_panel.gleam
+--- mid/muses/src/blocks/heaven_panel.gleam	2026-09-24 20:01:02.000000000 +0900
++++ after/muses/src/blocks/heaven_panel.gleam	2026-09-25 03:39:44.457833390 +0900
+@@ -11,8 +11,11 @@
+ import sketch/lustre/element/html
+ import style
+ 
+-pub type In {
+-  In(muse: muse_read.Out, heavens: muse_heaven_list.Out)
++pub type In =
++  muse_read.Out
++
++pub type Arg {
++  Arg(handle: String)
+ }
+ 
+ const shell: List(css.Style) = [
+@@ -39,10 +42,9 @@
+   style.ink,
+ ]
+ 
+-pub fn view(it: In) -> el.Element(Nil) {
+-  let muse_read.Out(muse: muse, ..) = it.muse
++pub fn view(it: In, _arg: Arg) -> el.Element(Nil) {
+   let muse_read.MusePublic(name: name, headline: headline, icon: icon, ..) =
+-    muse
++    it.muse
+   html.section(sketch_css.class(shell), [], [
+     html.h1(sketch_css.class(title), [], [el.text("ヘブン連携")]),
+     html.p(sketch_css.class(copy), [], [
+@@ -56,14 +58,10 @@
+         attribute.attribute("icon", option_blob(icon)),
+       ]),
+     ]),
+-    html.div(sketch_css.class(card), [], [
+-      html.h2(sketch_css.class(title), [], [el.text("連携済み")]),
+-      linked_view(it.heavens),
+-    ]),
+   ])
+ }
+ 
+-fn linked_view(value: muse_heaven_list.Out) -> el.Element(Nil) {
++pub fn linked_view(value: muse_heaven_list.Out) -> el.Element(Nil) {
+   case value.items {
+     [] ->
+       html.p(sketch_css.class(copy), [], [
+diff -ruN mid/muses/src/blocks/home.gleam after/muses/src/blocks/home.gleam
+--- mid/muses/src/blocks/home.gleam	2026-09-24 20:01:02.000000000 +0900
++++ after/muses/src/blocks/home.gleam	2026-09-25 03:39:44.457833390 +0900
+@@ -12,12 +12,11 @@
+ import sketch/lustre/element/html
+ import style
+ 
+-pub type In {
+-  In(
+-    muse: muse_read.Out,
+-    inbox: notification_inbox.Out,
+-    metrics: metrics_muse.Out,
+-  )
++pub type In =
++  muse_read.Out
++
++pub type Arg {
++  Arg(handle: String)
+ }
+ 
+ const shell: List(css.Style) = [
+@@ -36,55 +35,22 @@
+   style.ink,
+ ]
+ 
+-pub fn view(it: In) -> el.Element(Nil) {
+-  let In(muse: muse, inbox: inbox, metrics: metrics) = it
++pub fn view(it: In, _arg: Arg) -> el.Element(Nil) {
+   let muse_read.MusePublic(name: name, headline: headline, handle: handle, ..) =
+-    muse.muse
+-  let notification_inbox.Out(unread: unread, ..) = inbox
+-  let metrics_muse.Out(metrics: numbers, ..) = metrics
+-
++    it.muse
+   html.div_([], [
+     public_url_card(handle),
+     html.section(sketch_css.class(shell), [], [
+       html.h2(sketch_css.class(heading), [], [el.text("現在の名義")]),
+       html.p(sketch_css.class(heading), [], [el.text(name)]),
+       optional_paragraph(headline),
+-      html.p(sketch_css.class(copy), [], [
+-        el.text("公開ページと記事をここから整えます。"),
+-      ]),
+-      html.nav(
+-        sketch_css.class(copy),
+-        [attribute.aria("label", "console の導線")],
+-        [
+-          link("記事を管理", "/articles"),
+-          link("ページを組む", "/page"),
+-          link("ヘブン連携", "/heaven"),
+-          link("リンク集", "/links"),
+-          link("プロフィールと設定", "/settings"),
+-          link("受信箱", "/inbox"),
+-          link("数字", "/metrics"),
+-        ],
+-      ),
++      html.p(sketch_css.class(copy), [], [el.text("公開ページと記事をここから整えます。")]),
+     ]),
+     html.section(sketch_css.class(shell), [], [
+       html.h2(sketch_css.class(heading), [], [el.text("成人確認")]),
+-      html.p(sketch_css.class(copy), [], [
+-        el.text("この面は18歳以上の方が利用できます。"),
+-      ]),
++      html.p(sketch_css.class(copy), [], [el.text("この面は18歳以上の方が利用できます。")]),
+       el.island("adult-declare", []),
+     ]),
+-    html.section(sketch_css.class(shell), [], [
+-      html.div_([], [
+-        html.h2(sketch_css.class(heading), [], [el.text("受信箱")]),
+-        link("一覧を見る", "/inbox"),
+-      ]),
+-      html.p(sketch_css.class(copy), [], [
+-        el.text("未読 "),
+-        el.text(int.to_string(unread)),
+-        el.text("件"),
+-      ]),
+-    ]),
+-    metrics_card(numbers),
+   ])
+ }
+ 
+@@ -112,7 +78,7 @@
+   ])
+ }
+ 
+-fn metrics_card(numbers: metrics_muse.Metrics) -> el.Element(Nil) {
++pub fn metrics_card(numbers: metrics_muse.Metrics) -> el.Element(Nil) {
+   html.section(sketch_css.class(shell), [], [
+     html.div_([], [
+       html.h2(sketch_css.class(heading), [], [el.text("今日の数字")]),
+diff -ruN mid/muses/src/blocks/home_inbox.gleam after/muses/src/blocks/home_inbox.gleam
+--- mid/muses/src/blocks/home_inbox.gleam	1970-01-01 09:00:00.000000000 +0900
++++ after/muses/src/blocks/home_inbox.gleam	2026-09-25 03:27:16.546451531 +0900
+@@ -0,0 +1,12 @@
++//// HomeInbox Block: unread count from NotificationInbox.Out.
++
++import framework/front/el
++import gen/out/notification_inbox
++import gleam/int
++
++pub type In =
++  notification_inbox.Out
++
++pub fn view(it: In) -> el.Element(Nil) {
++  el.text(int.to_string(it.unread))
++}
+diff -ruN mid/muses/src/blocks/home_metrics.gleam after/muses/src/blocks/home_metrics.gleam
+--- mid/muses/src/blocks/home_metrics.gleam	1970-01-01 09:00:00.000000000 +0900
++++ after/muses/src/blocks/home_metrics.gleam	2026-09-25 03:14:52.405711924 +0900
+@@ -0,0 +1,18 @@
++//// HomeMetrics Block: MetricsMuse.Out.
++
++import gleam/option.{type Option}
++
++import blocks/home
++import framework/front/el
++import gen/out/metrics_muse
++
++pub type In =
++  metrics_muse.Out
++
++pub type Arg {
++  Arg(from: Option(String), to: Option(String))
++}
++
++pub fn view(it: In, _arg: Arg) -> el.Element(Nil) {
++  home.metrics_card(it.metrics)
++}
+diff -ruN mid/muses/src/blocks/link_import.gleam after/muses/src/blocks/link_import.gleam
+--- mid/muses/src/blocks/link_import.gleam	1970-01-01 09:00:00.000000000 +0900
++++ after/muses/src/blocks/link_import.gleam	2026-09-25 03:14:52.405760254 +0900
+@@ -0,0 +1,12 @@
++//// LinkImport Block: LinkImportRead.Out.
++
++import blocks/link_list as links
++import framework/front/el
++import gen/out/link_import_read
++
++pub type In =
++  link_import_read.Out
++
++pub fn view(it: In) -> el.Element(Nil) {
++  links.import_section(it)
++}
+diff -ruN mid/muses/src/blocks/link_list.gleam after/muses/src/blocks/link_list.gleam
+--- mid/muses/src/blocks/link_list.gleam	2026-09-24 20:01:02.000000000 +0900
++++ after/muses/src/blocks/link_list.gleam	2026-09-25 03:14:52.405826264 +0900
+@@ -10,8 +10,11 @@
+ import sketch/lustre/element/html
+ import style
+ 
+-pub type In {
+-  In(links: link_list.Out, proposal: link_import_read.Out)
++pub type In =
++  link_list.Out
++
++pub type Arg {
++  Arg(handle: String)
+ }
+ 
+ const shell: List(css.Style) = [
+@@ -28,15 +31,14 @@
+ 
+ const copy: List(css.Style) = [style.body, style.muted]
+ 
+-pub fn view(it: In) -> el.Element(Nil) {
++pub fn view(it: In, _arg: Arg) -> el.Element(Nil) {
+   html.section(sketch_css.class(shell), [], [
+     html.h1(sketch_css.class(copy), [], [el.text("リンク集")]),
+     html.p(sketch_css.class(copy), [], [
+       el.text("リンクの追加と並べ替え、lit.link の候補取り込みを行います。"),
+     ]),
+     add_form(),
+-    import_section(it.proposal),
+-    link_section(it.links),
++    link_section(it),
+   ])
+ }
+ 
+@@ -54,7 +56,7 @@
+   ])
+ }
+ 
+-fn import_section(proposal: link_import_read.Out) -> el.Element(Nil) {
++pub fn import_section(proposal: link_import_read.Out) -> el.Element(Nil) {
+   let body = case proposal.proposal {
+     None -> el.text("")
+     Some(row) -> proposal_view(row)
+diff -ruN mid/muses/src/blocks/metrics_dashboard.gleam after/muses/src/blocks/metrics_dashboard.gleam
+--- mid/muses/src/blocks/metrics_dashboard.gleam	2026-09-24 20:01:02.000000000 +0900
++++ after/muses/src/blocks/metrics_dashboard.gleam	2026-09-25 03:14:52.405919565 +0900
+@@ -12,8 +12,18 @@
+ import sketch/lustre/element/html
+ import style
+ 
+-pub type In {
+-  In(metrics: metrics_muse.Out, from: String, to: String)
++pub type In =
++  metrics_muse.Out
++
++pub type Arg {
++  Arg(from: Option(String), to: Option(String))
++}
++
++fn option_value(value: Option(String)) -> String {
++  case value {
++    Some(value) -> value
++    None -> ""
++  }
+ }
+ 
+ const shell: List(css.Style) = [
+@@ -30,15 +40,15 @@
+ 
+ const copy: List(css.Style) = [style.body, style.muted]
+ 
+-pub fn view(it: In) -> el.Element(Nil) {
++pub fn view(it: In, arg: Arg) -> el.Element(Nil) {
+   let metrics_muse.Out(metrics: metrics, circulation_rate: rate, median: median) =
+-    it.metrics
++    it
+   html.section(sketch_css.class(shell), [], [
+     html.h1(sketch_css.class(copy), [], [el.text("数字")]),
+     html.p(sketch_css.class(copy), [], [
+       el.text("期間と経路ごとの閲覧を確認します。"),
+     ]),
+-    period_form(it.from, it.to),
++    period_form(option_value(arg.from), option_value(arg.to)),
+     summary(metrics, rate, median),
+     daily(metrics.daily),
+     distribution(metrics.distribution),
+diff -ruN mid/muses/src/blocks/onboard_wizard.gleam after/muses/src/blocks/onboard_wizard.gleam
+--- mid/muses/src/blocks/onboard_wizard.gleam	2026-09-24 20:01:02.000000000 +0900
++++ after/muses/src/blocks/onboard_wizard.gleam	2026-09-25 03:14:52.406004466 +0900
+@@ -6,6 +6,9 @@
+ import sketch/lustre/element/html
+ import style
+ 
++pub type In =
++  Nil
++
+ const shell: List(css.Style) = [
+   style.white,
+   style.ink,
+@@ -22,7 +25,7 @@
+   style.ink,
+ ]
+ 
+-pub fn view(_it: Nil) -> el.Element(Nil) {
++pub fn view(_it: In) -> el.Element(Nil) {
+   html.section(sketch_css.class(shell), [], [
+     html.h2(sketch_css.class(heading), [], [el.text("オンボード")]),
+     html.p(sketch_css.class(copy), [], [
+diff -ruN mid/muses/src/blocks/settings.gleam after/muses/src/blocks/settings.gleam
+--- mid/muses/src/blocks/settings.gleam	2026-09-24 20:01:02.000000000 +0900
++++ after/muses/src/blocks/settings.gleam	2026-09-25 03:39:44.457833390 +0900
+@@ -12,13 +12,11 @@
+ import sketch/lustre/element/html
+ import style
+ 
+-pub type In {
+-  In(
+-    muse: muse_read.Out,
+-    rosters: roster_list_mine.Out,
+-    subjects: List(#(String, String, Bool)),
+-    consents: #(Bool, Bool),
+-  )
++pub type In =
++  muse_read.Out
++
++pub type Arg {
++  Arg(handle: String)
+ }
+ 
+ const shell: List(css.Style) = [
+@@ -35,16 +33,11 @@
+ 
+ const copy: List(css.Style) = [style.body, style.muted]
+ 
+-pub fn view(it: In) -> el.Element(Nil) {
++pub fn view(it: In, _arg: Arg) -> el.Element(Nil) {
+   html.section(sketch_css.class(shell), [], [
+     html.h1(sketch_css.class(copy), [], [el.text("設定")]),
+-    html.p(sketch_css.class(copy), [], [
+-      el.text("プロフィール、名義、同意を確認します。"),
+-    ]),
+-    profile(it.muse),
+-    subjects(it.subjects),
+-    rosters(it.rosters),
+-    consents(it.consents),
++    html.p(sketch_css.class(copy), [], [el.text("プロフィール、名義、同意を確認します。")]),
++    profile(it),
+   ])
+ }
+ 
+@@ -78,7 +71,7 @@
+   ])
+ }
+ 
+-fn subjects(rows: List(#(String, String, Bool))) -> el.Element(Nil) {
++pub fn subjects(rows: List(#(String, String, Bool))) -> el.Element(Nil) {
+   html.section(sketch_css.class(card), [], [
+     html.h2(sketch_css.class(copy), [], [el.text("名義を切り替え")]),
+     html.p(sketch_css.class(copy), [], [
+@@ -121,7 +114,7 @@
+   ])
+ }
+ 
+-fn rosters(value: roster_list_mine.Out) -> el.Element(Nil) {
++pub fn rosters(value: roster_list_mine.Out) -> el.Element(Nil) {
+   let body = case value.rosters {
+     [] -> html.p(sketch_css.class(copy), [], [el.text("claim 済みの在籍はありません。")])
+     _ -> html.ul_([], [el.each(value.rosters, roster_view)])
+@@ -152,45 +145,6 @@
+   ])
+ }
+ 
+-fn consents(value: #(Bool, Bool)) -> el.Element(Nil) {
+-  let #(use_confirmed, handling_confirmed) = value
+-  html.section(sketch_css.class(card), [], [
+-    html.h2(sketch_css.class(copy), [], [el.text("同意の確認")]),
+-    consent_row("利用開始", "use", use_confirmed),
+-    consent_row("通信の取扱い", "handling", handling_confirmed),
+-    html.p(sketch_css.class(copy), [], [
+-      el.text("同意の撤回と退会は確認画面を伴う機能として扱います。"),
+-    ]),
+-  ])
+-}
+-
+-fn consent_row(
+-  label: String,
+-  kind: String,
+-  confirmed: Bool,
+-) -> el.Element(Nil) {
+-  let status = case confirmed {
+-    True -> "確認済み"
+-    False -> "未確認"
+-  }
+-  html.div_([], [
+-    html.span(sketch_css.class(copy), [], [el.text(label)]),
+-    html.strong(sketch_css.class(copy), [], [el.text(status)]),
+-    consent_action(kind, confirmed),
+-  ])
+-}
+-
+-fn consent_action(kind: String, confirmed: Bool) -> el.Element(Nil) {
+-  case confirmed {
+-    True -> el.text("")
+-    False ->
+-      el.island("consent-give", [
+-        attribute.attribute("kind", kind),
+-        attribute.attribute("label", "同意する"),
+-      ])
+-  }
+-}
+-
+ fn plain_field(label: String, name: String, value: String) -> el.Element(Nil) {
+   html.label_([], [
+     el.text(label),
+diff -ruN mid/muses/src/blocks/settings_rosters.gleam after/muses/src/blocks/settings_rosters.gleam
+--- mid/muses/src/blocks/settings_rosters.gleam	1970-01-01 09:00:00.000000000 +0900
++++ after/muses/src/blocks/settings_rosters.gleam	2026-09-25 03:27:16.546451531 +0900
+@@ -0,0 +1,12 @@
++//// SettingsRosters Block: RosterListMine.Out.
++
++import blocks/settings
++import framework/front/el
++import gen/out/roster_list_mine
++
++pub type In =
++  roster_list_mine.Out
++
++pub fn view(it: In) -> el.Element(Nil) {
++  settings.rosters(it)
++}
+diff -ruN mid/muses/src/blocks/settings_subjects.gleam after/muses/src/blocks/settings_subjects.gleam
+--- mid/muses/src/blocks/settings_subjects.gleam	1970-01-01 09:00:00.000000000 +0900
++++ after/muses/src/blocks/settings_subjects.gleam	2026-09-25 03:14:52.406248048 +0900
+@@ -0,0 +1,12 @@
++//// SettingsSubjects Block: linked subjects; consent status is not displayed.
++
++import blocks/settings
++import framework/front/el
++import gen/out/subject_settings_read
++
++pub type In =
++  subject_settings_read.Out
++
++pub fn view(it: In) -> el.Element(Nil) {
++  settings.subjects(it.subjects)
++}
+diff -ruN mid/muses/src/blocks/space_list.gleam after/muses/src/blocks/space_list.gleam
+--- mid/muses/src/blocks/space_list.gleam	2026-09-24 20:01:02.000000000 +0900
++++ after/muses/src/blocks/space_list.gleam	2026-09-25 03:27:16.546451531 +0900
+@@ -12,6 +12,10 @@
+ pub type In =
+   space_list.Out
+ 
++pub type Arg {
++  Arg(handle: String)
++}
++
+ const shell: List(css.Style) = [
+   style.soft,
+   style.ink,
+@@ -23,10 +27,10 @@
+   style.muted,
+ ]
+ 
+-pub fn view(it: In) -> el.Element(Nil) {
++pub fn view(it: In, _arg: Arg) -> el.Element(Nil) {
+   let rows = case it.spaces {
+     [] -> html.p(sketch_css.class(copy), [], [el.text("場所はありません。")])
+-    _ -> html.ul_([], [el.each(it.spaces, space_row.view)])
++    _ -> html.ul_([], [el.each(it.spaces, space_row.row_view)])
+   }
+ 
+   html.section(sketch_css.class(shell), [], [
+diff -ruN mid/muses/src/blocks/space_row.gleam after/muses/src/blocks/space_row.gleam
+--- mid/muses/src/blocks/space_row.gleam	2026-09-24 20:01:02.000000000 +0900
++++ after/muses/src/blocks/space_row.gleam	2026-09-25 03:27:16.546451531 +0900
+@@ -9,7 +9,7 @@
+ import style
+ 
+ pub type In =
+-  space_list.FreeSpace
++  space_list.Out
+ 
+ const shell: List(css.Style) = [
+   style.white,
+@@ -23,6 +23,10 @@
+ ]
+ 
+ pub fn view(it: In) -> el.Element(Nil) {
++  el.each(it.spaces, fn(row) { row_view(row) })
++}
++
++pub fn row_view(it: space_list.FreeSpace) -> el.Element(Nil) {
+   let visibility = case it.visible {
+     True -> "表示中"
+     False -> "非表示"
+diff -ruN mid/muses/src/blocks/space_selector.gleam after/muses/src/blocks/space_selector.gleam
+--- mid/muses/src/blocks/space_selector.gleam	2026-09-24 20:01:02.000000000 +0900
++++ after/muses/src/blocks/space_selector.gleam	2026-09-25 03:27:16.547451532 +0900
+@@ -1,5 +1,7 @@
+ //// SpaceSelector Block ── query string で場所を選ぶ SSR フォーム。
+ 
++import gleam/option.{type Option, None, Some}
++
+ import framework/front/css
+ import framework/front/el
+ import framework/front/sketch_css
+@@ -8,8 +10,18 @@
+ import sketch/lustre/element/html
+ import style
+ 
+-pub type In {
+-  In(spaces: space_list.Out, selected: String)
++pub type In =
++  space_list.Out
++
++pub type Arg {
++  Arg(selected: Option(String), handle: String)
++}
++
++fn option_value(value: Option(String)) -> String {
++  case value {
++    Some(value) -> value
++    None -> ""
++  }
+ }
+ 
+ const shell: List(css.Style) = [
+@@ -23,8 +35,9 @@
+   style.muted,
+ ]
+ 
+-pub fn view(it: In) -> el.Element(Nil) {
+-  let In(spaces: spaces, selected: selected) = it
++pub fn view(it: In, arg: Arg) -> el.Element(Nil) {
++  let spaces = it
++  let selected = option_value(arg.selected)
+ 
+   html.section(sketch_css.class(shell), [], [
+     html.h2(sketch_css.class(copy), [], [el.text("表示する場所")]),
+diff -ruN mid/muses/src/blocks/theme_form.gleam after/muses/src/blocks/theme_form.gleam
+--- mid/muses/src/blocks/theme_form.gleam	2026-09-24 20:01:02.000000000 +0900
++++ after/muses/src/blocks/theme_form.gleam	2026-09-25 03:14:52.406572831 +0900
+@@ -38,24 +38,31 @@
+ 
+   html.section(sketch_css.class(shell), [], [
+     html.h2(sketch_css.class(copy), [], [el.text("テーマ")]),
+-    html.form_([attribute.action("/api/muse/set_theme"), attribute.method("post")], [
+-      html.noscript_([], [
+-        field("背景色", "background", option_string(theme.background)),
+-        field("背景画像キー", "background_image", option_blob(theme.background_image)),
+-        field("文字色", "text", option_string(theme.text)),
+-        field("アクセント色", "accent", option_string(theme.accent)),
+-        html.button_([attribute.type_("submit")], [el.text("テーマを保存")]),
+-      ]),
+-      el.island("theme-save", [
+-        attribute.attribute("background", option_string(theme.background)),
+-        attribute.attribute(
+-          "background_image",
+-          option_blob(theme.background_image),
+-        ),
+-        attribute.attribute("text", option_string(theme.text)),
+-        attribute.attribute("accent", option_string(theme.accent)),
+-      ]),
+-    ]),
++    html.form_(
++      [attribute.action("/api/muse/set_theme"), attribute.method("post")],
++      [
++        html.noscript_([], [
++          field("背景色", "background", option_string(theme.background)),
++          field(
++            "背景画像キー",
++            "background_image",
++            option_blob(theme.background_image),
++          ),
++          field("文字色", "text", option_string(theme.text)),
++          field("アクセント色", "accent", option_string(theme.accent)),
++          html.button_([attribute.type_("submit")], [el.text("テーマを保存")]),
++        ]),
++        el.island("theme-save", [
++          attribute.attribute("background", option_string(theme.background)),
++          attribute.attribute(
++            "background_image",
++            option_blob(theme.background_image),
++          ),
++          attribute.attribute("text", option_string(theme.text)),
++          attribute.attribute("accent", option_string(theme.accent)),
++        ]),
++      ],
++    ),
+   ])
+ }
+ 
+diff -ruN mid/muses/src/blocks/unclaim_confirm.gleam after/muses/src/blocks/unclaim_confirm.gleam
+--- mid/muses/src/blocks/unclaim_confirm.gleam	2026-09-24 20:01:02.000000000 +0900
++++ after/muses/src/blocks/unclaim_confirm.gleam	2026-09-25 03:27:16.548451533 +0900
+@@ -9,9 +9,8 @@
+ import sketch/lustre/element/html
+ import style
+ 
+-pub type In {
+-  In(rosters: roster_list_mine.Out)
+-}
++pub type In =
++  roster_list_mine.Out
+ 
+ const shell: List(css.Style) = [
+   style.soft,
+@@ -22,7 +21,7 @@
+ const copy: List(css.Style) = [style.body, style.muted]
+ 
+ pub fn view(it: In) -> el.Element(Nil) {
+-  case first(it.rosters.rosters) {
++  case first(it.rosters) {
+     Some(#(roster, store)) ->
+       html.section(sketch_css.class(shell), [], [
+         html.h1(sketch_css.class(copy), [], [el.text("在籍から外す")]),
+diff -ruN mid/muses/src/blocks/widget_form.gleam after/muses/src/blocks/widget_form.gleam
+--- mid/muses/src/blocks/widget_form.gleam	2026-09-24 20:01:02.000000000 +0900
++++ after/muses/src/blocks/widget_form.gleam	2026-09-25 03:14:52.406767422 +0900
+@@ -20,8 +20,11 @@
+   Edit(widget_list.Row)
+ }
+ 
+-pub type In {
+-  In(mode: Mode, spaces: space_list.Out, heavens: muse_heaven_list.Out)
++pub type In =
++  muse_heaven_list.Out
++
++pub type Arg {
++  Arg(kind: Option(String), space: Option(String), handle: String)
+ }
+ 
+ type Draft {
+@@ -43,6 +46,13 @@
+   )
+ }
+ 
++fn option_value(value: Option(String), fallback: String) -> String {
++  case value {
++    Some(value) -> value
++    None -> fallback
++  }
++}
++
+ const shell: List(css.Style) = [
+   style.soft,
+   style.ink,
+@@ -59,66 +69,23 @@
+   style.ink,
+ ]
+ 
+-pub fn view(it: In) -> el.Element(Nil) {
+-  let draft = draft(it.mode)
+-  let heading = case it.mode {
+-    New(..) -> "Widgetを追加"
+-    Edit(..) -> "Widgetを編集"
+-  }
+-  let picker = case it.mode {
+-    New(..) -> kind_picker(draft.kind)
+-    Edit(..) ->
+-      html.p(sketch_css.class(copy), [], [
+-        el.text("種類：" <> kind_label(draft.kind)),
+-      ])
+-  }
++pub fn view(it: In, arg: Arg) -> el.Element(Nil) {
++  let mode =
++    New(kind: query_value(arg.kind, "text"), space: query_value(arg.space, ""))
++  let draft = draft(mode)
++  html.form_([attribute.action("/api/widgets"), attribute.method("post")], [
++    html.h2(sketch_css.class(title), [], [el.text("Widgetを追加")]),
++    kind_picker(draft.kind),
++    fields(draft, it),
++    html.button_([attribute.type_("submit")], [el.text("保存")]),
++  ])
++}
+ 
+-  let fallback = case it.mode {
+-    New(..) ->
+-      html.noscript_([], [
+-        hidden("kind", draft.kind),
+-        place_field(it.mode, draft.space, it.spaces),
+-        fields(draft, it.heavens),
+-        html.button_([attribute.type_("submit")], [el.text("保存")]),
+-      ])
+-    Edit(..) ->
+-      html.noscript_([], [
+-        html.p(sketch_css.class(copy), [], [
+-          el.text("Widget の編集には JavaScript が必要です。"),
+-        ]),
+-      ])
++fn query_value(value: Option(String), fallback: String) -> String {
++  case value {
++    Some(value) -> value
++    None -> fallback
+   }
+-  let content = [
+-    fallback,
+-    el.island("widget-save", [
+-      attribute.attribute("mode", mode_name(it.mode)),
+-      attribute.attribute("id", draft.id),
+-      attribute.attribute("kind", draft.kind),
+-      attribute.attribute("space", draft.space),
+-      attribute.attribute("title", draft.title),
+-      attribute.attribute("body", draft.body),
+-      attribute.attribute("image", draft.image),
+-      attribute.attribute("caption", draft.caption),
+-      attribute.attribute("url", draft.url),
+-      attribute.attribute("heaven", draft.heaven),
+-      attribute.attribute("design", draft.design),
+-      attribute.attribute("num", draft.num),
+-      attribute.attribute("color", draft.color),
+-      attribute.attribute("fontsize", draft.fontsize),
+-      attribute.attribute("height", draft.height),
+-      attribute.attribute("spaces", space_choices(it.spaces)),
+-      attribute.attribute("heavens", heaven_choices(it.heavens)),
+-    ]),
+-  ]
+-  html.section(sketch_css.class(shell), [], [
+-    html.h2(sketch_css.class(title), [], [el.text(heading)]),
+-    picker,
+-    case it.mode {
+-      New(..) ->
+-        html.form_([attribute.action("/api/widgets"), attribute.method("post")], content)
+-      Edit(..) -> html.div_([], content)
+-    },
+-  ])
+ }
+ 
+ fn draft(mode: Mode) -> Draft {
+@@ -144,6 +111,17 @@
+   }
+ }
+ 
++pub fn edit_view(row: widget_list.Row) -> el.Element(Nil) {
++  let draft = draft(Edit(row))
++  html.section(sketch_css.class(shell), [], [
++    html.h2(sketch_css.class(title), [], [el.text("Widgetを編集")]),
++    html.p(sketch_css.class(copy), [], [
++      el.text("種類：" <> kind_label(draft.kind)),
++    ]),
++    html.p(sketch_css.class(copy), [], [el.text(draft.title)]),
++  ])
++}
++
+ fn draft_row(row: widget_list.Row) -> Draft {
+   case row {
+     widget_list.Text(
+diff -ruN mid/muses/src/blocks/widget_form_edit.gleam after/muses/src/blocks/widget_form_edit.gleam
+--- mid/muses/src/blocks/widget_form_edit.gleam	1970-01-01 09:00:00.000000000 +0900
++++ after/muses/src/blocks/widget_form_edit.gleam	2026-09-25 03:14:52.406858233 +0900
+@@ -0,0 +1,16 @@
++//// Y1f F6 single-Service Block input.
++
++import blocks/widget_form as form
++import framework/front/el
++import gen/out/widget_read
++
++pub type In =
++  widget_read.Out
++
++pub type Arg {
++  Arg(handle: String, id: String)
++}
++
++pub fn view(it: In, arg: Arg) -> el.Element(Nil) {
++  form.edit_view(it.row)
++}
+diff -ruN mid/muses/src/blocks/widget_heavens.gleam after/muses/src/blocks/widget_heavens.gleam
+--- mid/muses/src/blocks/widget_heavens.gleam	1970-01-01 09:00:00.000000000 +0900
++++ after/muses/src/blocks/widget_heavens.gleam	2026-09-25 03:14:52.406908603 +0900
+@@ -0,0 +1,15 @@
++//// Y1f F6 single-Service Block input.
++
++import framework/front/el
++import gen/out/muse_heaven_list
++
++pub type In =
++  muse_heaven_list.Out
++
++pub type Arg {
++  Arg(handle: String)
++}
++
++pub fn view(it: In, _arg: Arg) -> el.Element(Nil) {
++  el.each(it.items, fn(item) { el.text(item.shop_name) })
++}
+diff -ruN mid/muses/src/blocks/widget_list.gleam after/muses/src/blocks/widget_list.gleam
+--- mid/muses/src/blocks/widget_list.gleam	2026-09-24 20:01:02.000000000 +0900
++++ after/muses/src/blocks/widget_list.gleam	2026-09-25 03:27:16.548451533 +0900
+@@ -1,5 +1,7 @@
+ //// WidgetList Block ── Service の Out をそのまま一覧として描く。
+ 
++import gleam/option.{type Option, None, Some}
++
+ import blocks/widget_row
+ import framework/front/css
+ import framework/front/el
+@@ -10,8 +12,11 @@
+ import sketch/lustre/element/html
+ import style
+ 
+-pub type In {
+-  In(widgets: widget_list.Out, spaces: space_list.Out, selected: String)
++pub type In =
++  widget_list.Out
++
++pub type Arg {
++  Arg(selected: Option(String), handle: String, space: Option(String))
+ }
+ 
+ const shell: List(css.Style) = [
+@@ -25,9 +30,10 @@
+   style.muted,
+ ]
+ 
+-pub fn view(it: In) -> el.Element(Nil) {
+-  let In(widgets: widgets, spaces: spaces, selected: selected) = it
+-  let heading = "Widget（" <> selected_label(spaces.spaces, selected) <> "）"
++pub fn view(it: In, arg: Arg) -> el.Element(Nil) {
++  let widgets = it
++  let selected = option_value(arg.selected)
++  let heading = "Widget（" <> selected_label([], selected) <> "）"
+   let add_href = case selected {
+     "all" -> "/page/widget/new"
+     _ -> "/page/widget/new?space=" <> selected
+@@ -37,7 +43,12 @@
+       html.p(sketch_css.class(copy), [], [
+         el.text("この場所に Widget はありません。"),
+       ])
+-    _ -> html.ul_([], [el.each(widgets.widgets, widget_row.view)])
++    _ ->
++      html.ul_([], [
++        el.each(widgets.widgets, fn(row) {
++          widget_row.view(widget_list.Out(widgets: [row]))
++        }),
++      ])
+   }
+ 
+   html.section(sketch_css.class(shell), [], [
+@@ -49,6 +60,13 @@
+   ])
+ }
+ 
++fn option_value(value: Option(String)) -> String {
++  case value {
++    Some(value) -> value
++    None -> ""
++  }
++}
++
+ fn selected_label(
+   spaces: List(space_list.FreeSpace),
+   selected: String,
+diff -ruN mid/muses/src/blocks/widget_row.gleam after/muses/src/blocks/widget_row.gleam
+--- mid/muses/src/blocks/widget_row.gleam	2026-09-24 20:01:02.000000000 +0900
++++ after/muses/src/blocks/widget_row.gleam	2026-09-25 03:14:52.407028518 +0900
+@@ -13,7 +13,7 @@
+ import style
+ 
+ pub type In =
+-  widget_list.Row
++  widget_list.Out
+ 
+ type Common {
+   Common(
+@@ -44,7 +44,11 @@
+   style.ink,
+ ]
+ 
+-pub fn view(row: In) -> el.Element(Nil) {
++pub fn view(it: In) -> el.Element(Nil) {
++  el.each(it.widgets, fn(row) { row_view(row) })
++}
++
++fn row_view(row: widget_list.Row) -> el.Element(Nil) {
+   let common = common(row)
+   html.li(sketch_css.class(shell), [], [
+     html.div_([], [
+diff -ruN mid/muses/src/blocks/widget_space.gleam after/muses/src/blocks/widget_space.gleam
+--- mid/muses/src/blocks/widget_space.gleam	1970-01-01 09:00:00.000000000 +0900
++++ after/muses/src/blocks/widget_space.gleam	2026-09-25 03:27:16.548451533 +0900
+@@ -0,0 +1,24 @@
++//// Y1f F6 single-Service Block input.
++
++import framework/front/el
++import gen/out/space_list
++import gleam/option.{type Option, None, Some}
++import sketch/lustre/element/html
++
++pub type In =
++  space_list.Out
++
++pub type Arg {
++  Arg(selected: Option(String), handle: String)
++}
++
++pub fn view(it: In, arg: Arg) -> el.Element(Nil) {
++  let selected = case arg.selected {
++    Some(value) -> value
++    None -> ""
++  }
++  html.div_([], [
++    el.text("場所: " <> selected),
++    el.each(it.spaces, fn(space) { el.text(space.title) }),
++  ])
++}
+diff -ruN mid/muses/src/layout.gleam after/muses/src/layout.gleam
+--- mid/muses/src/layout.gleam	2026-09-25 03:28:00.697380169 +0900
++++ after/muses/src/layout.gleam	2026-09-25 03:14:52.408408826 +0900
+@@ -1,4 +1,6 @@
+-import framework/front.{type Layout, Area, Fixed, Frame, Layout, default_sp_cols, Flow}
++import framework/front.{
++  type Layout, Area, Fixed, Flow, Frame, Layout, default_sp_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -30,5 +32,5 @@
+   ),
+   pc: None,
+   tablet: None,
+-  reads: [],
++  vars: [],
+ )
+diff -ruN mid/muses/src/pages/articles/arg_id/page.gleam after/muses/src/pages/articles/arg_id/page.gleam
+--- mid/muses/src/pages/articles/arg_id/page.gleam	2026-09-25 03:28:00.697457908 +0900
++++ after/muses/src/pages/articles/arg_id/page.gleam	2026-09-25 03:14:52.407228806 +0900
+@@ -1,4 +1,7 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, Flow}
++import framework/front.{
++  type Page, Area, Fixed, Flow, Frame, Page, Path, Session, SubjectHandle, Var,
++  default_sp_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -19,12 +22,15 @@
+         style: style.page,
+       ),
+     ],
+-    placements: [Fixed(area: "page", block: blocks.ArticleForm, cell: Flow)],
++    placements: [Fixed(area: "page", block: blocks.ArticleEdit, cell: Flow)],
+     cols: default_sp_cols,
+     rows: [],
+     template: [],
+   ),
+   pc: None,
+   tablet: None,
+-  reads: [],
++  vars: [
++    Var("handle", Session(SubjectHandle)),
++    Var("id", Path("id")),
++  ],
+ )
+diff -ruN mid/muses/src/pages/articles/new/page.gleam after/muses/src/pages/articles/new/page.gleam
+--- mid/muses/src/pages/articles/new/page.gleam	2026-09-25 03:28:00.697529297 +0900
++++ after/muses/src/pages/articles/new/page.gleam	2026-09-25 03:14:52.407319277 +0900
+@@ -1,4 +1,7 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, Flow}
++import framework/front.{
++  type Page, Area, Fixed, Flow, Frame, Page, Session, SubjectHandle, Var,
++  default_sp_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -19,12 +22,12 @@
+         style: style.page,
+       ),
+     ],
+-    placements: [Fixed(area: "page", block: blocks.ArticleForm, cell: Flow)],
++    placements: [Fixed(area: "page", block: blocks.ArticleNew, cell: Flow)],
+     cols: default_sp_cols,
+     rows: [],
+     template: [],
+   ),
+   pc: None,
+   tablet: None,
+-  reads: [],
++  vars: [Var("handle", Session(SubjectHandle))],
+ )
+diff -ruN mid/muses/src/pages/articles/page.gleam after/muses/src/pages/articles/page.gleam
+--- mid/muses/src/pages/articles/page.gleam	2026-09-25 03:28:00.697597477 +0900
++++ after/muses/src/pages/articles/page.gleam	2026-09-25 03:14:52.407398128 +0900
+@@ -1,4 +1,7 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, Flow}
++import framework/front.{
++  type Page, Area, Fixed, Flow, Frame, Page, Query, Session, SubjectHandle, Var,
++  default_sp_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -26,5 +29,8 @@
+   ),
+   pc: None,
+   tablet: None,
+-  reads: [],
++  vars: [
++    Var("handle", Session(SubjectHandle)),
++    Var("cursor", Query("cursor")),
++  ],
+ )
+diff -ruN mid/muses/src/pages/heaven/page.gleam after/muses/src/pages/heaven/page.gleam
+--- mid/muses/src/pages/heaven/page.gleam	2026-09-25 03:28:00.697668536 +0900
++++ after/muses/src/pages/heaven/page.gleam	2026-09-25 03:27:16.545451530 +0900
+@@ -1,4 +1,7 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, Flow}
++import framework/front.{
++  type Page, Area, Fixed, Flow, Frame, Page, Session, SubjectHandle, Var,
++  default_sp_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -19,12 +22,15 @@
+         style: style.page,
+       ),
+     ],
+-    placements: [Fixed(area: "page", block: blocks.HeavenPanel, cell: Flow)],
++    placements: [
++      Fixed(area: "page", block: blocks.HeavenPanel, cell: Flow),
++      Fixed(area: "page", block: blocks.HeavenList, cell: Flow),
++    ],
+     cols: default_sp_cols,
+     rows: [],
+     template: [],
+   ),
+   pc: None,
+   tablet: None,
+-  reads: [],
++  vars: [Var("handle", Session(SubjectHandle))],
+ )
+diff -ruN mid/muses/src/pages/inbox/page.gleam after/muses/src/pages/inbox/page.gleam
+--- mid/muses/src/pages/inbox/page.gleam	2026-09-25 03:28:00.697738616 +0900
++++ after/muses/src/pages/inbox/page.gleam	2026-09-25 03:14:52.407559139 +0900
+@@ -1,4 +1,7 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, Flow}
++import framework/front.{
++  type Page, Area, Fixed, Flow, Frame, Page, Query, Session, SubjectHandle, Var,
++  default_sp_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -26,5 +29,8 @@
+   ),
+   pc: None,
+   tablet: None,
+-  reads: [],
++  vars: [
++    Var("handle", Session(SubjectHandle)),
++    Var("after", Query("after")),
++  ],
+ )
+diff -ruN mid/muses/src/pages/links/page.gleam after/muses/src/pages/links/page.gleam
+--- mid/muses/src/pages/links/page.gleam	2026-09-25 03:28:00.697808125 +0900
++++ after/muses/src/pages/links/page.gleam	2026-09-25 03:26:51.572378528 +0900
+@@ -1,4 +1,7 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, Flow}
++import framework/front.{
++  type Page, Area, Fixed, Flow, Frame, Page, Session, SubjectHandle, Var,
++  default_sp_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -19,12 +22,15 @@
+         style: style.page,
+       ),
+     ],
+-    placements: [Fixed(area: "page", block: blocks.LinkList, cell: Flow)],
++    placements: [
++      Fixed(area: "page", block: blocks.LinkList, cell: Flow),
++      Fixed(area: "page", block: blocks.LinkImport, cell: Flow),
++    ],
+     cols: default_sp_cols,
+     rows: [],
+     template: [],
+   ),
+   pc: None,
+   tablet: None,
+-  reads: [],
++  vars: [Var("handle", Session(SubjectHandle))],
+ )
+diff -ruN mid/muses/src/pages/metrics/page.gleam after/muses/src/pages/metrics/page.gleam
+--- mid/muses/src/pages/metrics/page.gleam	2026-09-25 03:28:00.697877545 +0900
++++ after/muses/src/pages/metrics/page.gleam	2026-09-25 03:14:52.407718280 +0900
+@@ -1,4 +1,7 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, Flow}
++import framework/front.{
++  type Page, Area, Fixed, Flow, Frame, Page, Query, Session, SubjectHandle, Var,
++  default_sp_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -19,12 +22,18 @@
+         style: style.page,
+       ),
+     ],
+-    placements: [Fixed(area: "page", block: blocks.MetricsDashboard, cell: Flow)],
++    placements: [
++      Fixed(area: "page", block: blocks.MetricsDashboard, cell: Flow),
++    ],
+     cols: default_sp_cols,
+     rows: [],
+     template: [],
+   ),
+   pc: None,
+   tablet: None,
+-  reads: [],
++  vars: [
++    Var("handle", Session(SubjectHandle)),
++    Var("from", Query("from")),
++    Var("to", Query("to")),
++  ],
+ )
+diff -ruN mid/muses/src/pages/onboard/page.gleam after/muses/src/pages/onboard/page.gleam
+--- mid/muses/src/pages/onboard/page.gleam	2026-09-25 03:28:00.697946164 +0900
++++ after/muses/src/pages/onboard/page.gleam	2026-09-25 03:14:52.407796431 +0900
+@@ -1,4 +1,7 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, Flow}
++import framework/front.{
++  type Page, Area, Fixed, Flow, Frame, Page, Session, SubjectHandle, Var,
++  default_sp_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -26,5 +29,5 @@
+   ),
+   pc: None,
+   tablet: None,
+-  reads: [],
++  vars: [Var("handle", Session(SubjectHandle))],
+ )
+diff -ruN mid/muses/src/pages/page/page.gleam after/muses/src/pages/page/page.gleam
+--- mid/muses/src/pages/page/page.gleam	2026-09-25 03:28:00.698021254 +0900
++++ after/muses/src/pages/page/page.gleam	2026-09-25 03:14:52.407877442 +0900
+@@ -1,4 +1,7 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, Flow}
++import framework/front.{
++  type Page, Area, Fixed, Flow, Frame, Page, Query, Session, SubjectHandle, Var,
++  default_sp_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -23,6 +26,7 @@
+       Fixed(area: "page", block: blocks.SpaceSelector, cell: Flow),
+       Fixed(area: "page", block: blocks.SpaceList, cell: Flow),
+       Fixed(area: "page", block: blocks.WidgetList, cell: Flow),
++      Fixed(area: "page", block: blocks.WidgetSpace, cell: Flow),
+       Fixed(area: "page", block: blocks.ThemeForm, cell: Flow),
+     ],
+     cols: default_sp_cols,
+@@ -31,5 +35,9 @@
+   ),
+   pc: None,
+   tablet: None,
+-  reads: [],
++  vars: [
++    Var("handle", Session(SubjectHandle)),
++    Var("selected", Query("space")),
++    Var("space", Query("space")),
++  ],
+ )
+diff -ruN mid/muses/src/pages/page/widget/arg_id/page.gleam after/muses/src/pages/page/widget/arg_id/page.gleam
+--- mid/muses/src/pages/page/widget/arg_id/page.gleam	2026-09-25 03:28:00.698097993 +0900
++++ after/muses/src/pages/page/widget/arg_id/page.gleam	2026-09-25 03:27:16.545451530 +0900
+@@ -1,4 +1,7 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, Flow}
++import framework/front.{
++  type Page, Area, Fixed, Flow, Frame, Page, Path, Query, Session, SubjectHandle,
++  Var, default_sp_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -19,12 +22,20 @@
+         style: style.page,
+       ),
+     ],
+-    placements: [Fixed(area: "page", block: blocks.WidgetForm, cell: Flow)],
++    placements: [
++      Fixed(area: "page", block: blocks.WidgetFormEdit, cell: Flow),
++      Fixed(area: "page", block: blocks.WidgetSpace, cell: Flow),
++      Fixed(area: "page", block: blocks.WidgetHeavens, cell: Flow),
++    ],
+     cols: default_sp_cols,
+     rows: [],
+     template: [],
+   ),
+   pc: None,
+   tablet: None,
+-  reads: [],
++  vars: [
++    Var("handle", Session(SubjectHandle)),
++    Var("id", Path("id")),
++    Var("selected", Query("space")),
++  ],
+ )
+diff -ruN mid/muses/src/pages/page/widget/new/page.gleam after/muses/src/pages/page/widget/new/page.gleam
+--- mid/muses/src/pages/page/widget/new/page.gleam	2026-09-25 03:28:00.698170283 +0900
++++ after/muses/src/pages/page/widget/new/page.gleam	2026-09-25 03:27:16.545451530 +0900
+@@ -1,4 +1,7 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, Flow}
++import framework/front.{
++  type Page, Area, Fixed, Flow, Frame, Page, Query, Session, SubjectHandle, Var,
++  default_sp_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -19,12 +22,21 @@
+         style: style.page,
+       ),
+     ],
+-    placements: [Fixed(area: "page", block: blocks.WidgetForm, cell: Flow)],
++    placements: [
++      Fixed(area: "page", block: blocks.WidgetForm, cell: Flow),
++      Fixed(area: "page", block: blocks.WidgetSpace, cell: Flow),
++      Fixed(area: "page", block: blocks.WidgetHeavens, cell: Flow),
++    ],
+     cols: default_sp_cols,
+     rows: [],
+     template: [],
+   ),
+   pc: None,
+   tablet: None,
+-  reads: [],
++  vars: [
++    Var("handle", Session(SubjectHandle)),
++    Var("kind", Query("kind")),
++    Var("space", Query("space")),
++    Var("selected", Query("space")),
++  ],
+ )
+diff -ruN mid/muses/src/pages/page.gleam after/muses/src/pages/page.gleam
+--- mid/muses/src/pages/page.gleam	2026-09-25 03:28:00.698238082 +0900
++++ after/muses/src/pages/page.gleam	2026-09-25 03:29:51.564890850 +0900
+@@ -1,4 +1,7 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, Flow}
++import framework/front.{
++  type Page, Area, Fixed, Flow, Frame, Page, Query, Session, SubjectHandle, Var,
++  default_sp_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -19,12 +22,20 @@
+         style: style.page,
+       ),
+     ],
+-    placements: [Fixed(area: "page", block: blocks.Home, cell: Flow)],
++    placements: [
++      Fixed(area: "page", block: blocks.Home, cell: Flow),
++      Fixed(area: "page", block: blocks.HomeInbox, cell: Flow),
++      Fixed(area: "page", block: blocks.HomeMetrics, cell: Flow),
++    ],
+     cols: default_sp_cols,
+     rows: [],
+     template: [],
+   ),
+   pc: None,
+   tablet: None,
+-  reads: [],
++  vars: [
++    Var("handle", Session(SubjectHandle)),
++    Var("from", Query("from")),
++    Var("to", Query("to")),
++  ],
+ )
+diff -ruN mid/muses/src/pages/settings/page.gleam after/muses/src/pages/settings/page.gleam
+--- mid/muses/src/pages/settings/page.gleam	2026-09-25 03:28:00.698308352 +0900
++++ after/muses/src/pages/settings/page.gleam	2026-09-25 03:14:52.408237445 +0900
+@@ -1,4 +1,7 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, Flow}
++import framework/front.{
++  type Page, Area, Fixed, Flow, Frame, Page, Session, SubjectHandle, Var,
++  default_sp_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -21,6 +24,8 @@
+     ],
+     placements: [
+       Fixed(area: "page", block: blocks.Settings, cell: Flow),
++      Fixed(area: "page", block: blocks.SettingsRosters, cell: Flow),
++      Fixed(area: "page", block: blocks.SettingsSubjects, cell: Flow),
+       Fixed(area: "page", block: blocks.ThemeForm, cell: Flow),
+     ],
+     cols: default_sp_cols,
+@@ -29,5 +34,5 @@
+   ),
+   pc: None,
+   tablet: None,
+-  reads: [],
++  vars: [Var("handle", Session(SubjectHandle))],
+ )
+diff -ruN mid/muses/src/pages/settings/unclaim/arg_id/page.gleam after/muses/src/pages/settings/unclaim/arg_id/page.gleam
+--- mid/muses/src/pages/settings/unclaim/arg_id/page.gleam	2026-09-25 03:28:00.698382051 +0900
++++ after/muses/src/pages/settings/unclaim/arg_id/page.gleam	2026-09-25 03:14:52.408324325 +0900
+@@ -1,4 +1,7 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, Flow}
++import framework/front.{
++  type Page, Area, Fixed, Flow, Frame, Page, Path, Session, SubjectHandle, Var,
++  default_sp_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -26,5 +29,8 @@
+   ),
+   pc: None,
+   tablet: None,
+-  reads: [],
++  vars: [
++    Var("handle", Session(SubjectHandle)),
++    Var("id", Path("id")),
++  ],
+ )
+diff -ruN mid/www/src/blocks/article_list.gleam after/www/src/blocks/article_list.gleam
+--- mid/www/src/blocks/article_list.gleam	2026-09-24 20:01:02.000000000 +0900
++++ after/www/src/blocks/article_list.gleam	2026-09-25 03:14:52.398480853 +0900
+@@ -39,18 +39,27 @@
+ 
+   html.section(sketch_css.class(shell), [], [
+     html.h2(sketch_css.class(title), [], [el.text("記事")]),
+-    html.ul_([], [el.each(articles, fn(article) { article_view(muse_handle, article) })]),
++    html.ul_([], [
++      el.each(articles, fn(article) { article_view(muse_handle, article) }),
++    ]),
+   ])
+ }
+ 
+-fn article_view(muse_handle: String, article: article_list.Article) -> el.Element(Nil) {
++fn article_view(
++  muse_handle: String,
++  article: article_list.Article,
++) -> el.Element(Nil) {
+   html.li_([], [
+     html.h3(sketch_css.class(title), [], [
+-      html.a(sketch_css.class(title), [
+-        attribute.href("/muse/" <> muse_handle <> "/article/" <> article.id),
+-      ], [
+-        el.text(article.title),
+-      ]),
++      html.a(
++        sketch_css.class(title),
++        [
++          attribute.href("/muse/" <> muse_handle <> "/article/" <> article.id),
++        ],
++        [
++          el.text(article.title),
++        ],
++      ),
+     ]),
+     html.p(sketch_css.class(copy), [], [el.text(date_text(article.posted_on))]),
+     html.p(sketch_css.class(copy), [], [el.text(article.body)]),
+diff -ruN mid/www/src/blocks/cast_schedule.gleam after/www/src/blocks/cast_schedule.gleam
+--- mid/www/src/blocks/cast_schedule.gleam	1970-01-01 09:00:00.000000000 +0900
++++ after/www/src/blocks/cast_schedule.gleam	2026-09-25 03:14:52.398651635 +0900
+@@ -0,0 +1,16 @@
++//// CastSchedule Block: same Service.Out with the cast-page title.
++
++import blocks/store_schedule
++import framework/front/el
++import gen/out/store_schedule_list
++
++pub type In =
++  store_schedule_list.Out
++
++pub type Arg {
++  Arg(handle: String)
++}
++
++pub fn view(it: In, _arg: Arg) -> el.Element(Nil) {
++  store_schedule.view_with_title(it, "7日間の出勤")
++}
+diff -ruN mid/www/src/blocks/claim_head.gleam after/www/src/blocks/claim_head.gleam
+--- mid/www/src/blocks/claim_head.gleam	2026-09-24 20:01:02.000000000 +0900
++++ after/www/src/blocks/claim_head.gleam	2026-09-25 03:14:52.398774866 +0900
+@@ -6,7 +6,11 @@
+ import style
+ 
+ pub type In =
+-  String
++  Nil
++
++pub type Arg {
++  Arg(code: String)
++}
+ 
+ const shell: List(css.Style) = [
+   style.white,
+@@ -25,12 +29,12 @@
+   style.ink,
+ ]
+ 
+-pub fn view(code: In) -> el.Element(Nil) {
++pub fn view(_it: In, arg: Arg) -> el.Element(Nil) {
+   html.section(sketch_css.class(shell), [], [
+     html.h1(sketch_css.class(title), [], [el.text("店の在籍claim")]),
+     html.p(sketch_css.class(copy), [], [
+       el.text("店から届いたURLを確認し、自分の本拠と在籍を結びます。"),
+     ]),
+-    el.island("claim-button", [attribute.attribute("code", code)]),
++    el.island("claim-button", [attribute.attribute("code", arg.code)]),
+   ])
+ }
+diff -ruN mid/www/src/blocks/external_hosts.gleam after/www/src/blocks/external_hosts.gleam
+--- mid/www/src/blocks/external_hosts.gleam	2026-09-24 20:01:02.000000000 +0900
++++ after/www/src/blocks/external_hosts.gleam	2026-09-25 03:14:52.398921007 +0900
+@@ -53,7 +53,9 @@
+     [
+       html.h3(sketch_css.class(title), [], [el.text(name)]),
+       html.dl(sketch_css.class(copy), [], [
+-        definition("ドメイン", [html.code(sketch_css.class(copy), [], [el.text(host)])]),
++        definition("ドメイン", [
++          html.code(sketch_css.class(copy), [], [el.text(host)]),
++        ]),
+         definition("送信される情報", [el.text(information)]),
+         definition("利用目的", [el.text(purpose)]),
+         definition("通信元", [el.text(side_label(side))]),
+@@ -72,9 +74,10 @@
+ 
+ fn embedded_resource_note(connector: String) -> el.Element(Nil) {
+   case connector {
+-    "heaven-widget" -> html.p(sketch_css.class(copy), [], [
+-      el.text("埋め込み内では同社の資源が読まれる"),
+-    ])
++    "heaven-widget" ->
++      html.p(sketch_css.class(copy), [], [
++        el.text("埋め込み内では同社の資源が読まれる"),
++      ])
+     _ -> el.text("")
+   }
+ }
+diff -ruN mid/www/src/blocks/inbox_list.gleam after/www/src/blocks/inbox_list.gleam
+--- mid/www/src/blocks/inbox_list.gleam	2026-09-24 20:01:02.000000000 +0900
++++ after/www/src/blocks/inbox_list.gleam	2026-09-25 03:14:52.399028376 +0900
+@@ -41,9 +41,10 @@
+     unread: unread,
+   ) = it
+   let body = case items {
+-    [] -> html.p(sketch_css.class(muted), [], [
+-      el.text("未読の通知はありません。"),
+-    ])
++    [] ->
++      html.p(sketch_css.class(muted), [], [
++        el.text("未読の通知はありません。"),
++      ])
+     _ -> el.each(items, unread_view)
+   }
+   html.section(sketch_css.class(shell), [], [
+@@ -65,7 +66,11 @@
+ fn notice_view(note: notification_inbox.Notification) -> el.Element(Nil) {
+   html.article(sketch_css.class(copy), [], [
+     html.p(sketch_css.class(muted), [], [
+-      el.text(kind_text(note.kind) <> " / " <> time.datetime_to_string(note.created_at)),
++      el.text(
++        kind_text(note.kind)
++        <> " / "
++        <> time.datetime_to_string(note.created_at),
++      ),
+     ]),
+     html.p(sketch_css.class(copy), [], [el.text(note.name)]),
+     el.island("notice-open", [attribute.attribute("id", note.id)]),
+diff -ruN mid/www/src/blocks/muse_header.gleam after/www/src/blocks/muse_header.gleam
+--- mid/www/src/blocks/muse_header.gleam	2026-09-24 20:01:02.000000000 +0900
++++ after/www/src/blocks/muse_header.gleam	2026-09-25 03:14:52.399160449 +0900
+@@ -11,8 +11,11 @@
+ import sketch/lustre/element/html
+ import style
+ 
+-pub type In {
+-  In(page: muse_read.Out, subscription: Option(subscription_read.Out))
++pub type In =
++  muse_read.Out
++
++pub type Arg {
++  Arg(handle: String)
+ }
+ 
+ const shell: List(css.Style) = [
+@@ -31,37 +34,39 @@
+   style.muted,
+ ]
+ 
+-pub fn view(it: In) -> el.Element(Nil) {
+-  let icon = case it.page.muse.icon {
++pub fn view(it: In, _arg: Arg) -> el.Element(Nil) {
++  let icon = case it.muse.icon {
+     Some(value) ->
+       el.img(sketch_css.class(copy), [
+         attribute.src(media.url(value, media.Thumb)),
+-        attribute.alt(it.page.muse.name),
++        attribute.alt(it.muse.name),
+       ])
+     None -> el.text("")
+   }
+ 
+-  let headline = case it.page.muse.headline {
++  let headline = case it.muse.headline {
+     Some(value) -> html.p(sketch_css.class(copy), [], [el.text(value)])
+     None -> el.text("")
+   }
+ 
+   html.header(sketch_css.class(shell), [], [
+     icon,
+-    html.h2(sketch_css.class(title), [], [el.text(it.page.muse.name)]),
++    html.h2(sketch_css.class(title), [], [el.text(it.muse.name)]),
+     headline,
+-    subscription_action(it),
+   ])
+ }
+ 
+-fn subscription_action(it: In) -> el.Element(Nil) {
+-  case it.subscription {
+-    Some(subscription_read.Out(owner: True, ..)) -> el.text("")
+-    Some(subscription_read.Out(subscription: Some(id), ..)) ->
++pub fn subscription_action(
++  it: subscription_read.Out,
++  handle: String,
++) -> el.Element(Nil) {
++  case it {
++    subscription_read.Out(owner: True, ..) -> el.text("")
++    subscription_read.Out(subscription: Some(id), ..) ->
+       el.island("unsubscribe-button", [attribute.attribute("id", id)])
+-    Some(subscription_read.Out(can_subscribe: True, subscription: None, ..)) ->
++    subscription_read.Out(can_subscribe: True, subscription: None, ..) ->
+       el.island("subscribe-button", [
+-        attribute.attribute("handle", it.page.muse.handle),
++        attribute.attribute("handle", handle),
+       ])
+     _ -> el.text("")
+   }
+diff -ruN mid/www/src/blocks/muse_nav.gleam after/www/src/blocks/muse_nav.gleam
+--- mid/www/src/blocks/muse_nav.gleam	2026-09-24 20:01:02.000000000 +0900
++++ after/www/src/blocks/muse_nav.gleam	2026-09-25 03:14:52.399241900 +0900
+@@ -11,6 +11,10 @@
+ pub type In =
+   muse_read.Out
+ 
++pub type Arg {
++  Arg(handle: String)
++}
++
+ const shell: List(css.Style) = [
+   style.white,
+   style.muted,
+@@ -22,7 +26,7 @@
+   style.muted,
+ ]
+ 
+-pub fn view(it: In) -> el.Element(Nil) {
++pub fn view(it: In, _arg: Arg) -> el.Element(Nil) {
+   let base = "/muse/" <> it.muse.handle
+ 
+   html.nav(sketch_css.class(shell), [], [
+diff -ruN mid/www/src/blocks/placeholder.gleam after/www/src/blocks/placeholder.gleam
+--- mid/www/src/blocks/placeholder.gleam	2026-09-24 20:01:02.000000000 +0900
++++ after/www/src/blocks/placeholder.gleam	2026-09-25 03:14:52.399323610 +0900
+@@ -26,9 +26,13 @@
+       attribute.attribute("data-ph", value),
+       attribute.attribute(
+         "style",
+-        "min-height: " <> style.placeholder_min_height <> "; border: "
+-          <> style.placeholder_border <> "; border-radius: 0.55rem; background: "
+-          <> style.placeholder_background <> "; box-sizing: border-box;",
++        "min-height: "
++          <> style.placeholder_min_height
++          <> "; border: "
++          <> style.placeholder_border
++          <> "; border-radius: 0.55rem; background: "
++          <> style.placeholder_background
++          <> "; box-sizing: border-box;",
+       ),
+     ],
+     [
+diff -ruN mid/www/src/blocks/roster_list.gleam after/www/src/blocks/roster_list.gleam
+--- mid/www/src/blocks/roster_list.gleam	2026-09-24 20:01:02.000000000 +0900
++++ after/www/src/blocks/roster_list.gleam	2026-09-25 03:14:52.399403651 +0900
+@@ -9,8 +9,11 @@
+ import sketch/lustre/element/html
+ import style
+ 
+-pub type In {
+-  In(handle: String, page: roster_list.Out)
++pub type In =
++  roster_list.Out
++
++pub type Arg {
++  Arg(handle: String)
+ }
+ 
+ const shell: List(css.Style) = [
+@@ -40,8 +43,9 @@
+   style.ink,
+ ]
+ 
+-pub fn view(it: In) -> el.Element(Nil) {
+-  let In(handle:, page: roster_list.Out(rosters: rosters)) = it
++pub fn view(it: In, arg: Arg) -> el.Element(Nil) {
++  let handle = arg.handle
++  let roster_list.Out(rosters: rosters) = it
+   let body = case rosters {
+     [] -> html.p(sketch_css.class(muted), [], [el.text("掲載中の在籍はありません。")])
+     _ -> el.each(rosters, fn(row) { row_view(handle, row) })
+diff -ruN mid/www/src/blocks/search_results.gleam after/www/src/blocks/search_results.gleam
+--- mid/www/src/blocks/search_results.gleam	2026-09-24 20:01:02.000000000 +0900
++++ after/www/src/blocks/search_results.gleam	2026-09-25 03:14:52.399485112 +0900
+@@ -34,9 +34,10 @@
+ pub fn view(it: In) -> el.Element(Nil) {
+   let article_search.Out(groups: groups, ..) = it
+   let body = case groups {
+-    [] -> html.p(sketch_css.class(muted), [], [
+-      el.text("検索結果はありません。"),
+-    ])
++    [] ->
++      html.p(sketch_css.class(muted), [], [
++        el.text("検索結果はありません。"),
++      ])
+     _ -> el.each(groups, group_view)
+   }
+   html.section(sketch_css.class(shell), [], [
+@@ -50,11 +51,9 @@
+   html.article(sketch_css.class(copy), [], [
+     html.h2(sketch_css.class(title), [], [el.text(muse.name)]),
+     el.each(hits, hit_view),
+-    html.a(
+-      sketch_css.class(muted),
+-      [attribute.href("/muse/" <> muse.handle)],
+-      [el.text("この嬢のページを見る")],
+-    ),
++    html.a(sketch_css.class(muted), [attribute.href("/muse/" <> muse.handle)], [
++      el.text("この嬢のページを見る"),
++    ]),
+   ])
+ }
+ 
+diff -ruN mid/www/src/blocks/space_title.gleam after/www/src/blocks/space_title.gleam
+--- mid/www/src/blocks/space_title.gleam	2026-09-24 20:01:02.000000000 +0900
++++ after/www/src/blocks/space_title.gleam	2026-09-25 03:14:52.401104985 +0900
+@@ -3,12 +3,16 @@
+ import framework/front/css
+ import framework/front/el
+ import framework/front/sketch_css
+-import gen/out/space_list
++import gen/out/space_read
+ import sketch/lustre/element/html
+ import style
+ 
+ pub type In =
+-  space_list.FreeSpace
++  space_read.Out
++
++pub type Arg {
++  Arg(handle: String, id: String)
++}
+ 
+ const shell: List(css.Style) = [
+   style.white,
+@@ -21,8 +25,8 @@
+   style.ink,
+ ]
+ 
+-pub fn view(it: In) -> el.Element(Nil) {
++pub fn view(it: In, _arg: Arg) -> el.Element(Nil) {
+   html.header(sketch_css.class(shell), [], [
+-    html.h1(sketch_css.class(title), [], [el.text(it.title)]),
++    html.h1(sketch_css.class(title), [], [el.text(it.space.title)]),
+   ])
+ }
+diff -ruN mid/www/src/blocks/store_memberships.gleam after/www/src/blocks/store_memberships.gleam
+--- mid/www/src/blocks/store_memberships.gleam	2026-09-24 20:01:02.000000000 +0900
++++ after/www/src/blocks/store_memberships.gleam	2026-09-25 03:14:52.401201506 +0900
+@@ -11,6 +11,10 @@
+ pub type In =
+   muse_read.Out
+ 
++pub type Arg {
++  Arg(handle: String)
++}
++
+ const shell: List(css.Style) = [
+   style.soft,
+   style.muted,
+@@ -22,7 +26,7 @@
+   style.muted,
+ ]
+ 
+-pub fn view(it: In) -> el.Element(Nil) {
++pub fn view(it: In, _arg: Arg) -> el.Element(Nil) {
+   let stores = case it.stores {
+     [] -> html.p(sketch_css.class(copy), [], [el.text("在籍店舗はありません")])
+     stores -> el.each(stores, store_view)
+diff -ruN mid/www/src/blocks/store_schedule.gleam after/www/src/blocks/store_schedule.gleam
+--- mid/www/src/blocks/store_schedule.gleam	2026-09-25 03:28:00.698530300 +0900
++++ after/www/src/blocks/store_schedule.gleam	2026-09-25 03:14:52.401297917 +0900
+@@ -9,8 +9,11 @@
+ import sketch/lustre/element/html
+ import style
+ 
+-pub type In {
+-  In(title: String, page: store_schedule_list.Out)
++pub type In =
++  store_schedule_list.Out
++
++pub type Arg {
++  Arg(handle: String)
+ }
+ 
+ const shell: List(css.Style) = [
+@@ -35,11 +38,12 @@
+   style.ink,
+ ]
+ 
+-pub fn view(it: In) -> el.Element(Nil) {
+-  let In(
+-    title: title_value,
+-    page: store_schedule_list.Out(schedules: schedules, grid: _),
+-  ) = it
++pub fn view(it: In, arg: Arg) -> el.Element(Nil) {
++  view_with_title(it, "今日と明日の出勤")
++}
++
++pub fn view_with_title(it: In, title_value: String) -> el.Element(Nil) {
++  let store_schedule_list.Out(schedules: schedules, grid: _) = it
+   let body = case schedules {
+     [] -> html.p(sketch_css.class(muted), [], [el.text("これからの出勤はありません。")])
+     _ -> html.ul(sketch_css.class(copy), [], schedules |> list_views)
+diff -ruN mid/www/src/blocks/subscription_action.gleam after/www/src/blocks/subscription_action.gleam
+--- mid/www/src/blocks/subscription_action.gleam	1970-01-01 09:00:00.000000000 +0900
++++ after/www/src/blocks/subscription_action.gleam	2026-09-25 03:14:52.401377758 +0900
+@@ -0,0 +1,16 @@
++//// Y1f F6 single-Service Block input.
++
++import blocks/muse_header
++import framework/front/el
++import gen/out/subscription_read
++
++pub type In =
++  subscription_read.Out
++
++pub type Arg {
++  Arg(handle: String)
++}
++
++pub fn view(it: In, arg: Arg) -> el.Element(Nil) {
++  muse_header.subscription_action(it, arg.handle)
++}
+diff -ruN mid/www/src/blocks/widget_articles.gleam after/www/src/blocks/widget_articles.gleam
+--- mid/www/src/blocks/widget_articles.gleam	2026-09-24 20:01:02.000000000 +0900
++++ after/www/src/blocks/widget_articles.gleam	2026-09-25 03:14:52.401449718 +0900
+@@ -11,6 +11,10 @@
+ pub type In =
+   widget_list.Row
+ 
++pub type Arg {
++  Arg(handle: String, space: Option(String))
++}
++
+ const shell: List(css.Style) = [
+   style.white,
+   style.ink,
+@@ -27,7 +31,7 @@
+   style.muted,
+ ]
+ 
+-pub fn view(it: In) -> el.Element(Nil) {
++pub fn view(it: In, _arg: Arg) -> el.Element(Nil) {
+   case it {
+     widget_list.Articles(title: title_value, articles: articles_value, ..) ->
+       html.section(sketch_css.class(shell), [], [
+diff -ruN mid/www/src/blocks/widget_heaven.gleam after/www/src/blocks/widget_heaven.gleam
+--- mid/www/src/blocks/widget_heaven.gleam	2026-09-24 20:01:02.000000000 +0900
++++ after/www/src/blocks/widget_heaven.gleam	2026-09-25 03:14:52.401551829 +0900
+@@ -11,6 +11,10 @@
+ pub type In =
+   widget_list.Row
+ 
++pub type Arg {
++  Arg(handle: String, space: Option(String))
++}
++
+ const shell: List(css.Style) = [
+   style.white,
+   style.ink,
+@@ -27,7 +31,7 @@
+   style.muted,
+ ]
+ 
+-pub fn view(it: In) -> el.Element(Nil) {
++pub fn view(it: In, _arg: Arg) -> el.Element(Nil) {
+   case it {
+     widget_list.HeavenDiary(
+       title: title_value,
+diff -ruN mid/www/src/blocks/widget_image.gleam after/www/src/blocks/widget_image.gleam
+--- mid/www/src/blocks/widget_image.gleam	2026-09-24 20:01:02.000000000 +0900
++++ after/www/src/blocks/widget_image.gleam	2026-09-25 03:14:52.401694680 +0900
+@@ -14,6 +14,10 @@
+ pub type In =
+   widget_list.Row
+ 
++pub type Arg {
++  Arg(handle: String, space: Option(String))
++}
++
+ const shell: List(css.Style) = [
+   style.white,
+   style.ink,
+@@ -30,7 +34,7 @@
+   style.muted,
+ ]
+ 
+-pub fn view(it: In) -> el.Element(Nil) {
++pub fn view(it: In, _arg: Arg) -> el.Element(Nil) {
+   case it {
+     widget_list.Image(
+       title: title_value,
+diff -ruN mid/www/src/blocks/widget_links.gleam after/www/src/blocks/widget_links.gleam
+--- mid/www/src/blocks/widget_links.gleam	2026-09-24 20:01:02.000000000 +0900
++++ after/www/src/blocks/widget_links.gleam	2026-09-25 03:14:52.401833971 +0900
+@@ -12,6 +12,10 @@
+ pub type In =
+   widget_list.Row
+ 
++pub type Arg {
++  Arg(handle: String, space: Option(String))
++}
++
+ const shell: List(css.Style) = [
+   style.white,
+   style.ink,
+@@ -28,7 +32,7 @@
+   style.muted,
+ ]
+ 
+-pub fn view(it: In) -> el.Element(Nil) {
++pub fn view(it: In, _arg: Arg) -> el.Element(Nil) {
+   case it {
+     widget_list.Links(title: title_value, links: links_value, ..) ->
+       html.section(sketch_css.class(shell), [], [
+diff -ruN mid/www/src/blocks/widget_text.gleam after/www/src/blocks/widget_text.gleam
+--- mid/www/src/blocks/widget_text.gleam	2026-09-24 20:01:02.000000000 +0900
++++ after/www/src/blocks/widget_text.gleam	2026-09-25 03:14:52.401972903 +0900
+@@ -11,6 +11,10 @@
+ pub type In =
+   widget_list.Row
+ 
++pub type Arg {
++  Arg(handle: String, space: Option(String))
++}
++
+ const shell: List(css.Style) = [
+   style.white,
+   style.ink,
+@@ -28,7 +32,7 @@
+   style.muted,
+ ]
+ 
+-pub fn view(it: In) -> el.Element(Nil) {
++pub fn view(it: In, _arg: Arg) -> el.Element(Nil) {
+   case it {
+     widget_list.Text(title: title_value, body: body_value, ..) ->
+       html.section(sketch_css.class(shell), [], [
+diff -ruN mid/www/src/layout.gleam after/www/src/layout.gleam
+--- mid/www/src/layout.gleam	2026-09-25 03:28:00.698816288 +0900
++++ after/www/src/layout.gleam	2026-09-25 03:14:52.405161659 +0900
+@@ -1,4 +1,7 @@
+-import framework/front.{type Layout, Area, Fixed, Frame, Layout, default_sp_cols, default_wide_cols, Flow}
++import framework/front.{
++  type Layout, Area, Fixed, Flow, Frame, Layout, default_sp_cols,
++  default_wide_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -71,5 +74,5 @@
+     ),
+   ),
+   tablet: None,
+-  reads: [],
++  vars: [],
+ )
+diff -ruN mid/www/src/pages/about/external/page.gleam after/www/src/pages/about/external/page.gleam
+--- mid/www/src/pages/about/external/page.gleam	2026-09-25 03:28:00.698896057 +0900
++++ after/www/src/pages/about/external/page.gleam	2026-09-25 03:14:52.402130764 +0900
+@@ -1,4 +1,6 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, default_wide_cols, Flow}
++import framework/front.{
++  type Page, Area, Fixed, Flow, Frame, Page, default_sp_cols, default_wide_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -51,5 +53,5 @@
+     ),
+   ),
+   tablet: None,
+-  reads: [],
++  vars: [],
+ )
+diff -ruN mid/www/src/pages/claim/arg_code/page.gleam after/www/src/pages/claim/arg_code/page.gleam
+--- mid/www/src/pages/claim/arg_code/page.gleam	2026-09-25 03:28:00.698978567 +0900
++++ after/www/src/pages/claim/arg_code/page.gleam	2026-09-25 03:14:52.402268625 +0900
+@@ -1,4 +1,7 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, default_wide_cols, Flow}
++import framework/front.{
++  type Page, Area, Fixed, Flow, Frame, Page, Path, Var, default_sp_cols,
++  default_wide_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -47,5 +50,5 @@
+     ),
+   ),
+   tablet: None,
+-  reads: [],
++  vars: [Var("code", Path("code"))],
+ )
+diff -ruN mid/www/src/pages/experiences/arg_id/page.gleam after/www/src/pages/experiences/arg_id/page.gleam
+--- mid/www/src/pages/experiences/arg_id/page.gleam	2026-09-25 03:28:00.699056136 +0900
++++ after/www/src/pages/experiences/arg_id/page.gleam	2026-09-25 03:14:52.402402246 +0900
+@@ -1,6 +1,9 @@
+ //// Page definition for the svelte-out-1 route.
+ 
+-import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, default_wide_cols, Flow}
++import framework/front.{
++  type Page, Area, Fixed, Flow, Frame, Page, Path, Var, default_sp_cols,
++  default_wide_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -53,5 +56,5 @@
+     ),
+   ),
+   tablet: None,
+-  reads: [],
++  vars: [Var("id", Path("id"))],
+ )
+diff -ruN mid/www/src/pages/fan/arg_handle/page.gleam after/www/src/pages/fan/arg_handle/page.gleam
+--- mid/www/src/pages/fan/arg_handle/page.gleam	2026-09-25 03:28:00.699138486 +0900
++++ after/www/src/pages/fan/arg_handle/page.gleam	2026-09-25 03:14:52.402536897 +0900
+@@ -1,6 +1,9 @@
+ //// Page definition for the svelte-out-1 route.
+ 
+-import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, default_wide_cols, Flow}
++import framework/front.{
++  type Page, Area, Fixed, Flow, Frame, Page, Path, Var, default_sp_cols,
++  default_wide_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -53,5 +56,5 @@
+     ),
+   ),
+   tablet: None,
+-  reads: [],
++  vars: [Var("handle", Path("handle"))],
+ )
+diff -ruN mid/www/src/pages/for_stores/api/v1/page.gleam after/www/src/pages/for_stores/api/v1/page.gleam
+--- mid/www/src/pages/for_stores/api/v1/page.gleam	2026-09-25 03:28:00.699223135 +0900
++++ after/www/src/pages/for_stores/api/v1/page.gleam	2026-09-25 03:14:52.402674428 +0900
+@@ -1,4 +1,6 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, default_wide_cols, Flow}
++import framework/front.{
++  type Page, Area, Fixed, Flow, Frame, Page, default_sp_cols, default_wide_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -47,5 +49,5 @@
+     ),
+   ),
+   tablet: None,
+-  reads: [],
++  vars: [],
+ )
+diff -ruN mid/www/src/pages/me/chats/arg_id/page.gleam after/www/src/pages/me/chats/arg_id/page.gleam
+--- mid/www/src/pages/me/chats/arg_id/page.gleam	2026-09-25 03:28:00.699301544 +0900
++++ after/www/src/pages/me/chats/arg_id/page.gleam	2026-09-25 03:14:52.402813019 +0900
+@@ -1,6 +1,9 @@
+ //// Page definition for the svelte-out-1 route.
+ 
+-import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, default_wide_cols, Flow}
++import framework/front.{
++  type Page, Area, Fixed, Flow, Frame, Page, Path, Var, default_sp_cols,
++  default_wide_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -53,5 +56,5 @@
+     ),
+   ),
+   tablet: None,
+-  reads: [],
++  vars: [Var("id", Path("id"))],
+ )
+diff -ruN mid/www/src/pages/me/chats/page.gleam after/www/src/pages/me/chats/page.gleam
+--- mid/www/src/pages/me/chats/page.gleam	2026-09-25 03:28:00.699373094 +0900
++++ after/www/src/pages/me/chats/page.gleam	2026-09-25 03:14:52.402942651 +0900
+@@ -1,6 +1,8 @@
+ //// Page definition for the svelte-out-1 route.
+ 
+-import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, default_wide_cols, Flow}
++import framework/front.{
++  type Page, Area, Fixed, Flow, Frame, Page, default_sp_cols, default_wide_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -52,5 +54,5 @@
+     ),
+   ),
+   tablet: None,
+-  reads: [],
++  vars: [],
+ )
+diff -ruN mid/www/src/pages/me/experiences/arg_id/page.gleam after/www/src/pages/me/experiences/arg_id/page.gleam
+--- mid/www/src/pages/me/experiences/arg_id/page.gleam	2026-09-25 03:28:00.699446443 +0900
++++ after/www/src/pages/me/experiences/arg_id/page.gleam	2026-09-25 03:14:52.403028447 +0900
+@@ -1,6 +1,9 @@
+ //// Page definition for the svelte-out-1 route.
+ 
+-import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, default_wide_cols, Flow}
++import framework/front.{
++  type Page, Area, Fixed, Flow, Frame, Page, Path, Var, default_sp_cols,
++  default_wide_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -52,5 +55,5 @@
+     ),
+   ),
+   tablet: None,
+-  reads: [],
++  vars: [Var("id", Path("id"))],
+ )
+diff -ruN mid/www/src/pages/me/experiences/page.gleam after/www/src/pages/me/experiences/page.gleam
+--- mid/www/src/pages/me/experiences/page.gleam	2026-09-25 03:28:00.699515753 +0900
++++ after/www/src/pages/me/experiences/page.gleam	2026-09-25 03:14:52.403201263 +0900
+@@ -1,6 +1,8 @@
+ //// Page definition for the svelte-out-1 route.
+ 
+-import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, default_wide_cols, Flow}
++import framework/front.{
++  type Page, Area, Fixed, Flow, Frame, Page, default_sp_cols, default_wide_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -52,5 +54,5 @@
+     ),
+   ),
+   tablet: None,
+-  reads: [],
++  vars: [],
+ )
+diff -ruN mid/www/src/pages/me/feed/page.gleam after/www/src/pages/me/feed/page.gleam
+--- mid/www/src/pages/me/feed/page.gleam	2026-09-25 03:28:00.699587692 +0900
++++ after/www/src/pages/me/feed/page.gleam	2026-09-25 03:14:52.403284513 +0900
+@@ -1,6 +1,8 @@
+ //// Page definition for the svelte-out-1 route.
+ 
+-import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, default_wide_cols, Flow}
++import framework/front.{
++  type Page, Area, Fixed, Flow, Frame, Page, default_sp_cols, default_wide_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -51,5 +53,5 @@
+     ),
+   ),
+   tablet: None,
+-  reads: [],
++  vars: [],
+ )
+diff -ruN mid/www/src/pages/me/inbox/page.gleam after/www/src/pages/me/inbox/page.gleam
+--- mid/www/src/pages/me/inbox/page.gleam	2026-09-25 03:28:00.699657892 +0900
++++ after/www/src/pages/me/inbox/page.gleam	2026-09-25 03:14:52.403362334 +0900
+@@ -1,4 +1,7 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, default_wide_cols, Flow}
++import framework/front.{
++  type Page, Area, Fixed, Flow, Frame, Page, Query, Var, default_sp_cols,
++  default_wide_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -47,5 +50,5 @@
+     ),
+   ),
+   tablet: None,
+-  reads: [],
++  vars: [Var("after", Query("after"))],
+ )
+diff -ruN mid/www/src/pages/me/page.gleam after/www/src/pages/me/page.gleam
+--- mid/www/src/pages/me/page.gleam	2026-09-25 03:28:00.699727111 +0900
++++ after/www/src/pages/me/page.gleam	2026-09-25 03:14:52.403437925 +0900
+@@ -1,4 +1,7 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, default_wide_cols, Flow}
++import framework/front.{
++  type Page, Area, Fixed, Flow, Frame, Page, Query, Var, default_sp_cols,
++  default_wide_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -51,5 +54,5 @@
+     ),
+   ),
+   tablet: None,
+-  reads: [],
++  vars: [Var("after", Query("after"))],
+ )
+diff -ruN mid/www/src/pages/me/reservations/page.gleam after/www/src/pages/me/reservations/page.gleam
+--- mid/www/src/pages/me/reservations/page.gleam	2026-09-25 03:28:00.699804131 +0900
++++ after/www/src/pages/me/reservations/page.gleam	2026-09-25 03:14:52.403517675 +0900
+@@ -1,6 +1,8 @@
+ //// Page definition for the svelte-out-1 route.
+ 
+-import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, default_wide_cols, Flow}
++import framework/front.{
++  type Page, Area, Fixed, Flow, Frame, Page, default_sp_cols, default_wide_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -52,5 +54,5 @@
+     ),
+   ),
+   tablet: None,
+-  reads: [],
++  vars: [],
+ )
+diff -ruN mid/www/src/pages/me/reviews/new/page.gleam after/www/src/pages/me/reviews/new/page.gleam
+--- mid/www/src/pages/me/reviews/new/page.gleam	2026-09-25 03:28:00.699881870 +0900
++++ after/www/src/pages/me/reviews/new/page.gleam	2026-09-25 03:14:52.403607896 +0900
+@@ -1,6 +1,8 @@
+ //// Page definition for the svelte-out-1 route.
+ 
+-import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, default_wide_cols, Flow}
++import framework/front.{
++  type Page, Area, Fixed, Flow, Frame, Page, default_sp_cols, default_wide_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -51,5 +53,5 @@
+     ),
+   ),
+   tablet: None,
+-  reads: [],
++  vars: [],
+ )
+diff -ruN mid/www/src/pages/me/settings/page.gleam after/www/src/pages/me/settings/page.gleam
+--- mid/www/src/pages/me/settings/page.gleam	2026-09-25 03:28:00.699954990 +0900
++++ after/www/src/pages/me/settings/page.gleam	2026-09-25 03:14:52.403693247 +0900
+@@ -1,6 +1,8 @@
+ //// Page definition for the svelte-out-1 route.
+ 
+-import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, default_wide_cols, Flow}
++import framework/front.{
++  type Page, Area, Fixed, Flow, Frame, Page, default_sp_cols, default_wide_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -53,5 +55,5 @@
+     ),
+   ),
+   tablet: None,
+-  reads: [],
++  vars: [],
+ )
+diff -ruN mid/www/src/pages/me/subscriptions/page.gleam after/www/src/pages/me/subscriptions/page.gleam
+--- mid/www/src/pages/me/subscriptions/page.gleam	2026-09-25 03:28:00.700027409 +0900
++++ after/www/src/pages/me/subscriptions/page.gleam	2026-09-25 03:14:52.403771697 +0900
+@@ -1,6 +1,8 @@
+ //// Page definition for the svelte-out-1 route.
+ 
+-import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, default_wide_cols, Flow}
++import framework/front.{
++  type Page, Area, Fixed, Flow, Frame, Page, default_sp_cols, default_wide_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -51,5 +53,5 @@
+     ),
+   ),
+   tablet: None,
+-  reads: [],
++  vars: [],
+ )
+diff -ruN mid/www/src/pages/muse/arg_handle/article/arg_id/page.gleam after/www/src/pages/muse/arg_handle/article/arg_id/page.gleam
+--- mid/www/src/pages/muse/arg_handle/article/arg_id/page.gleam	2026-09-25 03:28:00.700132668 +0900
++++ after/www/src/pages/muse/arg_handle/article/arg_id/page.gleam	2026-09-25 03:14:52.403880888 +0900
+@@ -1,4 +1,7 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, default_wide_cols, Flow}
++import framework/front.{
++  type Page, Area, Fixed, Flow, Frame, Page, Path, Var, default_sp_cols,
++  default_wide_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -21,6 +24,7 @@
+     ],
+     placements: [
+       Fixed(area: "page", block: blocks.MuseHeader, cell: Flow),
++      Fixed(area: "page", block: blocks.SubscriptionAction, cell: Flow),
+       Fixed(area: "page", block: blocks.StoreMemberships, cell: Flow),
+       Fixed(area: "page", block: blocks.MuseNav, cell: Flow),
+       Fixed(area: "page", block: blocks.ArticleHead, cell: Flow),
+@@ -55,5 +59,8 @@
+     ),
+   ),
+   tablet: None,
+-  reads: [],
++  vars: [
++    Var("handle", Path("handle")),
++    Var("id", Path("id")),
++  ],
+ )
+diff -ruN mid/www/src/pages/muse/arg_handle/article/page.gleam after/www/src/pages/muse/arg_handle/article/page.gleam
+--- mid/www/src/pages/muse/arg_handle/article/page.gleam	2026-09-25 03:28:00.700205868 +0900
++++ after/www/src/pages/muse/arg_handle/article/page.gleam	2026-09-25 03:14:52.403965349 +0900
+@@ -1,4 +1,7 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, default_wide_cols, Flow}
++import framework/front.{
++  type Page, Area, Fixed, Flow, Frame, Page, Path, Query, Var, default_sp_cols,
++  default_wide_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -21,6 +24,7 @@
+     ],
+     placements: [
+       Fixed(area: "page", block: blocks.MuseHeader, cell: Flow),
++      Fixed(area: "page", block: blocks.SubscriptionAction, cell: Flow),
+       Fixed(area: "page", block: blocks.StoreMemberships, cell: Flow),
+       Fixed(area: "page", block: blocks.MuseNav, cell: Flow),
+       Fixed(area: "page", block: blocks.ArticleList, cell: Flow),
+@@ -53,5 +57,8 @@
+     ),
+   ),
+   tablet: None,
+-  reads: [],
++  vars: [
++    Var("handle", Path("handle")),
++    Var("cursor", Query("cursor")),
++  ],
+ )
+diff -ruN mid/www/src/pages/muse/arg_handle/page.gleam after/www/src/pages/muse/arg_handle/page.gleam
+--- mid/www/src/pages/muse/arg_handle/page.gleam	2026-09-25 03:28:00.700288597 +0900
++++ after/www/src/pages/muse/arg_handle/page.gleam	2026-09-25 03:14:52.404058610 +0900
+@@ -1,4 +1,7 @@
+-import framework/front.{type Page, Area, ByKind, Fixed, Frame, Page, Widget, default_sp_cols, default_wide_cols, Flow}
++import framework/front.{
++  type Page, Area, ByKind, Fixed, Flow, Frame, Page, Path, Query, Var, Widget,
++  default_sp_cols, default_wide_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -21,6 +24,7 @@
+     ],
+     placements: [
+       Fixed(area: "page", block: blocks.MuseHeader, cell: Flow),
++      Fixed(area: "page", block: blocks.SubscriptionAction, cell: Flow),
+       Fixed(area: "page", block: blocks.StoreMemberships, cell: Flow),
+       Fixed(area: "page", block: blocks.MuseNav, cell: Flow),
+       Fixed(area: "page", block: blocks.PhF2BackgroundImage, cell: Flow),
+@@ -39,7 +43,6 @@
+       Fixed(area: "page", block: blocks.PhCommonReportTargetReason, cell: Flow),
+       Widget(
+         area: "page",
+-        name: "muse_top_main",
+         of: service.WidgetList,
+         render: ByKind(
+           by: "kind",
+@@ -81,5 +84,8 @@
+     ),
+   ),
+   tablet: None,
+-  reads: [],
++  vars: [
++    Var("handle", Path("handle")),
++    Var("space", Query("space")),
++  ],
+ )
+diff -ruN mid/www/src/pages/muse/arg_handle/reserve/page.gleam after/www/src/pages/muse/arg_handle/reserve/page.gleam
+--- mid/www/src/pages/muse/arg_handle/reserve/page.gleam	2026-09-25 03:28:00.700370367 +0900
++++ after/www/src/pages/muse/arg_handle/reserve/page.gleam	2026-09-25 03:14:52.404148130 +0900
+@@ -1,6 +1,9 @@
+ //// Page definition for the svelte-out-1 route.
+ 
+-import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, default_wide_cols, Flow}
++import framework/front.{
++  type Page, Area, Fixed, Flow, Frame, Page, Path, Var, default_sp_cols,
++  default_wide_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -55,5 +58,5 @@
+     ),
+   ),
+   tablet: None,
+-  reads: [],
++  vars: [Var("handle", Path("handle"))],
+ )
+diff -ruN mid/www/src/pages/muse/arg_handle/reviews/page.gleam after/www/src/pages/muse/arg_handle/reviews/page.gleam
+--- mid/www/src/pages/muse/arg_handle/reviews/page.gleam	2026-09-25 03:28:00.700443776 +0900
++++ after/www/src/pages/muse/arg_handle/reviews/page.gleam	2026-09-25 03:14:52.404232311 +0900
+@@ -1,6 +1,9 @@
+ //// Page definition for the svelte-out-1 route.
+ 
+-import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, default_wide_cols, Flow}
++import framework/front.{
++  type Page, Area, Fixed, Flow, Frame, Page, Path, Var, default_sp_cols,
++  default_wide_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -53,5 +56,5 @@
+     ),
+   ),
+   tablet: None,
+-  reads: [],
++  vars: [Var("handle", Path("handle"))],
+ )
+diff -ruN mid/www/src/pages/muse/arg_handle/schedule/page.gleam after/www/src/pages/muse/arg_handle/schedule/page.gleam
+--- mid/www/src/pages/muse/arg_handle/schedule/page.gleam	2026-09-25 03:28:00.700516515 +0900
++++ after/www/src/pages/muse/arg_handle/schedule/page.gleam	2026-09-25 03:14:52.404313702 +0900
+@@ -1,4 +1,7 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, default_wide_cols, Flow}
++import framework/front.{
++  type Page, Area, Fixed, Flow, Frame, Page, Path, Query, Var, default_sp_cols,
++  default_wide_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -21,6 +24,7 @@
+     ],
+     placements: [
+       Fixed(area: "page", block: blocks.MuseHeader, cell: Flow),
++      Fixed(area: "page", block: blocks.SubscriptionAction, cell: Flow),
+       Fixed(area: "page", block: blocks.StoreMemberships, cell: Flow),
+       Fixed(area: "page", block: blocks.MuseNav, cell: Flow),
+       Fixed(area: "page", block: blocks.ScheduleList, cell: Flow),
+@@ -54,5 +58,8 @@
+     ),
+   ),
+   tablet: None,
+-  reads: [],
++  vars: [
++    Var("handle", Path("handle")),
++    Var("from", Query("from")),
++  ],
+ )
+diff -ruN mid/www/src/pages/muse/arg_handle/space/arg_id/page.gleam after/www/src/pages/muse/arg_handle/space/arg_id/page.gleam
+--- mid/www/src/pages/muse/arg_handle/space/arg_id/page.gleam	2026-09-25 03:28:00.700593185 +0900
++++ after/www/src/pages/muse/arg_handle/space/arg_id/page.gleam	2026-09-25 03:14:52.404410313 +0900
+@@ -1,4 +1,7 @@
+-import framework/front.{type Page, Area, ByKind, Fixed, Frame, Page, Widget, default_sp_cols, default_wide_cols, Flow}
++import framework/front.{
++  type Page, Area, ByKind, Fixed, Flow, Frame, Page, Path, Var, Widget,
++  default_sp_cols, default_wide_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -7,7 +10,7 @@
+ import style
+ 
+ pub const page: Page(service.Service, blocks.Block) = Page(
+-  of: Some(service.SpaceList),
++  of: Some(service.SpaceRead),
+   layout: layout.www,
+   theme: Some("theme"),
+   sp: Frame(
+@@ -21,14 +24,14 @@
+     ],
+     placements: [
+       Fixed(area: "page", block: blocks.MuseHeader, cell: Flow),
++      Fixed(area: "page", block: blocks.SubscriptionAction, cell: Flow),
+       Fixed(area: "page", block: blocks.StoreMemberships, cell: Flow),
+       Fixed(area: "page", block: blocks.MuseNav, cell: Flow),
+       Fixed(area: "page", block: blocks.SpaceTitle, cell: Flow),
+       Fixed(area: "page", block: blocks.PhF7FreePageContent, cell: Flow),
+       Widget(
+         area: "page",
+-        name: "space_main",
+-        of: service.WidgetList,
++        of: service.SpaceWidgetList,
+         render: ByKind(
+           by: "kind",
+           table: [
+@@ -69,5 +72,9 @@
+     ),
+   ),
+   tablet: None,
+-  reads: [],
++  vars: [
++    Var("handle", Path("handle")),
++    Var("id", Path("id")),
++    Var("space", Path("id")),
++  ],
+ )
+diff -ruN mid/www/src/pages/muse/arg_handle/tweets/page.gleam after/www/src/pages/muse/arg_handle/tweets/page.gleam
+--- mid/www/src/pages/muse/arg_handle/tweets/page.gleam	2026-09-25 03:28:00.700672664 +0900
++++ after/www/src/pages/muse/arg_handle/tweets/page.gleam	2026-09-25 03:14:52.404503273 +0900
+@@ -1,6 +1,9 @@
+ //// Page definition for the svelte-out-1 route.
+ 
+-import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, default_wide_cols, Flow}
++import framework/front.{
++  type Page, Area, Fixed, Flow, Frame, Page, Path, Var, default_sp_cols,
++  default_wide_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -54,5 +57,5 @@
+     ),
+   ),
+   tablet: None,
+-  reads: [],
++  vars: [Var("handle", Path("handle"))],
+ )
+diff -ruN mid/www/src/pages/onboard/page.gleam after/www/src/pages/onboard/page.gleam
+--- mid/www/src/pages/onboard/page.gleam	2026-09-25 03:28:00.700755334 +0900
++++ after/www/src/pages/onboard/page.gleam	2026-09-25 03:14:52.404586834 +0900
+@@ -1,6 +1,8 @@
+ //// Page definition for the svelte-out-1 route.
+ 
+-import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, default_wide_cols, Flow}
++import framework/front.{
++  type Page, Area, Fixed, Flow, Frame, Page, default_sp_cols, default_wide_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -54,5 +56,5 @@
+     ),
+   ),
+   tablet: None,
+-  reads: [],
++  vars: [],
+ )
+diff -ruN mid/www/src/pages/page.gleam after/www/src/pages/page.gleam
+--- mid/www/src/pages/page.gleam	2026-09-25 03:28:00.700835343 +0900
++++ after/www/src/pages/page.gleam	2026-09-25 03:14:52.404669385 +0900
+@@ -1,4 +1,6 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, default_wide_cols, Flow}
++import framework/front.{
++  type Page, Area, Fixed, Flow, Frame, Page, default_sp_cols, default_wide_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -46,12 +48,14 @@
+           style: [],
+         ),
+       ],
+-      placements: [Fixed(area: "aside", block: blocks.PhCommonPcAdRail, cell: Flow)],
++      placements: [
++        Fixed(area: "aside", block: blocks.PhCommonPcAdRail, cell: Flow),
++      ],
+       cols: default_wide_cols,
+       rows: [],
+       template: [],
+     ),
+   ),
+   tablet: None,
+-  reads: [],
++  vars: [],
+ )
+diff -ruN mid/www/src/pages/search/page.gleam after/www/src/pages/search/page.gleam
+--- mid/www/src/pages/search/page.gleam	2026-09-25 03:28:00.700916023 +0900
++++ after/www/src/pages/search/page.gleam	2026-09-25 03:14:52.404747326 +0900
+@@ -1,4 +1,7 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, default_wide_cols, Flow}
++import framework/front.{
++  type Page, Area, Fixed, Flow, Frame, Page, Query, Var, default_sp_cols,
++  default_wide_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -50,5 +53,5 @@
+     ),
+   ),
+   tablet: None,
+-  reads: [],
++  vars: [Var("q", Query("q"))],
+ )
+diff -ruN mid/www/src/pages/store/arg_handle/cast/arg_id/page.gleam after/www/src/pages/store/arg_handle/cast/arg_id/page.gleam
+--- mid/www/src/pages/store/arg_handle/cast/arg_id/page.gleam	2026-09-25 03:28:00.700993512 +0900
++++ after/www/src/pages/store/arg_handle/cast/arg_id/page.gleam	2026-09-25 03:14:52.404834536 +0900
+@@ -1,4 +1,7 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, default_wide_cols, Flow}
++import framework/front.{
++  type Page, Area, Fixed, Flow, Frame, Page, Path, Var, default_sp_cols,
++  default_wide_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -21,7 +24,7 @@
+     ],
+     placements: [
+       Fixed(area: "page", block: blocks.CastProfile, cell: Flow),
+-      Fixed(area: "page", block: blocks.StoreSchedule, cell: Flow),
++      Fixed(area: "page", block: blocks.CastSchedule, cell: Flow),
+     ],
+     cols: default_sp_cols,
+     rows: [],
+@@ -50,5 +53,8 @@
+     ),
+   ),
+   tablet: None,
+-  reads: [],
++  vars: [
++    Var("handle", Path("handle")),
++    Var("id", Path("id")),
++  ],
+ )
+diff -ruN mid/www/src/pages/store/arg_handle/page.gleam after/www/src/pages/store/arg_handle/page.gleam
+--- mid/www/src/pages/store/arg_handle/page.gleam	2026-09-25 03:28:00.701068862 +0900
++++ after/www/src/pages/store/arg_handle/page.gleam	2026-09-25 03:14:52.404910847 +0900
+@@ -1,4 +1,7 @@
+-import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, default_wide_cols, Flow}
++import framework/front.{
++  type Page, Area, Fixed, Flow, Frame, Page, Path, Var, default_sp_cols,
++  default_wide_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -51,5 +54,5 @@
+     ),
+   ),
+   tablet: None,
+-  reads: [],
++  vars: [Var("handle", Path("handle"))],
+ )
+diff -ruN mid/www/src/pages/tl/page.gleam after/www/src/pages/tl/page.gleam
+--- mid/www/src/pages/tl/page.gleam	2026-09-25 03:28:00.701142861 +0900
++++ after/www/src/pages/tl/page.gleam	2026-09-25 03:14:52.404988938 +0900
+@@ -1,6 +1,8 @@
+ //// Page definition for the svelte-out-1 route.
+ 
+-import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, default_wide_cols, Flow}
++import framework/front.{
++  type Page, Area, Fixed, Flow, Frame, Page, default_sp_cols, default_wide_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -53,5 +55,5 @@
+     ),
+   ),
+   tablet: None,
+-  reads: [],
++  vars: [],
+ )
+diff -ruN mid/www/src/pages/w1_preview/page.gleam after/www/src/pages/w1_preview/page.gleam
+--- mid/www/src/pages/w1_preview/page.gleam	2026-09-25 03:28:00.701217490 +0900
++++ after/www/src/pages/w1_preview/page.gleam	2026-09-25 03:14:52.405028482 +0900
+@@ -1,6 +1,8 @@
+ //// Page definition for the svelte-out-1 route.
+ 
+-import framework/front.{type Page, Area, Fixed, Frame, Page, default_sp_cols, default_wide_cols, Flow}
++import framework/front.{
++  type Page, Area, Fixed, Flow, Frame, Page, default_sp_cols, default_wide_cols,
++}
+ import framework/front/css
+ import gen/blocks
+ import gen/service
+@@ -53,5 +55,5 @@
+     ),
+   ),
+   tablet: None,
+-  reads: [],
++  vars: [],
+ )

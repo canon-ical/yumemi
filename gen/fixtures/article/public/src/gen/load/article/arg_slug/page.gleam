@@ -1,7 +1,8 @@
-//// GENERATED from public/src/pages/article/arg_slug/page.gleam [sha256:b0af993d9f89] — 手で編集しない
+//// GENERATED from public/src/pages/article/arg_slug/page.gleam [sha256:4ced8cac33da] — 手で編集しない
 
 import blocks/article
 import blocks/feed
+import blocks/notice
 import blocks/row_article
 import blocks/row_summary
 import blocks/site_header
@@ -23,25 +24,39 @@ import sketch/lustre/element
 import sketch/lustre/element/html
 import style
 
+pub type Vars {
+  Vars(
+    widget: Option(String),
+    slug: String,
+    view_only: String,
+    term: Option(String),
+    subject_handle: Option(String),
+    www_origin: String,
+    auth_origin: String,
+  )
+}
+
 pub type Data {
   Data(
     layout: layout.Data,
+    vars: Vars,
     article_read: article_read.Out,
-    article_kinds: Option(widget_list.Out),
+    widget_list: Option(widget_list.Out),
     theme: Option(article_read.PageTheme),
   )
 }
 
 pub fn load(
-  article_feed: Option(widget_list.Out),
+  vars: Vars,
+  widget_list: Option(widget_list.Out),
   article_read: article_read.Out,
-  article_kinds: Option(widget_list.Out),
   theme: Option(article_read.PageTheme),
 ) -> Data {
   Data(
-    layout: layout.load(article_feed),
+    layout: layout.load(widget_list),
+    vars: vars,
     article_read: article_read,
-    article_kinds: article_kinds,
+    widget_list: widget_list,
     theme: theme,
   )
 }
@@ -134,8 +149,14 @@ fn page_children(it: Data) -> List(element.Element(Nil)) {
         ),
       ],
       list.flatten([
-        [styled_area("page", style.page, page_placement_0(it))],
-        [plain_area("rail", page_placement_2(it))],
+        [
+          styled_area(
+            "page",
+            style.page,
+            list.flatten([page_placement_0(it), page_placement_2(it)]),
+          ),
+        ],
+        [plain_area("rail", page_placement_3(it))],
         [overlay_area("article-dialog", [], page_placement_1(it))],
       ]),
     ),
@@ -183,28 +204,44 @@ fn layout_placement_0(_it: Data) -> List(element.Element(Nil)) {
 }
 
 fn layout_placement_1(it: Data) -> List(element.Element(Nil)) {
-  case it.layout.article_feed {
+  case it.layout.widget_list {
     Some(out) -> [feed.view(out)]
     None -> []
   }
 }
 
 fn page_placement_0(it: Data) -> List(element.Element(Nil)) {
-  [article.view(it.article_read)]
+  [
+    article.view(
+      it.article_read,
+      article.Arg(
+        slug: it.vars.slug,
+        term: it.vars.term,
+        subject_handle: it.vars.subject_handle,
+        www_origin: it.vars.www_origin,
+        auth_origin: it.vars.auth_origin,
+        view_only: it.vars.view_only,
+      ),
+    ),
+  ]
 }
 
 fn page_placement_1(it: Data) -> List(element.Element(Nil)) {
-  [summary.view(it.article_read)]
+  [summary.view(it.article_read, summary.Arg(slug: it.vars.slug))]
 }
 
 fn page_placement_2(it: Data) -> List(element.Element(Nil)) {
-  case it.article_kinds {
-    Some(out) -> render_page_placement_2(out.rows)
+  [notice.view(Nil, notice.Arg(slug: it.vars.slug))]
+}
+
+fn page_placement_3(it: Data) -> List(element.Element(Nil)) {
+  case it.widget_list {
+    Some(out) -> render_page_placement_3(out.rows)
     None -> []
   }
 }
 
-fn render_page_placement_2(
+fn render_page_placement_3(
   rows: List(widget_list.Row),
 ) -> List(element.Element(Nil)) {
   case rows {
@@ -213,11 +250,11 @@ fn render_page_placement_2(
       case row {
         widget_list.ArticleRow(..) -> [
           row_article.view(row),
-          ..render_page_placement_2(rest)
+          ..render_page_placement_3(rest)
         ]
         widget_list.Summary(..) -> [
           row_summary.view(row),
-          ..render_page_placement_2(rest)
+          ..render_page_placement_3(rest)
         ]
       }
   }

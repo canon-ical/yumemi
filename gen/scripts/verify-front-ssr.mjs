@@ -5,6 +5,7 @@ import {
   prepareFrontScratch,
   startFrontWorker,
 } from "./front-harness.mjs";
+import { verifyFrontShell } from "./verify-front-shell.mjs";
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -14,6 +15,7 @@ const work = prepareFrontScratch("front-ssr");
 let worker;
 try {
   worker = await startFrontWorker(work, 8792);
+  await verifyFrontShell();
 
   const fallbackResponse = await fetch(`${worker.baseUrl}/not-a-generated-route`);
   const fallbackBody = await fallbackResponse.text();

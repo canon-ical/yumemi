@@ -6,6 +6,7 @@ import shell from "./build/dev/javascript/yumemi_front_scratch/gen/shell.mjs";
 
 const encode = makeEncode({ Some, None, List });
 let likeCount = 12;
+const requests = [];
 
 function json(value) {
   return new Response(JSON.stringify(encode(value)), {
@@ -17,6 +18,24 @@ function json(value) {
 const app = {
   async fetch(request) {
     const url = new URL(request.url);
+    requests.push({
+      method: request.method,
+      path: url.pathname + url.search,
+      cookie: request.headers.get("cookie"),
+    });
+    if (request.method === "GET" && url.pathname === "/api/session") {
+      const cookie = request.headers.get("cookie") ?? "";
+      if (cookie.includes("no-subject")) return json({ anonymous: false });
+      if (cookie.includes("missing-handle")) {
+        return json({ anonymous: false, subject: { id: "reader-id" } });
+      }
+      const signedIn = cookie.includes("subject");
+      return json(
+        signedIn
+          ? { anonymous: false, subject: { handle: "reader-handle", id: "reader-id", email: "must-not-render" } }
+          : { anonymous: true },
+      );
+    }
     if (request.method === "GET" && url.pathname.startsWith("/api/articles/")) {
       return json(back.article_read());
     }
@@ -64,10 +83,23 @@ const svelte = {
 export default {
   fetch(request, env, context) {
     const pathname = new URL(request.url).pathname;
+    if (pathname === "/__reset") {
+      requests.length = 0;
+      return json({ reset: true });
+    }
+    if (pathname === "/__requests") return json(requests);
     if (pathname.startsWith("/api/")) return app.fetch(request);
+    const cookie = request.headers.get("cookie") ?? "";
+    const bindings = { ...env, APP: app, SVELTE: svelte, YUMEMI_DEV: "1" };
+    if (!cookie.includes("missing-public-origin")) {
+      bindings.PUBLIC_PUBLIC_ORIGIN = "https://public.example";
+    }
+    if (!cookie.includes("missing-idp-origin")) {
+      bindings.PUBLIC_IDP_ORIGIN = "https://identity.example";
+    }
     return shell.fetch(
       request,
-      { ...env, APP: app, SVELTE: svelte, YUMEMI_DEV: "1" },
+      bindings,
       context,
     );
   },

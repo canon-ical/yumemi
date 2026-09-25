@@ -1,4 +1,4 @@
-//// GENERATED from src/service/widget_list.gleam [sha256:e040b870a4bb] — 手で編集しない
+//// GENERATED from src/service/widget_list.gleam [sha256:a637e6dc3b1d] — 手で編集しない
 
 import gleam/dynamic/decode
 

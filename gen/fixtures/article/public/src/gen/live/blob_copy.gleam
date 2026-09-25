@@ -1,4 +1,4 @@
-//// GENERATED from api/src/gen/http_runtime.mjs [sha256:12764e937af9] — 手で編集しない
+//// GENERATED from api/src/gen/http_runtime.mjs [sha256:660d3b40f2a6] — 手で編集しない
 
 import framework/front/live
 import gleam/dynamic.{type Dynamic}
