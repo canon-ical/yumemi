@@ -1619,7 +1619,8 @@ fn create_sql_input_placeholder_count(sql: String) -> Int {
     |> list.find(fn(line) {
       string.contains(line, "SELECT $1") || string.contains(line, "VALUES($1")
     })
-  let input_values = case string.split(values, ",'draft'") {
+  // 呼び手の入力は最初の文字列 literal(初期の相 `'<phase>'`)より前。相の綴りに依らない。
+  let input_values = case string.split(values, "'") {
     [before, ..] -> before
     [] -> values
   }
@@ -4457,4 +4458,24 @@ fn assert_one_note(
   let assert [note] = notes
   note.class |> should.equal(class)
   string.contains(note.text, text) |> should.be_true
+}
+
+// ── yumemi-hw-1 ── 初期の相の綴りに依らない placeholder の数え ────────────────
+
+/// 呼び手の入力の placeholder は最初の文字列 literal(初期の相)より前を数える。
+/// 相が `'draft'` でない Entity(`'pending'` など)でも、相の後ろの `entered_*` を数えない。
+pub fn create_sql_placeholder_count_ignores_the_phase_spelling_test() {
+  create_sql_input_placeholder_count(
+    "INSERT INTO app.order(a,b,phase,entered_pending)\n SELECT $1,$2::uuid,'pending',$3::timestamptz\n",
+  )
+  |> should.equal(2)
+  create_sql_input_placeholder_count(
+    " SELECT $1,$2,$3,$4,next_order.next_order,$5,'draft',$6::timestamptz",
+  )
+  |> should.equal(5)
+  // 相の無い Entity は行の全部が呼び手の入力。
+  create_sql_input_placeholder_count(
+    "VALUES($1,$2,$3::boolean,$4) RETURNING id",
+  )
+  |> should.equal(4)
 }

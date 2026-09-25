@@ -76,7 +76,9 @@ pub fn emit(app: model.App, hashes: hash.Hashes) -> List(File) {
   ]
 }
 
-/// 手書き札の照合。未一致は止めず、指定された名前ごとに1行の警告を返す。
+/// 手書き札の照合。`handwritten_verbs` の未一致は止めず、名前ごとに1行の警告を返す
+/// (生成候補を持たない手書き verb は `manual_verbs` へ、と文言で名指しする)。
+/// `manual_verbs` は候補と一致しないことを宣言する語 ── 一致したら exit 4。
 pub fn notes(app: model.App) -> List(stop.Note) {
   let global_candidates =
     app.entities
@@ -85,10 +87,17 @@ pub fn notes(app: model.App) -> List(stop.Note) {
   let entity_notes =
     app.entities
     |> list.flat_map(fn(entity) {
-      handwritten_notes(
-        entity.module,
-        entity.handwritten_verbs,
-        candidate_names(entity),
+      list.append(
+        handwritten_notes(
+          entity.module,
+          entity.handwritten_verbs,
+          candidate_names(entity),
+        ),
+        manual_notes(
+          entity.module,
+          entity.manual_verbs,
+          candidate_names(entity),
+        ),
       )
     })
   let external_notes =
@@ -96,7 +105,34 @@ pub fn notes(app: model.App) -> List(stop.Note) {
     |> list.flat_map(fn(entry) {
       handwritten_notes(entry.0, entry.1, global_candidates)
     })
-  list.append(entity_notes, external_notes)
+  let external_manual =
+    app.manual_verbs
+    |> list.flat_map(fn(entry) {
+      manual_notes(entry.0, entry.1, global_candidates)
+    })
+  list.flatten([entity_notes, external_notes, external_manual])
+}
+
+fn manual_notes(
+  module: String,
+  names: List(String),
+  candidates: List(String),
+) -> List(stop.Note) {
+  names
+  |> list.unique
+  |> list.filter_map(fn(name) {
+    case list.contains(candidates, name) {
+      False -> Error(Nil)
+      True ->
+        Ok(stop.Note(
+          class: stop.Conflict,
+          text: module
+            <> ": manual_verbs の名が生成候補と一致する: "
+            <> name
+            <> "(生成を止めて手書きにするなら handwritten_verbs へ)",
+        ))
+    }
+  })
 }
 
 fn handwritten_notes(
@@ -112,7 +148,10 @@ fn handwritten_notes(
       False ->
         Ok(stop.Note(
           class: stop.Warning,
-          text: module <> ": handwritten_verbs に生成名が無い: " <> name,
+          text: module
+            <> ": handwritten_verbs に生成名が無い: "
+            <> name
+            <> "(生成候補の無い手書き verb は manual_verbs へ)",
         ))
     }
   })
@@ -152,13 +191,20 @@ fn emits_reorder(app: model.App, entity: model.Entity, name: String) -> Bool {
 }
 
 fn handwritten_header(app: model.App) -> String {
+  // manual_verbs も札と同じくヘッダの `handwritten:` に載せる。
   let names =
-    list.unique(list.append(
-      app.entities
-        |> list.flat_map(fn(entity) { entity.handwritten_verbs }),
-      app.handwritten_verbs
-        |> list.flat_map(fn(entry) { entry.1 }),
-    ))
+    list.unique(
+      list.flatten([
+        app.entities
+          |> list.flat_map(fn(entity) {
+            list.append(entity.handwritten_verbs, entity.manual_verbs)
+          }),
+        app.handwritten_verbs
+          |> list.flat_map(fn(entry) { entry.1 }),
+        app.manual_verbs
+          |> list.flat_map(fn(entry) { entry.1 }),
+      ]),
+    )
   case names {
     [] -> ""
     _ -> "//// handwritten: " <> string.join(names, ", ") <> "\n"
@@ -850,7 +896,10 @@ fn sql_files(
     Some(ordered) ->
       case ordered_parent(entity, app, ordered) {
         Some(parent) ->
-          case has_create_many(entity), emits(app, entity, "create_" <> entity.collection) {
+          case
+            has_create_many(entity),
+            emits(app, entity, "create_" <> entity.collection)
+          {
             True, True -> [
               sql_file(
                 entity,

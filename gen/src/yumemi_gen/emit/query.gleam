@@ -5,7 +5,8 @@
 //// From と Field を同じ module に置くと構成子の名前空間が衝突する(Entity `consent_version` の
 //// From と Entity Consent の `version` 列が `ConsentVersion` で衝突し `Duplicate definition`)。
 //// From / Field / Arrow / Operand は Entity 宣言から、残りは framework/query.gleam の
-//// 構成子をそのまま単型に写す(アプリは語彙を足せない、20:664)。
+//// 構成子をそのまま単型に写す(アプリは語彙を足せない、20:664)。`Select` の `Pick` も
+//// framework 側に同じ形で在る(役員 人見 09-25、1 対 1 は test が見る)。
 
 import gleam/list
 import gleam/string
@@ -67,7 +68,7 @@ pub fn collisions(app: App) -> List(#(String, String)) {
   let lifecycles = list.filter(entities_in_order(app), model.has_lifecycle)
   let query_names =
     list.flatten([
-      list.map(app.arrows, fn(arrow) { arrow.name }),
+      arrow_names(app),
       ["Param", "Num", "Str", "At", "Col"],
       list.map(lifecycles, fn(entity) { "PhaseOf" <> entity.name }),
       list.map(entities_in_order(app), fn(entity) { "KeyOf" <> entity.name }),
@@ -79,7 +80,7 @@ pub fn collisions(app: App) -> List(#(String, String)) {
       ["Nearest", "Asc", "Desc", "AscAgg", "DescAgg"],
       ["Distance", "Rank", "Running"],
       ["NoLimit", "Paged", "First", "FirstPerGroup"],
-      ["Select"],
+      ["Select", "Pick"],
     ])
   list.flatten([
     duplicates(from_module, from_variants(app)),
@@ -129,7 +130,9 @@ fn text(app: App, input_hash: String) -> String {
     "/// Field の実体は gen/query/field。\n",
     "pub type Field =\n  field.Field\n",
     "\n",
-    block("Arrow", list.map(app.arrows, fn(arrow) { arrow.name })),
+    "/// 順向き(子 -> 親)は関係 Property 1 つにつき 1 本。末尾は `with:` に書かれた\n",
+    "/// Held の逆向き(親 -> 子の List)。\n",
+    block("Arrow", arrow_names(app)),
     "\n",
     block(
       "Operand(p)",
@@ -204,6 +207,8 @@ fn text(app: App, input_hash: String) -> String {
       "FirstPerGroup(Int, Group)",
     ]),
     "\n",
+    "/// `Pick` は返す列を選ぶ口。`select` は `Select` を直に書き、行は選んだ列の record になる。\n",
+    "/// `columns` に with の子の列を混ぜると、その子も選んだ列だけの record になる。\n",
     "pub type Select(p) {\n",
     "  Select(\n",
     "    from: From,\n",
@@ -217,8 +222,17 @@ fn text(app: App, input_hash: String) -> String {
     "    order: List(Order(p)),\n",
     "    limit: Limit(p),\n",
     "  )\n",
+    "  Pick(columns: List(Field), select: Select(p))\n",
     "}\n",
   ])
+}
+
+/// Arrow の構成子。順向きのあとに逆向き。
+fn arrow_names(app: App) -> List(String) {
+  list.append(
+    list.map(app.arrows, fn(arrow) { arrow.name }),
+    list.map(app.reverse_arrows, fn(arrow) { arrow.name }),
+  )
 }
 
 fn block(name: String, variants: List(String)) -> String {

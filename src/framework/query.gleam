@@ -79,7 +79,21 @@ pub type Limit(operand, group) {
   FirstPerGroup(Int, group)
 }
 
-pub type Select(from, arrow, cond, group, cond_agg, agg, along, order, limit) {
+/// `Pick` は返す列を選ぶ口。`select` は `Select` を直に書き、行は選んだ列の record になる。
+/// `columns` に with の子の列を混ぜると、その子も選んだ列だけの record になる。
+/// 書かなければ(`Select` のまま)従来どおり全列。
+pub type Select(
+  from,
+  field,
+  arrow,
+  cond,
+  group,
+  cond_agg,
+  agg,
+  along,
+  order,
+  limit,
+) {
   Select(
     from: from,
     join: List(arrow),
@@ -91,5 +105,20 @@ pub type Select(from, arrow, cond, group, cond_agg, agg, along, order, limit) {
     with: List(arrow),
     order: List(order),
     limit: limit,
+  )
+  Pick(
+    columns: List(field),
+    select: Select(
+      from,
+      field,
+      arrow,
+      cond,
+      group,
+      cond_agg,
+      agg,
+      along,
+      order,
+      limit,
+    ),
   )
 }

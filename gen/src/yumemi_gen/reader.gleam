@@ -11,6 +11,8 @@ import gleam/string
 import yumemi_gen/glance_util as g
 import yumemi_gen/model.{type App, type Entity, type Prop, type ValueType}
 import yumemi_gen/naming
+import yumemi_gen/reader/clauses
+import yumemi_gen/relation
 import yumemi_gen/source.{type Unit}
 import yumemi_gen/stop
 
@@ -223,11 +225,13 @@ fn collection_of(unit: Unit) -> Result(Option(model.Collection), Error) {
                 module,
                 unit.path,
               ))
+              use manual_verbs <- result.try(manual_verbs_of(module, unit.path))
               Ok(
                 Some(model.Collection(
                   module: unit.path,
                   collection: collection,
                   handwritten_verbs: handwritten_verbs,
+                  manual_verbs: manual_verbs,
                 )),
               )
             }
@@ -242,16 +246,28 @@ fn handwritten_verbs_of(
   module: glance.Module,
   where: String,
 ) -> Result(List(String), Error) {
-  case public_constant(module, "handwritten_verbs") {
+  verb_names_of(module, where, "handwritten_verbs")
+}
+
+/// 生成候補を持たない手書き verb(`pub const manual_verbs: List(String)`)。
+fn manual_verbs_of(
+  module: glance.Module,
+  where: String,
+) -> Result(List(String), Error) {
+  verb_names_of(module, where, "manual_verbs")
+}
+
+fn verb_names_of(
+  module: glance.Module,
+  where: String,
+  name: String,
+) -> Result(List(String), Error) {
+  case public_constant(module, name) {
     None -> Ok([])
     Some(constant) -> {
-      use expressions <- result.try(expression_list(
-        constant.value,
-        where,
-        "handwritten_verbs",
-      ))
+      use expressions <- result.try(expression_list(constant.value, where, name))
       list.try_map(expressions, fn(expression) {
-        string_expression(expression, where, "handwritten_verbs の verb 名")
+        string_expression(expression, where, name <> " の verb 名")
       })
     }
   }
@@ -358,6 +374,7 @@ fn entity_of(
         module,
         unit.path,
       ))
+      use manual_verbs <- result.try(manual_verbs_of(module, unit.path))
       use #(verbs, ordered_by, upsert_key) <- result.try(declarations(
         module,
         phases,
@@ -394,6 +411,7 @@ fn entity_of(
           edges: edges,
           verbs: verbs,
           handwritten_verbs: handwritten_verbs,
+          manual_verbs: manual_verbs,
           ordered_by: ordered_by,
           upsert_key: upsert_key,
           auto_key: auto_key,
@@ -1877,27 +1895,125 @@ fn parse_select(
   where: String,
 ) -> Result(model.Select, Error) {
   case g.ctor_name(expression) {
-    Some("Select") -> {
-      use from <- result.try(
-        g.labelled(expression, "from")
-        |> option.then(g.ctor_name)
-        |> option.to_result(Unsupported(where, "from が読めない")),
+    Some("Select") -> plain_select(expression, where)
+    // 列の選択。`q.Pick(columns: [q.RosterName, ..], select: q.Select(..))`。
+    // select は q.Select を直に書く(const の参照・Pick の入れ子は読まない)。
+    Some("Pick") -> {
+      use inner <- result.try(
+        g.labelled(expression, "select")
+        |> option.to_result(Unsupported(where, "Pick の select が無い")),
       )
-      Ok(model.Select(
-        from: from,
-        join: arrow_names(expression, "join"),
-        where: conds(expression, "where"),
-        group: groups(expression, "group"),
-        having: havings(expression, "having"),
-        agg: aggs(expression, "agg"),
-        along: alongs(expression, "along"),
-        with: arrow_names(expression, "with"),
-        order: orders(expression, "order"),
-        limit: limit(expression),
-      ))
+      use select <- result.try(case g.ctor_name(inner) {
+        Some("Select") -> plain_select(inner, where)
+        _ -> Error(Unsupported(where, "Pick の select は q.Select(..) を直に書く"))
+      })
+      use items <- result.try(
+        g.labelled(expression, "columns")
+        |> option.to_result(Unsupported(where, "Pick の columns が無い")),
+      )
+      let columns_unread = case items {
+        glance.List(rest: Some(_), ..) -> ["columns の spread(..)"]
+        _ -> []
+      }
+      use columns <- result.try(
+        g.list_elements(items)
+        |> list.try_map(fn(item) {
+          g.ctor_name(item)
+          |> option.to_result(Unsupported(where, "Pick の columns の項が Field でない"))
+        }),
+      )
+      Ok(
+        model.Select(
+          ..select,
+          columns: Some(columns),
+          unshaped: list.append(select.unshaped, columns_unread),
+        ),
+      )
     }
     _ -> Error(Unsupported(where, "Select の構成子でない"))
   }
+}
+
+fn plain_select(
+  expression: glance.Expression,
+  where: String,
+) -> Result(model.Select, Error) {
+  use from <- result.try(
+    g.labelled(expression, "from")
+    |> option.then(g.ctor_name)
+    |> option.to_result(Unsupported(where, "from が読めない")),
+  )
+  let #(join, join_unread) = arrow_names(expression, "join")
+  let #(with, with_unread) = arrow_names(expression, "with")
+  let shape_unread =
+    list.flat_map(select_lists, fn(label) { literal_unread(expression, label) })
+  Ok(model.Select(
+    from: from,
+    join: join,
+    where: conds(expression, "where"),
+    group: groups(expression, "group"),
+    having: havings(expression, "having"),
+    agg: aggs(expression, "agg"),
+    along: alongs(expression, "along"),
+    with: with,
+    order: orders(expression, "order"),
+    limit: limit(expression),
+    unread: list.append(join_unread, with_unread),
+    unshaped: list.append(shape_unread, where_unread(expression)),
+    columns: None,
+  ))
+}
+
+/// Select の List の欄。
+const select_lists = [
+  "join", "where", "group", "having", "agg", "along", "with", "order",
+]
+
+/// 欄が List の literal でない(定数の参照など)か、spread(`..rest`)を持つ。
+/// 読みは literal の項しか辿れないので、そのまま読むと項が黙って落ちる ──
+/// `where` なら絞りが消えて返る行が増え、`join` / `with` なら欄が消える。
+/// 捨てずに `unshaped` に残し、SQL 層で exit 4 にする。
+fn literal_unread(
+  expression: glance.Expression,
+  label: String,
+) -> List(String) {
+  case g.labelled(expression, label) {
+    None -> []
+    Some(glance.List(rest: None, ..)) -> []
+    Some(glance.List(rest: Some(_), ..)) -> [label <> " の spread(..)"]
+    Some(_) -> [label <> " が List の literal でない"]
+  }
+}
+
+/// `where` の項のうち条件として読めないもの。`Has` / `HasNone` の中の List も辿る。
+/// 読めない条件を落とすと絞りが緩むので、捨てずに名指しする。
+fn where_unread(expression: glance.Expression) -> List(String) {
+  case g.labelled(expression, "where") {
+    Some(glance.List(elements: elements, ..)) -> cond_unread(elements, "where")
+    _ -> []
+  }
+}
+
+fn cond_unread(items: List(glance.Expression), place: String) -> List(String) {
+  items
+  |> list.index_map(fn(item, index) {
+    let here = place <> " の " <> int.to_string(index + 1) <> " 番目"
+    case cond(item) {
+      None -> [here <> "(条件として読めない)"]
+      Some(_) ->
+        case g.ctor_name(item), g.args(item) {
+          Some("Has"), [_, inner] | Some("HasNone"), [_, inner] ->
+            case inner {
+              glance.List(elements: elements, rest: None, ..) ->
+                cond_unread(elements, here)
+              glance.List(rest: Some(_), ..) -> [here <> " の spread(..)"]
+              _ -> [here <> " の条件が List の literal でない"]
+            }
+          _, _ -> []
+        }
+    }
+  })
+  |> list.flatten
 }
 
 fn labelled_list(
@@ -1910,9 +2026,38 @@ fn labelled_list(
   }
 }
 
-fn arrow_names(expression: glance.Expression, label: String) -> List(String) {
+/// 矢印の名と、矢印として読めなかった項(`<label> <位置>番目` の形)。
+/// 読めない項は捨てずに返す ── SQL 層と型の層のどちらでも exit 4 で名指しするため。
+fn arrow_names(
+  expression: glance.Expression,
+  label: String,
+) -> #(List(String), List(String)) {
   labelled_list(expression, label)
-  |> list.filter_map(fn(item) { g.ctor_name(item) |> option.to_result(Nil) })
+  |> list.index_map(fn(item, index) { #(item, index) })
+  |> list.fold(#([], []), fn(acc, entry) {
+    let #(names, unread) = acc
+    let #(item, index) = entry
+    let constructor = case item {
+      glance.FieldAccess(..) | glance.Variable(..) ->
+        g.ctor_name(item)
+        |> option.then(fn(name) {
+          case naming.capitalise(name) == name {
+            True -> Some(name)
+            False -> None
+          }
+        })
+      _ -> None
+    }
+    case constructor {
+      Some(name) -> #(list.append(names, [name]), unread)
+      None -> #(
+        names,
+        list.append(unread, [
+          label <> " の " <> int.to_string(index + 1) <> " 番目",
+        ]),
+      )
+    }
+  })
 }
 
 fn field_name(expression: glance.Expression) -> String {
@@ -2121,16 +2266,46 @@ pub fn read(units: List(Unit)) -> Result(App, Error) {
     units,
     entity_list,
   ))
+  use external_manual <- result.try(external_manual_verbs(units, entity_list))
+  let arrow_list = arrows(entity_list)
   Ok(model.App(
     value_types: types,
     entities: entity_list,
     collections: collection_list,
     services: service_list,
-    arrows: arrows(entity_list),
+    arrows: arrow_list,
+    reverse_arrows: relation.reverse_arrows(
+      entity_list,
+      arrow_list,
+      service_list,
+    ),
+    clauses: clauses.read(units),
     entries: entry_list,
     attached: [],
     handwritten_verbs: external_handwritten,
+    manual_verbs: external_manual,
   ))
+}
+
+/// ER の外のトップレベル module の `manual_verbs`。
+fn external_manual_verbs(
+  units: List(Unit),
+  entities: List(Entity),
+) -> Result(List(#(String, List(String))), Error) {
+  let entity_names = list.map(entities, fn(entity) { entity.module })
+  units
+  |> list.filter(fn(unit) {
+    !string.contains(unit.path, "/") && !list.contains(entity_names, unit.path)
+  })
+  |> list.try_map(fn(unit) {
+    let module = g.in_order(unit.module)
+    use verbs <- result.try(manual_verbs_of(module, unit.path))
+    Ok(#(unit.path, verbs))
+  })
+  |> result.map(fn(entries) {
+    entries
+    |> list.filter(fn(entry) { entry.1 != [] })
+  })
 }
 
 fn external_handwritten_verbs(
