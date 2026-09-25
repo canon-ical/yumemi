@@ -852,14 +852,33 @@ fn allow_clause(
         |> list.filter_map(fn(clause) {
           case clause {
             model.Clause(owner: "NoOwner", ..) -> Error(Nil)
+            model.Clause(owner: "Self", ..) -> Error(Nil)
             model.Clause(owner: owner, ..) -> Ok(owner)
             model.UnreadClause(..) -> Error(Nil)
           }
         })
         |> list.unique
-      case phased, owners {
-        False, [] -> Ok(#(scope, None))
-        _, _ -> restricted(app, service, scope, phased, owners)
+      let selves =
+        readable
+        |> list.filter_map(fn(clause) {
+          case clause {
+            model.Clause(owner: "Self", who: who, ..) -> Ok(who)
+            _ -> Error(Nil)
+          }
+        })
+        |> list.unique
+      let all_self =
+        readable != []
+        && list.all(readable, fn(clause) {
+          case clause {
+            model.Clause(owner: "Self", ..) -> True
+            _ -> False
+          }
+        })
+      case phased, owners, selves {
+        False, [], [] -> Ok(#(scope, None))
+        _, _, _ ->
+          restricted(app, service, scope, phased, owners, selves, all_self)
       }
     }
   }
@@ -871,6 +890,8 @@ fn restricted(
   scope: Scope,
   phased: Bool,
   owners: List(String),
+  selves: List(String),
+  all_self: Bool,
 ) -> Result(#(Scope, Option(Allowed)), Reason) {
   let allow_entity = case service.allow_module {
     Some(path) ->
@@ -914,27 +935,62 @@ fn restricted(
       }
     }),
   )
+  use subjects <- try(list.try_map(selves, subject_of(app, _)))
   let wanted =
-    list.append(
+    list.flatten([
       option.map(phase_target, fn(pair) { [pair.0] }) |> option.unwrap([]),
       list.map(parties, fn(item) { item.1 }),
-    )
+      subjects,
+    ])
     |> list.fold([], fn(acc, entity: Entity) {
       case list.any(acc, fn(other: Entity) { other.name == entity.name }) {
         True -> acc
         False -> list.append(acc, [entity])
       }
     })
+  let clauses_place = scope.next_param
+  let party_place = scope.next_param + 1
+  let subject_place = case parties {
+    [] -> scope.next_param + 1
+    _ -> scope.next_param + 2
+  }
   use #(inner, hops) <- try(
     list.try_fold(wanted, #(scope, []), fn(acc, entity) {
       let #(current, hops) = acc
-      reach(app, current, hops, entity)
+      case reach(app, current, hops, entity) {
+        Ok(found) -> Ok(found)
+        // 句が全部 `Self` で、主体の Entity が読みから辿れない(consent_version を読む
+        // link_import など)── 主体の行そのものを鍵の穴で引いて、相をそこで照らす。
+        Error(reason) ->
+          case
+            all_self
+            && list.any(subjects, fn(other) { other.name == entity.name })
+          {
+            False -> Error(reason)
+            True -> {
+              let next = assign(current, entity)
+              let alias = option.unwrap(alias_of(next, entity.name), "t")
+              Ok(#(
+                next,
+                list.append(hops, [
+                  Hop(
+                    table: entity.table,
+                    alias: alias,
+                    relation: alias
+                      <> "."
+                      <> quoted(entity.key_column)
+                      <> "=$"
+                      <> int.to_string(subject_place),
+                  ),
+                ]),
+              ))
+            }
+          }
+      }
     }),
   )
   let taken = list.map(inner.aliases, fn(pair) { pair.1 })
   let clause_alias = free("cl", taken, 1)
-  let clauses_place = scope.next_param
-  let party_place = scope.next_param + 1
   let phase_part = case phase_target {
     Some(#(entity, column)) -> [
       "("
@@ -949,27 +1005,42 @@ fn restricted(
     ]
     None -> []
   }
-  let owner_part = case parties {
-    [] -> []
-    _ -> [
+  let self_rows =
+    list.map(subjects, fn(entity) {
+      "("
+      <> clause_alias
+      <> "->>'owner'='self' AND "
+      <> option.unwrap(alias_of(inner, entity.name), "t")
+      <> "."
+      <> quoted(entity.key_column)
+      <> "=$"
+      <> int.to_string(subject_place)
+      <> ")"
+    })
+  let owner_part = case parties, self_rows {
+    [], [] -> []
+    _, _ -> [
       "("
       <> clause_alias
       <> "->>'owner'='no_owner' OR "
       <> string.join(
-        list.map(parties, fn(item) {
-          let #(owner, entity, column) = item
-          "("
-          <> clause_alias
-          <> "->>'owner'='"
-          <> naming.snake(owner)
-          <> "' AND "
-          <> option.unwrap(alias_of(inner, entity.name), "t")
-          <> "."
-          <> quoted(column)
-          <> "=$"
-          <> int.to_string(party_place)
-          <> ")"
-        }),
+        list.append(
+          list.map(parties, fn(item) {
+            let #(owner, entity, column) = item
+            "("
+            <> clause_alias
+            <> "->>'owner'='"
+            <> naming.snake(owner)
+            <> "' AND "
+            <> option.unwrap(alias_of(inner, entity.name), "t")
+            <> "."
+            <> quoted(column)
+            <> "=$"
+            <> int.to_string(party_place)
+            <> ")"
+          }),
+          self_rows,
+        ),
         " OR ",
       )
       <> ")",
@@ -997,31 +1068,55 @@ fn restricted(
       <> inside
       <> ")"
     })
-  let #(next, contract) = case parties {
-    [] -> #(
-      clauses_place + 1,
-      "-- allow: clauses=$" <> int.to_string(clauses_place),
-    )
-    _ -> #(
-      party_place + 1,
-      "-- allow: clauses=$"
-        <> int.to_string(clauses_place)
-        <> " party=$"
-        <> int.to_string(party_place),
-    )
+  let party_contract = case parties {
+    [] -> ""
+    _ -> " party=$" <> int.to_string(party_place)
   }
+  let subject_contract = case subjects {
+    [] -> ""
+    _ -> " subject=$" <> int.to_string(subject_place)
+  }
+  let next = case parties, subjects {
+    [], [] -> clauses_place + 1
+    _, [] -> party_place + 1
+    _, _ -> subject_place + 1
+  }
+  let contract =
+    "-- allow: clauses=$"
+    <> int.to_string(clauses_place)
+    <> party_contract
+    <> subject_contract
   Ok(#(
     Scope(..scope, next_param: next),
     Some(Allowed(text: text, contract: contract)),
   ))
 }
 
+/// owner `Self` の句が照らす主体の Entity。`who` の `As<Entity>` の Entity で、その key の列と
+/// 主体の鍵の穴(`subject=$K`、実行側が actor の subject の id を渡す)を比べる(hw-1 の鷹野宛 1 の案、
+/// WGy の裁定 4)。`As` で始まらない `who`(`Anyone` など)に `Self` は付かない。
+fn subject_of(app: App, who: String) -> Result(Entity, Reason) {
+  let name = case string.split(who, ".") |> list.last {
+    Ok(last) -> last
+    Error(_) -> who
+  }
+  case string.starts_with(name, "As") {
+    False -> Error(clash("allow 句の owner Self の who が主体でない: " <> who))
+    True -> {
+      let entity_name = string.drop_start(name, 2)
+      model.entity_by_name(app.entities, entity_name)
+      |> option.to_result(clash(
+        "allow 句の owner Self の who の Entity が無い: " <> entity_name,
+      ))
+    }
+  }
+}
+
 /// owner の名から party を持つ Entity への道。`Via<Entity>Party` = その Entity の party
 /// (`ViaMuseParty` = muse の party)。hw-2 の `party_of` と同じ規則。
-/// `Self` は主体そのものの鍵で照らす句で、party の穴では表せないので止める。
+/// `Self` は `subject_of` の持ち分(party の穴ではなく主体の鍵の穴で照らす)。
 fn party_of(app: App, owner: String) -> Result(Entity, Reason) {
   case owner {
-    "Self" -> Error(clash("allow 句の owner Self は party の穴で表せない(主体の鍵が要る)"))
     _ ->
       case
         string.starts_with(owner, "Via") && string.ends_with(owner, "Party")

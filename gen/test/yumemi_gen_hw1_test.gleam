@@ -442,7 +442,7 @@ pub fn allow_without_restriction_adds_nothing_test() {
   string.contains(found, "jsonb_array_elements") |> should.be_false
 }
 
-/// 入れられない形は exit 4 ── Self(party の穴で表せない)、相の無い Entity を Only で絞る、
+/// 入れられない形は exit 4 ── Self の who が主体でない、相の無い Entity を Only で絞る、
 /// party の列が無い Entity、from / join から辿れない Entity。どれも SQL を出さない。
 pub fn allow_clause_that_cannot_be_placed_is_exit_four_test() {
   let out =
@@ -452,7 +452,7 @@ pub fn allow_clause_that_cannot_be_placed_is_exit_four_test() {
         memo_service(
           "memo_self",
           "article",
-          "allow.Clause(who: allow.AsStaff, at: allow.AnyPhase, owner: allow.Self)",
+          "allow.Clause(who: allow.Anyone, at: allow.AnyPhase, owner: allow.Self)",
         ),
         memo_service(
           "memo_phase",
@@ -475,7 +475,7 @@ pub fn allow_clause_that_cannot_be_placed_is_exit_four_test() {
     )
   let self_note = note_with(out, "memo_self/items")
   self_note.class |> should.equal(stop.Conflict)
-  string.contains(self_note.text, "owner Self は party の穴で表せない")
+  string.contains(self_note.text, "owner Self の who が主体でない")
   |> should.be_true
   let phase_note = note_with(out, "memo_phase/items")
   phase_note.class |> should.equal(stop.Conflict)
@@ -1146,4 +1146,27 @@ pub fn pick_of_child_columns_that_cannot_be_chosen_is_exit_four_test() {
   |> should.be_true
   has_file(out, "db/queries/album_odd/stray.sql") |> should.be_false
   has_file(out, "db/queries/album_odd/twice.sql") |> should.be_false
+}
+
+/// owner `Self`(WGy の裁定 4、hw-1 の鷹野宛 1 の案)── 主体の鍵の穴 `subject=$K` を足し、
+/// `As<Entity>` の Entity の key の列と比べる。party の穴の後ろに置く。
+pub fn allow_clause_self_uses_the_subject_key_hole_test() {
+  let out =
+    generate(
+      units_with(article_fixture, [
+        memo_entity(),
+        memo_service(
+          "memo_self",
+          "article",
+          "allow.Clause(who: allow.AsStaff, at: allow.AnyPhase, owner: allow.Self)",
+        ),
+      ]),
+    )
+  let found = file(out, "db/queries/memo_self/items.sql")
+  string.contains(found, "-- allow: clauses=$2 subject=$3") |> should.be_true
+  string.contains(found, "->>'owner'='no_owner' OR (") |> should.be_true
+  // staff の key は party の列(fixture の宣言)── key の列を主体の鍵と比べる。
+  string.contains(found, "->>'owner'='self' AND s.party=$3)") |> should.be_true
+  string.contains(found, "-- allow: clauses=$2 party=") |> should.be_false
+  no_note_with(out, "memo_self/items")
 }
