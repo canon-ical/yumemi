@@ -1,3 +1,23 @@
+# yumemi-gen-8(WGy)真壁 ── back の生成器(2026-09-26)
+
+## 状態
+
+- 完了条件のうち届いたもの:宣言(`framework/server`、routes / aliases / attached / cron / durable_objects / hooks)と reader、`http_runtime.mjs` を入力として読む行 0、Route の曖昧 22 → 0、`owner Self` 28 → 0(主体の鍵の穴 `subject=$K`)、面の Route を面が参照する Service に絞った(www に `Put` 無し)、back の生成物 15 本(registry / sql / codec / attached / shell / queue / cron / key / subject / source / operations / entry×4)、framework の server の JS 7 本
+- **届いていないもの**:`http_runtime.mjs` / `runtime.mjs` / `connector/*.gleam` の生成と、Gleam 側の生成物での `api/src/gen` の丸ごとの置き換え。写しの `api/src/gen` の sha256 無しは 102 のまま。**squash していない**(checkpoint 6 本を残した)。理由と矛盾は `docs/reports/yumemi-gen-8.md` の「鷹野宛」1
+- 詳細・棚卸し・★ hook の一覧は `docs/reports/yumemi-gen-8.md`
+
+## DDL
+
+無し。
+
+## 検証
+
+- root `gleam build` 0(warning 1、既存)。`cd gen && gleam test` **253 passed**(基線 241)。`gleam format --check src test` root・gen とも 0
+- fixture ×2 で diff 0、tracked 51 一致(3 本を更新)+ 新しい back の生成物 11 本を tracked に。写し ×2 で diff 0、exit 1/2/3/4 = 3/0/0/97(back 0、face 97 は基点と同一)
+- 生成した back の 15 本を置いた写しで api `npm test` **659 / 660**(基線 660)。落ちる 1 本は SQL manifest(★ の SQL 30 本を db/queries に出した分の行が無い)。registry は基点と 129 行・(method, path) 全行一致。route-match は 3 面の生成の `api.gleam` で pass
+- `git diff v0.11.0 -- src/framework` は 8 file の追加だけ(削除 0)
+- 証拠は `gen/build/wgy/`
+
 # yumemi-hw-1 真壁 r2 ── 柏木ゲートの差し戻しの直し(2026-09-25)
 
 ## 状態
