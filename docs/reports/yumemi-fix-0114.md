@@ -98,3 +98,98 @@ fixture(`gen/fixtures/article`)の tracked の生成物も 2 本変わった(`pu
 ## port と process
 
 PG 55562 は本便で起こした(写しの `api/test/postgres.sh`、pid 3384830)。実 API の道具(bridge・API の wrangler・面の wrangler 3 本・proxy、`real/launch.sh` の `pids.txt`)は pid で止め、9482〜9497・9931〜9937 が listen していないのを見た。PG は `pg_ctl stop` で止め、55562 が listen していないのを見た。
+
+## r2 ── 全面 SPA(pageview の Page と書いた後の読み直しも client 遷移)と柏木 P1 の前倒し(真壁[IM]、2026-09-26)
+
+基点は r1 `78e699b` + 柏木 `f84ae87`、branch は同じ `impl/yumemi-fix-0114`。版は 0.11.4 のまま(未 publish)。musearch には書いていない。証跡は `gen/build/fix0114r2/`(gitignore の下)。写しは r1 の `gen/build/fix0114/ms`(`cd9731f8` の `git archive`)を使い回した。
+
+### 直したもの
+
+| # | 直し | 場所・test |
+|---|---|---|
+| 1 pageview | **生成器は route 表から pageview の Page を外さない**(外すのは門の `frame_src` だけ)。navigate の fetch は印の header `x-yumemi-navigate: 1` を付ける。門の `after_response` は、今までと同じ条件(adult の session・200 の HTML・pageview の Page)で、印の付いた request には script でなく `<meta name="yumemi-pageview">` を `</head>` の前に差し、`vary: x-yumemi-navigate` を足す。印の無い request(頁の読み込み)は今までどおり script。client は差し替えた後にだけ、取った文書にその meta があれば 1 回送る(送り先・source の param・sessionStorage の鍵は生成の client が `start({…, pageview: {endpoint, source, key}})` で渡す。本文は門の script と同じ欄で、`kind` は遷移が `spa`、書いた後の取り直しが `reload`。前の event が sessionStorage に無い時だけ遷移の元の path を `referrer_path` に置く)。頁の読み込みに落ちた時は client は送らず、読み込みの応答の script が 1 回数える。門の script は送る時でなく走った時の URL を持つ形にした(読み込み直後の idle の前に client 遷移で頁が替わっても、元の頁を数える) | `emit/gate.gleam`(`after_response`・`pageview_script`)、`emit/front.gleam` の `navigation`、`navigate.mjs` の `counted` / `pageviewPayload` / `sendPageview`。test:`gate_marks_navigation_fetch_instead_of_script_test`(生成の gate.mjs を node で動かし、読み込みは script・印付きは head の meta・両方に vary・申告の無い session と数えない Page は何も差さない、の 5 手)、`navigation_keeps_counted_pages_and_passes_pageview_test`、`navigation_rules` の `counted mark`・`payload spa`・`payload reload chained` |
+| 2 読み直し | 生成の client の `listenReload` は `yumemi-done` で `navigate.reload()` を呼ぶ。`start` が走った面で今の頁が route 表に当たれば、今の URL を同じ道(印付きの fetch・門・差し替え・`boot()`)で取り直す。history は積まず、scroll は差し替えの前の値を、差し替え直後・`boot()` の後・次の 2 frame で当て直す(島が描き終わって高さが戻った後にも当てる)。当たらなければ `location.assign(location.href)`(今までどおり)。取り直しの fetch は `cache: "no-store"`(遷移も同じ) | `navigate.mjs` の `reload` / `go(url, "refresh")`、`emit/front.gleam` の `client_text`。test:`done_reload_goes_through_navigation_test` |
+| 3 CSP | `frame_src` の Page は route 表から外したまま(頁の読み込み)。外すのを当てる test を足した(柏木 P1-7) | `navigation_skips_csp_pages_test`(fixture の entry の public に `frame_src: ["frames.example"]`、門の `frame_src: [Exact("/status")]` → 表は `/article/:slug` だけ) |
+| P1-1 | `readOnly` を 1 回の走査に。`strip` が前から順に、文字列(`'…'`・`E'…'` の `\` 逃がし・`$tag$…$tag$`)を `''` に、引用識別子を `"q"` に、注釈(`--`・入れ子の `/* */`)を空白に替える。書きの語に `into`・`for (key) share`・`pg_try_advisory_*` を足した。`(` の前の語は、SQL の語(`exists`・`over`・`filter`・`materialized`・`operator` ほか)と書かない組み込みの関数の許可表に無ければ書きに数える。schema 付き・引用付きの呼びは書き。`::` の後の型と `AS` の後の別名の列は呼びでない | `read_retry.mjs`。test:`read_classification_never_reads_writes_test`(書き 14 形が全部書き、読み 7 形が全部読み)。写しの SQL 562 本では r1 の判定と 1 本も食い違わない(読み 257・書き 305、`h10-compare.txt`)。柏木の外れ 10 形(`kashiwagi-0114/h10/edge.mjs`)は `$$update$$`(本当に literal)以外の 9 形が書き(`h10-edge.txt`) |
+| P1-2 | 読みの timeout の既定を 10000 ms に。env `DATABASE_READ_TIMEOUT_MS` はそのまま | `read_retry.mjs` の `defaultReadTimeoutMs`、`driver.mjs` の注釈 |
+| P1-4 | # の decode を `hashTarget` に切り出し、try で包んだ。壊れた百分率でも null を返し、`boot()` と `yumemi-navigated` は走る | `navigate.mjs`、`navigation_rules` の `broken hash`・`hash` |
+| P1-5 | `sketch_lustre` の依存の幅を `>= 3.1.2 and < 3.2.0` に絞った(`island_style.mjs` が internals を import するため) | `gleam.toml`、`manifest.toml` の requirements |
+| P1-7 | `navigation_rules` に `download` の手 | `navigation_rules` の `download`(20 手) |
+
+**実 API で見つけて直した bug。**最初の走りで、pageview の Page へ client 遷移しても送りが 0 本だった。`swap(doc)` が取った文書の head の子を今の文書へ adopt で移した後に `counted(doc)` を見ていたため。印は差し替えの前に読む形にした(`63036b8`)。gen test の偽の文書では adopt で子が消えないので当たらなかった。
+
+**P1-3・P1-6 は今回の射程外**(BRIEF の 4 に無い)。P1-3(頁の読み込みに落ちる行き先は GET を 2 回受ける)は r2 で落ちる道が減った(pageview の Page は落ちない)が、redirect・200 でない・CSP の header の道は同じ。P1-6(memo の thunk)も変えていない。
+
+### 公開型
+
+`git diff 78e699b -- src/framework` の export の差は足しただけ:`navigate.mjs` に `navigateHeader`・`hashTarget`・`counted`・`pageviewPayload`・`reload`、`start` に省ける引数 `pageview`。`read_retry.mjs` に `strip`、`defaultReadTimeoutMs` は値だけ 5000 → 10000。driver の `database(env, observe)` とその返り値の形は同じ。Gleam の公開型は変えていない。依存の幅(`sketch_lustre < 3.2.0`)は狭めた。
+
+### 変わった生成物
+
+写しの 1 手で、r1 の出力(`fix0114/run2`)との差は 6 本、写しの commit 済みの生成物(`fix0114/base`)との差は 8 本(`base-run1.txt`)。
+
+| file | r1 との差 | 中身 |
+|---|---|---|
+| `www/src/gen/gate.mjs`・`muses/src/gen/gate.mjs`・`console/src/gen/gate.mjs` | 有 | `navigateHeader` / `pageviewMark` と `after_response` の印の分岐・vary。www は pageview の script の `shown`(muses・console は pageview を持たないので script の差は無い) |
+| 3 面の `priv/static/_yumemi/client.mjs` | 有 | navigate の r2(esbuild の束)、`listenReload` が `reloadPage()`、www の `start` に pageview の Page 9 本を足した 31 本の route 表と `pageview: {endpoint: "/api/pageviews", source: "r", key: "musearch:last-pageview"}` |
+| `api/src/gen/codec.mjs`・`muses/src/gen/live/blob_copy.gleam` | 無(r1 の H7・H5) | ── |
+
+www の route 表から外れるのは CSP の `/`・`/about/external`・`/for_stores/api/v1` の 3 本だけになった。fixture の tracked の生成物は 3 本変わり(`admin/src/gen/gate.mjs`・`public/src/gen/gate.mjs`・`public/priv/static/_yumemi/client.mjs`)、取り直して commit した。
+
+### 確かめたこと
+
+| 検収 | 結果 | 証跡(`gen/build/fix0114r2/`) |
+|---|---|---|
+| root `gleam build` | exit 0 | `root-build.txt` |
+| `gleam format --check src test gen/src gen/test` | exit 0 | `format.txt` |
+| `cd gen && gleam test` | **305 passed, no failures**(r1 301 + 足した 4:置き換え 1・新 4) | `test-final.txt` |
+| fixture ×2 | exit 0 / 0、`diff -r` 0 行。tracked の 66 本と `cmp` して最後の形で差 0(取り直した 3 本を含む) | `fx-one`・`fx-two`・`fx-cmp.txt` |
+| 写しの 1 手 ×2(基点の形) | exit 0 / 0、4 dir・`db/queries`・3 面の `_yumemi` の `diff -r` 0 行。`[exit` の診断 33 行は r1 と同じ集合 | `run1`・`run2`・`gen-run{1,2}.log`・`regen.sh` |
+| 写しの api `npm test`(PG 55565、dropdb からの新しい DB) | **700 / 700** | `api-1.txt`・`api-test.sh` |
+| 3 面(基点の形):`gleam build` / `format --check src` / `npm run build` / `npm test` | www 0 / 0 / 0 / **52**、muses 0 / 0 / 0 / **30**、console 0 / 0 / 0 / **24**。build の後の生成物は `run2` と差 0 | `face-*`・`after-diff.txt` |
+| 3 面(`adopt-source.patch` を当て、1 手を回した形) | www 52、muses 30、console 24、どれも build・format・npm build 0。patch は r1 のまま当たる(当て直し不要) | `adopt-*`・`adopt2` |
+
+console の `gleam build` は 1 回目に Hex の rate limit で落ちた。写しの `console/manifest.toml` が yumemi 0.11.3(hex)の形に戻っていて、依存の幅を変えたので版を解き直しに行ったため。muses の manifest と同じ path 依存の行に揃えて取り直した(写しの中だけ)。
+
+**実 API で**(写しの面 wrangler 9682〜9684、proxy 9692〜9694、API 9691、bridge 9690 → PG 55565 / `musearchfix0114r2`、inspector 10131〜10134。Chromium は headless の UA だと musearch の `pageviewSuppressed` で 202 だけ返り行が入らないので、通常の Chrome の UA を渡した。「docs」は main frame の document の request の数):
+
+| 手 | 結果 | 証跡(`real/`) |
+|---|---|---|
+| A www:客 C(adult の session)が `/search` を開く → `/muse/:handle` → 記事 → 予約 手1 → 手2 → コース → 手3 → 戻る ×4 → 戻る → 進む | 全部 **docs 1**、`window` の印が残る。送りは 6 本で、DB の `app.page_view` も送った id の 6 行:`/search initial`・`/muse/<X> spa`・記事 `spa`・(予約の 3 Page と戻る 3 回は数えない Page なので 0)・戻る → 記事 `spa`・戻る → `/muse/<X> spa`・進む → 記事 `spa`。2 本目から `prev` が繋がる。pageerror 0 | `r2hands.tsv` A1〜A9 |
+| C www:記事 → `/about/external`(CSP)→ `/search` | どちらも頁の読み込み(docs 2 → 3)、`/about/external` の応答に CSP。`/search` は読み込みの script で `initial` 1 本 | C1・C2 |
+| C 何も無い browser:`/`(CSP の header 有)→ `/about/external` | 頁の読み込み(docs 2) | C3 |
+| B 申告の無い browser(session だけ) | `/search` は 403。`/consent` → `/muse/:handle` は fetch 403 → 頁の読み込み → document 403。送り 0 | B |
+| D muses:X が `/` → `/links` → `/page` → `/settings` → `/articles` → `/metrics` → 戻る | docs 1 のまま、pageerror 0 | D muses |
+| D console:S が `/` → `/rosters` → `/courses` → `/schedule` → `/inbox` → 戻る(全部頁の a) | docs 1 のまま、pageerror 0 | D console |
+| E1 muses `/links` の link-add で追加 | docs 1、取り直しの印付き fetch 1 本、新しい link が画面に出て DB に 1 行 | E1 |
+| E2 muses `/links` を下まで scroll して link-move(下へ) | docs 1、並びが替わり、scrollY 933 → 933 | E2 |
+| E3 console `/rosters` の roster-move(下へ) | docs 1、画面の並びが替わり、DB の並びも替わった | E3 |
+| F www `/muse/:handle/schedule`(数える Page)の島 `schedule-slots` に `yumemi-done` を 2 回 | 2 回とも取り直しの fetch 1 本、docs 1。DB は `initial`・`reload`・`reload` の 3 行(2 回目は差し替えた後の島に付け直した listener で動いた) | `r2reload.tsv` |
+| H10 driver(写しの api の build)→ bridge → PG 55565。1 回目は DB で commit し、応答だけ落とす注入 | `SELECT r2_bump()`(schema の無い利用者の関数)・`SELECT 1 AS n INTO public.r2_h10_copy`・`WITH a AS (SELECT '--' AS x), b AS (INSERT …) SELECT * FROM b`:3 本とも fetch 1 回・書いた行 1・503・log `kind: write`。対照の読みは 1 回やり直して返る。env 無しで 6 秒かかる読みは 1 回で通る(既定 10000)。r1 の 6 手も同じ結果 | `r2h10.tsv` |
+
+H10 の手の表と関数(`public.r2_h10`・`public.r2_h10_copy`・`public.r2_bump()`)は test の DB に作り、手の終わりで消した。写しの `api/db` には書いていない。
+
+### musearch が採る時の手の差分(r1 の「採る時の手」に対して)
+
+1. 生成器の 1 手で変わるのは r1 の 5 本に加えて 3 面の `src/gen/gate.mjs`(計 8 本)。3 面の client は r1 の束から r2 の束に替わる
+2. pageview:www の pageview の Page 9 本も client 遷移になる。`app.page_view` に `kind` の `spa` と `reload` が入り始める(schema の CHECK は既に 3 値を許す)。書いた後の読み直しは、数える Page では今まで頁の読み込みで `initial` だったのが `reload` になる。集計が `initial` だけを見ているなら見直しが要る(musearch 側で確かめていない)
+3. 門の応答に `vary: x-yumemi-navigate` が付く(adult の session の数える Page だけ)
+4. `sketch_lustre` は 3.1 系に限られる。musearch の 4 package の manifest は 3.1.2 で、そのまま解ける
+5. `adopt-source.patch` は当て直し不要(r2 で当てて 3 面 build・test を見た)
+6. timeout を 10 秒より上げ下げしたい時は Worker の env `DATABASE_READ_TIMEOUT_MS`
+
+### DDL
+
+無し(生成器と framework の JS。H10 の手の表と関数は test の DB に作って消した)。
+
+### 確かめていないこと
+
+- P1-3(落ちる道で GET を 2 回受ける)と P1-6(memo の thunk の前に stylesheet を外す)は直していない
+- pageview の送りの時刻の粒度:client 遷移の送りは差し替え後の idle(最大 1 秒)に出る。送る前に次の遷移が来ると、送りは前の頁の path のまま出る(`sendPageview` が URL を先に固める)が、手では当てていない
+- 印の header を外す proxy や CDN が間に入ると、印付きの fetch に script が返り、client は頁の読み込みに落ちて 1 回数える(2 回にはならない)。この道は手で押していない(門の単体の test で script と meta の出し分けだけ見た)
+- `given` の島が登録済みの頁の取り直しは頁の読み込みに落ちる(r1 と同じ)。写しの 3 面に `registerWithGiven` は無い
+- staging の Neon と実 browser の bfcache での戻る・進むは見ていない(Playwright の Chromium だけ)
+
+### port と process
+
+PG 55565 は本便で起こした(写しの `api/test/postgres.sh`)。実 API の道具(bridge 3440088・API の wrangler 3440089・面の wrangler 3440090〜3440092・proxy 3440093、`ms/build/y14r2/real/pids.txt`)は pid で止め、9682〜9697・10131〜10137 が listen していないのを見た。PG は `postgres.sh stop` で止め、`pg_isready -p 55565` が no response。写しの下で動いている process は 0。手の中で browser が外の host へ出した request は数えていない(写しの www の source に外の iframe や host の直書きは無かった。blob の写しは本便では押していない)。

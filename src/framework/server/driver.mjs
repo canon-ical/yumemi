@@ -1,6 +1,6 @@
 // yumemi framework/server ── Neon HTTP の transport(WGy、0.11.1)。app の生成物(`gen/shell.mjs` ほか)が
 // `database(env, observe)` を呼ぶ。date(oid 1082)は文字列のまま返す。DB の外の失敗は connector='neon' / 503。
-// 読みだけの文(`read_retry.readOnly`)は 1 回を `DATABASE_READ_TIMEOUT_MS`(既定 5000)で切り、DB の外の失敗なら 1 回やり直す。
+// 読みだけの文(`read_retry.readOnly`)は 1 回を `DATABASE_READ_TIMEOUT_MS`(既定 10000)で切り、DB の外の失敗なら 1 回やり直す。
 // DB の外の失敗は本文を log に 1 行ずつ出す(書きも)。書きの文と transaction はやり直さず、timeout も付けない(0.11.4、H10)。
 import { neon, types as pgTypes } from '@neondatabase/serverless';
 import { defaultReadTimeoutMs, failureLine, readOnly, readWithRetry, transient } from './read_retry.mjs';

@@ -5852,6 +5852,8 @@ function styled(app5) {
 
 // public/build/dev/javascript/yumemi/framework/front/navigate.mjs
 var clientSrc = "/_yumemi/client.mjs";
+var navigateHeader = "x-yumemi-navigate";
+var pageviewMark = 'meta[name="yumemi-pageview"]';
 function matches2(route, pathname) {
   const expected = route.split("/");
   const actual = pathname.split("/");
@@ -5887,7 +5889,50 @@ function swappable(doc, defined2) {
   if (!doc.body) return false;
   return ![...doc.body.querySelectorAll("[data-yumemi-given]")].some((element5) => defined2(element5.localName));
 }
-function start4({ routes, boot: boot2 }) {
+function hashTarget(url, byId) {
+  if (!url.hash) return null;
+  try {
+    return byId(decodeURIComponent(url.hash.slice(1)));
+  } catch (_error) {
+    return null;
+  }
+}
+function counted(doc) {
+  return doc.head?.querySelector(pageviewMark) != null;
+}
+function pageviewPayload({ url, kind, from: from3, previous, sourceParam, id: id2, at: at2 }) {
+  const payload = { id: id2, client_at: at2, kind, path: url.pathname };
+  if (previous) payload.prev = previous;
+  else if (from3) payload.referrer_path = from3;
+  const sourceKey = sourceParam ? url.searchParams.get(sourceParam) : null;
+  if (sourceKey && /^[a-z0-9_]{1,16}$/.test(sourceKey)) payload.source_key = sourceKey;
+  return payload;
+}
+function sendPageview(config, url, kind, from3) {
+  let previous = null;
+  try {
+    const value2 = sessionStorage.getItem(config.key);
+    previous = value2 && /^[0-9a-f-]{36}$/.test(value2) ? value2 : null;
+  } catch (_) {
+  }
+  const id2 = crypto.randomUUID();
+  const body = JSON.stringify(pageviewPayload({ url, kind, from: from3, previous, sourceParam: config.source, id: id2, at: (/* @__PURE__ */ new Date()).toISOString() }));
+  try {
+    sessionStorage.setItem(config.key, id2);
+  } catch (_) {
+  }
+  const post = () => fetch(config.endpoint, { method: "POST", headers: { "content-type": "application/json" }, body, keepalive: true });
+  const send7 = () => void post().catch(() => post().catch(() => {
+  }));
+  if ("requestIdleCallback" in window) window.requestIdleCallback(send7, { timeout: 1e3 });
+  else requestAnimationFrame(send7);
+}
+var refresh = null;
+function reload() {
+  if (refresh !== null) return refresh();
+  globalThis.location.assign(globalThis.location.href);
+}
+function start4({ routes, boot: boot2, pageview = null }) {
   if (typeof window === "undefined" || typeof history?.pushState !== "function") return;
   let pending = null;
   const page = (location) => location.pathname + location.search;
@@ -5906,7 +5951,8 @@ function start4({ routes, boot: boot2 }) {
     if (lang !== null) document.documentElement.setAttribute("lang", lang);
     document.body.replaceWith(document.adoptNode(doc.body));
   };
-  const go = async (url, push) => {
+  const go = async (url, mode) => {
+    const push = mode === "push";
     pending?.abort();
     const controller = new AbortController();
     pending = controller;
@@ -5915,7 +5961,8 @@ function start4({ routes, boot: boot2 }) {
       response = await fetch(url.href, {
         credentials: "same-origin",
         redirect: "manual",
-        headers: { accept: "text/html" },
+        cache: "no-store",
+        headers: { accept: "text/html", [navigateHeader]: "1" },
         signal: controller.signal
       });
     } catch (error) {
@@ -5937,27 +5984,46 @@ function start4({ routes, boot: boot2 }) {
     const doc = new DOMParser().parseFromString(html, "text/html");
     if (!swappable(doc, (tag) => globalThis.customElements.get(tag) !== void 0)) return load(url, !push);
     pending = null;
+    const from3 = globalThis.location.pathname;
+    const scroll = [window.scrollX, window.scrollY];
+    const count = pageview !== null && counted(doc);
     swap(doc);
     if (push) history.pushState({ yumemi: "navigate" }, "", url.href);
     shown = page(url);
-    const anchor = url.hash ? document.getElementById(decodeURIComponent(url.hash.slice(1))) : null;
-    if (anchor) anchor.scrollIntoView();
-    else if (push) window.scrollTo(0, 0);
+    if (mode !== "refresh") {
+      const anchor = hashTarget(url, (id2) => document.getElementById(id2));
+      if (anchor) anchor.scrollIntoView();
+      else if (push) window.scrollTo(0, 0);
+    }
     boot2();
-    document.dispatchEvent(new CustomEvent("yumemi-navigated", { detail: { url: url.href } }));
+    if (mode === "refresh") {
+      const keep = () => window.scrollTo(scroll[0], scroll[1]);
+      keep();
+      requestAnimationFrame(() => {
+        keep();
+        requestAnimationFrame(keep);
+      });
+    }
+    if (count) sendPageview(pageview, url, mode === "refresh" ? "reload" : "spa", from3);
+    document.dispatchEvent(new CustomEvent("yumemi-navigated", { detail: { url: url.href, mode } }));
+  };
+  refresh = () => {
+    const url = new URL(globalThis.location.href);
+    if (!routed(routes, url.pathname)) return globalThis.location.assign(url.href);
+    void go(url, "refresh");
   };
   if (history.state === null) history.replaceState({ yumemi: "navigate" }, "", globalThis.location.href);
   document.addEventListener("click", (event4) => {
     const url = intercept(event4, routes, globalThis.location);
     if (url === null) return;
     event4.preventDefault();
-    void go(url, true);
+    void go(url, "push");
   });
   window.addEventListener("popstate", (event4) => {
     const url = new URL(globalThis.location.href);
     if (page(url) === shown) return;
     if (event4.state?.yumemi !== "navigate" || !routed(routes, url.pathname)) return load(url, true);
-    void go(url, false);
+    void go(url, "pop");
   });
 }
 
@@ -7899,7 +7965,7 @@ function defined(tag) {
 function listenReload(tag) {
   document.querySelectorAll(tag).forEach((element5) => {
     element5.addEventListener("yumemi-done", () => {
-      globalThis.location.assign(globalThis.location.href);
+      reload();
     });
   });
 }

@@ -207,7 +207,7 @@ pub fn emit(
           package.units,
           app,
           hashes,
-          navigable_routes(app, back_units, package, model_),
+          navigation(app, back_units, package, model_),
         ),
       ),
     ]
@@ -1959,30 +1959,37 @@ pub fn client_notes(
   })
 }
 
-/// client で差し替えてよい Page の route(0.11.4、H9)。面の Page の route から、応答に頁の読み込みの印が付く
-/// Page を外す:門の `frame_src`(CSP の header は頁の読み込みにしか効かない)と `pageview`(数える script は頁の
-/// 読み込みで走る)。外した Page へ・から の遷移は頁の読み込みのまま。
-fn navigable_routes(
+/// client で差し替えてよい Page の route(0.11.4、H9)と、client 遷移で数える pageview の送り先(r2)。面の Page の
+/// route から、門の `frame_src` の Page を外す(CSP の header は頁の読み込みにしか効かない)。外した Page へ・から の
+/// 遷移は頁の読み込みのまま。pageview の Page は外さない ── 門が client 遷移の fetch に数える印を差し、client が送る。
+fn navigation(
   app: model.App,
   back_units: List(Unit),
   package: face.Package,
   front: reader_front.Front,
-) -> List(String) {
+) -> #(List(String), String) {
   let #(gate, _) = read_gate(app, back_units, package, front)
   let csp = case gate.frame_hosts {
     [] -> []
     _ -> gate.frame_src
   }
-  let counted = case gate.pageview {
-    Some(pageview) -> pageview.pages
-    None -> []
-  }
-  front_route_paths(front)
-  |> list.filter(fn(path) {
-    !list.any(list.append(csp, counted), fn(match) {
-      reader_gate.covers(match, path)
+  let routes =
+    front_route_paths(front)
+    |> list.filter(fn(path) {
+      !list.any(csp, fn(match) { reader_gate.covers(match, path) })
     })
-  })
+  let pageview = case gate.pageview {
+    Some(pageview) ->
+      ", pageview: { endpoint: "
+      <> quoted(pageview.endpoint)
+      <> ", source: "
+      <> quoted(pageview.source_param)
+      <> ", key: "
+      <> quoted(pageview.storage_key)
+      <> " }"
+    None -> ""
+  }
+  #(routes, pageview)
 }
 
 fn client_text(
@@ -1991,15 +1998,22 @@ fn client_text(
   units: List(Unit),
   app: model.App,
   hashes: hash.Hashes,
-  routes: List(String),
+  navigation: #(List(String), String),
 ) -> String {
-  let navigation = case routes {
-    [] -> #("", "")
+  let #(routes, pageview) = navigation
+  // 書いた後の読み直し(r2):route 表があれば navigate の `reload`(当たる頁は client 遷移で取り直す)
+  let #(navigation, reload) = case routes {
+    [] -> #(#("", ""), "globalThis.location.assign(globalThis.location.href)")
     _ -> #(
-      "import { start as startNavigation } from \"__YUMEMI_BUILD__/yumemi/framework/front/navigate.mjs\";\n",
-      "startNavigation({ routes: ["
-        <> string.join(list.map(routes, fn(route) { quoted(route) }), ", ")
-        <> "], boot });\n",
+      #(
+        "import { reload as reloadPage, start as startNavigation } from \"__YUMEMI_BUILD__/yumemi/framework/front/navigate.mjs\";\n",
+        "startNavigation({ routes: ["
+          <> string.join(list.map(routes, fn(route) { quoted(route) }), ", ")
+          <> "], boot"
+          <> pageview
+          <> " });\n",
+      ),
+      "reloadPage()",
     )
   }
   let components = client_components(front, units)
@@ -2075,7 +2089,9 @@ fn client_text(
   <> "function listenReload(tag) {\n"
   <> "  document.querySelectorAll(tag).forEach((element) => {\n"
   <> "    element.addEventListener(\"yumemi-done\", () => {\n"
-  <> "      globalThis.location.assign(globalThis.location.href);\n"
+  <> "      "
+  <> reload
+  <> ";\n"
   <> "    });\n"
   <> "  });\n"
   <> "}\n\n"

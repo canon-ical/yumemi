@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
@@ -101,7 +103,7 @@ export function island_stylesheet() {
 }
 
 // H9 ── navigate.mjs の純な判定(click の取り方・route の当て方・差し替えてよい文書)
-import { intercept, matches, swappable } from "../yumemi/framework/front/navigate.mjs";
+import { counted, hashTarget, intercept, matches, pageviewPayload, swappable } from "../yumemi/framework/front/navigate.mjs";
 
 function anchor(href, attrs = {}) {
   return { tagName: "A", getAttribute: (name) => (name === "href" ? href : attrs[name] ?? null), hasAttribute: (name) => name === "href" || name in attrs };
@@ -109,8 +111,8 @@ function anchor(href, attrs = {}) {
 function click(node, extra = {}) {
   return { defaultPrevented: false, button: 0, metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, composedPath: () => [{ tagName: "SPAN" }, node], ...extra };
 }
-function fakeDoc({ scripts, head = true, given = [] }) {
-  const headEl = { tag: "head" };
+function fakeDoc({ scripts, head = true, given = [], mark = false }) {
+  const headEl = { tag: "head", querySelector: (q) => (mark && q === 'meta[name="yumemi-pageview"]' ? {} : null) };
   const els = scripts.map((s) => ({ getAttribute: (n) => s[n] ?? null, parentElement: s.inHead === false ? {} : headEl }));
   return {
     head: headEl,
@@ -139,5 +141,79 @@ export function navigation_rules() {
   check("swappable", swappable(fakeDoc({ scripts: [client] }), () => false));
   check("inline script falls back", !swappable(fakeDoc({ scripts: [client, {}] }), () => false));
   check("given island defined falls back", !swappable(fakeDoc({ scripts: [client], given: ["reserve-time"] }), (tag) => tag === "reserve-time"));
+  // r2(柏木 P1-7):download 付きの a は頁の読み込み
+  check("download", intercept(click(anchor("/me", { download: "" })), routes, here) === null);
+  // r2(柏木 P1-4):壊れた百分率の # は投げずに null(島の登録と yumemi-navigated を飛ばさない)
+  check("broken hash", hashTarget(new URL("https://www.example/me#%E0%A4%A"), () => { throw new Error("unreached"); }) === null);
+  check("hash", hashTarget(new URL("https://www.example/me#a%20b"), (id) => id) === "a b");
+  // r2:数える印は門が client 遷移の fetch に差す meta だけ
+  check("counted mark", counted(fakeDoc({ scripts: [client], mark: true })) && !counted(fakeDoc({ scripts: [client] })));
+  const spa = pageviewPayload({ url: new URL("https://www.example/muse/aoi?r=ig_1"), kind: "spa", from: "/search", previous: null, sourceParam: "r", id: "i", at: "t" });
+  check("payload spa", JSON.stringify(spa) === '{"id":"i","client_at":"t","kind":"spa","path":"/muse/aoi","referrer_path":"/search","source_key":"ig_1"}');
+  const chained = pageviewPayload({ url: new URL("https://www.example/muse/aoi?r=BAD!"), kind: "reload", from: "/search", previous: "p", sourceParam: "r", id: "i", at: "t" });
+  check("payload reload chained", JSON.stringify(chained) === '{"id":"i","client_at":"t","kind":"reload","path":"/muse/aoi","prev":"p"}');
   return out.join("\n");
+}
+
+// H10 r2(柏木 P1-1)── 書きを読みに数える形は 0、musearch の形の読みは読みのまま
+export function read_classification() {
+  return node(`
+import { readOnly } from ${retry};
+const writes = {
+  "unqualified user fn": "SELECT do_write($1)",
+  "set-returning user fn in FROM": "SELECT * FROM bump_counter($1)",
+  "SELECT INTO": "SELECT * INTO app.snapshot FROM app.muse",
+  "literal -- hides CTE UPDATE": "WITH a AS (SELECT '--' AS x), b AS (UPDATE app.muse SET phase='x' RETURNING id) SELECT * FROM b",
+  "E-string hides CTE UPDATE": "WITH a AS (SELECT E'\\\\'' AS x), b AS (UPDATE t SET y=1 RETURNING *) SELECT * FROM b",
+  "comment quote hides UPDATE": "WITH a AS (SELECT 1 /* ' */), b AS (UPDATE t SET y=1 RETURNING *) SELECT * FROM b",
+  "quoted schema call": 'SELECT * FROM "framework"."insert_x"($1)',
+  "quoted fn": 'SELECT "do_write"($1)',
+  "schema call": "SELECT * FROM framework.insert_links_guarded($1)",
+  "FOR NO KEY UPDATE": "SELECT * FROM t FOR NO KEY UPDATE",
+  "FOR SHARE": "SELECT * FROM t FOR SHARE",
+  "advisory lock": "SELECT pg_try_advisory_lock(1)",
+  "nextval": "SELECT nextval('s')",
+  "two statements": "SELECT 1; DELETE FROM t",
+};
+const reads = {
+  "plain": "SELECT id, name FROM app.muse WHERE handle = $1",
+  "jsonb": "SELECT to_jsonb(m) FROM jsonb_array_elements_text($1::jsonb) WITH ORDINALITY AS keys(value,ord) JOIN app.muse m ON m.id = keys.value::uuid",
+  "aggregate": "WITH x AS MATERIALIZED (SELECT count(*) FILTER (WHERE a) AS n FROM t) SELECT coalesce(max(n), 0) FROM x",
+  "percentile": "SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY ms) FROM generate_series(1, 3) AS g(ms)",
+  "literal words": "SELECT 'update; insert into' AS x, $$delete$$ AS y -- drop table\\n FROM t",
+  "cast": "SELECT $1::numeric(10,2), CAST($2 AS varchar(20))",
+  "vector": "SELECT id FROM app.article c ORDER BY c.embedding OPERATOR(public.<=>) $1::public.vector LIMIT 5",
+};
+for (const [name, sql] of Object.entries(writes)) console.log((readOnly(sql) ? "NG write read as read " : "ok write ") + name);
+for (const [name, sql] of Object.entries(reads)) console.log((readOnly(sql) ? "ok read " : "NG read counted as write ") + name);
+`);
+}
+
+// r2 ── 門の after_response:client 遷移の fetch(x-yumemi-navigate: 1)には script でなく meta を head に差す
+export function gate_marks_navigation_fetch(text) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "yumemi-gate-"));
+  fs.writeFileSync(path.join(dir, "gate.mjs"), text);
+  fs.writeFileSync(path.join(dir, "route.mjs"), 'export const routes = [{path: "/search"}, {path: "/muse/:handle"}, {path: "/me"}];\n');
+  const out = node(`
+import { serve } from ${JSON.stringify(path.join(dir, "gate.mjs"))};
+const html = "<!doctype html><html><head><title>t</title></head><body><main>x</main></body></html>";
+const env = (adult) => ({ APP: { fetch: async () => new Response(JSON.stringify({ adult, anonymous: false, subject: null }), { status: 200 }) } });
+const app = serve(async () => new Response(html, { status: 200, headers: { "content-type": "text/html; charset=utf-8" } }));
+const get = async (p, adult, nav) => {
+  const r = await app.fetch(new Request("https://www.example" + p, { headers: nav ? { "x-yumemi-navigate": "1" } : {} }), env(adult));
+  return { body: await r.text(), vary: r.headers.get("vary") ?? "" };
+};
+const check = (name, ok) => console.log((ok ? "ok " : "NG ") + name);
+const load = await get("/search", true, false);
+check("load gets script", load.body.includes("<script>") && !load.body.includes("<meta name="));
+const nav = await get("/search", true, true);
+check("navigate gets mark in head", nav.body.includes('<meta name="yumemi-pageview"></head>') && !nav.body.includes("<script>"));
+check("vary", nav.vary.includes("x-yumemi-navigate") && load.vary.includes("x-yumemi-navigate"));
+const minor = await get("/search", false, true);
+check("no adult no mark", !minor.body.includes("yumemi-pageview") && !minor.body.includes("<script>"));
+const other = await get("/me", true, true);
+check("not counted page no mark", !other.body.includes("yumemi-pageview"));
+`);
+  fs.rmSync(dir, { recursive: true, force: true });
+  return out;
 }

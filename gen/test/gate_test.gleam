@@ -422,3 +422,17 @@ pub fn attached_entry_live_sends_blob_fields_test() {
   )
   |> should.be_true
 }
+
+@external(javascript, "./yumemi_fix_0114_test_ffi.mjs", "gate_marks_navigation_fetch")
+fn gate_marks_navigation_fetch(text: String) -> String
+
+/// 0.11.4 r2:client 遷移の fetch(`x-yumemi-navigate: 1`)には、pageview の script でなく数える印の meta を head に
+/// 差す(adult の session・200 の HTML・pageview の Page だけ)。頁の読み込みは今までどおり script。
+pub fn gate_marks_navigation_fetch_instead_of_script_test() {
+  let #(read, _) = read_www(www_gate)
+  let out =
+    gate_marks_navigation_fetch(gate_emit.text("// header", read, www_routes))
+  string.contains(out, "NG ") |> should.be_false
+  string.contains(out, "STDERR") |> should.be_false
+  string.split(out, "\n") |> list.length |> should.equal(5)
+}

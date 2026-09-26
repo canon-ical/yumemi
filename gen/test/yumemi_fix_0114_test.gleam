@@ -274,7 +274,7 @@ pub fn client_starts_navigation_over_page_routes_test() {
     face_file([], [], "public/priv/static/_yumemi/client.mjs")
   string.contains(
     text,
-    "import { start as startNavigation } from \"__YUMEMI_BUILD__/yumemi/framework/front/navigate.mjs\";",
+    "import { reload as reloadPage, start as startNavigation } from \"__YUMEMI_BUILD__/yumemi/framework/front/navigate.mjs\";",
   )
   |> should.be_true
   string.contains(text, "function boot() {\n") |> should.be_true
@@ -291,15 +291,67 @@ pub fn client_starts_navigation_over_page_routes_test() {
   |> should.be_true
 }
 
-/// pageview を数える Page(と frame-src の CSP を持つ Page)は route 表から外す(頁の読み込みのまま)。
-pub fn navigation_skips_counted_pages_test() {
+/// r2:pageview を数える Page も route 表に入れ(client 遷移)、数える送り先を client に渡す。
+pub fn navigation_keeps_counted_pages_and_passes_pageview_test() {
   let assert Ok(text) =
     face_file([], [counting_gate()], "public/priv/static/_yumemi/client.mjs")
+  string.contains(
+    text,
+    "startNavigation({ routes: [\"/article/:slug\", \"/status\"], boot, pageview: { endpoint: \"/api/pageviews\", source: \"r\", key: \"k\" } });",
+  )
+  |> should.be_true
+}
+
+/// r2(柏木 P1-7):門の `frame_src`(CSP)の Page は route 表から外す(頁の読み込みのまま)。
+pub fn navigation_skips_csp_pages_test() {
+  let assert Ok(back_units) = source.load(article_fixture)
+  let assert Ok(entry) =
+    list.find(back_units, fn(unit) { unit.path == "entry" })
+  let framed =
+    unit(
+      "entry",
+      string.replace(
+        entry.text,
+        "    services: All,\n  ),\n  Http(\n    name: \"admin\"",
+        "    services: All,\n    frame_src: [\"frames.example\"],\n  ),\n  Http(\n    name: \"admin\"",
+      ),
+    )
+  string.contains(framed.text, "frame_src: [\"frames.example\"]")
+  |> should.be_true
+  let csp_gate =
+    unit(
+      "gate",
+      "import framework/gate.{Exact, Gate, NoPageview, SignIn}\n\n"
+        <> "pub const gate: gate.Gate = Gate(\n"
+        <> "  sign_in: SignIn(path: \"/auth/sign-in\", fallback_origin: \"https://auth.example\"),\n"
+        <> "  rules: [],\n  redirects: [],\n  frame_src: [Exact(\"/status\")],\n"
+        <> "  pageview: NoPageview,\n"
+        <> ")\n",
+    )
+  let assert Ok(text) =
+    face_file([framed], [csp_gate], "public/priv/static/_yumemi/client.mjs")
   string.contains(
     text,
     "startNavigation({ routes: [\"/article/:slug\"], boot });",
   )
   |> should.be_true
+}
+
+/// r2:島の Done の後の読み直しは navigate の `reload`(route 表に当たる頁は client 遷移で取り直す)。
+pub fn done_reload_goes_through_navigation_test() {
+  let assert Ok(text) =
+    face_file([], [], "public/priv/static/_yumemi/client.mjs")
+  string.contains(
+    text,
+    "import { reload as reloadPage, start as startNavigation } from \"__YUMEMI_BUILD__/yumemi/framework/front/navigate.mjs\";",
+  )
+  |> should.be_true
+  string.contains(
+    text,
+    "    element.addEventListener(\"yumemi-done\", () => {\n      reloadPage();\n",
+  )
+  |> should.be_true
+  string.contains(text, "location.assign") |> should.be_false
 }
 
 @external(javascript, "./yumemi_fix_0114_test_ffi.mjs", "navigation_rules")
@@ -309,5 +361,16 @@ fn navigation_rules() -> String
 pub fn navigation_intercepts_only_routed_plain_clicks_test() {
   let out = navigation_rules()
   string.contains(out, "NG ") |> should.be_false
-  string.split(out, "\n") |> list.length |> should.equal(14)
+  string.split(out, "\n") |> list.length |> should.equal(20)
+}
+
+@external(javascript, "./yumemi_fix_0114_test_ffi.mjs", "read_classification")
+fn read_classification() -> String
+
+/// r2(柏木 P1-1):書きを読みに数えて再試行する形は 0(利用者の関数・INTO・literal の後ろの CTE・引用付きの呼び)。
+pub fn read_classification_never_reads_writes_test() {
+  let out = read_classification()
+  string.contains(out, "NG ") |> should.be_false
+  string.contains(out, "STDERR") |> should.be_false
+  string.split(out, "\n") |> list.length |> should.equal(21)
 }

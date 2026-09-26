@@ -1,3 +1,22 @@
+# yumemi-fix-0114 r2 真壁 ── 全面 SPA(pageview の Page・書いた後の読み直しも client 遷移)と柏木 P1 の前倒し(2026-09-26)
+
+正本は `docs/reports/yumemi-fix-0114.md` の `## r2`。証跡は `gen/build/fix0114r2/`。
+
+## 状態
+
+- 1〜4 は全部済み。pageview は印の header → 門が head に meta → client が差し替えの後に 1 回(`spa` / `reload`)。Done の読み直しは `navigate.reload()`。CSP の Page は外したまま(test 足した)。P1-1・2・4・5・7 を直した
+- 実 API で、数える印を差し替えの後に読んでいた bug を見つけて直した(`63036b8`)
+- root build 0、format 0、gen test 305 / 0、fixture ×2 差 0、写しの 1 手 ×2 差 0、api 700 / 700(PG 55565)、3 面 52 / 30 / 24(基点の形・adopt の形とも)
+- 実 API:`r2hands.tsv` 21 手・`r2reload.tsv` 5 手・`r2h10.tsv` 11 手が全部 ○
+
+## DDL
+
+無し。
+
+## 残り
+
+- P1-3・P1-6 は射程外で直していない。印の header を外す proxy の道は手で押していない
+
 # yumemi-fix-0114 真壁 ── musearch を yumemi で止めない最後の patch H5〜H10、版 0.11.4(2026-09-26)
 
 ## 状態
