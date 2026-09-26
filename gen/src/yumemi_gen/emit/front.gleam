@@ -170,7 +170,7 @@ pub fn emit(
     attached_live_targets(model_, app)
     |> list.map(fn(target) {
       let #(route, component) = target
-      attached_live_file(route, package, component, hashes, face_name)
+      attached_live_file(app, route, package, component, hashes, face_name)
     })
   let blob_entry_files =
     blob_entries
@@ -201,7 +201,14 @@ pub fn emit(
       ),
       File(
         path: face_name <> "/priv/static/_yumemi/client.mjs",
-        text: client_text(face_name, model_, package.units, app, hashes),
+        text: client_text(
+          face_name,
+          model_,
+          package.units,
+          app,
+          hashes,
+          navigable_routes(app, back_units, package, model_),
+        ),
       ),
     ]
   }
@@ -1466,6 +1473,7 @@ fn attached_live_targets(
 }
 
 fn attached_live_file(
+  app: model.App,
   route: model.AttachedRoute,
   package: face.Package,
   component: reader_front.Component,
@@ -1481,16 +1489,86 @@ fn attached_live_file(
     text: attached_live_text(
       route,
       component,
+      attached_body_fields(app, route),
       header("src/" <> component.module <> ".gleam", input_hash),
     ),
   )
 }
 
+/// attached の口が body に載せる欄(0.11.4、H6)。framework の役が本文の形を決める口だけが持つ:
+/// `SwitchSubject` は `{kind, id}`(`server/http.mjs` の switch_subject が `s.args.kind` / `s.args.id` を読む)。
+/// 役の無い口・本文を読まない役の口は空(body は今までどおり null)。
+fn attached_body_fields(
+  app: model.App,
+  route: model.AttachedRoute,
+) -> List(String) {
+  let roles =
+    app.server.attached_roles
+    |> list.filter(fn(row) { row.attached == naming.snake(route.name) })
+    |> list.map(fn(row) { row.role })
+  case list.contains(roles, "switch_subject") {
+    True -> ["kind", "id"]
+    False -> []
+  }
+}
+
 fn attached_live_text(
   route: model.AttachedRoute,
   component: reader_front.Component,
+  fields: List(String),
   generated_header: String,
 ) -> String {
+  let field_type = case fields {
+    [] -> "pub type Field\n\n"
+    _ ->
+      "pub type Field {\n"
+      <> string.concat(
+        list.map(fields, fn(field) { "  " <> naming.pascal(field) <> "\n" }),
+      )
+      <> "}\n\n"
+  }
+  let args_type = case fields {
+    [] -> "pub type Args {\n  Args\n}\n\n"
+    _ ->
+      "pub type Args {\n  Args("
+      <> string.join(list.map(fields, fn(field) { field <> ": String" }), ", ")
+      <> ")\n}\n\n"
+  }
+  let args_init = case fields {
+    [] -> "Args"
+    _ ->
+      "Args("
+      <> string.join(list.map(fields, fn(field) { field <> ": \"\"" }), ", ")
+      <> ")"
+  }
+  let set_branches = case fields {
+    [] -> "    live.Set(_, _) -> #(model, effect.none())\n"
+    _ ->
+      string.concat(
+        list.map(fields, fn(field) {
+          "    live.Set("
+          <> naming.pascal(field)
+          <> ", value) -> #(live.State(..model, args: Args(..model.args, "
+          <> field
+          <> ": value)), effect.none())\n"
+        }),
+      )
+  }
+  let #(request_call, request_head, body) = case fields {
+    [] -> #("request()", "fn request() -> Effect(Event) {\n", "json.null()")
+    _ -> #(
+      "request(model.args)",
+      "fn request(args: Args) -> Effect(Event) {\n",
+      "json.object(["
+        <> string.join(
+        list.map(fields, fn(field) {
+          "#(" <> quoted(field) <> ", json.string(args." <> field <> "))"
+        }),
+        ", ",
+      )
+        <> "])",
+    )
+  }
   let reload = component.after_send == Some("ReloadPage")
   let reload_imports = case reload {
     True -> "import lustre/event\n"
@@ -1506,21 +1584,25 @@ fn attached_live_text(
   <> "import lustre/effect.{type Effect}\n"
   <> reload_imports
   <> "\n"
-  <> "pub type Field\n\n"
-  <> "pub type Args {\n  Args\n}\n\n"
+  <> field_type
+  <> args_type
   <> "pub type Error\n\n"
   <> "pub type Failure {\n  Refused(Error)\n  Broke(String)\n}\n\n"
   <> "pub type State = live.State(Args, Nil, Dynamic, Failure)\n\n"
   <> "pub type Event = live.Event(Field, Nil, Dynamic, Failure)\n\n"
   <> "pub fn init(_args: Nil) -> #(State, Effect(Event)) {\n"
-  <> "  #(live.State(args: Args, given: Nil, last: None, waiting: False), effect.none())\n}\n\n"
+  <> "  #(live.State(args: "
+  <> args_init
+  <> ", given: Nil, last: None, waiting: False), effect.none())\n}\n\n"
   <> "pub fn update(model: State, msg: Event, after: live.After) -> #(State, Effect(Event)) {\n"
   <> "  case msg {\n"
-  <> "    live.Set(_, _) -> #(model, effect.none())\n"
+  <> set_branches
   <> "    live.Send ->\n"
   <> "      case model.waiting {\n"
   <> "        True -> #(model, effect.none())\n"
-  <> "        False -> #(live.State(..model, waiting: True), request())\n"
+  <> "        False -> #(live.State(..model, waiting: True), "
+  <> request_call
+  <> ")\n"
   <> "      }\n"
   <> "    live.Given(_) -> #(model, effect.none())\n"
   <> "    live.Done(result) -> {\n"
@@ -1537,7 +1619,7 @@ fn attached_live_text(
   <> "  }\n}\n\n"
   <> "@external(javascript, \"./transport_ffi.mjs\", \"send\")\n"
   <> "fn transport_send(method: String, path: String, body: json.Json, blob_fields: List(String), on_ok: fn(Dynamic) -> Nil, on_error: fn(Dynamic) -> Nil) -> Nil\n\n"
-  <> "fn request() -> Effect(Event) {\n"
+  <> request_head
   <> "  use dispatch <- effect.from\n"
   <> "  transport_send(\n"
   <> "    "
@@ -1546,7 +1628,9 @@ fn attached_live_text(
   <> "    "
   <> quoted(route.path)
   <> ",\n"
-  <> "    json.null(),\n"
+  <> "    "
+  <> body
+  <> ",\n"
   <> "    [],\n"
   <> "    fn(value) { dispatch(live.Done(Ok(value))) },\n"
   <> "    fn(value) { dispatch(live.Done(Error(Broke(error_text(value))))) },\n"
@@ -1606,6 +1690,7 @@ fn blob_entry_live_text(
   <> "import framework/front/live\n"
   <> "import gleam/dynamic.{type Dynamic}\n"
   <> "import gleam/dynamic/decode\n"
+  <> "import gleam/json\n"
   <> "import gleam/option.{None, Some}\n"
   <> "import lustre/attribute\n"
   <> "import lustre/effect.{type Effect}\n"
@@ -1671,6 +1756,48 @@ fn blob_entry_live_text(
   <> "      fn(_unit) { dispatch(live.Done(Error(\"file upload failed\"))) },\n"
   <> "    )\n"
   <> "    Nil\n"
+  <> "  })\n}\n\n"
+  // 0.11.4(H5):URL の写し。framework の blob の口は JSON の `{from: url}` を受けて写した key を返す
+  <> "/// URL の写し(`{from: url}` を JSON で送る)。成功は写した key、失敗は本文の `code`(無ければ `url copy failed`)。\n"
+  <> "/// `Send`(file の upload)と同じ State を使い、送りの間は `waiting`。\n"
+  <> "pub fn copy_from(model: State, url: String) -> #(State, Effect(Event)) {\n"
+  <> "  case model.waiting || url == \"\" {\n"
+  <> "    True -> #(model, effect.none())\n"
+  <> "    False -> #(live.State(..model, waiting: True), send_from(url))\n"
+  <> "  }\n}\n\n"
+  <> "@external(javascript, \"./transport_ffi.mjs\", \"send\")\n"
+  <> "fn transport_send(\n"
+  <> "  method: String,\n"
+  <> "  path: String,\n"
+  <> "  body: json.Json,\n"
+  <> "  blob_fields: List(String),\n"
+  <> "  on_ok: fn(Dynamic) -> Nil,\n"
+  <> "  on_error: fn(Dynamic) -> Nil,\n"
+  <> ") -> Nil\n\n"
+  <> "fn send_from(url: String) -> Effect(Event) {\n"
+  <> "  effect.from(fn(dispatch) {\n"
+  <> "    transport_send(\n"
+  <> "      "
+  <> quoted(route.method)
+  <> ",\n"
+  <> "      "
+  <> quoted(route.path)
+  <> ",\n"
+  <> "      json.object([#(\"from\", json.string(url))]),\n"
+  <> "      [],\n"
+  <> "      fn(value) {\n"
+  <> "        case decode.run(value, decode.at([\"key\"], decode.string)) {\n"
+  <> "          Ok(key) if key != \"\" -> dispatch(live.Done(Ok(key)))\n"
+  <> "          _ -> dispatch(live.Done(Error(\"invalid response\")))\n"
+  <> "        }\n"
+  <> "      },\n"
+  <> "      fn(value) {\n"
+  <> "        case decode.run(value, decode.at([\"code\"], decode.string)) {\n"
+  <> "          Ok(code) if code != \"\" -> dispatch(live.Done(Error(code)))\n"
+  <> "          _ -> dispatch(live.Done(Error(\"url copy failed\")))\n"
+  <> "        }\n"
+  <> "      },\n"
+  <> "    )\n"
   <> "  })\n}\n"
 }
 
@@ -1832,19 +1959,58 @@ pub fn client_notes(
   })
 }
 
+/// client で差し替えてよい Page の route(0.11.4、H9)。面の Page の route から、応答に頁の読み込みの印が付く
+/// Page を外す:門の `frame_src`(CSP の header は頁の読み込みにしか効かない)と `pageview`(数える script は頁の
+/// 読み込みで走る)。外した Page へ・から の遷移は頁の読み込みのまま。
+fn navigable_routes(
+  app: model.App,
+  back_units: List(Unit),
+  package: face.Package,
+  front: reader_front.Front,
+) -> List(String) {
+  let #(gate, _) = read_gate(app, back_units, package, front)
+  let csp = case gate.frame_hosts {
+    [] -> []
+    _ -> gate.frame_src
+  }
+  let counted = case gate.pageview {
+    Some(pageview) -> pageview.pages
+    None -> []
+  }
+  front_route_paths(front)
+  |> list.filter(fn(path) {
+    !list.any(list.append(csp, counted), fn(match) {
+      reader_gate.covers(match, path)
+    })
+  })
+}
+
 fn client_text(
   face_name: String,
   front: reader_front.Front,
   units: List(Unit),
   app: model.App,
   hashes: hash.Hashes,
+  routes: List(String),
 ) -> String {
+  let navigation = case routes {
+    [] -> #("", "")
+    _ -> #(
+      "import { start as startNavigation } from \"__YUMEMI_BUILD__/yumemi/framework/front/navigate.mjs\";\n",
+      "startNavigation({ routes: ["
+        <> string.join(list.map(routes, fn(route) { quoted(route) }), ", ")
+        <> "], boot });\n",
+    )
+  }
   let components = client_components(front, units)
   let imports =
     string.concat([
       "import { register as lustreRegister } from \"__YUMEMI_BUILD__/lustre/lustre.mjs\";\n",
       "import { run as decodeRun } from \"__YUMEMI_BUILD__/gleam_stdlib/gleam/dynamic/decode.mjs\";\n",
       "import { Result$isOk, Result$Ok$0 } from \"__YUMEMI_BUILD__/__YUMEMI_FACE__/gleam.mjs\";\n",
+      // 0.11.4(H8):島は sketch の stylesheet の下で描く(class 付きの要素が panic しない)
+      "import { styled } from \"__YUMEMI_BUILD__/yumemi/framework/front/island_style.mjs\";\n",
+      navigation.0,
       string.concat(list.map(components, client_component_import)),
       string.concat(
         list.filter_map(components, fn(component) {
@@ -1903,6 +2069,9 @@ fn client_text(
   <> "  }\n"
   <> "  lustreRegister({ ...app, init: () => app.init(given) }, tag);\n"
   <> "}\n\n"
+  <> "function defined(tag) {\n"
+  <> "  return globalThis.customElements?.get(tag) !== undefined;\n"
+  <> "}\n\n"
   <> "function listenReload(tag) {\n"
   <> "  document.querySelectorAll(tag).forEach((element) => {\n"
   <> "    element.addEventListener(\"yumemi-done\", () => {\n"
@@ -1910,8 +2079,13 @@ fn client_text(
   <> "    });\n"
   <> "  });\n"
   <> "}\n\n"
+  // 0.11.4(H9):島の登録は client 遷移で body を差し替えた後にも走らせ直す
+  <> "function boot() {\n"
   <> registrations
   <> reloads
+  <> "}\n\n"
+  <> "boot();\n"
+  <> navigation.1
 }
 
 fn client_component_import(component: reader_front.Component) -> String {
@@ -1932,16 +2106,25 @@ fn client_registration(
     Some(reload) ->
       case service_for(services, reload.1) {
         Some(service) ->
-          "registerWithGiven("
+          "if (!defined(\""
+          <> tag
+          <> "\")) registerWithGiven(styled("
           <> name
-          <> ".app(), "
+          <> ".app()), "
           <> service.module
           <> "Out.decoder, \""
           <> tag
           <> "\");\n"
         None -> ""
       }
-    None -> "lustreRegister(" <> name <> ".app(), \"" <> tag <> "\");\n"
+    None ->
+      "if (!defined(\""
+      <> tag
+      <> "\")) lustreRegister(styled("
+      <> name
+      <> ".app()), \""
+      <> tag
+      <> "\");\n"
   }
 }
 

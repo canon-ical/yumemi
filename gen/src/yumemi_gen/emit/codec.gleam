@@ -228,7 +228,23 @@ fn prop_value(
   entity: Entity,
   prop: Prop,
 ) -> Result(String, String) {
-  let raw = "r." <> column(entity, prop)
+  // `Split` の宣言(record の欄 -> 列)を持つ record は、列から欄の object を組み直してから読む
+  let raw = case storage.split_columns(app, entity, prop.name) {
+    [] -> "r." <> column(entity, prop)
+    [first, ..] as pairs -> {
+      let object =
+        "{"
+        <> string.join(
+          list.map(pairs, fn(pair) { pair.0 <> ":r." <> pair.1 }),
+          ",",
+        )
+        <> "}"
+      case prop.optional {
+        True -> "(r." <> first.1 <> "==null?null:" <> object <> ")"
+        False -> object
+      }
+    }
+  }
   // `Text` の宣言(列の値 -> 構成子)を持つ sum は、列の値を構成子の snake 名へ戻してから読む
   let raw = case storage.text_values(app, entity, prop.name) {
     [] -> raw

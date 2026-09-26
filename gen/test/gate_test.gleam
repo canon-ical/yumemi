@@ -344,11 +344,15 @@ pub fn client_registers_every_app_component_and_flags_missing_app_test() {
   let #(notes, client) = client_fixture()
   // calls の無い島も app() があれば登録する
   client
-  |> string.contains("lustreRegister(copy_link.app(), \"copy-link\");")
+  |> string.contains(
+    "if (!defined(\"copy-link\")) lustreRegister(styled(copy_link.app()), \"copy-link\");",
+  )
   |> should.be_true
   // 既存の島(calls と app() を持つ)はそのまま
   client
-  |> string.contains("lustreRegister(like_button.app(), \"like-button\");")
+  |> string.contains(
+    "if (!defined(\"like-button\")) lustreRegister(styled(like_button.app()), \"like-button\");",
+  )
   |> should.be_true
   // app() の無い島は登録せず、exit 3 で名指す
   client |> string.contains("no-app") |> should.be_false
