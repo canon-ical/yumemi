@@ -468,7 +468,71 @@ var Dict = class {
 var bits = 5;
 var mask = (1 << bits) - 1;
 var noElementMarker = /* @__PURE__ */ Symbol();
+var Node = class _Node {
+  constructor(generation, datamap, nodemap, data) {
+    this.datamap = datamap;
+    this.nodemap = nodemap;
+    this.data = data;
+    this.generation = generation;
+  }
+  equals(other) {
+    if (this === other) return true;
+    if (!(other instanceof _Node)) return false;
+    if (this.datamap !== other.datamap || this.nodemap !== other.nodemap) {
+      return false;
+    }
+    const leftData = this.data;
+    const rightData = other.data;
+    if (leftData.length !== rightData.length) return false;
+    if (this.datamap === 0 && this.nodemap === 0) {
+      return this.#equalsOverflowEntries(rightData);
+    }
+    const edgesStart = leftData.length - popcount(this.nodemap);
+    for (let i = 0; i < edgesStart; i += 2) {
+      if (!isEqual(leftData[i], rightData[i]) || !isEqual(leftData[i + 1], rightData[i + 1])) {
+        return false;
+      }
+    }
+    for (let i = edgesStart; i < leftData.length; ++i) {
+      if (!leftData[i].equals(rightData[i])) return false;
+    }
+    return true;
+  }
+  #equalsOverflowEntries(otherData) {
+    const data = this.data;
+    entries: for (let i = 0; i < data.length; i += 2) {
+      for (let j = 0; j < otherData.length; j += 2) {
+        if (isEqual(data[i], otherData[j])) {
+          if (!isEqual(data[i + 1], otherData[j + 1])) return false;
+          continue entries;
+        }
+      }
+      return false;
+    }
+    return true;
+  }
+  hashCode() {
+    const data = this.data;
+    const edgesStart = data.length - popcount(this.nodemap);
+    let hash = 0;
+    for (let i = 0; i < edgesStart; i += 2) {
+      hash = hash + hashMerge(getHash(data[i + 1]), getHash(data[i])) | 0;
+    }
+    for (let i = edgesStart; i < data.length; ++i) {
+      hash = hash + data[i].hashCode() | 0;
+    }
+    return hash;
+  }
+};
+var emptyNode = /* @__PURE__ */ newNode(0);
+var emptyDict = /* @__PURE__ */ new Dict(0, emptyNode);
 var errorNil = /* @__PURE__ */ Result$Error(void 0);
+function newNode(generation) {
+  return new Node(generation, 0, 0, []);
+}
+function make() {
+  return emptyDict;
+}
 function get(dict3, key) {
   const result = lookup(dict3.root, key, getHash(key));
   return result !== noElementMarker ? Result$Ok(result) : errorNil;
@@ -494,6 +558,21 @@ function lookup(node, key, hash) {
   }
   return noElementMarker;
 }
+function fold(dict3, state, fun) {
+  const queue = [dict3.root];
+  while (queue.length) {
+    const node = queue.pop();
+    const data = node.data;
+    const edgesStart = data.length - popcount(node.nodemap);
+    for (let i = 0; i < edgesStart; i += 2) {
+      state = fun(state, data[i], data[i + 1]);
+    }
+    for (let i = edgesStart; i < data.length; ++i) {
+      queue.push(data[i]);
+    }
+  }
+  return state;
+}
 function popcount(n) {
   n -= n >>> 1 & 1431655765;
   n = (n & 858993459) + (n >>> 2 & 858993459);
@@ -518,6 +597,17 @@ var Option$Some$0 = (value2) => value2[0];
 var None = class extends CustomType {
 };
 var Option$None$const = new None();
+
+// public/build/dev/javascript/gleam_stdlib/gleam/dict.mjs
+function values(dict3) {
+  return fold(
+    dict3,
+    List$Empty$const,
+    (acc, _, value2) => {
+      return prepend(value2, acc);
+    }
+  );
+}
 
 // public/build/dev/javascript/gleam_stdlib/gleam/order.mjs
 var Lt = class extends CustomType {
@@ -636,6 +726,9 @@ function flatten_loop(loop$lists, loop$acc) {
 }
 function flatten(lists) {
   return flatten_loop(lists, List$Empty$const);
+}
+function flat_map(list4, fun) {
+  return flatten(map2(list4, fun));
 }
 function fold2(loop$list, loop$initial, loop$fun) {
   while (true) {
@@ -2297,6 +2390,16 @@ function is_void_html_element(tag, namespace) {
 function text(key, content) {
   return new Text(text_kind, key, content);
 }
+function unsafe_inner_html(key, namespace, tag, attributes, inner_html) {
+  return new UnsafeInnerHtml(
+    unsafe_inner_html_kind,
+    key,
+    namespace,
+    tag,
+    prepare(attributes),
+    inner_html
+  );
+}
 function map4(element5, mapper) {
   if (element5 instanceof Map2) {
     let child_mapper = element5.mapper;
@@ -2391,6 +2494,12 @@ function text2(content) {
 function none2() {
   return text("", "");
 }
+function fragment2(children) {
+  return fragment("", children, empty2());
+}
+function unsafe_raw_html(namespace, tag, attributes, inner_html) {
+  return unsafe_inner_html("", namespace, tag, attributes, inner_html);
+}
 function memo2(dependencies, view5) {
   return memo("", dependencies, view5);
 }
@@ -2399,6 +2508,11 @@ function ref(value2) {
 }
 function map5(element5, f) {
   return map4(element5, f);
+}
+
+// public/build/dev/javascript/lustre/lustre/element/html.mjs
+function style(attrs, css) {
+  return unsafe_raw_html("", "style", attrs, css);
 }
 
 // public/build/dev/javascript/lustre/lustre/vdom/patch.mjs
@@ -4942,7 +5056,7 @@ function namespaced2(namespace, tag, attributes, children) {
     is_void_html_element(tag, namespace)
   );
 }
-function fragment2(children) {
+function fragment3(children) {
   let $ = extract_keyed_children(children);
   let keyed_children = $[0];
   let children$1 = $[1];
@@ -4960,7 +5074,7 @@ var virtualise = (root2) => {
     rootMeta.parent = rootNodeMeta;
     rootNodeMeta.children.push(rootMeta);
     root2.insertBefore(rootMeta.node, root2.firstChild);
-    return fragment2(toList2(children));
+    return fragment3(toList2(children));
   }
   if (children.length === 1) {
     return children[0][1];
@@ -5031,7 +5145,7 @@ var virtualiseFragment = (metaParent, domParent, node, index4) => {
   const meta2 = insertMetadataChild(fragment_kind, metaParent, node, index4, key);
   const { children, end } = virtualiseChildren(meta2, domParent, node.nextSibling);
   meta2.endNode = end;
-  const vnode = fragment2(toList2(children));
+  const vnode = fragment3(toList2(children));
   return childResult(key, vnode, end?.nextSibling);
 };
 var virtualiseMap = (metaParent, domParent, node, index4) => {
@@ -5604,6 +5718,315 @@ function component(init5, update6, view5, options) {
   );
 }
 
+// public/build/dev/javascript/sketch/sketch.ffi.mjs
+var id = 0;
+function uniqueId() {
+  return id++;
+}
+
+// public/build/dev/javascript/sketch/sketch/internals/cache/cache.mjs
+var Cache2 = class extends CustomType {
+  constructor(cache, at_rules) {
+    super();
+    this.cache = cache;
+    this.at_rules = at_rules;
+  }
+};
+var NoStyle = class extends CustomType {
+};
+var Style$NoStyle$const = new NoStyle();
+function new$5() {
+  return new Cache2(make(), make());
+}
+function get_definitions(class$4) {
+  let $ = class$4.definitions;
+  let medias = $.medias;
+  let selectors = $.selectors;
+  let class$1 = $.class;
+  let _pipe = toList([toList([class$1]), selectors, medias]);
+  return flatten(_pipe);
+}
+function render_sheet(cache) {
+  let _pipe = values(cache.at_rules);
+  let _pipe$1 = append(
+    _pipe,
+    flat_map(
+      values(cache.cache),
+      (c) => {
+        return get_definitions(c[0]);
+      }
+    )
+  );
+  return join(_pipe$1, "\n\n");
+}
+
+// public/build/dev/javascript/sketch/sketch/css/media.mjs
+var Dark = class extends CustomType {
+};
+var ColorMode$Dark$const = new Dark();
+var Light = class extends CustomType {
+};
+var ColorMode$Light$const = new Light();
+var Screen = class extends CustomType {
+};
+var Query$Screen$const = new Screen();
+var Print = class extends CustomType {
+};
+var Query$Print$const = new Print();
+var All2 = class extends CustomType {
+};
+var Query$All$const = new All2();
+
+// public/build/dev/javascript/sketch/sketch.mjs
+var StyleSheet = class extends CustomType {
+  constructor(cache, id2, is_persistent) {
+    super();
+    this.cache = cache;
+    this.id = id2;
+    this.is_persistent = is_persistent;
+  }
+};
+var Ephemeral = class extends CustomType {
+};
+var Strategy$Ephemeral$const = new Ephemeral();
+var Persistent = class extends CustomType {
+};
+var Strategy$Persistent$const = new Persistent();
+function render(cache) {
+  return render_sheet(cache.cache);
+}
+function stylesheet(strategy) {
+  let id2 = uniqueId();
+  return new Ok(
+    (() => {
+      if (strategy instanceof Ephemeral) {
+        return new StyleSheet(new$5(), id2, false);
+      } else {
+        return new StyleSheet(new$5(), id2, true);
+      }
+    })()
+  );
+}
+
+// public/build/dev/javascript/sketch_lustre/sketch/lustre/internals/global.ffi.mjs
+var currentStylesheet = null;
+var stylesheets = {};
+function setStyleSheet(stylesheet2) {
+  stylesheets[stylesheet2.id] = stylesheet2;
+  return Result$Ok(stylesheet2);
+}
+function setCurrentStylesheet(stylesheet2) {
+  currentStylesheet = stylesheet2.id;
+  return Result$Ok(stylesheet2);
+}
+function getStyleSheet() {
+  const stylesheet2 = stylesheets[currentStylesheet];
+  if (!stylesheet2) return Result$Error();
+  return Result$Ok(stylesheet2);
+}
+function dismissCurrentStylesheet() {
+  currentStylesheet = null;
+  return Result$Ok(void 0);
+}
+
+// public/build/dev/javascript/yumemi/framework/front/island_style.mjs
+function styled(app5) {
+  const created = stylesheet(new Persistent());
+  if (!Result$isOk(created)) return app5;
+  const sheet = Result$Ok$0(created);
+  setStyleSheet(sheet);
+  const view5 = (model) => {
+    setCurrentStylesheet(sheet);
+    try {
+      const element5 = app5.view(model);
+      const current = getStyleSheet();
+      if (!Result$isOk(current) || Result$Ok$0(current).id !== sheet.id) return element5;
+      const css = render(Result$Ok$0(current));
+      return css === "" ? element5 : fragment2(toList([style(toList([]), css), element5]));
+    } finally {
+      dismissCurrentStylesheet();
+    }
+  };
+  return { ...app5, view: view5 };
+}
+
+// public/build/dev/javascript/yumemi/framework/front/navigate.mjs
+var clientSrc = "/_yumemi/client.mjs";
+var navigateHeader = "x-yumemi-navigate";
+var pageviewMark = 'meta[name="yumemi-pageview"]';
+function matches2(route, pathname) {
+  const expected = route.split("/");
+  const actual = pathname.split("/");
+  if (expected.length !== actual.length) return false;
+  return expected.every((segment, index4) => segment.startsWith(":") ? actual[index4] !== "" : segment === actual[index4] || segment.replaceAll("_", "-") === actual[index4]);
+}
+function routed(routes, pathname) {
+  return routes.some((route) => matches2(route, pathname));
+}
+function intercept(event4, routes, location) {
+  if (event4.defaultPrevented || event4.button !== 0) return null;
+  if (event4.metaKey || event4.ctrlKey || event4.shiftKey || event4.altKey) return null;
+  const path = typeof event4.composedPath === "function" ? event4.composedPath() : [event4.target];
+  const anchor = path.find((node) => node?.tagName === "A" && typeof node.getAttribute === "function" && node.hasAttribute("href"));
+  if (!anchor) return null;
+  const target = anchor.getAttribute("target");
+  if (target !== null && target !== "" && target !== "_self" || anchor.hasAttribute("download")) return null;
+  let url;
+  try {
+    url = new URL(anchor.getAttribute("href"), location.href);
+  } catch (_error) {
+    return null;
+  }
+  if (url.origin !== location.origin) return null;
+  if (url.pathname === location.pathname && url.search === location.search && url.hash !== "") return null;
+  if (!routed(routes, location.pathname) || !routed(routes, url.pathname)) return null;
+  return url;
+}
+function swappable(doc, defined2) {
+  const scripts = [...doc.querySelectorAll("script")];
+  const client = scripts.filter((script) => script.getAttribute("src") === clientSrc && script.getAttribute("type") === "module");
+  if (client.length !== 1 || scripts.length !== 1 || client[0].parentElement !== doc.head) return false;
+  if (!doc.body) return false;
+  return ![...doc.body.querySelectorAll("[data-yumemi-given]")].some((element5) => defined2(element5.localName));
+}
+function hashTarget(url, byId) {
+  if (!url.hash) return null;
+  try {
+    return byId(decodeURIComponent(url.hash.slice(1)));
+  } catch (_error) {
+    return null;
+  }
+}
+function counted(doc) {
+  return doc.head?.querySelector(pageviewMark) != null;
+}
+function pageviewPayload({ url, kind, from: from3, previous, sourceParam, id: id2, at: at2 }) {
+  const payload = { id: id2, client_at: at2, kind, path: url.pathname };
+  if (previous) payload.prev = previous;
+  else if (from3) payload.referrer_path = from3;
+  const sourceKey = sourceParam ? url.searchParams.get(sourceParam) : null;
+  if (sourceKey && /^[a-z0-9_]{1,16}$/.test(sourceKey)) payload.source_key = sourceKey;
+  return payload;
+}
+function sendPageview(config, url, kind, from3) {
+  let previous = null;
+  try {
+    const value2 = sessionStorage.getItem(config.key);
+    previous = value2 && /^[0-9a-f-]{36}$/.test(value2) ? value2 : null;
+  } catch (_) {
+  }
+  const id2 = crypto.randomUUID();
+  const body = JSON.stringify(pageviewPayload({ url, kind, from: from3, previous, sourceParam: config.source, id: id2, at: (/* @__PURE__ */ new Date()).toISOString() }));
+  try {
+    sessionStorage.setItem(config.key, id2);
+  } catch (_) {
+  }
+  const post = () => fetch(config.endpoint, { method: "POST", headers: { "content-type": "application/json" }, body, keepalive: true });
+  const send7 = () => void post().catch(() => post().catch(() => {
+  }));
+  if ("requestIdleCallback" in window) window.requestIdleCallback(send7, { timeout: 1e3 });
+  else requestAnimationFrame(send7);
+}
+var refresh = null;
+function reload() {
+  if (refresh !== null) return refresh();
+  globalThis.location.assign(globalThis.location.href);
+}
+function start4({ routes, boot: boot2, pageview = null }) {
+  if (typeof window === "undefined" || typeof history?.pushState !== "function") return;
+  let pending = null;
+  const page = (location) => location.pathname + location.search;
+  let shown = page(globalThis.location);
+  const load = (url, replace3) => {
+    if (replace3) globalThis.location.replace(url.href);
+    else globalThis.location.assign(url.href);
+  };
+  const swap = (doc) => {
+    const keep = (node) => node.nodeName === "SCRIPT" && node.getAttribute("src") === clientSrc;
+    const incoming = [...doc.head.childNodes].filter((node) => !keep(node)).map((node) => document.adoptNode(node));
+    const outgoing = [...document.head.childNodes].filter((node) => !keep(node));
+    for (const node of incoming) document.head.appendChild(node);
+    for (const node of outgoing) node.remove();
+    const lang = doc.documentElement.getAttribute("lang");
+    if (lang !== null) document.documentElement.setAttribute("lang", lang);
+    document.body.replaceWith(document.adoptNode(doc.body));
+  };
+  const go = async (url, mode) => {
+    const push = mode === "push";
+    pending?.abort();
+    const controller = new AbortController();
+    pending = controller;
+    let response;
+    try {
+      response = await fetch(url.href, {
+        credentials: "same-origin",
+        redirect: "manual",
+        cache: "no-store",
+        headers: { accept: "text/html", [navigateHeader]: "1" },
+        signal: controller.signal
+      });
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      return load(url, !push);
+    }
+    const type = response.headers.get("content-type") ?? "";
+    if (response.type === "opaqueredirect" || response.status !== 200 || !type.startsWith("text/html") || response.headers.has("content-security-policy")) {
+      return load(url, !push);
+    }
+    let html;
+    try {
+      html = await response.text();
+    } catch (_error) {
+      if (controller.signal.aborted) return;
+      return load(url, !push);
+    }
+    if (controller.signal.aborted) return;
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    if (!swappable(doc, (tag) => globalThis.customElements.get(tag) !== void 0)) return load(url, !push);
+    pending = null;
+    const from3 = globalThis.location.pathname;
+    const scroll = [window.scrollX, window.scrollY];
+    const count = pageview !== null && counted(doc);
+    swap(doc);
+    if (push) history.pushState({ yumemi: "navigate" }, "", url.href);
+    shown = page(url);
+    if (mode !== "refresh") {
+      const anchor = hashTarget(url, (id2) => document.getElementById(id2));
+      if (anchor) anchor.scrollIntoView();
+      else if (push) window.scrollTo(0, 0);
+    }
+    boot2();
+    if (mode === "refresh") {
+      const keep = () => window.scrollTo(scroll[0], scroll[1]);
+      keep();
+      requestAnimationFrame(() => {
+        keep();
+        requestAnimationFrame(keep);
+      });
+    }
+    if (count) sendPageview(pageview, url, mode === "refresh" ? "reload" : "spa", from3);
+    document.dispatchEvent(new CustomEvent("yumemi-navigated", { detail: { url: url.href, mode } }));
+  };
+  refresh = () => {
+    const url = new URL(globalThis.location.href);
+    if (!routed(routes, url.pathname)) return globalThis.location.assign(url.href);
+    void go(url, "refresh");
+  };
+  if (history.state === null) history.replaceState({ yumemi: "navigate" }, "", globalThis.location.href);
+  document.addEventListener("click", (event4) => {
+    const url = intercept(event4, routes, globalThis.location);
+    if (url === null) return;
+    event4.preventDefault();
+    void go(url, "push");
+  });
+  window.addEventListener("popstate", (event4) => {
+    const url = new URL(globalThis.location.href);
+    if (page(url) === shown) return;
+    if (event4.state?.yumemi !== "navigate" || !routed(routes, url.pathname)) return load(url, true);
+    void go(url, "pop");
+  });
+}
+
 // public/build/dev/javascript/lustre/lustre/event.mjs
 function emit2(event4, data) {
   return event2(event4, data);
@@ -5639,36 +6062,6 @@ function on_change(message) {
     )
   );
 }
-
-// public/build/dev/javascript/sketch/sketch/internals/cache/cache.mjs
-var NoStyle = class extends CustomType {
-};
-var Style$NoStyle$const = new NoStyle();
-
-// public/build/dev/javascript/sketch/sketch/css/media.mjs
-var Dark = class extends CustomType {
-};
-var ColorMode$Dark$const = new Dark();
-var Light = class extends CustomType {
-};
-var ColorMode$Light$const = new Light();
-var Screen = class extends CustomType {
-};
-var Query$Screen$const = new Screen();
-var Print = class extends CustomType {
-};
-var Query$Print$const = new Print();
-var All2 = class extends CustomType {
-};
-var Query$All$const = new All2();
-
-// public/build/dev/javascript/sketch/sketch.mjs
-var Ephemeral = class extends CustomType {
-};
-var Strategy$Ephemeral$const = new Ephemeral();
-var Persistent = class extends CustomType {
-};
-var Strategy$Persistent$const = new Persistent();
 
 // public/build/dev/javascript/sketch_lustre/sketch/lustre/element.mjs
 var text3 = text2;
@@ -6088,7 +6481,7 @@ function app() {
 }
 
 // public/build/dev/javascript/yumemi/framework/spec_ffi.mjs
-function matches2(raw, pattern) {
+function matches3(raw, pattern) {
   return new RegExp(pattern, "u").test(raw);
 }
 var codepoints = (raw) => Array.from(raw).length;
@@ -6155,7 +6548,7 @@ function within(raw, min2, max2) {
 function validate(raw, spec) {
   let _block;
   if (spec instanceof Uuid) {
-    _block = matches2(
+    _block = matches3(
       raw,
       "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
     );
@@ -6163,7 +6556,7 @@ function validate(raw, spec) {
     let min2 = spec.min;
     let max2 = spec.max;
     let regex = spec.regex;
-    _block = within(raw, min2, max2) && matches2(raw, regex);
+    _block = within(raw, min2, max2) && matches3(raw, regex);
   } else if (spec instanceof Text2) {
     let min2 = spec.min;
     let max2 = spec.max;
@@ -7566,15 +7959,22 @@ function registerWithGiven(app5, decoder5, tag) {
   }
   make_component({ ...app5, init: () => app5.init(given) }, tag);
 }
+function defined(tag) {
+  return globalThis.customElements?.get(tag) !== void 0;
+}
 function listenReload(tag) {
   document.querySelectorAll(tag).forEach((element5) => {
     element5.addEventListener("yumemi-done", () => {
-      globalThis.location.assign(globalThis.location.href);
+      reload();
     });
   });
 }
-make_component(app(), "article-blob-copy");
-make_component(app2(), "blob-save");
-make_component(app3(), "like-button");
-registerWithGiven(app4(), decoder4, "pick-tag");
-listenReload("pick-tag");
+function boot() {
+  if (!defined("article-blob-copy")) make_component(styled(app()), "article-blob-copy");
+  if (!defined("blob-save")) make_component(styled(app2()), "blob-save");
+  if (!defined("like-button")) make_component(styled(app3()), "like-button");
+  if (!defined("pick-tag")) registerWithGiven(styled(app4()), decoder4, "pick-tag");
+  listenReload("pick-tag");
+}
+boot();
+start4({ routes: ["/article/:slug", "/status"], boot });

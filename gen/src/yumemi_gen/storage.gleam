@@ -150,3 +150,21 @@ pub fn text_values(
   |> option.from_result
   |> option.unwrap([])
 }
+
+/// `Split` の宣言の (record の欄, 列)。無ければ空。
+pub fn split_columns(
+  app: model.App,
+  entity: model.Entity,
+  property: String,
+) -> List(#(String, String)) {
+  list.find_map(app.server.storage, fn(row) {
+    case row {
+      model.SplitColumns(entity: module, property: name, columns: columns)
+        if module == entity.module && name == property
+      -> Ok(columns)
+      _ -> Error(Nil)
+    }
+  })
+  |> option.from_result
+  |> option.unwrap([])
+}

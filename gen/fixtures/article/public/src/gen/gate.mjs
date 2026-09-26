@@ -13,6 +13,8 @@ const pageviewRoutes = [];
 const pageviewScript = null;
 
 const contexts = new WeakMap();
+const navigateHeader = "x-yumemi-navigate";
+const pageviewMark = "<meta name=\"yumemi-pageview\">";
 
 function literalMatches(segment, value) {
   return segment === value || segment.replaceAll("_", "-") === value;
@@ -186,12 +188,18 @@ export async function after_response(request, env, response) {
   if (pageviewScript === null || !tracksPageview(context) || output.status !== 200 || !isHtml(output)) return output;
   if (context.session?.adult !== true) return output;
   const html = await output.text();
-  const offset = html.indexOf("</body>");
-  if (offset < 0) throw new Error("SSR body is missing");
-  return new Response(html.slice(0, offset) + pageviewScript + html.slice(offset), {
+  const headers = new Headers(output.headers);
+  headers.append("vary", navigateHeader);
+  // client 遷移の fetch には script でなく数える印を差す(client が差し替えた後に 1 回送る)
+  const [marker, mark] = request.headers.get(navigateHeader) === "1"
+    ? ["</head>", pageviewMark]
+    : ["</body>", pageviewScript];
+  const offset = html.indexOf(marker);
+  if (offset < 0) throw new Error(marker === "</head>" ? "SSR head is missing" : "SSR body is missing");
+  return new Response(html.slice(0, offset) + mark + html.slice(offset), {
     status: output.status,
     statusText: output.statusText,
-    headers: output.headers,
+    headers,
   });
 }
 

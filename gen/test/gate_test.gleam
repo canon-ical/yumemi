@@ -344,11 +344,15 @@ pub fn client_registers_every_app_component_and_flags_missing_app_test() {
   let #(notes, client) = client_fixture()
   // calls の無い島も app() があれば登録する
   client
-  |> string.contains("lustreRegister(copy_link.app(), \"copy-link\");")
+  |> string.contains(
+    "if (!defined(\"copy-link\")) lustreRegister(styled(copy_link.app()), \"copy-link\");",
+  )
   |> should.be_true
   // 既存の島(calls と app() を持つ)はそのまま
   client
-  |> string.contains("lustreRegister(like_button.app(), \"like-button\");")
+  |> string.contains(
+    "if (!defined(\"like-button\")) lustreRegister(styled(like_button.app()), \"like-button\");",
+  )
   |> should.be_true
   // app() の無い島は登録せず、exit 3 で名指す
   client |> string.contains("no-app") |> should.be_false
@@ -417,4 +421,18 @@ pub fn attached_entry_live_sends_blob_fields_test() {
     "export function send(method, path, body, blobFields, onOk, onError) {",
   )
   |> should.be_true
+}
+
+@external(javascript, "./yumemi_fix_0114_test_ffi.mjs", "gate_marks_navigation_fetch")
+fn gate_marks_navigation_fetch(text: String) -> String
+
+/// 0.11.4 r2:client 遷移の fetch(`x-yumemi-navigate: 1`)には、pageview の script でなく数える印の meta を head に
+/// 差す(adult の session・200 の HTML・pageview の Page だけ)。頁の読み込みは今までどおり script。
+pub fn gate_marks_navigation_fetch_instead_of_script_test() {
+  let #(read, _) = read_www(www_gate)
+  let out =
+    gate_marks_navigation_fetch(gate_emit.text("// header", read, www_routes))
+  string.contains(out, "NG ") |> should.be_false
+  string.contains(out, "STDERR") |> should.be_false
+  string.split(out, "\n") |> list.length |> should.equal(5)
 }

@@ -1,3 +1,50 @@
+# yumemi-fix-0114 r2 真壁 ── 全面 SPA(pageview の Page・書いた後の読み直しも client 遷移)と柏木 P1 の前倒し(2026-09-26)
+
+正本は `docs/reports/yumemi-fix-0114.md` の `## r2`。証跡は `gen/build/fix0114r2/`。
+
+## 状態
+
+- 1〜4 は全部済み。pageview は印の header → 門が head に meta → client が差し替えの後に 1 回(`spa` / `reload`)。Done の読み直しは `navigate.reload()`。CSP の Page は外したまま(test 足した)。P1-1・2・4・5・7 を直した
+- 実 API で、数える印を差し替えの後に読んでいた bug を見つけて直した(`63036b8`)
+- root build 0、format 0、gen test 305 / 0、fixture ×2 差 0、写しの 1 手 ×2 差 0、api 700 / 700(PG 55565)、3 面 52 / 30 / 24(基点の形・adopt の形とも)
+- 実 API:`r2hands.tsv` 21 手・`r2reload.tsv` 5 手・`r2h10.tsv` 11 手が全部 ○
+
+## DDL
+
+無し。
+
+## 残り
+
+- P1-3・P1-6 は射程外で直していない。印の header を外す proxy の道は手で押していない
+
+# yumemi-fix-0114 真壁 ── musearch を yumemi で止めない最後の patch H5〜H10、版 0.11.4(2026-09-26)
+
+## 状態
+
+- 完了。報告は `docs/reports/yumemi-fix-0114.md`
+- H5:BlobCopy の live に `copy_from`(`{from: url}` → `Done(Ok(key))`)。H6:`SwitchSubject` の attached の live が `Args(kind, id)` を持ち `{kind, id}` を送る(役から導く、役の無い口は 0.11.3 と同じ)。H7:`Split` の record を列から組み直して decode
+- H8:`framework/front/island_style.mjs` の `styled`、生成の client が島を包んで登録。H9:`framework/front/navigate.mjs` の `start`、route 表は面の Page から門の `frame_src` と `pageview` の Page を外したもの
+- H10:`framework/server/read_retry.mjs`、読みだけの文を timeout(既定 5000 ms)で切って 1 回やり直す。書きはやり直さない。DB の外の失敗は読みも書きも本文を log に
+- 版 0.11.4(`gleam.toml`、`gen/manifest.toml`)、README に 6 行。`git diff v0.11.3 -- src/framework` は A 3・M 1(driver.mjs の -2 行、export の形は同じ)
+
+## 検収(証跡は `gen/build/fix0114/`)
+
+- root build 0、gen test 301 / 0、format 0、fixture ×2 差 0(tracked 66 と一致、2 本は取り直して commit)
+- 写し `cd9731f8`:1 手 ×2 exit 0・差 0、診断 33 行は基線と同じ集合。commit 済みとの差は codec.mjs・muses の blob_copy の live・3 面の client.mjs の 5 本
+- 写し:api 700 / 700 ×2(PG 55562)、3 面 build 0・format 0・npm build 0・test 52 / 30 / 24
+- 実 API:H9 の予約の 3 Page を click・戻る・進むで navigation 1 のまま、門(403 / 302)は頁の読み込みに落ちた。H8 claim の URL を class 付きで描いて pageerror 0。H6 muses / console の切り替えが `{kind, id}` で 200・DB 変化。H5 アイコンの写し 200 → 保存の icon が key。H10 遅延の注入で timeout → 再試行 → 成功、2 回とも落ちた時の log 2 行
+- PG 55562・wrangler・bridge・proxy は pid で止めた
+
+## DDL
+
+無し。
+
+## 残り
+
+- muses / console の Page 間の click は押していない。given の島が登録済みなら頁の読み込みに落とす道は写しでは通らない
+- H10 の読みの判定は文の字。schema で修飾しない利用者の関数で書く文は読みに数える(写しに無い)
+- staging での H10 は deploy の後(鷹野さん)
+
 # yumemi-fix-0113 真壁 ── 生成器の穴 H4、版 0.11.3(2026-09-26)
 
 ## 状態

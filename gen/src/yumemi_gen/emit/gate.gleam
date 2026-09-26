@@ -3,7 +3,8 @@
 //// - `before_route(request, env)` ── route 表(literal-first)で Page を引き、URL の段の `-` をフォルダの `_` に
 ////   戻し、門(sign-in・主体・同意・既定の admit)と条件つきの redirect を当てる。
 ////   返り値は `{response}`(門で止めた)か `{request, route, session}`(通した。route は外れなら null)
-//// - `after_response(request, env, response)` ── CSP `frame-src` と pageview の script を足す
+//// - `after_response(request, env, response)` ── CSP `frame-src` と pageview の script を足す(client 遷移の
+////   fetch ── header `x-yumemi-navigate: 1` ── には script でなく `<meta name="yumemi-pageview">` を head に差す)
 //// - `serve(dispatch)` ── 上の 2 本で dispatch を挟んだ Worker の `fetch`。生成 shell の export default
 ////
 //// 値の運び(route の値・session・query を読みへ渡すこと)はここに無い。
@@ -215,6 +216,8 @@ fn pageview_script(
     "    });",
     "  };",
     "  if (!trackedPath(location.pathname)) return;",
+    "  // 送る時でなく走った時の頁(送る前に client 遷移で頁が替わっても、この頁を数える)",
+    "  const shown = new URL(location.href);",
     "",
     "  const previousEventKey = " <> quoted(storage_key) <> ";",
     "  let previousEvent = null;",
@@ -235,7 +238,7 @@ fn pageview_script(
     "      id,",
     "      client_at: new Date().toISOString(),",
     "      kind: navigation?.type === \"reload\" ? \"reload\" : \"initial\",",
-    "      path: location.pathname",
+    "      path: shown.pathname",
     "    };",
     "    if (!previousEvent && document.referrer) {",
     "      try {",
@@ -245,7 +248,7 @@ fn pageview_script(
     "      } catch (_) {}",
     "    }",
     "    if (previousEvent) payload.prev = previousEvent;",
-    "    const sourceKey = new URL(location.href).searchParams.get("
+    "    const sourceKey = shown.searchParams.get("
       <> quoted(source_param)
       <> ");",
     "    if (sourceKey && /^[a-z0-9_]{1,16}$/.test(sourceKey)) payload.source_key = sourceKey;",
@@ -279,6 +282,8 @@ fn pageview_script(
 }
 
 const runtime = "const contexts = new WeakMap();
+const navigateHeader = \"x-yumemi-navigate\";
+const pageviewMark = \"<meta name=\\\"yumemi-pageview\\\">\";
 
 function literalMatches(segment, value) {
   return segment === value || segment.replaceAll(\"_\", \"-\") === value;
@@ -452,12 +457,18 @@ export async function after_response(request, env, response) {
   if (pageviewScript === null || !tracksPageview(context) || output.status !== 200 || !isHtml(output)) return output;
   if (context.session?.adult !== true) return output;
   const html = await output.text();
-  const offset = html.indexOf(\"</body>\");
-  if (offset < 0) throw new Error(\"SSR body is missing\");
-  return new Response(html.slice(0, offset) + pageviewScript + html.slice(offset), {
+  const headers = new Headers(output.headers);
+  headers.append(\"vary\", navigateHeader);
+  // client 遷移の fetch には script でなく数える印を差す(client が差し替えた後に 1 回送る)
+  const [marker, mark] = request.headers.get(navigateHeader) === \"1\"
+    ? [\"</head>\", pageviewMark]
+    : [\"</body>\", pageviewScript];
+  const offset = html.indexOf(marker);
+  if (offset < 0) throw new Error(marker === \"</head>\" ? \"SSR head is missing\" : \"SSR body is missing\");
+  return new Response(html.slice(0, offset) + mark + html.slice(offset), {
     status: output.status,
     statusText: output.statusText,
-    headers: output.headers,
+    headers,
   });
 }
 
