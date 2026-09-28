@@ -2,15 +2,21 @@
 // fetch / queue の口と、AppSystem(service binding の RPC)、Durable Object の class をここから作る。
 // cron の式ごとの分岐(scheduled)は `src/server.gleam` の `cron` から生成物に書く。
 import { DurableObject, WorkerEntrypoint } from 'cloudflare:workers';
+import { recording } from './outbox.mjs';
 
-/** fetch と queue。fetch が 202 を返したら outbox を送る(同じ invocation の waitUntil)。 */
+/**
+ * fetch と queue。fetch が 202 を返したか、outbox へ INSERT する文を commit したら(status によらず、
+ * 生成の書きも手書きの SQL も)、outbox を送る(同じ invocation の waitUntil)。書きの無い要求では送らない。
+ */
 export function handlers({ dispatch, database, observe, sweep, consume }) {
  let invocation=0;
  return {
   async fetch(request,env,execution) {
    const db=database(env,observe);
-   const response=await dispatch({request,env,db,invocation:++invocation});
-   if(response.status===202) execution.waitUntil(sweep(db,env));
+   const writes=recording(db);
+   let response;
+   try {response=await dispatch({request,env,db:writes.db,invocation:++invocation});}
+   finally {if(response?.status===202||writes.wrote()) execution.waitUntil(sweep(db,env));}
    return response;
   },
   async queue(batch,env) {
