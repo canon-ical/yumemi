@@ -17,6 +17,7 @@
 //// | `src/gen/operations_ffi.mjs` | with の逆向き矢印(root の子の List) |
 //// | `src/gen/entry/{auth,queue,system}.gleam` | framework の session / outbox の契約(固定) |
 
+import framework/schema
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -519,6 +520,8 @@ fn registry_text(app: App, units: List(Unit), input: String) -> String {
 /// app の `db/queries/**`(★ の SQL と、採用済みの生成 SQL)に、この回に生成した SQL のうち app に無い道を
 /// 足す。同じ道は app の file が勝つ ── 実行側の穴の契約は app が採った SQL に合っているため。生成 SQL を
 /// 採る(`db/queries` に置く)と、その回から sql.mjs もそれに揃う。道の順に並べる。
+/// framework の SQL のうち 0.11.6 で足した `framework/outbox_claim` だけは既定の 1 文をここで足す(app に
+/// ★ があればそちらが勝つ)── 足した版で sweep が止まらないように。
 fn bundle(
   app_queries: List(#(String, String)),
   generated: List(File),
@@ -537,6 +540,7 @@ fn bundle(
         False -> Error(Nil)
       }
     })
+    |> list.append([#("framework/outbox_claim", outbox_claim_sql())])
   // app の SQL が勝つのは ★(手書き)だけ。`-- GENERATED` を名乗る app の file は生成物の古い写しなので、
   // この回の生成物で置き換える(WGy r3、採用)
   let kept =
@@ -548,6 +552,16 @@ fn bundle(
     list.filter(made, fn(pair) { !list.any(kept, fn(m) { m.0 == pair.0 }) })
   list.append(kept, fresh)
   |> list.sort(fn(left, right) { string.compare(left.0, right.0) })
+}
+
+/// sweep が行を送る前に取る 1 文(0.11.6)。`$1` は行の id。送り直しの幅(1 時間)は `framework/outbox_sweep`
+/// の `sent_at` の条件と揃える。重なった sweep の 2 本目は、1 本目の commit の後に条件を読み直して 0 行になる。
+fn outbox_claim_sql() -> String {
+  "-- GENERATED from framework.outbox_claim — 手で編集しない\n"
+  <> "UPDATE "
+  <> schema.framework
+  <> ".outbox SET sent_at=now() WHERE id=$1 AND done_at IS NULL\n"
+  <> "AND (sent_at IS NULL OR sent_at<now()-interval '1 hour') RETURNING id;\n"
 }
 
 fn sql_text(queries: List(#(String, String)), input: String) -> String {
