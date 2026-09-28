@@ -418,7 +418,7 @@ fn fail_field(
       case face_path(location) && !string.contains(location, "#") {
         False ->
           Error(
-            "RedirectBack の location は面の中の path(`/` で始め、`//` で始めず、`#` を持たない)",
+            "RedirectBack の location は面の中の path(`/` で始め、`//` で始めず、`\\` も制御文字も `#` も持たない)",
           )
         True ->
           case param_name(param) {
@@ -431,9 +431,15 @@ fn fail_field(
   }
 }
 
-/// 面の中の path(`/` で始め、`//` で始めない)。
+/// 面の中の path(`/` で始め、`//` で始めず、`\` も制御文字も持たない ── 門の `safeParam` と同じ判定)。
+/// browser は `\` を `/` に読み、tab・改行を捨てるので、`/\evil.example` も `/<tab>/evil.example` も外の origin になる。
 fn face_path(location: String) -> Bool {
-  string.starts_with(location, "/") && !string.starts_with(location, "//")
+  string.starts_with(location, "/")
+  && !string.starts_with(location, "//")
+  && !string.contains(location, "\\")
+  && !list.any(string.to_utf_codepoints(location), fn(point) {
+    string.utf_codepoint_to_int(point) < 0x20
+  })
 }
 
 /// query の名に URL 符号化の要らない字だけ。
@@ -476,7 +482,7 @@ fn redirect_of(expression: glance.Expression) -> Result(Redirect, String) {
               True -> Ok(FixedKeep(location))
               False ->
                 Error(
-                  "FixedKeep の location は面の中の path(`/` で始め、`//` で始めず、`?` も `#` も持たない)",
+                  "FixedKeep の location は面の中の path(`/` で始め、`//` で始めず、`\\` も制御文字も `?` も `#` も持たない)",
                 )
             }
           })

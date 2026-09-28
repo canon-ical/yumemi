@@ -64,7 +64,7 @@ pub type Fail {
   /// 302 で面の中の `location` へ返し、query `param` に要求の path + search を URL 符号化して付ける
   /// (0.11.5)。`location` が既に query を持てば `&` で足す。要求の path + search が面の中の path でなければ
   /// (`SafeParam` と同じ判定)`param` を付けない ── 外の origin へ戻す値にはしない。
-  /// `location` は `/` で始め、`//` で始めず `#` を持たない。`param` は `[A-Za-z0-9_.-]+`。
+  /// `location` は `/` で始め、`//` で始めず、`\` も制御文字も `#` も持たない。`param` は `[A-Za-z0-9_.-]+`。
   RedirectBack(location: String, param: String)
 }
 
@@ -82,7 +82,8 @@ pub type To {
   SafeParam(param: String, fallback: String)
   /// 302 → 決まった path。
   Fixed(location: String)
-  /// 302 → 決まった path に、要求の query を保って付ける(0.11.5)。`location` は `?` も `#` も持たない。
+  /// 302 → 決まった path に、要求の query を保って付ける(0.11.5)。`location` は `/` で始め、`//` で始めず、
+  /// `\` も制御文字も `?` も `#` も持たない。
   /// hash は server に届かない ── 頁の読み込みの 302 では browser が元の URL の hash を引き継ぐ
   /// (client 遷移の fetch は redirect を取らずに頁の読み込みへ落ちるので、同じに保たれる)。
   FixedKeep(location: String)

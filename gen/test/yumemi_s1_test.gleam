@@ -98,7 +98,8 @@ pub fn redirect_back_and_fixed_keep_are_read_test() {
   |> should.equal([gate.FixedKeep("/me/chats"), gate.Fixed("/search")])
 }
 
-/// 外の origin・`//` の path・`#` 付き・符号化の要る param・`?` 付きの FixedKeep は宣言で止める(exit 4)。
+/// 外の origin・`//` の path・`\` や制御文字(browser が `/` に読む・捨てる)・`#` 付き・符号化の要る param・
+/// `?` 付きの FixedKeep は宣言で止める(exit 4)。
 pub fn redirect_back_outside_face_is_conflict_test() {
   [
     #(
@@ -108,6 +109,14 @@ pub fn redirect_back_outside_face_is_conflict_test() {
     #(
       "RedirectBack(location: \"/\", param: \"returnTo\")",
       "RedirectBack(location: \"//evil.example/\", param: \"returnTo\")",
+    ),
+    #(
+      "RedirectBack(location: \"/\", param: \"returnTo\")",
+      "RedirectBack(location: \"/\\\\evil.example/\", param: \"returnTo\")",
+    ),
+    #(
+      "RedirectBack(location: \"/\", param: \"returnTo\")",
+      "RedirectBack(location: \"/\t/evil.example/\", param: \"returnTo\")",
     ),
     #(
       "RedirectBack(location: \"/\", param: \"returnTo\")",
@@ -125,6 +134,10 @@ pub fn redirect_back_outside_face_is_conflict_test() {
     #(
       "FixedKeep(location: \"/me/chats\")",
       "FixedKeep(location: \"//evil.example\")",
+    ),
+    #(
+      "FixedKeep(location: \"/me/chats\")",
+      "FixedKeep(location: \"/\\\\evil.example\")",
     ),
   ]
   |> list.each(fn(pair) {
@@ -294,6 +307,25 @@ pub fn subset_faces_get_entries_test() {
   // 面 1 つは entry のまま
   string.contains(text, "entry: 'admin' },") |> should.be_true
   string.contains(text, "entry: 'public' },") |> should.be_true
+}
+
+/// 同じ面を重ねた宣言(`[Admin, Admin]`)は面 1 つと同じ `entry`(重ねても面の外へ開かない)。
+pub fn repeated_face_keeps_entry_test() {
+  let dir = copy_app("fixtures/article")
+  edit(
+    dir,
+    "src/service/article_retract.gleam",
+    "pub const faces: List(Face) = [Admin]",
+    "pub const faces: List(Face) = [Admin, Admin]",
+  )
+  |> should.be_true
+  let text = registry_of(dir)
+  remove_app(dir)
+  string.contains(
+    text,
+    "{ name: 'article_retract', module: article_retract, root: root_article_retract, method: 'POST', path: '/api/admin/articles/:slug/retract', fields: ['slug'], folded: null, entry: 'admin' },",
+  )
+  |> should.be_true
 }
 
 @external(javascript, "./yumemi_s1_test_ffi.mjs", "entries_check")

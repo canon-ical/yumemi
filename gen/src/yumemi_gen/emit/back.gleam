@@ -346,6 +346,8 @@ fn entry_field(app: App, service: Service, pair: Option(Pair)) -> String {
     })
   case only_entry(app, service), service.faces_declared, named {
     Some(name), _, _ -> ", entry: " <> quoted(name)
+    // 同じ面を重ねた宣言(`[Admin, Admin]`)は面 1 つと同じ
+    None, True, [only] -> ", entry: " <> quoted(only.name)
     None, True, [_, _, ..] -> {
       let aliased =
         list.filter_map(app.server.aliases, fn(alias) {
