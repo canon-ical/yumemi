@@ -57,6 +57,8 @@ pub type Fail {
   ToSignIn(status: Int, back: Bool)
   Deny(status: Int, body: String)
   RedirectTo(location: String)
+  /// 0.11.5:面の中の `location` へ、query `param` に要求の path + search を付けて返す。
+  RedirectBack(location: String, param: String)
 }
 
 pub type Redirect {
@@ -66,6 +68,8 @@ pub type Redirect {
 pub type To {
   SafeParam(param: String, fallback: String)
   Fixed(location: String)
+  /// 0.11.5:決まった path に要求の query を保って返す。
+  FixedKeep(location: String)
 }
 
 pub type Pageview {
@@ -408,8 +412,46 @@ fn fail_field(
           False -> Error("RedirectTo は面の中の path(`/` で始める)")
         }
       })
-    _ -> Error("失敗の応答は ToSignIn / Deny / RedirectTo")
+    Some("RedirectBack") -> {
+      use location <- result.try(string_field(item, "location", 0))
+      use param <- result.try(string_field(item, "param", 1))
+      case face_path(location) && !string.contains(location, "#") {
+        False ->
+          Error(
+            "RedirectBack の location は面の中の path(`/` で始め、`//` で始めず、`\\` も制御文字も `#` も持たない)",
+          )
+        True ->
+          case param_name(param) {
+            True -> Ok(RedirectBack(location, param))
+            False -> Error("RedirectBack の param は `[A-Za-z0-9_.-]+`")
+          }
+      }
+    }
+    _ -> Error("失敗の応答は ToSignIn / Deny / RedirectTo / RedirectBack")
   }
+}
+
+/// 面の中の path(`/` で始め、`//` で始めず、`\` も制御文字も持たない ── 門の `safeParam` と同じ判定)。
+/// browser は `\` を `/` に読み、tab・改行を捨てるので、`/\evil.example` も `/<tab>/evil.example` も外の origin になる。
+fn face_path(location: String) -> Bool {
+  string.starts_with(location, "/")
+  && !string.starts_with(location, "//")
+  && !string.contains(location, "\\")
+  && !list.any(string.to_utf_codepoints(location), fn(point) {
+    string.utf_codepoint_to_int(point) < 0x20
+  })
+}
+
+/// query の名に URL 符号化の要らない字だけ。
+fn param_name(param: String) -> Bool {
+  param != ""
+  && string.to_graphemes(param)
+  |> list.all(fn(char) {
+    string.contains(
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-",
+      char,
+    )
+  })
 }
 
 fn redirect_of(expression: glance.Expression) -> Result(Redirect, String) {
@@ -430,7 +472,21 @@ fn redirect_of(expression: glance.Expression) -> Result(Redirect, String) {
           Ok(SafeParam(param, fallback))
         }
         Some("Fixed") -> result.map(string_field(to, "location", 0), Fixed)
-        _ -> Error("`to` は SafeParam / Fixed")
+        Some("FixedKeep") ->
+          result.try(string_field(to, "location", 0), fn(location) {
+            case
+              face_path(location)
+              && !string.contains(location, "?")
+              && !string.contains(location, "#")
+            {
+              True -> Ok(FixedKeep(location))
+              False ->
+                Error(
+                  "FixedKeep の location は面の中の path(`/` で始め、`//` で始めず、`\\` も制御文字も `?` も `#` も持たない)",
+                )
+            }
+          })
+        _ -> Error("`to` は SafeParam / Fixed / FixedKeep")
       })
       Ok(Redirect(pages: pages, when_adult: when_adult, to: to))
     }

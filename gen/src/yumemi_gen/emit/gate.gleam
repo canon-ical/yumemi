@@ -77,8 +77,66 @@ pub fn text(header: String, gate: Gate, route_paths: List(String)) -> String {
     None -> "const pageviewScript = null;\n"
   }
   <> "\n"
-  <> runtime
+  <> runtime_for(gate)
 }
+
+/// 0.11.5 の語(`RedirectBack` / `FixedKeep`)を使う門だけ runtime に足す。使わない門の `gate.mjs` は 0.11.4 と同じ字。
+fn runtime_for(gate: Gate) -> String {
+  let back =
+    list.any(gate.rules, fn(rule) {
+      list.any(rule.checks, fn(check) {
+        case check {
+          gate.SignedIn(gate.RedirectBack(..))
+          | gate.Adult(gate.RedirectBack(..))
+          | gate.SubjectKind(_, gate.RedirectBack(..))
+          | gate.Consent(_, gate.RedirectBack(..)) -> True
+          _ -> False
+        }
+      })
+    })
+  let keep =
+    list.any(gate.redirects, fn(redirect) {
+      case redirect.to {
+        gate.FixedKeep(..) -> True
+        _ -> False
+      }
+    })
+  let with_back = case back {
+    False -> runtime
+    True ->
+      runtime
+      |> string.replace(failed_tail, redirect_back_branch <> failed_tail)
+      |> string.replace(
+        redirect_for_head,
+        redirect_back_fn <> redirect_for_head,
+      )
+  }
+  case keep {
+    False -> with_back
+    True -> string.replace(with_back, fixed_location, fixed_keep_location)
+  }
+}
+
+const failed_tail = "  return redirectTo(302, fail.location);\n}\n"
+
+const redirect_back_branch = "  if (fail.type === \"redirect-back\") return redirectBack(fail, request);\n"
+
+const redirect_for_head = "function redirectFor(redirect, session, url) {\n"
+
+const redirect_back_fn = "// 面の中の location へ、要求の path + search を param に付けて返す。面の中の path でなければ付けない(safeParam の判定)
+function redirectBack(fail, request) {
+  const url = new URL(request.url);
+  const back = safeParam(url.pathname + url.search, null);
+  if (back === null) return redirectTo(302, fail.location);
+  const joint = fail.location.includes(\"?\") ? \"&\" : \"?\";
+  return redirectTo(302, fail.location + joint + fail.param + \"=\" + encodeURIComponent(back));
+}
+
+"
+
+const fixed_location = "    ? redirect.to.location\n    : safeParam("
+
+const fixed_keep_location = "    ? redirect.to.location\n    : redirect.to.type === \"fixed-keep\"\n    ? redirect.to.location + url.search\n    : safeParam("
 
 fn expand(matches: List(Match), route_paths: List(String)) -> List(String) {
   route_paths
@@ -145,6 +203,12 @@ fn fail_js(fail: Fail) -> String {
       <> "}"
     gate.RedirectTo(location) ->
       "{type: \"redirect\", location: " <> quoted(location) <> "}"
+    gate.RedirectBack(location, param) ->
+      "{type: \"redirect-back\", location: "
+      <> quoted(location)
+      <> ", param: "
+      <> quoted(param)
+      <> "}"
   }
 }
 
@@ -166,6 +230,8 @@ fn redirect_js(redirect: Redirect) -> String {
       <> "}"
     gate.Fixed(location) ->
       "{type: \"fixed\", location: " <> quoted(location) <> "}"
+    gate.FixedKeep(location) ->
+      "{type: \"fixed-keep\", location: " <> quoted(location) <> "}"
   }
   <> "}"
 }

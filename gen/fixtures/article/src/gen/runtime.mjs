@@ -9,10 +9,10 @@ import * as draft_category from './draft/category.mjs';
 import * as draft_staff from './draft/staff.mjs';
 import * as draft_tag from './draft/tag.mjs';
 const roots={
- article_create:{sql:null,params:[],values:['entity:article','phase:article']},
- article_publish:{sql:null,params:[],values:['entity:article','phase:article']},
- article_read:{sql:null,params:[],values:['entity:article','phase:article']},
- article_retract:{sql:null,params:[],values:['entity:article','phase:article']},
+ article_create:{sql:'article_create/root',params:['arg:slug','clauses'],values:['entity:article','phase:article']},
+ article_publish:{sql:'article_publish/root',params:['arg:slug','clauses'],values:['entity:article','phase:article']},
+ article_read:{sql:'article_read/root',params:['arg:slug','clauses'],values:['entity:article','phase:article']},
+ article_retract:{sql:'article_retract/root',params:['arg:slug','clauses'],values:['entity:article','phase:article']},
 };
 const actors={
  article_blob_save:{kind:'sum',module:allow_article,variants:[['staff','StaffActor']],party:false,any:true},

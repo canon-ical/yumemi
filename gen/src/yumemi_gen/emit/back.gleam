@@ -119,10 +119,64 @@ pub fn emit(
         ])
       Output(
         files: files,
-        notes: list.flatten([queue_notes, cron_notes, runtime_notes, http_notes]),
+        notes: list.flatten([
+          root_sql_notes(app, units, queries),
+          queue_notes,
+          cron_notes,
+          runtime_notes,
+          http_notes,
+        ]),
       )
     }
   }
+}
+
+/// root の Entity を持つ Service は root を `db/queries/<name>/root.sql` の 1 文で読む。無ければ実行時に 503
+/// (`sql: null` の root に Entity の値が無い)なので、生成で Service 名を出して止める(0.11.5、exit 3)。
+/// root を別の道で作る Service は止めない:★ の口で応える Service(hook `service_<name>`、DO の器の port)と、
+/// root の 1 文を持つ Service から queue で呼ばれる consumer(その base の root を借りる、`consumer_of`)。
+/// `Rootless` と Entity の無い root(`Carried` だけ)は root の 1 文を持たないので対象の外。
+fn root_sql_notes(
+  app: App,
+  units: List(Unit),
+  queries: List(#(String, String)),
+) -> List(stop.Note) {
+  let rooted = fn(name) {
+    list.any(queries, fn(pair) { pair.0 == name <> "/root" })
+  }
+  let hook_names = list.map(app.server.hooks, fn(hook) { hook.name })
+  sorted_services(app)
+  |> list.filter_map(fn(service) {
+    let port = list.contains(hook_names, "service_" <> service.module)
+    let consumer = fn() {
+      list.any(app.services, fn(other) {
+        other.module != service.module
+        && rooted(other.module)
+        && list.contains(
+          queue_calls(service_source(units, other.module)),
+          service.module,
+        )
+      })
+    }
+    case root.root_for(app, service) {
+      Some(entity) ->
+        case rooted(service.module) || port || consumer() {
+          True -> Error(Nil)
+          False ->
+            Ok(stop.Note(
+              class: stop.Missing,
+              text: "service."
+                <> service.module
+                <> ": root("
+                <> entity.module
+                <> ")を読む db/queries/"
+                <> service.module
+                <> "/root.sql が無い(実行時に 503)",
+            ))
+        }
+      None -> Error(Nil)
+    }
+  })
 }
 
 fn back_hash(units: List(Unit), hashes: hash.Hashes) -> String {
@@ -281,6 +335,52 @@ fn only_entry(app: App, service: Service) -> Option(String) {
   }
 }
 
+/// 面を 2 つ以上、入口の全部でなく宣言した Service は、許す入口の集合の外で検査 7 が 403 にする(`entries`、
+/// 0.11.5)。付けるのは、この Service の行(本体・面の別名・`server.aliases`)に検査 2 で当たりうる入口 ──
+/// 媒体(Session / ApiKey)が合い、ReadOnly の入口なら Read の Service ── が面の外に残るときだけ。当たりうる入口を
+/// 全部面に持つ Service(musearch の 4 面全部)は何も付けない。面 1 つは今までどおり `entry`。
+fn entry_field(app: App, service: Service, pair: Option(Pair)) -> String {
+  let named =
+    list.filter(app.entries, fn(entry) {
+      list.contains(service.faces, naming.pascal(entry.name))
+    })
+  case only_entry(app, service), service.faces_declared, named {
+    Some(name), _, _ -> ", entry: " <> quoted(name)
+    // 同じ面を重ねた宣言(`[Admin, Admin]`)は面 1 つと同じ
+    None, True, [only] -> ", entry: " <> quoted(only.name)
+    None, True, [_, _, ..] -> {
+      let aliased =
+        list.filter_map(app.server.aliases, fn(alias) {
+          case alias {
+            model.ServiceAlias(service: target, credential: credential, ..)
+              if target == service.module
+            -> Ok(credential == "api_key")
+            _ -> Error(Nil)
+          }
+        })
+      let kinds = case pair {
+        Some(Pair(credential: Some("api_key"), ..)) -> [True, ..aliased]
+        Some(_) -> [False, ..aliased]
+        None -> aliased
+      }
+      let open =
+        list.filter(app.entries, fn(entry) {
+          list.contains(kinds, entry.credential == model.ApiKeyCredential)
+          && case entry.services, service.effect {
+            model.ReadOnlyServices, model.WriteEffect -> False
+            _, _ -> True
+          }
+          && !list.contains(named, entry)
+        })
+      case open {
+        [] -> ""
+        _ -> ", entries: " <> js_list(list.map(named, fn(entry) { entry.name }))
+      }
+    }
+    None, _, _ -> ""
+  }
+}
+
 fn fields_of(service: Service) -> String {
   js_list(list.map(service.args, fn(arg) { arg.name }))
 }
@@ -330,10 +430,7 @@ fn registry_text(app: App, units: List(Unit), input: String) -> String {
         Some(value) -> ", credential: " <> quoted(value)
         None -> ""
       }
-      <> case only_entry(app, service) {
-        Some(name) -> ", entry: " <> quoted(name)
-        None -> ""
-      }
+      <> entry_field(app, service, pair_of(app, routes, service))
       <> " },\n"
     })
   let face_rows =

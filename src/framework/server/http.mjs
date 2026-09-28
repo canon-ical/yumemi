@@ -258,6 +258,8 @@ export function http(spec) {
  });
  const subject=check('resolve',7,s=>{
   if(s.record?.entry&&s.record.entry!==s.entry.name) fail('forbidden',403);
+  // 面を 2 つ以上・入口の全部でなく宣言した Service は、許す入口の集合(`entries`、0.11.5)の外で 403
+  if(s.record?.entries&&!s.record.entries.includes(s.entry.name)) fail('forbidden',403);
   // Service routes are the only routes whose subject must match the entry's
   // declared subject set.  The attached session routes intentionally expose
   // the current session before a face switch.
