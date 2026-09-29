@@ -31,6 +31,11 @@ pub fn to_sketch(style: css.Style) -> List(sketch_css.Style) {
       sketch_css.object_fit(object_fit(fit)),
       sketch_css.aspect_ratio(aspect_ratio(ratio)),
     ]
+    css.Sizing(box:) -> [sketch_css.box_sizing(box_sizing(box))]
+    css.Marker(marker:) -> [sketch_css.list_style(list_marker(marker))]
+    css.Decoration(line:) -> [
+      sketch_css.text_decoration(text_decoration(line)),
+    ]
     css.Space(property:, value:) -> [space(property, value)]
     css.Text(family:, size:, weight:, line_height:) -> [
       sketch_css.font_family(font_family(family)),
@@ -92,6 +97,26 @@ fn object_fit(value: css.ObjectFit) -> String {
     css.Fill -> "fill"
     css.ScaleDown -> "scale-down"
     css.FitNone -> "none"
+  }
+}
+
+fn box_sizing(value: css.BoxSizing) -> String {
+  case value {
+    css.BorderBox -> "border-box"
+    css.ContentBox -> "content-box"
+  }
+}
+
+fn list_marker(value: css.ListMarker) -> String {
+  case value {
+    css.NoMarker -> "none"
+  }
+}
+
+fn text_decoration(value: css.TextDecoration) -> String {
+  case value {
+    css.NoDecoration -> "none"
+    css.Underline -> "underline"
   }
 }
 

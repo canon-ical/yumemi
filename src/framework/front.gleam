@@ -1,7 +1,10 @@
 import framework/front/css
 import framework/front/track
+import gleam/float
+import gleam/int
 import gleam/list
 import gleam/option.{type Option}
+import gleam/string
 
 pub type Var {
   Var(name: String, from: From)
@@ -152,6 +155,58 @@ fn area_name_in_names(names: List(String), name: String) -> Bool {
 
 pub type Area {
   Area(name: String, flow: css.Flow, pin: css.Pin, style: List(css.Style))
+}
+
+/// Area の `flow` を、生成される grid の CSS(その Area の規則)に書く宣言にする。
+/// `Stack` は縦の flex で、中の block は幅いっぱいのまま(`align-items: stretch`)。
+/// 各 variant は並びの向きまで書き切る ── pc・tablet の Frame で別の flow に替えても、
+/// sp の規則の向きが残らない。
+pub fn area_flow_css(flow: css.Flow) -> List(String) {
+  case flow {
+    css.Stack(gap:) -> [
+      "display: flex;",
+      "flex-direction: column;",
+      "align-items: stretch;",
+      "gap: " <> length_css(gap) <> ";",
+    ]
+    css.Row(gap:, wrap:) -> [
+      "display: flex;",
+      "flex-direction: row;",
+      "flex-wrap: "
+        <> case wrap {
+        True -> "wrap"
+        False -> "nowrap"
+      }
+        <> ";",
+      "gap: " <> length_css(gap) <> ";",
+    ]
+    css.Grid(cols:, gap:) -> [
+      "display: grid;",
+      "grid-template-columns: repeat("
+        <> int.to_string(cols)
+        <> ", minmax(0, 1fr));",
+      "gap: " <> length_css(gap) <> ";",
+    ]
+    css.GridTracks(cols:, gap:) -> [
+      "display: grid;",
+      "grid-template-columns: "
+        <> string.join(list.map(cols, track.to_css), " ")
+        <> ";",
+      "gap: " <> length_css(gap) <> ";",
+    ]
+    css.Scroller -> [
+      "display: flex;",
+      "flex-direction: row;",
+      "overflow-x: auto;",
+    ]
+  }
+}
+
+fn length_css(value: css.Length) -> String {
+  case value {
+    css.Px(value) -> float.to_string(value) <> "px"
+    css.Rem(value) -> float.to_string(value) <> "rem"
+  }
 }
 
 pub type Placement(service, block) {
