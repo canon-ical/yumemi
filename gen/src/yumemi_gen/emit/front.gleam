@@ -5956,6 +5956,25 @@ fn framework_track_css(track: framework_track.Track) -> String {
   |> string.replace(".0px", "px")
 }
 
+fn framework_area_flow(flow: reader_front.AreaFlow) -> framework_css.Flow {
+  case flow {
+    reader_front.StackFlow(gap:) ->
+      framework_css.Stack(gap: framework_length(gap))
+    reader_front.RowFlow(gap:, wrap:) ->
+      framework_css.Row(gap: framework_length(gap), wrap: wrap)
+    reader_front.GridFlow(cols:, gap:) ->
+      framework_css.Grid(cols: cols, gap: framework_length(gap))
+    reader_front.ScrollerFlow -> framework_css.Scroller
+  }
+}
+
+fn framework_length(length: reader_front.Length) -> framework_css.Length {
+  case length {
+    reader_front.RemLength(value) -> framework_css.Rem(value)
+    reader_front.PxLength(value) -> framework_css.Px(value)
+  }
+}
+
 fn length_css(length: reader_front.Length) -> String {
   case length {
     reader_front.RemLength(value) -> float.to_string(value) <> "rem"
@@ -6077,10 +6096,19 @@ fn static_area_rule(
     ]
     None -> []
   }
-  let visible = case visibility {
-    "hidden" -> ["  display: none;"]
-    "visible" -> ["  display: block;"]
-    _ -> []
+  // Area の flow(GridTracks 以外)── その Area を flex / grid にする。表示に戻す
+  // media の規則では display を flow の側が書くので `display: block` を足さない。
+  let flow = case area.pin, area.flow_layout {
+    "Overlay", _ -> []
+    _, Some(flow) ->
+      framework_front.area_flow_css(framework_area_flow(flow))
+      |> list.map(fn(line) { "  " <> line })
+    _, None -> []
+  }
+  let visible = case visibility, flow {
+    "hidden", _ -> ["  display: none;"]
+    "visible", [] -> ["  display: block;"]
+    _, _ -> []
   }
   let pin = case area.pin {
     "Top" -> [
@@ -6100,7 +6128,10 @@ fn static_area_rule(
       base,
       list.append(
         grid_area,
-        list.append(grid_tracks, list.append(visible, list.append(pin, ["}"]))),
+        list.append(
+          grid_tracks,
+          list.append(flow, list.append(visible, list.append(pin, ["}"]))),
+        ),
       ),
     ),
     "\n",

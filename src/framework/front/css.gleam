@@ -55,6 +55,24 @@ pub type Ratio {
   Ratio(width: Float, height: Float)
 }
 
+/// 箱の寸法の数え方(`box-sizing`)。`BorderBox` は width・min-height に padding と
+/// border を含める ── `min-height: 48px` と padding を持つ入力が 48px のまま出る。
+pub type BoxSizing {
+  BorderBox
+  ContentBox
+}
+
+/// 並びの印(`list-style`)。いま書けるのは印を消す `NoMarker` だけ。
+pub type ListMarker {
+  NoMarker
+}
+
+/// 文字の飾り(`text-decoration`)。
+pub type TextDecoration {
+  NoDecoration
+  Underline
+}
+
 pub type Interaction {
   Hover
   Focus
@@ -73,6 +91,9 @@ pub type Style {
   Border(edge: BorderEdge, width: Length, style: BorderStyle, color: String)
   Outline(width: Length, offset: Length, color: String)
   Crop(fit: ObjectFit, ratio: Ratio)
+  Sizing(box: BoxSizing)
+  Marker(marker: ListMarker)
+  Decoration(line: TextDecoration)
   Space(property: SpaceProperty, value: Length)
   Text(
     family: FontFamily,

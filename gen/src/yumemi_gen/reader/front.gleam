@@ -135,11 +135,21 @@ pub type Length {
   PxLength(Float)
 }
 
+/// Area の `flow` のうち、生成する grid の CSS へ写すもの(`GridTracks` は
+/// `grid_tracks` が持つ)。gap は literal か `style` の定数を読んだ値。
+pub type AreaFlow {
+  StackFlow(gap: Length)
+  RowFlow(gap: Length, wrap: Bool)
+  GridFlow(cols: Int, gap: Length)
+  ScrollerFlow
+}
+
 pub type Area {
   Area(
     name: String,
     flow: String,
     grid_tracks: Option(GridTracks),
+    flow_layout: Option(AreaFlow),
     pin: String,
     style: List(String),
   )
@@ -278,13 +288,18 @@ fn read_with_package_and_warning(
   services: List(model.Service),
   entries: List(model.Entry),
 ) -> Result(Front, Error) {
+  let lengths =
+    units
+    |> list.find(fn(unit) { unit.path == "style" })
+    |> result.map(style_lengths)
+    |> result.unwrap([])
   use layout_unit <- result.try(find_unit(units, "layout"))
-  use layout <- result.try(parse_layout(face, layout_unit))
+  use layout <- result.try(parse_layout(face, layout_unit, lengths))
   let shell = shell_from_units(units, package_name)
   let pages =
     units
     |> list.filter(fn(unit) { string.starts_with(unit.path, "pages/") })
-    |> list.filter_map(parse_page)
+    |> list.filter_map(fn(unit) { parse_page(unit, lengths) })
   let blocks =
     units
     |> list.filter(fn(unit) { string.starts_with(unit.path, "blocks/") })
@@ -762,22 +777,29 @@ fn find_unit(units: List(Unit), path: String) -> Result(Unit, Error) {
   }
 }
 
-fn parse_layout(face: String, unit: Unit) -> Result(Layout, Error) {
+fn parse_layout(
+  face: String,
+  unit: Unit,
+  lengths: List(#(String, Length)),
+) -> Result(Layout, Error) {
   let module = g.in_order(unit.module)
   use constant <- result.try(public_constant(module, face, "layout"))
   use value <- result.try(expected_type(constant, "Layout", unit.path))
   use _ <- result.try(expected_constructor(value, "Layout", unit.path))
   Ok(Layout(
     name: face,
-    sp: frame_field(value, "sp", "sp", unit.path),
-    pc: frame_field(value, "pc", "pc", unit.path),
-    tablet: frame_field(value, "tablet", "tablet", unit.path),
+    sp: frame_field(value, "sp", "sp", lengths),
+    pc: frame_field(value, "pc", "pc", lengths),
+    tablet: frame_field(value, "tablet", "tablet", lengths),
     vars: vars_field(value),
     nested: has_nested_constructor(value, "Layout"),
   ))
 }
 
-fn parse_page(unit: Unit) -> Result(Page, Nil) {
+fn parse_page(
+  unit: Unit,
+  lengths: List(#(String, Length)),
+) -> Result(Page, Nil) {
   let module = g.in_order(unit.module)
   case public_named_constant(module, "page") {
     Some(constant) ->
@@ -791,9 +813,9 @@ fn parse_page(unit: Unit) -> Result(Page, Nil) {
             layout: option_name(g.labelled(constant.value, "layout")),
             theme: option_string_name(g.labelled(constant.value, "theme")),
             vars: vars_field(constant.value),
-            sp: frame_field(constant.value, "sp", "sp", unit.path),
-            pc: frame_field(constant.value, "pc", "pc", unit.path),
-            tablet: frame_field(constant.value, "tablet", "tablet", unit.path),
+            sp: frame_field(constant.value, "sp", "sp", lengths),
+            pc: frame_field(constant.value, "pc", "pc", lengths),
+            tablet: frame_field(constant.value, "tablet", "tablet", lengths),
           ))
         _, _ -> Error(Nil)
       }
@@ -1162,25 +1184,29 @@ fn frame_field(
   expression: glance.Expression,
   label: String,
   media: String,
-  _where: String,
+  lengths: List(#(String, Length)),
 ) -> Option(Frame) {
   case g.labelled(expression, label) {
     None -> None
     Some(value) ->
       case option_value(value) {
         None -> None
-        Some(frame) -> parse_frame(frame, media)
+        Some(frame) -> parse_frame(frame, media, lengths)
       }
   }
 }
 
-fn parse_frame(expression: glance.Expression, media: String) -> Option(Frame) {
+fn parse_frame(
+  expression: glance.Expression,
+  media: String,
+  lengths: List(#(String, Length)),
+) -> Option(Frame) {
   case g.ctor_name(expression) {
     Some("Frame") ->
       Some(Frame(
         media: media,
         areas: g.labelled(expression, "areas")
-          |> option.then(parse_areas)
+          |> option.then(fn(areas) { parse_areas(areas, lengths) })
           |> option.unwrap([]),
         placements: g.labelled(expression, "placements")
           |> option.then(parse_placements)
@@ -1199,18 +1225,29 @@ fn parse_frame(expression: glance.Expression, media: String) -> Option(Frame) {
   }
 }
 
-fn parse_areas(expression: glance.Expression) -> Option(List(Area)) {
+fn parse_areas(
+  expression: glance.Expression,
+  lengths: List(#(String, Length)),
+) -> Option(List(Area)) {
   case g.list_elements(expression) {
     [] ->
       case expression {
         glance.List(elements: [], ..) -> Some([])
         _ -> None
       }
-    elements -> Some(list.filter_map(elements, parse_area_result))
+    elements ->
+      Some(
+        list.filter_map(elements, fn(element) {
+          parse_area_result(element, lengths)
+        }),
+      )
   }
 }
 
-fn parse_area(expression: glance.Expression) -> Option(Area) {
+fn parse_area(
+  expression: glance.Expression,
+  lengths: List(#(String, Length)),
+) -> Option(Area) {
   case g.ctor_name(expression) {
     Some("Area") ->
       Some(Area(
@@ -1218,6 +1255,8 @@ fn parse_area(expression: glance.Expression) -> Option(Area) {
         flow: constructor_label(expression, "flow") |> option.unwrap(""),
         grid_tracks: g.labelled(expression, "flow")
           |> option.then(parse_grid_tracks),
+        flow_layout: g.labelled(expression, "flow")
+          |> option.then(fn(flow) { parse_area_flow(flow, lengths) }),
         pin: constructor_label(expression, "pin") |> option.unwrap(""),
         style: style_names(expression),
       ))
@@ -1225,8 +1264,11 @@ fn parse_area(expression: glance.Expression) -> Option(Area) {
   }
 }
 
-fn parse_area_result(expression: glance.Expression) -> Result(Area, Nil) {
-  case parse_area(expression) {
+fn parse_area_result(
+  expression: glance.Expression,
+  lengths: List(#(String, Length)),
+) -> Result(Area, Nil) {
+  case parse_area(expression, lengths) {
     Some(area) -> Ok(area)
     None -> Error(Nil)
   }
@@ -1354,6 +1396,89 @@ fn parse_grid_tracks(expression: glance.Expression) -> Option(GridTracks) {
         _, _ -> None
       }
     _ -> None
+  }
+}
+
+/// Area の `flow` を読む。`GridTracks` は `parse_grid_tracks` の側。gap が literal
+/// でも `style` の定数でもなく読めないときは None ── grid の CSS に flow の行を出さない。
+fn parse_area_flow(
+  expression: glance.Expression,
+  lengths: List(#(String, Length)),
+) -> Option(AreaFlow) {
+  let gap = fn() {
+    g.labelled(expression, "gap")
+    |> option.then(fn(gap) { parse_length_ref(gap, lengths) })
+  }
+  case g.ctor_name(expression) {
+    Some("Stack") -> gap() |> option.map(StackFlow)
+    Some("Row") ->
+      case gap(), g.labelled(expression, "wrap") |> option.then(parse_bool) {
+        Some(gap), Some(wrap) -> Some(RowFlow(gap: gap, wrap: wrap))
+        _, _ -> None
+      }
+    Some("Grid") ->
+      case gap(), g.labelled(expression, "cols") |> option.then(parse_int) {
+        Some(gap), Some(cols) -> Some(GridFlow(cols: cols, gap: gap))
+        _, _ -> None
+      }
+    Some("Scroller") -> Some(ScrollerFlow)
+    _ -> None
+  }
+}
+
+fn parse_bool(expression: glance.Expression) -> Option(Bool) {
+  case g.ctor_name(expression) {
+    Some("True") -> Some(True)
+    Some("False") -> Some(False)
+    _ -> None
+  }
+}
+
+/// 長さの literal(`css.Px(8.0)`)か、`style` の定数(`style.s2`)。
+fn parse_length_ref(
+  expression: glance.Expression,
+  lengths: List(#(String, Length)),
+) -> Option(Length) {
+  case parse_length(expression), expression {
+    Some(length), _ -> Some(length)
+    None,
+      glance.FieldAccess(
+        container: glance.Variable(name: "style", ..),
+        label:,
+        ..,
+      )
+    -> list.key_find(lengths, label) |> option_from_result
+    None, _ -> None
+  }
+}
+
+/// `style` の定数のうち長さになるもの。同じ module の別の定数を指すものも辿る。
+fn style_lengths(unit: Unit) -> List(#(String, Length)) {
+  let constants =
+    g.in_order(unit.module).constants
+    |> list.map(fn(definition) {
+      #(definition.definition.name, definition.definition.value)
+    })
+  list.filter_map(constants, fn(entry) {
+    style_length(entry.1, constants, 8)
+    |> option.map(fn(length) { #(entry.0, length) })
+    |> option.to_result(Nil)
+  })
+}
+
+fn style_length(
+  expression: glance.Expression,
+  constants: List(#(String, glance.Expression)),
+  depth: Int,
+) -> Option(Length) {
+  case parse_length(expression), expression, depth > 0 {
+    Some(length), _, _ -> Some(length)
+    None, glance.Variable(name:, ..), True ->
+      case list.key_find(constants, name) {
+        Ok(value) -> style_length(value, constants, depth - 1)
+        Error(_) -> None
+      }
+    _, _, _ -> None
   }
 }
 

@@ -2544,6 +2544,62 @@ pub fn front_emit_grid_css_has_breakpoint_pin_and_hidden_area_rules_test() {
   string.contains(css, "position: sticky;") |> should.be_true
 }
 
+// yumemi-look2(0.11.8)── Area の flow が grid の CSS の、その Area の規則に出る。
+// gap は style の定数(`style.s2`)を読む。hidden の Area は display: none が後に勝ち、
+// media で表示に戻す規則は display: block を足さない(flow の display が効く)。
+pub fn front_emit_area_flow_reaches_grid_css_test() {
+  let css = text("public/priv/static/_yumemi/style.css")
+  [
+    "[data-yumemi-grid=\"layout\"] > [data-yumemi-area=\"page\"] {\n  grid-area: page;\n  display: flex;\n  flex-direction: column;\n  align-items: stretch;\n  gap: 16.0px;\n}",
+    "[data-yumemi-grid=\"layout\"] > [data-yumemi-area=\"header\"] {\n  grid-area: header;\n  display: flex;\n  flex-direction: column;\n  align-items: stretch;\n  gap: 0.0px;\n  position: sticky;",
+    "[data-yumemi-grid=\"layout\"] > [data-yumemi-area=\"footer\"] {\n  grid-area: footer;\n  display: flex;\n  flex-direction: row;\n  flex-wrap: nowrap;\n  gap: 0.0px;\n  position: sticky;",
+    "[data-yumemi-grid=\"layout\"] > [data-yumemi-area=\"aside\"] {\n  grid-area: aside;\n  display: flex;\n  flex-direction: column;\n  align-items: stretch;\n  gap: 8.0px;\n  display: none;\n}",
+    "[data-yumemi-grid=\"layout\"] > [data-yumemi-area=\"aside\"] {\n  grid-area: aside;\n  display: flex;\n  flex-direction: column;\n  align-items: stretch;\n  gap: 8.0px;\n}",
+  ]
+  |> list.each(fn(row) { string.contains(css, row) |> should.be_true })
+  string.contains(css, "display: block;") |> should.be_false
+}
+
+pub fn front_emit_area_flow_variants_and_grid_tracks_test() {
+  let files =
+    synthetic_front_files_with_layout(
+      "Layout(\n"
+      <> "  sp: Frame(\n"
+      <> "    areas: [\n"
+      <> "      Area(name: \"hero\", flow: css.Stack(gap: css.Rem(1.5)), pin: css.NoPin, style: []),\n"
+      <> "      Area(name: \"tiles\", flow: css.Grid(cols: 3, gap: css.Px(4.0)), pin: css.NoPin, style: []),\n"
+      <> "      Area(name: \"chips\", flow: css.Row(gap: style.s1, wrap: True), pin: css.NoPin, style: []),\n"
+      <> "      Area(name: \"strip\", flow: css.Scroller, pin: css.NoPin, style: []),\n"
+      <> "      Area(name: \"rail\", flow: css.GridTracks(cols: [track.Fr(2), track.Fr(1)], gap: css.Rem(0.5)), pin: css.NoPin, style: []),\n"
+      <> "      Area(name: \"loose\", flow: css.Stack(gap: other.gap), pin: css.NoPin, style: []),\n"
+      <> "    ],\n"
+      <> "    placements: [],\n"
+      <> "    cols: [],\n"
+      <> "    rows: [],\n"
+      <> "    template: [],\n"
+      <> "  ),\n"
+      <> "  pc: None,\n"
+      <> "  tablet: None,\n"
+      <> "  vars: [],\n"
+      <> ")",
+    )
+  let assert Ok(#(_, css)) =
+    list.find(files, fn(file) {
+      file.0 == "public/priv/static/_yumemi/style.css"
+    })
+  [
+    "grid-area: hero;\n  display: flex;\n  flex-direction: column;\n  align-items: stretch;\n  gap: 1.5rem;\n}",
+    "grid-area: tiles;\n  display: grid;\n  grid-template-columns: repeat(3, minmax(0, 1fr));\n  gap: 4.0px;\n}",
+    "grid-area: chips;\n  display: flex;\n  flex-direction: row;\n  flex-wrap: wrap;\n  gap: 8.0px;\n}",
+    "grid-area: strip;\n  display: flex;\n  flex-direction: row;\n  overflow-x: auto;\n}",
+    // GridTracks は 0.11.7 までの出力のまま(flow の行を重ねない)
+    "grid-area: rail;\n  display: grid;\n  grid-template-columns: 2fr 1fr;\n  gap: 0.5rem;\n}",
+    // gap が literal でも style の定数でもなく読めない Area は flow の行を出さない
+    "grid-area: loose;\n}",
+  ]
+  |> list.each(fn(row) { string.contains(css, row) |> should.be_true })
+}
+
 pub fn front_emit_grid_tracks_template_and_fixed_cells_test() {
   let files =
     synthetic_front_files_with_layout(

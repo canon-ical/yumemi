@@ -24,7 +24,7 @@ Extracted from the `framework/` directory of a production application on 2026-09
 gleam build
 ```
 
-## `framework/front` ── Style (0.11.7)
+## `framework/front` ── Style (0.11.8)
 
 `framework/front/css`'s `Style` is the typed vocabulary a Page / Area / component carries; `framework/front/sketch_css` maps it to CSS (sketch classes, so a Style used by an island also lands in the island's shadow `<style>`). Color values are strings passed straight through, so `var(--ma-color-bg)` and `color-mix(...)` work — the app owns its palette, yumemi bakes in no hex. Every word also works inside `State(Hover / Focus / Disabled, ..)` and `Responsive(SP / PC / Tablet, ..)`.
 
@@ -37,7 +37,27 @@ gleam build
 | `Space(property:, value:)` | `margin` / `padding` / `gap` / `width` / `height` / `border-radius`, and (0.11.7) `min-width` / `min-height` / `max-width` |
 | `Text(family:, size:, weight:, line_height:)` | `font-family` (`System` / `SansSerif` / `Serif` / `Monospace`, or `Named("var(--ma-font-ui)")` / `Named("\"Noto Sans JP\", sans-serif)")`), `font-size`, `font-weight` (`Normal` 400 / `Medium` 500 / `SemiBold` 600 / `Bold` 700), `line-height` |
 | `Crop(fit: Cover / Contain / Fill / ScaleDown / FitNone, ratio: Ratio(w, h))` | `object-fit` and `aspect-ratio` |
+| `Sizing(box: BorderBox / ContentBox)` | (0.11.8) `box-sizing` — `BorderBox` counts padding and border inside `width` / `min-height`, so an input or an `<a>` button with `min-height: 48px` and padding stays 48px |
+| `Marker(marker: NoMarker)` | (0.11.8) `list-style: none` — drops the `ul` / `li` bullet (clear the indent with `Space(Padding, Px(0.0))`) |
+| `Decoration(line: NoDecoration / Underline)` | (0.11.8) `text-decoration: none` / `underline` — e.g. a row link without the underline, underlined again inside `State(Hover / Focus, ..)` |
 | `Flow(..)` `State(..)` `Responsive(..)` `Animation(..)` | layout, interaction states, breakpoints, animations (unchanged) |
+
+## `framework/front` ── Area flow (0.11.8)
+
+An Area's `flow` in a Layout or a Page's Frame now reaches the generated grid CSS (the `<style>` that `htmlWithGridCss` puts in SSR pages and `_yumemi/style.css`, which carry the same text): the Area's rule gets the flow's declarations after `grid-area`, so the blocks placed in the Area are laid out by it. Before 0.11.8 the Area stayed `display: block` and the flow was ignored.
+
+| `flow` | declarations in the Area's rule |
+|---|---|
+| `Stack(gap:)` | `display: flex; flex-direction: column; align-items: stretch; gap` — blocks keep the Area's full width |
+| `Row(gap:, wrap:)` | `display: flex; flex-direction: row; flex-wrap: wrap / nowrap; gap` |
+| `Grid(cols:, gap:)` | `display: grid; grid-template-columns: repeat(cols, minmax(0, 1fr)); gap` |
+| `GridTracks(cols:, gap:)` | unchanged (already written since 0.11.x: `display: grid`, the tracks, `gap`) |
+| `Scroller` | `display: flex; flex-direction: row; overflow-x: auto` |
+
+- `gap` is a literal (`css.Px(..)` / `css.Rem(..)`) or a constant of the app's `style` module (`style.s2`). A gap the generator cannot read leaves the Area's rule without flow lines (as before).
+- Every variant writes its direction, so a `pc` / `tablet` Frame that gives the Area another flow overrides the `sp` one inside its media rule. An Area shown only at a breakpoint (hidden elsewhere) keeps `display: none` outside it; inside the media rule its flow's `display` shows it, and no `display: block` is added.
+- An Area pinned `Overlay` gets no flow lines (its display stays with the overlay). `pin` and `style` output is unchanged.
+- `framework/front.area_flow_css(flow)` returns the declarations for one `css.Flow`.
 
 ## `framework/server` ── what the app must provide (0.11.1)
 
@@ -77,6 +97,11 @@ A Service whose logic runs `step.commit` and continues after it (and is not a qu
 0.11.7 adds, without changing the existing variants' meaning or output:
 
 - **Style grows the look vocabulary** (see the Style section above): `Background`, `Border` (all edges or bottom only), `Outline` (the focus ring, always `outline-style: solid` with `outline-offset`), `min-width` / `min-height` / `max-width` in `Space`, `Named(..)` font families (a CSS variable or a family name), `SemiBold` (600), and `Crop` (`object-fit` + `aspect-ratio`). Color values stay strings (`var(--ma-*)`, `color-mix(..)` pass through). Generation from an unchanged app is byte-identical.
+
+0.11.8 adds, without changing the existing variants' meaning or output:
+
+- **Style:** `Sizing` (`box-sizing`), `Marker(NoMarker)` (`list-style: none`), `Decoration` (`text-decoration: none` / `underline`), all usable inside `State(..)` / `Responsive(..)`.
+- **Area flow reaches the grid CSS** (see the Area flow section above). Regenerating an app changes only the Area rules of the grid CSS.
 
 **Imports outside the package**
 

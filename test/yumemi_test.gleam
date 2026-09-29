@@ -38,7 +38,11 @@ pub fn main() {
   look_crop_renders_to_css()
   look_styles_work_inside_state_and_responsive()
   look_styles_reach_island_shadow_style()
-  io.println("Framework checks passed: 13 groups")
+  look2_box_sizing_renders_to_css()
+  look2_list_marker_renders_to_css()
+  look2_text_decoration_renders_to_css_and_inside_state()
+  look2_area_flow_renders_to_area_css()
+  io.println("Framework checks passed: 17 groups")
 }
 
 fn vars_are_typed_sources() {
@@ -577,6 +581,116 @@ fn look_styles_reach_island_shadow_style() {
     "island style has Outline's solid style",
   )
   assert_contains(html, "object-fit: cover;", "island style has the new Crop")
+}
+
+// ── yumemi-look2(0.11.8)── box-sizing・並びの印・文字の飾りと Area の flow ──
+
+fn look2_box_sizing_renders_to_css() {
+  let input =
+    css_of([
+      css.Sizing(css.BorderBox),
+      css.Space(property: css.MinHeight, value: css.Px(48.0)),
+      css.Space(property: css.Padding, value: css.Px(12.0)),
+    ])
+  assert_contains(input, "box-sizing: border-box;", "Sizing BorderBox")
+  assert_contains(input, "min-height: 48.0px;", "min-height stays")
+  let content = css_of([css.Sizing(css.ContentBox)])
+  assert_contains(content, "box-sizing: content-box;", "Sizing ContentBox")
+  let html =
+    island_shadow_style(front_sketch_css.class([css.Sizing(css.BorderBox)]))
+  assert_contains(html, "box-sizing: border-box;", "island style has Sizing")
+}
+
+fn look2_list_marker_renders_to_css() {
+  let list =
+    css_of([
+      css.Marker(css.NoMarker),
+      css.Space(property: css.Padding, value: css.Px(0.0)),
+    ])
+  assert_contains(list, "list-style: none;", "Marker NoMarker")
+  assert_contains(list, "padding: 0.0px;", "padding 0 by Space")
+}
+
+fn look2_text_decoration_renders_to_css_and_inside_state() {
+  let plain = css_of([css.Decoration(css.NoDecoration)])
+  assert_contains(plain, "text-decoration: none;", "Decoration NoDecoration")
+  let hover =
+    css_of([
+      css.Decoration(css.NoDecoration),
+      css.State(css.Hover, [css.Decoration(css.Underline)]),
+    ])
+  assert_contains(hover, ":hover", "State Hover selector")
+  assert_contains(
+    hover,
+    "text-decoration: underline;",
+    "Decoration Underline inside State(Hover)",
+  )
+  let focus = css_of([css.State(css.Focus, [css.Decoration(css.Underline)])])
+  assert_contains(focus, ":focus", "State Focus selector")
+  assert_contains(
+    focus,
+    "text-decoration: underline;",
+    "Decoration Underline inside State(Focus)",
+  )
+}
+
+fn look2_area_flow_renders_to_area_css() {
+  assert_equal(
+    front.area_flow_css(css.Stack(gap: css.Px(8.0))),
+    [
+      "display: flex;",
+      "flex-direction: column;",
+      "align-items: stretch;",
+      "gap: 8.0px;",
+    ],
+    "Stack is a column flex that keeps blocks full width",
+  )
+  assert_equal(
+    front.area_flow_css(css.Row(gap: css.Rem(0.5), wrap: True)),
+    [
+      "display: flex;",
+      "flex-direction: row;",
+      "flex-wrap: wrap;",
+      "gap: 0.5rem;",
+    ],
+    "Row",
+  )
+  assert_equal(
+    front.area_flow_css(css.Row(gap: css.Px(0.0), wrap: False)),
+    [
+      "display: flex;",
+      "flex-direction: row;",
+      "flex-wrap: nowrap;",
+      "gap: 0.0px;",
+    ],
+    "Row nowrap",
+  )
+  assert_equal(
+    front.area_flow_css(css.Grid(cols: 3, gap: css.Px(4.0))),
+    [
+      "display: grid;",
+      "grid-template-columns: repeat(3, minmax(0, 1fr));",
+      "gap: 4.0px;",
+    ],
+    "Grid",
+  )
+  assert_equal(
+    front.area_flow_css(css.GridTracks(
+      cols: [track.Fr(2), track.Fr(1)],
+      gap: css.Rem(1.0),
+    )),
+    [
+      "display: grid;",
+      "grid-template-columns: 2fr 1fr;",
+      "gap: 1.0rem;",
+    ],
+    "GridTracks",
+  )
+  assert_equal(
+    front.area_flow_css(css.Scroller),
+    ["display: flex;", "flex-direction: row;", "overflow-x: auto;"],
+    "Scroller",
+  )
 }
 
 fn empty_frame() -> front.Frame(Service, Block) {
