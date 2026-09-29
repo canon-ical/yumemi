@@ -33,7 +33,7 @@ gleam build
 | `Color(value)` | `color` |
 | `Background(value)` | `background-color` |
 | `Border(edge: AllEdges / BottomEdge, width, style: Solid / Dashed / Dotted, color)` | `border` / `border-bottom` (e.g. the 2px tab underline) |
-| `Outline(width, offset, color)` | `outline-width` / `outline-offset` / `outline-color` — the focus ring, inside `State(Focus, ..)` |
+| `Outline(width, offset, color)` | `outline-style: solid` / `outline-width` / `outline-offset` / `outline-color` — the focus ring, inside `State(Focus, ..)` |
 | `Space(property:, value:)` | `margin` / `padding` / `gap` / `width` / `height` / `border-radius`, and (0.11.7) `min-width` / `min-height` / `max-width` |
 | `Text(family:, size:, weight:, line_height:)` | `font-family` (`System` / `SansSerif` / `Serif` / `Monospace`, or `Named("var(--ma-font-ui)")` / `Named("\"Noto Sans JP\", sans-serif)")`), `font-size`, `font-weight` (`Normal` 400 / `Medium` 500 / `SemiBold` 600 / `Bold` 700), `line-height` |
 | `Crop(fit: Cover / Contain / Fill / ScaleDown / FitNone, ratio: Ratio(w, h))` | `object-fit` and `aspect-ratio` |
@@ -76,7 +76,7 @@ A Service whose logic runs `step.commit` and continues after it (and is not a qu
 
 0.11.7 adds, without changing the existing variants' meaning or output:
 
-- **Style grows the look vocabulary** (see the Style section above): `Background`, `Border` (all edges or bottom only), `Outline` (the focus ring with `outline-offset`), `min-width` / `min-height` / `max-width` in `Space`, `Named(..)` font families (a CSS variable or a family name), `SemiBold` (600), and `Crop` (`object-fit` + `aspect-ratio`). Color values stay strings (`var(--ma-*)`, `color-mix(..)` pass through). Generation from an unchanged app is byte-identical.
+- **Style grows the look vocabulary** (see the Style section above): `Background`, `Border` (all edges or bottom only), `Outline` (the focus ring, always `outline-style: solid` with `outline-offset`), `min-width` / `min-height` / `max-width` in `Space`, `Named(..)` font families (a CSS variable or a family name), `SemiBold` (600), and `Crop` (`object-fit` + `aspect-ratio`). Color values stay strings (`var(--ma-*)`, `color-mix(..)` pass through). Generation from an unchanged app is byte-identical.
 
 **Imports outside the package**
 

@@ -22,6 +22,7 @@ pub fn to_sketch(style: css.Style) -> List(sketch_css.Style) {
       border(edge, width, style, color),
     ]
     css.Outline(width:, offset:, color:) -> [
+      sketch_css.outline_style("solid"),
       sketch_css.outline_width(length_to_string(width)),
       sketch_css.outline_offset(length_to_string(offset)),
       sketch_css.outline_color(color),

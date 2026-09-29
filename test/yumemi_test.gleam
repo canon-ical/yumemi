@@ -420,6 +420,7 @@ fn look_background_border_and_outline_render_to_css() {
         color: "var(--ma-color-focus)",
       ),
     ])
+  assert_contains(outline, "outline-style: solid;", "Outline style is solid")
   assert_contains(outline, "outline-width: 3.0px;", "Outline width")
   assert_contains(
     outline,
@@ -502,6 +503,11 @@ fn look_styles_work_inside_state_and_responsive() {
   assert_contains(focused, ":focus", "State Focus selector")
   assert_contains(
     focused,
+    "outline-style: solid;",
+    "Outline style inside State(Focus) so the ring paints",
+  )
+  assert_contains(
+    focused,
     "outline-offset: 3.0px;",
     "Outline inside State(Focus)",
   )
@@ -564,6 +570,11 @@ fn look_styles_reach_island_shadow_style() {
     html,
     "outline-offset: 3.0px;",
     "island style has the new Outline",
+  )
+  assert_contains(
+    html,
+    "outline-style: solid;",
+    "island style has Outline's solid style",
   )
   assert_contains(html, "object-fit: cover;", "island style has the new Crop")
 }

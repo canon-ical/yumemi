@@ -44,3 +44,21 @@
 - `attribute.attribute("style", …)` の抜け穴を塞ぐのは別便のまま(触っていない)
 - ブランドガイドの色・書体の値そのもの(CSS 変数 `--ma-*` の定義)はアプリ(www)側の仕事。yumemi には hex を焼いていない
 - staging / production への適用・publish・push は鷹野さん
+
+## r2 ── Outline に outline-style を出す(鷹野検収の差し戻し 1 点、2026-09-30)
+
+- 障害:`Outline` が `outline-width`・`outline-offset`・`outline-color` しか出さず、`outline-style` の既定は `none` なので `State(Focus, [Outline(..)])` を書いても輪が描かれない
+- 直し:`sketch_css.gleam` の `Outline` の枝に `sketch_css.outline_style("solid")` を 1 本足した。**型の形は solid 固定にした。**理由:差し戻しの要件は「`outline-style: solid` を出す」で、focus の輪の線種を変える要求はブランドガイドに無い。欄を足すと r1 の型(`Outline(width:, offset:, color:)`)を壊すので、足さない方が手戻りが少ない。線種が要るときは別便で `BorderStyle` を足せばよい
+- test:`State(Focus, [Outline(..)])` の CSS に `outline-style: solid;` が出る断言を `look_styles_work_inside_state_and_responsive` に。island の shadow の test(`look_styles_reach_island_shadow_style`)にも 1 行。直接の `Outline` の test(`look_background_border_and_outline_render_to_css`)にも 1 行
+- README の Style の表と 0.11.7 の節の `Outline` の記述に `outline-style: solid` を追記
+
+### 検収(r2)
+
+- `gleam format --check src test`:0(差分無し)
+- root `gleam test`:13 群 PASS(`Framework checks passed: 13 groups`、EXIT=0、`build/r2-gleam-test-root.txt`)
+- `gen/` `gleam test`:318 passed, no failures(EXIT=0、`build/r2-gleam-test-gen.txt`)
+- musearch main を入力にした生成の差 0 をもう 1 回:r1 の写し(`gen/build/look/ms-input`、main `c3167cbb`)を `out-r2` にコピーし、作業木の `gen/` で `gleam run -m yumemi_gen -- build/look/out-r2/api build/look/out-r2`。EXIT=0、書いた file 1778(out-base と同じ)、診断は出力 path の行以外全行一致。`diff -r out-base out-r2` は `.claude` の symlink 2 本(r1 と同じ、archive に実体が無い)だけで**生成物の差 0**(`gen/build/look/ms-diff-r2.txt`、4 行とも symlink)
+
+### DDL
+
+無し。
