@@ -12,6 +12,9 @@ pub type SpaceProperty {
   Width
   Height
   Radius
+  MinWidth
+  MinHeight
+  MaxWidth
 }
 
 pub type FontFamily {
@@ -19,12 +22,37 @@ pub type FontFamily {
   SansSerif
   Serif
   Monospace
+  Named(String)
 }
 
 pub type FontWeight {
   Normal
   Medium
+  SemiBold
   Bold
+}
+
+pub type BorderEdge {
+  AllEdges
+  BottomEdge
+}
+
+pub type BorderStyle {
+  Solid
+  Dashed
+  Dotted
+}
+
+pub type ObjectFit {
+  Cover
+  Contain
+  Fill
+  ScaleDown
+  FitNone
+}
+
+pub type Ratio {
+  Ratio(width: Float, height: Float)
 }
 
 pub type Interaction {
@@ -41,6 +69,10 @@ pub type Breakpoint {
 
 pub type Style {
   Color(value: String)
+  Background(value: String)
+  Border(edge: BorderEdge, width: Length, style: BorderStyle, color: String)
+  Outline(width: Length, offset: Length, color: String)
+  Crop(fit: ObjectFit, ratio: Ratio)
   Space(property: SpaceProperty, value: Length)
   Text(
     family: FontFamily,

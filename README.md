@@ -24,6 +24,21 @@ Extracted from the `framework/` directory of a production application on 2026-09
 gleam build
 ```
 
+## `framework/front` ── Style (0.11.7)
+
+`framework/front/css`'s `Style` is the typed vocabulary a Page / Area / component carries; `framework/front/sketch_css` maps it to CSS (sketch classes, so a Style used by an island also lands in the island's shadow `<style>`). Color values are strings passed straight through, so `var(--ma-color-bg)` and `color-mix(...)` work — the app owns its palette, yumemi bakes in no hex. Every word also works inside `State(Hover / Focus / Disabled, ..)` and `Responsive(SP / PC / Tablet, ..)`.
+
+| Style | CSS |
+|---|---|
+| `Color(value)` | `color` |
+| `Background(value)` | `background-color` |
+| `Border(edge: AllEdges / BottomEdge, width, style: Solid / Dashed / Dotted, color)` | `border` / `border-bottom` (e.g. the 2px tab underline) |
+| `Outline(width, offset, color)` | `outline-width` / `outline-offset` / `outline-color` — the focus ring, inside `State(Focus, ..)` |
+| `Space(property:, value:)` | `margin` / `padding` / `gap` / `width` / `height` / `border-radius`, and (0.11.7) `min-width` / `min-height` / `max-width` |
+| `Text(family:, size:, weight:, line_height:)` | `font-family` (`System` / `SansSerif` / `Serif` / `Monospace`, or `Named("var(--ma-font-ui)")` / `Named("\"Noto Sans JP\", sans-serif)")`), `font-size`, `font-weight` (`Normal` 400 / `Medium` 500 / `SemiBold` 600 / `Bold` 700), `line-height` |
+| `Crop(fit: Cover / Contain / Fill / ScaleDown / FitNone, ratio: Ratio(w, h))` | `object-fit` and `aspect-ratio` |
+| `Flow(..)` `State(..)` `Responsive(..)` `Animation(..)` | layout, interaction states, breakpoints, animations (unchanged) |
+
 ## `framework/server` ── what the app must provide (0.11.1)
 
 The back-end runtime (`framework/server/*.mjs`) is JavaScript that the generated `src/gen/*.mjs` imports. It knows no application names: route names, cookie names, key bindings and the party a queue consumer reads its borrowed root as come from the app's `src/server.gleam` (`attached_roles`, `browser`, `hooks`, `roots`' `QueueParty`). The generated face gate (`<face>/src/gen/gate.mjs`, declared in `<face>/src/gate.gleam` with `framework/gate`) reads the session through the `ReadSession` attached route. Gleam packages cannot declare npm dependencies, so the app supplies the following itself.
@@ -58,6 +73,10 @@ A Service whose logic runs `step.commit` and continues after it (and is not a qu
 - **A request that wrote to the outbox sweeps it, whatever its status.** The fetch handler wraps the request's database handle and notes every statement or transaction that inserts into `framework.outbox` (`INSERT INTO framework.outbox`, also inside a `WITH`, in generated and hand-written SQL alike; comments and string literals do not count, quoted identifiers are not recognised) and resolves, that is, commits. After such a request — 200, 4xx, 5xx or a thrown error — `waitUntil` runs the sweep, as a 202 always did (202 still sweeps). A request that only reads, or whose outbox insert failed or rolled back, does not sweep. The cron sweep is unchanged.
 - **Each row is sent once by overlapping sweeps.** The sweep claims a row with `framework/outbox_claim` (a conditional `UPDATE … SET sent_at=now() … RETURNING id`) before it sends it, and skips a row it could not claim. A second sweep that reaches the same row waits for the first one's row lock, re-reads the condition and gets no row. `framework/outbox_sent` is no longer called. A row whose send fails after the claim waits out the resend window (1 hour) like a lost message and is sent by the first sweep after it (a request that sweeps, a 202 or the cron); 0.11.5 resent it on the next sweep. Consumers stay idempotent.
 - The generator adds a default `framework/outbox_claim` statement to `src/gen/sql.mjs` when the app has no `db/queries/framework/outbox_claim.sql`; the app's own file wins. Its resend window (1 hour) must match the app's `framework/outbox_sweep`.
+
+0.11.7 adds, without changing the existing variants' meaning or output:
+
+- **Style grows the look vocabulary** (see the Style section above): `Background`, `Border` (all edges or bottom only), `Outline` (the focus ring with `outline-offset`), `min-width` / `min-height` / `max-width` in `Space`, `Named(..)` font families (a CSS variable or a family name), `SemiBold` (600), and `Crop` (`object-fit` + `aspect-ratio`). Color values stay strings (`var(--ma-*)`, `color-mix(..)` pass through). Generation from an unchanged app is byte-identical.
 
 **Imports outside the package**
 

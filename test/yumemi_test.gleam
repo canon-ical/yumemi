@@ -8,6 +8,8 @@ import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
 import lustre/element as lustre_element
+import sketch
+import sketch/css as sketch_class
 
 pub type Service {
   ArticleRead
@@ -31,7 +33,12 @@ pub fn main() {
   area_overlay_controls_share_the_area_id()
   badge_counts_keep_the_same_dom_shape()
   each_modals_use_stable_scoped_ids()
-  io.println("Framework checks passed: 8 groups")
+  look_background_border_and_outline_render_to_css()
+  look_min_max_named_family_and_weight_render_to_css()
+  look_crop_renders_to_css()
+  look_styles_work_inside_state_and_responsive()
+  look_styles_reach_island_shadow_style()
+  io.println("Framework checks passed: 13 groups")
 }
 
 fn vars_are_typed_sources() {
@@ -353,6 +360,214 @@ fn render_two_each_modals() -> String {
   |> lustre_element.to_string
 }
 
+// ── yumemi-look(0.11.7)── Style に足した見た目の語彙 7 つ ─────────────────
+
+@external(javascript, "./yumemi_look_ffi.mjs", "island_shadow_style")
+fn island_shadow_style(class: sketch_class.Class) -> String
+
+fn css_of(styles: List(css.Style)) -> String {
+  let assert Ok(sheet) = sketch.stylesheet(strategy: sketch.Ephemeral)
+  let #(sheet, _) = sketch.class_name(front_sketch_css.class(styles), sheet)
+  sketch.render(sheet)
+}
+
+fn look_background_border_and_outline_render_to_css() {
+  let background = css_of([css.Background("var(--ma-color-bg)")])
+  assert_contains(
+    background,
+    "background-color: var(--ma-color-bg);",
+    "Background renders background-color",
+  )
+  let mixed = css_of([css.Background("color-mix(in srgb, #000 50%, #fff)")])
+  assert_contains(
+    mixed,
+    "background-color: color-mix(in srgb, #000 50%, #fff);",
+    "Background passes color-mix through",
+  )
+  let around =
+    css_of([
+      css.Border(
+        edge: css.AllEdges,
+        width: css.Px(1.0),
+        style: css.Solid,
+        color: "var(--ma-color-line)",
+      ),
+    ])
+  assert_contains(
+    around,
+    "border: 1.0px solid var(--ma-color-line);",
+    "Border AllEdges renders border",
+  )
+  let tab_underline =
+    css_of([
+      css.Border(
+        edge: css.BottomEdge,
+        width: css.Px(2.0),
+        style: css.Dashed,
+        color: "#b92c22",
+      ),
+    ])
+  assert_contains(
+    tab_underline,
+    "border-bottom: 2.0px dashed #b92c22;",
+    "Border BottomEdge renders the 2px tab underline",
+  )
+  let outline =
+    css_of([
+      css.Outline(
+        width: css.Px(3.0),
+        offset: css.Px(3.0),
+        color: "var(--ma-color-focus)",
+      ),
+    ])
+  assert_contains(outline, "outline-width: 3.0px;", "Outline width")
+  assert_contains(
+    outline,
+    "outline-offset: 3.0px;",
+    "Outline offset reaches 3px outside",
+  )
+  assert_contains(
+    outline,
+    "outline-color: var(--ma-color-focus);",
+    "Outline color",
+  )
+}
+
+fn look_min_max_named_family_and_weight_render_to_css() {
+  let sizes =
+    css_of([
+      css.Space(property: css.MinHeight, value: css.Rem(12.0)),
+      css.Space(property: css.MinWidth, value: css.Px(320.0)),
+      css.Space(property: css.MaxWidth, value: css.Rem(60.0)),
+    ])
+  assert_contains(sizes, "min-height: 12.0rem;", "min-height")
+  assert_contains(sizes, "min-width: 320.0px;", "min-width")
+  assert_contains(sizes, "max-width: 60.0rem;", "max-width")
+  let text =
+    css_of([
+      css.Text(
+        family: css.Named("var(--ma-font-ui)"),
+        size: css.Rem(1.0),
+        weight: css.SemiBold,
+        line_height: css.Rem(1.5),
+      ),
+    ])
+  assert_contains(
+    text,
+    "font-family: var(--ma-font-ui);",
+    "Named family passes a CSS variable through",
+  )
+  assert_contains(text, "font-weight: 600;", "SemiBold renders 600")
+  let named_family =
+    css_of([
+      css.Text(
+        family: css.Named("\"Noto Sans JP\", sans-serif"),
+        size: css.Rem(1.0),
+        weight: css.Normal,
+        line_height: css.Rem(1.5),
+      ),
+    ])
+  assert_contains(
+    named_family,
+    "font-family: \"Noto Sans JP\", sans-serif;",
+    "Named family names Noto Sans JP",
+  )
+}
+
+fn look_crop_renders_to_css() {
+  let crop =
+    css_of([
+      css.Crop(fit: css.Cover, ratio: css.Ratio(width: 16.0, height: 9.0)),
+    ])
+  assert_contains(crop, "object-fit: cover;", "Crop renders object-fit")
+  assert_contains(
+    crop,
+    "aspect-ratio: 16.0 / 9.0;",
+    "Crop renders aspect-ratio",
+  )
+}
+
+fn look_styles_work_inside_state_and_responsive() {
+  let focused =
+    css_of([
+      css.State(css.Focus, [
+        css.Outline(
+          width: css.Px(3.0),
+          offset: css.Px(3.0),
+          color: "var(--ma-color-focus)",
+        ),
+        css.Background("var(--ma-color-focus-bg)"),
+      ]),
+    ])
+  assert_contains(focused, ":focus", "State Focus selector")
+  assert_contains(
+    focused,
+    "outline-offset: 3.0px;",
+    "Outline inside State(Focus)",
+  )
+  assert_contains(
+    focused,
+    "background-color: var(--ma-color-focus-bg);",
+    "Background inside State(Focus)",
+  )
+  let pc =
+    css_of([
+      css.Responsive(css.PC, [
+        css.Border(
+          edge: css.BottomEdge,
+          width: css.Px(2.0),
+          style: css.Solid,
+          color: "var(--ma-color-line)",
+        ),
+        css.Space(property: css.MaxWidth, value: css.Rem(60.0)),
+      ]),
+    ])
+  assert_contains(pc, "@media", "Responsive PC media query")
+  assert_contains(
+    pc,
+    "border-bottom: 2.0px solid var(--ma-color-line);",
+    "Border inside Responsive(PC)",
+  )
+  assert_contains(pc, "max-width: 60.0rem;", "MaxWidth inside Responsive(PC)")
+}
+
+fn look_styles_reach_island_shadow_style() {
+  let class =
+    front_sketch_css.class([
+      css.Background("var(--ma-color-bg)"),
+      css.Border(
+        edge: css.BottomEdge,
+        width: css.Px(2.0),
+        style: css.Solid,
+        color: "var(--ma-color-line)",
+      ),
+      css.Outline(
+        width: css.Px(3.0),
+        offset: css.Px(3.0),
+        color: "var(--ma-color-focus)",
+      ),
+      css.Crop(fit: css.Cover, ratio: css.Ratio(width: 1.0, height: 1.0)),
+    ])
+  let html = island_shadow_style(class)
+  assert_contains(html, "<style>", "island renders a shadow style tag")
+  assert_contains(
+    html,
+    "background-color: var(--ma-color-bg);",
+    "island style has the new Background",
+  )
+  assert_contains(
+    html,
+    "border-bottom: 2.0px solid var(--ma-color-line);",
+    "island style has the new Border",
+  )
+  assert_contains(
+    html,
+    "outline-offset: 3.0px;",
+    "island style has the new Outline",
+  )
+  assert_contains(html, "object-fit: cover;", "island style has the new Crop")
+}
+
 fn empty_frame() -> front.Frame(Service, Block) {
   front.Frame(areas: [], placements: [], cols: [], rows: [], template: [])
 }
@@ -368,6 +583,13 @@ fn area(name: String) -> front.Area {
 
 fn assert_equal(actual: a, expected: a, _label: String) -> Nil {
   case actual == expected {
+    True -> Nil
+    False -> panic as "test failed"
+  }
+}
+
+fn assert_contains(haystack: String, needle: String, _label: String) -> Nil {
+  case string.contains(haystack, needle) {
     True -> Nil
     False -> panic as "test failed"
   }
