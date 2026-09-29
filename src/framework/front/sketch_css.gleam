@@ -17,6 +17,20 @@ pub fn class(styles: List(css.Style)) -> sketch_css.Class {
 pub fn to_sketch(style: css.Style) -> List(sketch_css.Style) {
   case style {
     css.Color(value) -> [sketch_css.color(value)]
+    css.Background(value) -> [sketch_css.background_color(value)]
+    css.Border(edge:, width:, style:, color:) -> [
+      border(edge, width, style, color),
+    ]
+    css.Outline(width:, offset:, color:) -> [
+      sketch_css.outline_style("solid"),
+      sketch_css.outline_width(length_to_string(width)),
+      sketch_css.outline_offset(length_to_string(offset)),
+      sketch_css.outline_color(color),
+    ]
+    css.Crop(fit:, ratio:) -> [
+      sketch_css.object_fit(object_fit(fit)),
+      sketch_css.aspect_ratio(aspect_ratio(ratio)),
+    ]
     css.Space(property:, value:) -> [space(property, value)]
     css.Text(family:, size:, weight:, line_height:) -> [
       sketch_css.font_family(font_family(family)),
@@ -43,7 +57,46 @@ fn space(property: css.SpaceProperty, value: css.Length) -> sketch_css.Style {
     css.Width -> sketch_css.width(to_length(value))
     css.Height -> sketch_css.height(to_length(value))
     css.Radius -> sketch_css.border_radius(to_length(value))
+    css.MinWidth -> sketch_css.min_width(to_length(value))
+    css.MinHeight -> sketch_css.min_height(to_length(value))
+    css.MaxWidth -> sketch_css.max_width(to_length(value))
   }
+}
+
+fn border(
+  edge: css.BorderEdge,
+  width: css.Length,
+  style: css.BorderStyle,
+  color: String,
+) -> sketch_css.Style {
+  let value =
+    length_to_string(width) <> " " <> border_style(style) <> " " <> color
+  case edge {
+    css.AllEdges -> sketch_css.border(value)
+    css.BottomEdge -> sketch_css.border_bottom(value)
+  }
+}
+
+fn border_style(value: css.BorderStyle) -> String {
+  case value {
+    css.Solid -> "solid"
+    css.Dashed -> "dashed"
+    css.Dotted -> "dotted"
+  }
+}
+
+fn object_fit(value: css.ObjectFit) -> String {
+  case value {
+    css.Cover -> "cover"
+    css.Contain -> "contain"
+    css.Fill -> "fill"
+    css.ScaleDown -> "scale-down"
+    css.FitNone -> "none"
+  }
+}
+
+fn aspect_ratio(value: css.Ratio) -> String {
+  float.to_string(value.width) <> " / " <> float.to_string(value.height)
 }
 
 fn flow_style(flow: css.Flow) -> List(sketch_css.Style) {
@@ -129,6 +182,7 @@ fn font_family(value: css.FontFamily) -> String {
     css.SansSerif -> "sans-serif"
     css.Serif -> "serif"
     css.Monospace -> "monospace"
+    css.Named(value) -> value
   }
 }
 
@@ -136,6 +190,7 @@ fn font_weight(value: css.FontWeight) -> String {
   case value {
     css.Normal -> "400"
     css.Medium -> "500"
+    css.SemiBold -> "600"
     css.Bold -> "700"
   }
 }
