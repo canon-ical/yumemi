@@ -46,7 +46,10 @@ pub fn main() {
   v0119_current_state_renders_aria_current_selector()
   v0119_anchored_overlay_is_a_pin()
   v0119_lengths_var_env_dvh_render_to_css()
-  io.println("Framework checks passed: 21 groups")
+  v01110_styled_frame_carries_grid_style()
+  v01110_bottom_flush_is_a_pin()
+  v01110_wrap_renders_overflow_wrap()
+  io.println("Framework checks passed: 24 groups")
 }
 
 fn vars_are_typed_sources() {
@@ -859,4 +862,79 @@ fn assert_not_contains(
     True -> panic as "test failed"
     False -> Nil
   }
+}
+
+fn v01110_styled_frame_carries_grid_style() {
+  let shell = [css.Space(css.MinHeight, css.Dvh(100.0))]
+  let styled: front.Frame(Service, Block) =
+    front.StyledFrame(
+      areas: [area("header"), area("page"), area("nav")],
+      placements: [],
+      cols: [],
+      rows: [track.Auto, track.Fr(1), track.Auto],
+      template: [],
+      style: shell,
+    )
+  assert_equal(front.frame_style(styled), shell, "StyledFrame.style")
+  assert_equal(front.frame_style(empty_frame()), [], "Frame has no grid style")
+  // 他の欄は Frame と同じに読める(既定の列・template の解決も同じ)。
+  assert_equal(
+    styled.rows,
+    [track.Auto, track.Fr(1), track.Auto],
+    "StyledFrame.rows",
+  )
+  assert_equal(
+    front.resolved_cols(styled, css.SP),
+    front.default_sp_cols,
+    "StyledFrame resolves default cols",
+  )
+  assert_equal(
+    front.resolved_template(styled, styled, css.SP),
+    [["header"], ["page"], ["nav"]],
+    "StyledFrame resolves default template",
+  )
+  assert_contains(
+    css_of(front.frame_style(styled)),
+    "min-height: 100.0dvh;",
+    "grid style renders min-height dvh",
+  )
+}
+
+fn v01110_bottom_flush_is_a_pin() {
+  let nav =
+    front.Area(
+      name: "nav",
+      flow: css.Stack(gap: css.Px(0.0)),
+      pin: css.BottomFlush,
+      style: [],
+    )
+  assert_equal(nav.pin, css.BottomFlush, "BottomFlush Pin constructor")
+  assert_equal(
+    css.BottomFlush == css.Bottom,
+    False,
+    "BottomFlush is not Bottom",
+  )
+}
+
+fn v01110_wrap_renders_overflow_wrap() {
+  assert_contains(
+    css_of([css.Wrap(css.Anywhere)]),
+    "overflow-wrap: anywhere;",
+    "Wrap(Anywhere)",
+  )
+  assert_contains(
+    css_of([css.Wrap(css.BreakWord)]),
+    "overflow-wrap: break-word;",
+    "Wrap(BreakWord)",
+  )
+  assert_contains(
+    css_of([css.Wrap(css.WrapNormal)]),
+    "overflow-wrap: normal;",
+    "Wrap(WrapNormal)",
+  )
+  let nested =
+    css_of([
+      css.Responsive(css.SP, [css.State(css.Hover, [css.Wrap(css.Anywhere)])]),
+    ])
+  assert_contains(nested, "overflow-wrap: anywhere;", "Wrap inside Responsive")
 }

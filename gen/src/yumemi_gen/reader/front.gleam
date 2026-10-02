@@ -99,7 +99,21 @@ pub type Frame {
     cols: List(Track),
     rows: List(Track),
     template: List(List(String)),
+    style: FrameStyle,
   )
+}
+
+/// `StyledFrame(style:)` ── 格子の要素(`data-yumemi-grid`)に掛ける Style。Area の
+/// style と同じく `style` の定数で書く。`Frame` と `style: []` は `NoFrameStyle`
+/// (出力は 0.11.9 と同じ)。
+pub type FrameStyle {
+  NoFrameStyle
+  /// `style: [style.a, style.b]`(各要素が `css.Style` の定数)。
+  FrameStyleList(names: List(String))
+  /// `style: style.shell`(`List(css.Style)` の定数)。
+  FrameStyleConstant(name: String)
+  /// `style` の定数でない要素を含む(`frame_notes` が止める)。
+  FrameStyleInvalid
 }
 
 pub type Track {
@@ -1288,26 +1302,59 @@ fn parse_frame(
   lengths: List(#(String, Length)),
 ) -> Option(Frame) {
   case g.ctor_name(expression) {
-    Some("Frame") ->
-      Some(Frame(
-        media: media,
-        areas: g.labelled(expression, "areas")
-          |> option.then(fn(areas) { parse_areas(areas, lengths) })
-          |> option.unwrap([]),
-        placements: g.labelled(expression, "placements")
-          |> option.then(parse_placements)
-          |> option.unwrap([]),
-        cols: g.labelled(expression, "cols")
-          |> option.then(parse_tracks)
-          |> option.unwrap([]),
-        rows: g.labelled(expression, "rows")
-          |> option.then(parse_tracks)
-          |> option.unwrap([]),
-        template: g.labelled(expression, "template")
-          |> option.then(parse_template)
-          |> option.unwrap([]),
-      ))
+    Some("Frame" as name) | Some("StyledFrame" as name) ->
+      Some(
+        Frame(
+          media: media,
+          areas: g.labelled(expression, "areas")
+            |> option.then(fn(areas) { parse_areas(areas, lengths) })
+            |> option.unwrap([]),
+          placements: g.labelled(expression, "placements")
+            |> option.then(parse_placements)
+            |> option.unwrap([]),
+          cols: g.labelled(expression, "cols")
+            |> option.then(parse_tracks)
+            |> option.unwrap([]),
+          rows: g.labelled(expression, "rows")
+            |> option.then(parse_tracks)
+            |> option.unwrap([]),
+          template: g.labelled(expression, "template")
+            |> option.then(parse_template)
+            |> option.unwrap([]),
+          style: case name {
+            "StyledFrame" -> parse_frame_style(expression)
+            _ -> NoFrameStyle
+          },
+        ),
+      )
     _ -> None
+  }
+}
+
+fn parse_frame_style(expression: glance.Expression) -> FrameStyle {
+  let constant = fn(item: glance.Expression) {
+    case item {
+      glance.FieldAccess(
+        container: glance.Variable(name: "style", ..),
+        label:,
+        ..,
+      ) -> Ok(label)
+      _ -> Error(Nil)
+    }
+  }
+  case g.labelled(expression, "style") {
+    None -> NoFrameStyle
+    Some(glance.List(elements: [], rest: None, ..)) -> NoFrameStyle
+    Some(glance.List(elements:, rest: None, ..)) ->
+      case list.try_map(elements, constant) {
+        Ok(names) -> FrameStyleList(names)
+        Error(_) -> FrameStyleInvalid
+      }
+    Some(value) ->
+      case constant(value) {
+        Ok(name) -> FrameStyleConstant(name)
+        Error(_) -> FrameStyleInvalid
+      }
   }
 }
 
@@ -2803,8 +2850,32 @@ fn frame_notes(
       duplicate_top_notes(face, module, sp),
       duplicate_top_notes(face, module, pc),
       duplicate_top_notes(face, module, tablet),
+      frame_style_notes(face, module, sp),
+      frame_style_notes(face, module, pc),
+      frame_style_notes(face, module, tablet),
     ]),
   )
+}
+
+fn frame_style_notes(
+  face: String,
+  module: String,
+  frame: Option(Frame),
+) -> List(stop.Note) {
+  case frame {
+    Some(Frame(style: FrameStyleInvalid, media:, ..)) -> [
+      stop.Note(
+        class: stop.Conflict,
+        text: face
+          <> "/"
+          <> module
+          <> "/"
+          <> media
+          <> ": StyledFrame の style は style の定数で書く(style: [style.shell] か style: style.shell)",
+      ),
+    ]
+    _ -> []
+  }
 }
 
 fn duplicate_top_notes(
