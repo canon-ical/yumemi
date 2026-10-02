@@ -88,6 +88,15 @@ pub type TextDecoration {
   Underline
 }
 
+/// 行の中での折り返し(`overflow-wrap`)。`Anywhere` は長い URL のような切れ目の無い
+/// 語も行の幅で折る(min-content の幅にも効く)。`BreakWord` は折るが min-content の
+/// 幅には効かない。`WrapNormal` は既定(語の切れ目だけで折る)。
+pub type OverflowWrap {
+  Anywhere
+  BreakWord
+  WrapNormal
+}
+
 pub type Interaction {
   Hover
   Focus
@@ -111,6 +120,7 @@ pub type Style {
   Sizing(box: BoxSizing)
   Marker(marker: ListMarker)
   Decoration(line: TextDecoration)
+  Wrap(wrap: OverflowWrap)
   Space(property: SpaceProperty, value: Length)
   Text(
     family: FontFamily,
@@ -135,6 +145,11 @@ pub type Flow {
 pub type Pin {
   Top
   Bottom
+  /// 画面の下端に着く棒(`position: sticky; bottom: 0`)。safe area(iPhone の下端の
+  /// バー)の分は棒の内側の下の余白(`padding-bottom: env(safe-area-inset-bottom, 0px)`)
+  /// で持つ ── 棒の地は画面の下端まで届き、中身はバーに重ならない。`Bottom` は
+  /// `bottom: env(safe-area-inset-bottom)` で浮いて止まる(出力は変えない)。
+  BottomFlush
   NoPin
   Overlay
   /// 開いた `el.opener` の下か上へ寄せて開く Overlay(CSS anchor positioning)。

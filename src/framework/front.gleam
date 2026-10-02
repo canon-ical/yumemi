@@ -56,6 +56,28 @@ pub type Frame(service, block) {
     rows: List(track.Track),
     template: List(List(String)),
   )
+  /// 格子の要素(`data-yumemi-grid`)そのものに Style を掛ける Frame。他の欄は
+  /// `Frame` と同じ。`style: [style.shell]` に `css.Space(MinHeight, Dvh(100.0))` を
+  /// 書き `rows` に `Fr(1)` を置けば、格子が画面の高さまで伸び本文の行が残りを埋める。
+  /// sp の style は全幅に、pc・tablet の style はその幅の media の中に効く。Area の
+  /// style と同じく `style` の定数で書く。列・行・gap は Frame の欄が書く(生成の CSS が
+  /// 先に持つ)ので、style では他の性質を書く。
+  StyledFrame(
+    areas: List(Area),
+    placements: List(Placement(service, block)),
+    cols: List(track.Track),
+    rows: List(track.Track),
+    template: List(List(String)),
+    style: List(css.Style),
+  )
+}
+
+/// Frame の格子の要素に掛ける Style。`Frame` は空。
+pub fn frame_style(frame: Frame(service, block)) -> List(css.Style) {
+  case frame {
+    Frame(..) -> []
+    StyledFrame(style:, ..) -> style
+  }
 }
 
 pub const default_sp_cols: List(track.Track) = [track.Fr(1)]

@@ -36,6 +36,7 @@ pub fn to_sketch(style: css.Style) -> List(sketch_css.Style) {
     css.Decoration(line:) -> [
       sketch_css.text_decoration(text_decoration(line)),
     ]
+    css.Wrap(wrap:) -> [sketch_css.overflow_wrap(overflow_wrap(wrap))]
     css.Space(property:, value:) -> [space(property, value)]
     css.Text(family:, size:, weight:, line_height:) -> [
       sketch_css.font_family(font_family(family)),
@@ -117,6 +118,14 @@ fn text_decoration(value: css.TextDecoration) -> String {
   case value {
     css.NoDecoration -> "none"
     css.Underline -> "underline"
+  }
+}
+
+fn overflow_wrap(value: css.OverflowWrap) -> String {
+  case value {
+    css.Anywhere -> "anywhere"
+    css.BreakWord -> "break-word"
+    css.WrapNormal -> "normal"
   }
 }
 

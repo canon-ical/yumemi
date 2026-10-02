@@ -4750,3 +4750,189 @@ pub fn create_sql_placeholder_count_ignores_the_phase_spelling_test() {
   )
   |> should.equal(4)
 }
+
+// 0.11.10:StyledFrame の style が格子の要素(data-yumemi-grid)の class になる。sp は
+// 全幅、pc は css.Responsive(css.PC, ..)。Area の style は各 Area の class のまま。
+pub fn front_emit_styled_frame_grid_style_test() {
+  let files =
+    synthetic_front_files_with_layout(
+      "Layout(\n"
+      <> "  sp: StyledFrame(\n"
+      <> "    areas: [\n"
+      <> "      Area(name: \"page\", flow: css.Stack(gap: style.s0), pin: css.NoPin, style: [style.ink]),\n"
+      <> "      Area(name: \"nav\", flow: css.Stack(gap: style.s0), pin: css.NoPin, style: []),\n"
+      <> "    ],\n"
+      <> "    placements: [],\n"
+      <> "    cols: [],\n"
+      <> "    rows: [track.Fr(1), track.Auto],\n"
+      <> "    template: [],\n"
+      <> "    style: [style.shell, style.paper],\n"
+      <> "  ),\n"
+      <> "  pc: Some(StyledFrame(areas: [], placements: [], cols: [], rows: [], template: [], style: style.wide)),\n"
+      <> "  tablet: None,\n"
+      <> "  vars: [],\n"
+      <> ")",
+    )
+  let assert Ok(#(_, page)) =
+    list.find(files, fn(file) {
+      file.0 == "public/src/gen/load/article/arg_slug/page.gleam"
+    })
+  string.contains(
+    page,
+    "html.div(sketch_css.class([css.Responsive(css.PC, style.wide), ..[style.shell, style.paper]]), [attribute.attribute(\"data-yumemi-grid\", \"layout\")], [\n",
+  )
+  |> should.be_true
+  string.contains(page, "styled_area(\"page\", style.ink,") |> should.be_true
+  let assert Ok(#(_, css)) =
+    list.find(files, fn(file) {
+      file.0 == "public/priv/static/_yumemi/style.css"
+    })
+  string.contains(css, "grid-template-rows: 1fr auto;") |> should.be_true
+}
+
+// style を持たない Frame(と style: [])の格子は今の html.div_ のまま。
+pub fn front_emit_frame_without_style_keeps_plain_grid_test() {
+  let files =
+    synthetic_front_files_with_layout(
+      "Layout(\n"
+      <> "  sp: StyledFrame(\n"
+      <> "    areas: [Area(name: \"page\", flow: css.Stack(gap: style.s0), pin: css.NoPin, style: [])],\n"
+      <> "    placements: [],\n"
+      <> "    cols: [],\n"
+      <> "    rows: [],\n"
+      <> "    template: [],\n"
+      <> "    style: [],\n"
+      <> "  ),\n"
+      <> "  pc: None,\n"
+      <> "  tablet: None,\n"
+      <> "  vars: [],\n"
+      <> ")",
+    )
+  let assert Ok(#(_, page)) =
+    list.find(files, fn(file) {
+      file.0 == "public/src/gen/load/article/arg_slug/page.gleam"
+    })
+  string.contains(
+    page,
+    "html.div_([attribute.attribute(\"data-yumemi-grid\", \"layout\")], [\n",
+  )
+  |> should.be_true
+  string.contains(page, "data-yumemi-grid\", \"layout\")], [\n")
+  |> should.be_true
+  string.contains(page, "sketch_css.class([css.Responsive") |> should.be_false
+}
+
+// Page の StyledFrame は Page の格子を作り、その要素に style を掛ける。
+pub fn front_emit_page_styled_frame_makes_page_grid_test() {
+  let files =
+    synthetic_front_files_with_layout_and_page(
+      "Layout(vars: [], sp: Frame(areas: [], placements: [], cols: [], rows: [], template: []), pc: None, tablet: None)",
+      "Page(\n"
+        <> "  of: None,\n"
+        <> "  layout: layout.public,\n"
+        <> "  theme: None,\n"
+        <> "  vars: [],\n"
+        <> "  sp: StyledFrame(areas: [Area(name: \"page\", flow: css.Stack(gap: style.s0), pin: css.NoPin, style: [])], placements: [], cols: [], rows: [], template: [], style: style.shell),\n"
+        <> "  pc: None,\n"
+        <> "  tablet: None,\n"
+        <> ")",
+    )
+  let assert Ok(#(_, page)) =
+    list.find(files, fn(file) {
+      file.0 == "public/src/gen/load/article/arg_slug/page.gleam"
+    })
+  string.contains(
+    page,
+    "[html.div(sketch_css.class(style.shell), [attribute.attribute(\"data-yumemi-grid\", \"page:",
+  )
+  |> should.be_true
+}
+
+pub fn invalid_frame_style_is_a_conflict_test() {
+  let notes =
+    front_notes(
+      [
+        layout_unit(
+          "Layout(vars: [], sp: StyledFrame(areas: [], placements: [], cols: [], rows: [], template: [], style: [css.Space(css.MinHeight, css.Dvh(100.0))]), pc: None, tablet: None)",
+        ),
+      ],
+      app().services,
+    )
+  list.any(notes, fn(note) {
+    note.class == stop.Conflict
+    && string.contains(note.text, "StyledFrame の style は style の定数で書く")
+  })
+  |> should.be_true
+}
+
+// 0.11.10:BottomFlush は bottom: 0 に留まり、safe area を内側の下の余白で持つ。
+// Bottom の規則は今のまま。
+pub fn front_emit_bottom_flush_pin_css_test() {
+  let files =
+    synthetic_front_files_with_layout(
+      "Layout(\n"
+      <> "  sp: Frame(\n"
+      <> "    areas: [\n"
+      <> "      Area(name: \"page\", flow: css.Stack(gap: style.s0), pin: css.NoPin, style: []),\n"
+      <> "      Area(name: \"bar\", flow: css.Stack(gap: style.s0), pin: css.Bottom, style: []),\n"
+      <> "      Area(name: \"nav\", flow: css.Stack(gap: style.s0), pin: css.BottomFlush, style: []),\n"
+      <> "    ],\n"
+      <> "    placements: [],\n"
+      <> "    cols: [],\n"
+      <> "    rows: [],\n"
+      <> "    template: [],\n"
+      <> "  ),\n"
+      <> "  pc: None,\n"
+      <> "  tablet: None,\n"
+      <> "  vars: [],\n"
+      <> ")",
+    )
+  let assert Ok(#(_, css)) =
+    list.find(files, fn(file) {
+      file.0 == "public/priv/static/_yumemi/style.css"
+    })
+  [
+    "grid-area: bar;\n  display: flex;\n  flex-direction: column;\n  align-items: stretch;\n  gap: 0.0px;\n  position: sticky;\n  bottom: env(safe-area-inset-bottom);\n  z-index: 3;\n}",
+    "grid-area: nav;\n  display: flex;\n  flex-direction: column;\n  align-items: stretch;\n  gap: 0.0px;\n  position: sticky;\n  bottom: 0;\n  padding-bottom: env(safe-area-inset-bottom, 0px);\n  z-index: 3;\n}",
+  ]
+  |> list.each(fn(row) { string.contains(css, row) |> should.be_true })
+}
+
+// 0.11.10:Wrap を持つ style の定数は Area の style として今と同じ経路で通る
+// (生成は名で引くだけ、CSS は root の sketch_css が書く)。
+pub fn front_emit_wrap_style_constant_passes_test() {
+  let assert Ok(face_units) = source.load("fixtures/article/public")
+  let face_units =
+    face_units
+    |> list.map(fn(unit) {
+      case unit.path {
+        "style" ->
+          source_unit(
+            "style",
+            unit.text
+              <> "\npub const url: List(css.Style) = [css.Wrap(css.Anywhere)]\n",
+          )
+        _ -> unit
+      }
+    })
+    |> list.filter(fn(unit) { unit.path != "layout" })
+    |> list.append([
+      source_unit(
+        "layout",
+        layout_source(
+          "Layout(vars: [], sp: Frame(areas: [Area(name: \"page\", flow: css.Stack(gap: style.s0), pin: css.NoPin, style: style.url)], placements: [], cols: [], rows: [], template: []), pc: None, tablet: None)",
+        ),
+      ),
+    ])
+  let test_app = app()
+  front_from_units_named("public", face_units, test_app.services)
+  |> front.notes(test_app.services)
+  |> list.any(fn(note) { string.contains(note.text, "style") })
+  |> should.be_false
+  let files = synthetic_front_files(face_units)
+  let assert Ok(#(_, page)) =
+    list.find(files, fn(file) {
+      file.0 == "public/src/gen/load/article/arg_slug/page.gleam"
+    })
+  string.contains(page, "styled_area(\"page\", style.url,") |> should.be_true
+}

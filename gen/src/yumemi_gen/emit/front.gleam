@@ -706,6 +706,7 @@ fn blocks_preview_text(
             cols: [],
             rows: [],
             template: [],
+            style: reader_front.NoFrameStyle,
           )
       }
   }
@@ -4227,7 +4228,12 @@ fn page_view_text(
       list.append(page.vars, front.layout.vars),
     )
   "pub fn view(it: Data) -> element.Element(Nil) {\n"
-  <> "  html.div_([attribute.attribute(\"data-yumemi-grid\", \"layout\")], [\n"
+  <> "  "
+  <> grid_element_open(
+    "\"layout\"",
+    grid_style_expression(front.layout.sp, front.layout.pc, front.layout.tablet),
+  )
+  <> "[\n"
   <> areas
   <> "  ])\n}\n\n"
   <> "fn page_children(it: Data) -> List(element.Element(Nil)) {\n"
@@ -4304,12 +4310,66 @@ fn page_children_text(
   }
   case page_has_explicit_grid(page) {
     True ->
-      "  [html.div_([attribute.attribute(\"data-yumemi-grid\", \""
-      <> page_grid_name(page)
-      <> "\")], "
+      "  ["
+      <> grid_element_open(
+        "\"" <> page_grid_name(page) <> "\"",
+        grid_style_expression(page.sp, page.pc, page.tablet),
+      )
       <> children
       <> ")]\n"
     False -> "  " <> children <> "\n"
+  }
+}
+
+/// 格子の要素を開く式(子の list の手前まで)。style が無ければ今の `html.div_`。
+fn grid_element_open(name: String, style: Option(String)) -> String {
+  let attributes =
+    "[attribute.attribute(\"data-yumemi-grid\", " <> name <> ")], "
+  case style {
+    None -> "html.div_(" <> attributes
+    Some(style) -> "html.div(sketch_css.class(" <> style <> "), " <> attributes
+  }
+}
+
+/// 格子の要素に掛ける Style の式(`List(css.Style)`)。sp の style は全幅に、pc・
+/// tablet の style は `css.Responsive` でその幅の media の中に(生成の格子の CSS の
+/// media と同じ幅)。どの断点の Frame も style を持たなければ None。
+fn grid_style_expression(
+  sp: Option(reader_front.Frame),
+  pc: Option(reader_front.Frame),
+  tablet: Option(reader_front.Frame),
+) -> Option(String) {
+  let responsive =
+    [
+      #("css.Tablet", frame_style_expression(tablet)),
+      #("css.PC", frame_style_expression(pc)),
+    ]
+    |> list.filter_map(fn(item) {
+      case item.1 {
+        Some(style) -> Ok("css.Responsive(" <> item.0 <> ", " <> style <> ")")
+        None -> Error(Nil)
+      }
+    })
+  case responsive, frame_style_expression(sp) {
+    [], None -> None
+    [], Some(style) -> Some(style)
+    items, None -> Some("[" <> string.join(items, ", ") <> "]")
+    items, Some(style) ->
+      Some("[" <> string.join(items, ", ") <> ", .." <> style <> "]")
+  }
+}
+
+fn frame_style_expression(frame: Option(reader_front.Frame)) -> Option(String) {
+  case frame {
+    Some(reader_front.Frame(style: reader_front.FrameStyleList(names), ..)) ->
+      Some(
+        "["
+        <> string.join(list.map(names, fn(name) { "style." <> name }), ", ")
+        <> "]",
+      )
+    Some(reader_front.Frame(style: reader_front.FrameStyleConstant(name), ..)) ->
+      Some("style." <> name)
+    _ -> None
   }
 }
 
@@ -5960,6 +6020,7 @@ fn empty_frame(media: String) -> reader_front.Frame {
     cols: [],
     rows: [],
     template: [],
+    style: reader_front.NoFrameStyle,
   )
 }
 
@@ -6122,6 +6183,7 @@ fn page_has_explicit_grid(page: reader_front.Page) -> Bool {
     fn(frame) {
       frame.cols != []
       || frame.rows != []
+      || frame_style_expression(Some(frame)) != None
       || frame.template != []
       || list.any(frame.areas, fn(area) {
         area.pin != "Overlay" && area.grid_tracks != None
@@ -6246,6 +6308,13 @@ fn static_area_rule(
     "Bottom" -> [
       "  position: sticky;",
       "  bottom: env(safe-area-inset-bottom);",
+      "  z-index: 3;",
+    ]
+    // 下端に着く棒:画面の下端(0)に留め、safe area の分は棒の内側の下の余白で持つ。
+    "BottomFlush" -> [
+      "  position: sticky;",
+      "  bottom: 0;",
+      "  padding-bottom: env(safe-area-inset-bottom, 0px);",
       "  z-index: 3;",
     ]
     _ -> []
