@@ -42,7 +42,11 @@ pub fn main() {
   look2_list_marker_renders_to_css()
   look2_text_decoration_renders_to_css_and_inside_state()
   look2_area_flow_renders_to_area_css()
-  io.println("Framework checks passed: 17 groups")
+  v0119_current_route_is_a_var_source()
+  v0119_current_state_renders_aria_current_selector()
+  v0119_anchored_overlay_is_a_pin()
+  v0119_lengths_var_env_dvh_render_to_css()
+  io.println("Framework checks passed: 21 groups")
 }
 
 fn vars_are_typed_sources() {
@@ -706,6 +710,132 @@ fn area(name: String) -> front.Area {
   )
 }
 
+fn v0119_current_route_is_a_var_source() {
+  let route = front.Var(name: "route", from: front.CurrentRoute)
+  assert_equal(route.from, front.CurrentRoute, "CurrentRoute Var source")
+  let layout =
+    front.Layout(
+      vars: [route],
+      sp: front.Frame(
+        areas: [],
+        placements: [],
+        cols: [],
+        rows: [],
+        template: [],
+      ),
+      pc: None,
+      tablet: None,
+    )
+  assert_equal(layout.vars, [route], "Layout holds a CurrentRoute Var")
+}
+
+fn v0119_current_state_renders_aria_current_selector() {
+  let rendered =
+    css_of([
+      css.Color("var(--ma-color-muted)"),
+      css.State(css.Current, [
+        css.Color("var(--ma-color-fg)"),
+        css.Border(
+          edge: css.BottomEdge,
+          width: css.Px(2.0),
+          style: css.Solid,
+          color: "var(--ma-color-accent)",
+        ),
+      ]),
+    ])
+  assert_contains(
+    rendered,
+    "[aria-current]:not([aria-current=\"false\"])",
+    "State(Current) selects aria-current except false",
+  )
+  assert_contains(
+    rendered,
+    "border-bottom: 2.0px solid var(--ma-color-accent);",
+    "Border inside State(Current)",
+  )
+  let hover = css_of([css.State(css.Hover, [css.Color("red")])])
+  assert_contains(hover, ":hover", "Hover is unchanged")
+  assert_not_contains(hover, "aria-current", "Hover has no aria-current")
+}
+
+fn v0119_anchored_overlay_is_a_pin() {
+  let menu =
+    front.Area(
+      name: "account",
+      flow: css.Stack(gap: css.Px(0.0)),
+      pin: css.AnchoredOverlay(side: css.Below, align: css.AlignEnd),
+      style: [],
+    )
+  assert_equal(
+    menu.pin,
+    css.AnchoredOverlay(side: css.Below, align: css.AlignEnd),
+    "AnchoredOverlay Pin constructor",
+  )
+  let above = css.AnchoredOverlay(side: css.Above, align: css.AlignStart)
+  assert_equal(above == css.Overlay, False, "AnchoredOverlay is not Overlay")
+}
+
+fn v0119_lengths_var_env_dvh_render_to_css() {
+  let rendered =
+    css_of([
+      css.Space(css.MinHeight, css.Dvh(100.0)),
+      css.Space(css.Padding, css.Var("ma-space-2")),
+      css.Space(css.MaxWidth, css.Px(640.0)),
+      css.Space(css.Margin, css.Env(css.SafeBottom)),
+    ])
+  assert_contains(rendered, "min-height: 100.0dvh;", "Dvh")
+  assert_contains(rendered, "padding: var(--ma-space-2);", "Var")
+  assert_contains(rendered, "max-width: 640.0px;", "Px is unchanged")
+  assert_contains(
+    rendered,
+    "margin: env(safe-area-inset-bottom, 0px);",
+    "Env bottom",
+  )
+  assert_equal(
+    list.map(
+      [css.SafeTop, css.SafeRight, css.SafeBottom, css.SafeLeft],
+      fn(edge) { front_sketch_css.length_to_string(css.Env(edge)) },
+    ),
+    [
+      "env(safe-area-inset-top, 0px)",
+      "env(safe-area-inset-right, 0px)",
+      "env(safe-area-inset-bottom, 0px)",
+      "env(safe-area-inset-left, 0px)",
+    ],
+    "Env edges",
+  )
+  list.each(["a;b", "a}b", "a)b", "a b", "", "A", "a_b", "x\ny"], fn(name) {
+    assert_equal(
+      front_sketch_css.length_to_string(css.Var(name)),
+      "unset",
+      "invalid Var name is not written",
+    )
+  })
+  let injected = css_of([css.Space(css.Gap, css.Var("x;}body{color:red"))])
+  assert_contains(injected, "gap: unset;", "invalid Var becomes unset")
+  assert_not_contains(injected, "body{", "invalid Var does not leak")
+  assert_equal(
+    front.area_flow_css(css.Stack(gap: css.Var("ma-space-1"))),
+    [
+      "display: flex;",
+      "flex-direction: column;",
+      "align-items: stretch;",
+      "gap: var(--ma-space-1);",
+    ],
+    "Area flow gap takes Var",
+  )
+  assert_equal(
+    front.area_flow_css(css.Stack(gap: css.Px(8.0))),
+    [
+      "display: flex;",
+      "flex-direction: column;",
+      "align-items: stretch;",
+      "gap: 8.0px;",
+    ],
+    "Area flow Px gap is unchanged",
+  )
+}
+
 fn assert_equal(actual: a, expected: a, _label: String) -> Nil {
   case actual == expected {
     True -> Nil
@@ -717,5 +847,16 @@ fn assert_contains(haystack: String, needle: String, _label: String) -> Nil {
   case string.contains(haystack, needle) {
     True -> Nil
     False -> panic as "test failed"
+  }
+}
+
+fn assert_not_contains(
+  haystack: String,
+  needle: String,
+  _label: String,
+) -> Nil {
+  case string.contains(haystack, needle) {
+    True -> panic as "test failed"
+    False -> Nil
   }
 }

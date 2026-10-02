@@ -1,6 +1,6 @@
 import framework/front/css
+import framework/front/sketch_css
 import framework/front/track
-import gleam/float
 import gleam/int
 import gleam/list
 import gleam/option.{type Option}
@@ -16,6 +16,10 @@ pub type From {
   Session(SessionKey)
   Origin(face: String)
   AuthOrigin
+  /// 今描いている Page の route の綴り(例 `/rosters/:id`)。生成器が Page ごとに
+  /// 知っている定数で、要求の URL の字(引数の実値・query)は入らない。Layout にも
+  /// Page にも置ける ── Layout の帯の block がナビの今いる所を出すため。
+  CurrentRoute
 }
 
 pub type SessionKey {
@@ -203,10 +207,7 @@ pub fn area_flow_css(flow: css.Flow) -> List(String) {
 }
 
 fn length_css(value: css.Length) -> String {
-  case value {
-    css.Px(value) -> float.to_string(value) <> "px"
-    css.Rem(value) -> float.to_string(value) <> "rem"
-  }
+  sketch_css.length_to_string(value)
 }
 
 pub type Placement(service, block) {

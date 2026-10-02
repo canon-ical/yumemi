@@ -3,9 +3,9 @@
 
 import framework/front as framework_front
 import framework/front/css as framework_css
+import framework/front/sketch_css as framework_sketch_css
 import framework/front/track as framework_track
 import glance
-import gleam/float
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -5285,6 +5285,7 @@ fn shell_text(
   <> "\n"
   <> shell_runtime_text(
     front.components != [],
+    uses_current_route(front),
     static_grid_css(front.layout)
       <> static_pages_grid_css(front.pages)
       <> generated_front_css(front),
@@ -5554,13 +5555,13 @@ fn shell_var_rows(
     <> ", optional: "
     <> bool_text(optional)
     <> ", from: "
-    <> shell_var_source(var.from)
+    <> shell_var_source(var.from, reader_front.route_path(page.path))
     <> " },\n"
   })
   |> string.concat
 }
 
-fn shell_var_source(source: reader_front.From) -> String {
+fn shell_var_source(source: reader_front.From, route: String) -> String {
   case source {
     reader_front.Path(name) ->
       "{ type: \"path\", name: " <> quoted(name) <> " }"
@@ -5571,6 +5572,8 @@ fn shell_var_source(source: reader_front.From) -> String {
     reader_front.Origin(face) ->
       "{ type: \"origin\", name: " <> quoted(face) <> " }"
     reader_front.AuthOrigin -> "{ type: \"auth-origin\" }"
+    reader_front.CurrentRoute ->
+      "{ type: \"route\", value: " <> quoted(route) <> " }"
     reader_front.InvalidFrom(_) -> "{ type: \"invalid\" }"
   }
 }
@@ -5689,6 +5692,121 @@ fn generated_front_css(front: reader_front.Front) -> String {
   <> case front_has_overlay(front) {
     True -> "[popover]::backdrop { background: rgba(0, 0, 0, 0.45); }\n"
     False -> ""
+  }
+  <> anchored_overlay_css(front)
+}
+
+/// `pin: css.AnchoredOverlay(..)` の Area を、開いた `el.opener` の下か上へ寄せる。
+/// CSS anchor positioning を支える browser だけに効く(`@supports`)── 支えない
+/// browser では今の Overlay と同じく UA の既定で中央に開き、backdrop も暗くなる。
+/// 寄せた Overlay は backdrop を暗くしない。同じ名の opener が複数あれば、anchor は
+/// 文書順で最後の 1 つ(CSS anchor positioning の規則)。
+fn anchored_overlay_css(front: reader_front.Front) -> String {
+  let frames =
+    list.append(
+      option_frame_list(front.layout.sp)
+        |> list.append(option_frame_list(front.layout.pc))
+        |> list.append(option_frame_list(front.layout.tablet)),
+      list.flat_map(front.pages, fn(page) {
+        option_frame_list(page.sp)
+        |> list.append(option_frame_list(page.pc))
+        |> list.append(option_frame_list(page.tablet))
+      }),
+    )
+  let anchored =
+    frames
+    |> list.flat_map(fn(frame) { frame.areas })
+    |> list.filter_map(fn(area) {
+      case area.pin, area.anchor {
+        "Overlay", Some(anchor) -> Ok(#(area.name, anchor))
+        _, _ -> Error(Nil)
+      }
+    })
+    |> unique_by_name
+  case anchored {
+    [] -> ""
+    _ ->
+      "@supports (anchor-name: --yumemi) {\n"
+      <> string.concat(list.map(anchored, anchored_overlay_rule))
+      <> "}\n"
+  }
+}
+
+fn unique_by_name(
+  items: List(#(String, reader_front.OverlayAnchor)),
+) -> List(#(String, reader_front.OverlayAnchor)) {
+  list.fold(items, [], fn(found, item) {
+    case list.key_find(found, item.0) {
+      Ok(_) -> found
+      Error(_) -> list.append(found, [item])
+    }
+  })
+}
+
+fn anchored_overlay_rule(
+  item: #(String, reader_front.OverlayAnchor),
+) -> String {
+  let #(name, anchor) = item
+  let anchor_name = "--yumemi-overlay-" <> css_ident(name)
+  let area = "[data-yumemi-overlay][data-yumemi-area=\"" <> name <> "\"]"
+  let block = case anchor.side {
+    "Above" -> "block-start"
+    _ -> "block-end"
+  }
+  // 始端をそろえる = ボタンの始端から終端の向きへ伸ばす
+  let inline = case anchor.align {
+    "AlignEnd" -> "span-inline-start"
+    _ -> "span-inline-end"
+  }
+  "  [data-yumemi-overlay-opener][popovertarget=\"yumemi-overlay-"
+  <> name
+  <> "\"] { anchor-name: "
+  <> anchor_name
+  <> "; }\n"
+  <> "  "
+  <> area
+  <> " {\n"
+  <> "    position-anchor: "
+  <> anchor_name
+  <> ";\n"
+  <> "    position-area: "
+  <> block
+  <> " "
+  <> inline
+  <> ";\n"
+  <> "    position-try-fallbacks: flip-block;\n"
+  <> "    inset: auto;\n"
+  <> "    margin: 0;\n"
+  <> "  }\n"
+  <> "  "
+  <> area
+  <> "::backdrop { background: transparent; }\n"
+}
+
+/// dashed-ident に書けない字を `_` にする。
+fn css_ident(name: String) -> String {
+  name
+  |> string.to_graphemes
+  |> list.map(fn(char) {
+    case is_ident_char(char) {
+      True -> char
+      False -> "_"
+    }
+  })
+  |> string.concat
+}
+
+fn is_ident_char(char: String) -> Bool {
+  case string.to_utf_codepoints(char) {
+    [codepoint] -> {
+      let code = string.utf_codepoint_to_int(codepoint)
+      { code >= 97 && code <= 122 }
+      || { code >= 65 && code <= 90 }
+      || { code >= 48 && code <= 57 }
+      || code == 45
+      || code == 95
+    }
+    _ -> False
   }
 }
 
@@ -5972,14 +6090,23 @@ fn framework_length(length: reader_front.Length) -> framework_css.Length {
   case length {
     reader_front.RemLength(value) -> framework_css.Rem(value)
     reader_front.PxLength(value) -> framework_css.Px(value)
+    reader_front.VarLength(name) -> framework_css.Var(name)
+    reader_front.EnvLength(edge) -> framework_css.Env(safe_area_of(edge))
+    reader_front.DvhLength(value) -> framework_css.Dvh(value)
+  }
+}
+
+fn safe_area_of(edge: String) -> framework_css.SafeArea {
+  case edge {
+    "top" -> framework_css.SafeTop
+    "right" -> framework_css.SafeRight
+    "left" -> framework_css.SafeLeft
+    _ -> framework_css.SafeBottom
   }
 }
 
 fn length_css(length: reader_front.Length) -> String {
-  case length {
-    reader_front.RemLength(value) -> float.to_string(value) <> "rem"
-    reader_front.PxLength(value) -> float.to_string(value) <> "px"
-  }
+  framework_sketch_css.length_to_string(framework_length(length))
 }
 
 fn page_grid_name(page: reader_front.Page) -> String {
@@ -6157,7 +6284,19 @@ fn shell_decoder_text(services: List(model.Service)) -> String {
   |> string.concat
 }
 
-fn shell_runtime_text(include_client: Bool, grid_css: String) -> String {
+/// 面のどこかの Var が `CurrentRoute` を持つか。持たない面の shell には route の
+/// 分岐を出さない(足した語彙を使わない面の生成を変えないため)。
+fn uses_current_route(front: reader_front.Front) -> Bool {
+  front.layout.vars
+  |> list.append(list.flat_map(front.pages, fn(page) { page.vars }))
+  |> list.any(fn(var) { var.from == reader_front.CurrentRoute })
+}
+
+fn shell_runtime_text(
+  include_client: Bool,
+  include_route: Bool,
+  grid_css: String,
+) -> String {
   "function areaNames(areas) {\n"
   <> "  return areas.map((area) => area.name);\n"
   <> "}\n\n"
@@ -6287,6 +6426,12 @@ fn shell_runtime_text(include_client: Bool, grid_css: String) -> String {
   <> "      const origin = env[envName];\n"
   <> "      if (typeof origin !== \"string\" || origin.length === 0) return failure(500, envName);\n"
   <> "      value = origin;\n"
+  <> case include_route {
+    True ->
+      "    } else if (source.type === \"route\") {\n"
+      <> "      value = source.value;\n"
+    False -> ""
+  }
   <> "    } else if (source.type === \"session\") {\n"
   <> "      if (!sessionLoaded) {\n"
   <> "        sessionLoaded = true;\n"

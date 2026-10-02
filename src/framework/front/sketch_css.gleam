@@ -39,7 +39,7 @@ pub fn to_sketch(style: css.Style) -> List(sketch_css.Style) {
     css.Space(property:, value:) -> [space(property, value)]
     css.Text(family:, size:, weight:, line_height:) -> [
       sketch_css.font_family(font_family(family)),
-      sketch_css.font_size(to_length(size)),
+      sketch_css.font_size_(length_to_string(size)),
       sketch_css.font_weight(font_weight(weight)),
       sketch_css.line_height(length_to_string(line_height)),
     ]
@@ -56,15 +56,15 @@ pub fn to_sketch(style: css.Style) -> List(sketch_css.Style) {
 
 fn space(property: css.SpaceProperty, value: css.Length) -> sketch_css.Style {
   case property {
-    css.Margin -> sketch_css.margin(to_length(value))
-    css.Padding -> sketch_css.padding(to_length(value))
-    css.Gap -> sketch_css.gap(to_length(value))
-    css.Width -> sketch_css.width(to_length(value))
-    css.Height -> sketch_css.height(to_length(value))
-    css.Radius -> sketch_css.border_radius(to_length(value))
-    css.MinWidth -> sketch_css.min_width(to_length(value))
-    css.MinHeight -> sketch_css.min_height(to_length(value))
-    css.MaxWidth -> sketch_css.max_width(to_length(value))
+    css.Margin -> sketch_css.margin_(length_to_string(value))
+    css.Padding -> sketch_css.padding_(length_to_string(value))
+    css.Gap -> sketch_css.gap_(length_to_string(value))
+    css.Width -> sketch_css.width_(length_to_string(value))
+    css.Height -> sketch_css.height_(length_to_string(value))
+    css.Radius -> sketch_css.border_radius_(length_to_string(value))
+    css.MinWidth -> sketch_css.min_width_(length_to_string(value))
+    css.MinHeight -> sketch_css.min_height_(length_to_string(value))
+    css.MaxWidth -> sketch_css.max_width_(length_to_string(value))
   }
 }
 
@@ -129,12 +129,12 @@ fn flow_style(flow: css.Flow) -> List(sketch_css.Style) {
     css.Stack(gap:) -> [
       sketch_css.display("flex"),
       sketch_css.flex_direction("column"),
-      sketch_css.gap(to_length(gap)),
+      sketch_css.gap_(length_to_string(gap)),
     ]
     css.Row(gap:, wrap:) -> [
       sketch_css.display("flex"),
       sketch_css.flex_direction("row"),
-      sketch_css.gap(to_length(gap)),
+      sketch_css.gap_(length_to_string(gap)),
       sketch_css.flex_wrap(case wrap {
         True -> "wrap"
         False -> "nowrap"
@@ -145,7 +145,7 @@ fn flow_style(flow: css.Flow) -> List(sketch_css.Style) {
       sketch_css.grid_template_columns(
         "repeat(" <> int.to_string(cols) <> ", minmax(0, 1fr))",
       ),
-      sketch_css.gap(to_length(gap)),
+      sketch_css.gap_(length_to_string(gap)),
     ]
     css.GridTracks(cols:, gap:) -> [
       sketch_css.display("grid"),
@@ -154,7 +154,7 @@ fn flow_style(flow: css.Flow) -> List(sketch_css.Style) {
         |> list.map(track.to_css)
         |> string.join(" "),
       ),
-      sketch_css.gap(to_length(gap)),
+      sketch_css.gap_(length_to_string(gap)),
     ]
     css.Scroller -> [
       sketch_css.display("flex"),
@@ -162,6 +162,10 @@ fn flow_style(flow: css.Flow) -> List(sketch_css.Style) {
     ]
   }
 }
+
+/// `aria-current` の値のうち `false` だけが「今ではない」(WAI-ARIA)。`page` に絞らず、
+/// `step`・`location`・`true` などの今いる所も同じ状態にする。
+const current_selector = "[aria-current]:not([aria-current=\"false\"])"
 
 fn state_style(
   state: css.Interaction,
@@ -172,6 +176,7 @@ fn state_style(
     css.Hover -> [sketch_css.hover(styles)]
     css.Focus -> [sketch_css.focus(styles)]
     css.Disabled -> [sketch_css.disabled(styles)]
+    css.Current -> [sketch_css.selector(current_selector, styles)]
   }
 }
 
@@ -187,17 +192,37 @@ fn breakpoint(value: css.Breakpoint) -> media.Query {
   }
 }
 
-fn to_length(value: css.Length) -> length.Length {
-  case value {
-    css.Px(value) -> length.px_(value)
-    css.Rem(value) -> length.rem(value)
-  }
-}
-
-fn length_to_string(value: css.Length) -> String {
+/// 長さを CSS の値の字にする。`Px`・`Rem` は sketch の `length.to_string` と同じ字
+/// (`8.0px`)で、0.11.8 までの出力を変えない。
+pub fn length_to_string(value: css.Length) -> String {
   case value {
     css.Px(value) -> float.to_string(value) <> "px"
     css.Rem(value) -> float.to_string(value) <> "rem"
+    css.Var(name) ->
+      case valid_var_name(name) {
+        True -> "var(--" <> name <> ")"
+        False -> "unset"
+      }
+    css.Env(edge) -> "env(safe-area-inset-" <> safe_area(edge) <> ", 0px)"
+    css.Dvh(value) -> float.to_string(value) <> "dvh"
+  }
+}
+
+/// `Var` の名が `[a-z0-9-]` だけで、空でないか。
+pub fn valid_var_name(name: String) -> Bool {
+  name != ""
+  && list.all(string.to_utf_codepoints(name), fn(codepoint) {
+    let code = string.utf_codepoint_to_int(codepoint)
+    { code >= 97 && code <= 122 } || { code >= 48 && code <= 57 } || code == 45
+  })
+}
+
+fn safe_area(edge: css.SafeArea) -> String {
+  case edge {
+    css.SafeTop -> "top"
+    css.SafeRight -> "right"
+    css.SafeBottom -> "bottom"
+    css.SafeLeft -> "left"
   }
 }
 
