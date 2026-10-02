@@ -24,9 +24,9 @@ Extracted from the `framework/` directory of a production application on 2026-09
 gleam build
 ```
 
-## `framework/front` ── Style (0.11.8)
+## `framework/front` ── Style (0.11.9)
 
-`framework/front/css`'s `Style` is the typed vocabulary a Page / Area / component carries; `framework/front/sketch_css` maps it to CSS (sketch classes, so a Style used by an island also lands in the island's shadow `<style>`). Color values are strings passed straight through, so `var(--ma-color-bg)` and `color-mix(...)` work — the app owns its palette, yumemi bakes in no hex. Every word also works inside `State(Hover / Focus / Disabled, ..)` and `Responsive(SP / PC / Tablet, ..)`.
+`framework/front/css`'s `Style` is the typed vocabulary a Page / Area / component carries; `framework/front/sketch_css` maps it to CSS (sketch classes, so a Style used by an island also lands in the island's shadow `<style>`). Color values are strings passed straight through, so `var(--ma-color-bg)` and `color-mix(...)` work — the app owns its palette, yumemi bakes in no hex. Every word also works inside `State(Hover / Focus / Disabled / Current, ..)` and `Responsive(SP / PC / Tablet, ..)`.
 
 | Style | CSS |
 |---|---|
@@ -40,7 +40,23 @@ gleam build
 | `Sizing(box: BorderBox / ContentBox)` | (0.11.8) `box-sizing` — `BorderBox` counts padding and border inside `width` / `min-height`, so an input or an `<a>` button with `min-height: 48px` and padding stays 48px |
 | `Marker(marker: NoMarker)` | (0.11.8) `list-style: none` — drops the `ul` / `li` bullet (clear the indent with `Space(Padding, Px(0.0))`) |
 | `Decoration(line: NoDecoration / Underline)` | (0.11.8) `text-decoration: none` / `underline` — e.g. a row link without the underline, underlined again inside `State(Hover / Focus, ..)` |
+| `State(Current, styles)` | (0.11.9) `[aria-current]:not([aria-current="false"])` — the item that is where the user is (`aria-current="page"`, also `step` / `location` / `true`). Mark the nav item with `aria-current` (a Layout block learns the page from `CurrentRoute`, below) and give it e.g. the 2px underline with `Border(BottomEdge, ..)` |
 | `Flow(..)` `State(..)` `Responsive(..)` `Animation(..)` | layout, interaction states, breakpoints, animations (unchanged) |
+
+Lengths (`css.Length`) are `Px(n)` / `Rem(n)` and, from 0.11.9:
+
+| Length | CSS |
+|---|---|
+| `Var(name)` | `var(--name)` — e.g. `Var("ma-space-2")`. The name passes only `[a-z0-9-]`; any other name (`;`, `}`, `)`, a space, upper case, empty) is written as `unset` by `sketch_css`, and the generator stops on it in an Area's `gap` |
+| `Env(SafeTop / SafeRight / SafeBottom / SafeLeft)` | `env(safe-area-inset-top, 0px)` … (0px where the device has no safe area) |
+| `Dvh(n)` | `n dvh` — e.g. `Space(MinHeight, Dvh(100.0))` for a short page that still fills the screen |
+
+They work everywhere a Length does: `Space`, `Text`, `Border`, `Outline`, `Flow` gaps, and an Area's flow `gap` in the generated grid CSS (literal or a `style` constant).
+
+## `framework/front` ── Layout vars and Overlay (0.11.9)
+
+- **`Var(name, CurrentRoute)`** — the route spelling of the Page being drawn, as the generated route table writes it (`/rosters/:id`, `/`). It is a constant the generator knows per Page; the request's argument values and query never enter it. It can sit in a Layout (where `Path` / `Query` / `Session` cannot) or in a Page, and arrives as a `String` block arg of the same name — a header block compares it with its links' routes to set `aria-current="page"`.
+- **`pin: AnchoredOverlay(side: Below / Above, align: AlignStart / AlignEnd)`** — an Overlay Area that opens next to the `el.opener` button that opened it, below or above it, lining up its start or end edge with the button's. It is an Overlay in every other respect (`el.opener` / `el.closer`, popover, not in the grid). The generated CSS uses CSS anchor positioning inside `@supports (anchor-name: ..)` (`position-area`, `position-try-fallbacks: flip-block`) and leaves the backdrop clear. A browser without anchor positioning opens it like `Overlay`: centred by the UA, with the darkened backdrop. With several openers for the same Area the anchor is the last one in document order. `Overlay` and `[popover]::backdrop` are unchanged.
 
 ## `framework/front` ── Area flow (0.11.8)
 
@@ -102,6 +118,13 @@ A Service whose logic runs `step.commit` and continues after it (and is not a qu
 
 - **Style:** `Sizing` (`box-sizing`), `Marker(NoMarker)` (`list-style: none`), `Decoration` (`text-decoration: none` / `underline`), all usable inside `State(..)` / `Responsive(..)`.
 - **Area flow reaches the grid CSS** (see the Area flow section above). Regenerating an app changes only the Area rules of the grid CSS.
+
+0.11.9 adds, without changing the existing variants' meaning or output:
+
+- **Layout knows the page:** `front.From` gains `CurrentRoute` (see Layout vars above). The shell carries it as a constant per page; the shell's branch for it is written only for a face that uses it.
+- **Style:** `State(Current, ..)` (`aria-current`), and the lengths `Var` / `Env` / `Dvh`, read by the generator in Area gaps and `style` constants too.
+- **Overlay:** `pin: AnchoredOverlay(..)` opens next to its opener (CSS anchor positioning; centred as before without it).
+- Regenerating an app that uses none of these is byte-identical.
 
 **Imports outside the package**
 

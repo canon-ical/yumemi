@@ -87,6 +87,7 @@ pub type From {
   Session(String)
   Origin(String)
   AuthOrigin
+  CurrentRoute
   InvalidFrom(String)
 }
 
@@ -133,6 +134,17 @@ pub type GridTracks {
 pub type Length {
   RemLength(Float)
   PxLength(Float)
+  /// `css.Var(name)`。名の検査(`[a-z0-9-]`)は `length_notes` が止める。
+  VarLength(String)
+  /// `css.Env(edge)`。辺は `top`・`right`・`bottom`・`left`。
+  EnvLength(String)
+  DvhLength(Float)
+}
+
+/// `pin: css.AnchoredOverlay(side:, align:)` ── 開いた `el.opener` の下か上へ寄せる。
+/// side は `Below`・`Above`、align は `AlignStart`・`AlignEnd`。
+pub type OverlayAnchor {
+  OverlayAnchor(side: String, align: String)
 }
 
 /// Area の `flow` のうち、生成する grid の CSS へ写すもの(`GridTracks` は
@@ -151,6 +163,7 @@ pub type Area {
     grid_tracks: Option(GridTracks),
     flow_layout: Option(AreaFlow),
     pin: String,
+    anchor: Option(OverlayAnchor),
     style: List(String),
   )
 }
@@ -351,6 +364,7 @@ pub fn notes(front: Front, services: List(model.Service)) -> List(stop.Note) {
     violation_notes(front.face, front.violations),
     overlay_template_notes(front),
     overlay_call_notes(front),
+    length_notes(front),
     frame_notes(
       front.face,
       "layout",
@@ -465,6 +479,73 @@ fn first_argument_literal(expression: glance.Expression) -> Option(String) {
     [first, ..] -> g.string_value(first)
     [] -> None
   }
+}
+
+/// Area の flow の gap に書いた `css.Var(name)` の名が `[a-z0-9-]` でなければ止める
+/// (`;`・`}`・`)`・空白を生成の CSS に書かないため)。
+fn length_notes(front: Front) -> List(stop.Note) {
+  let layout = #(
+    "layout",
+    frames(front.layout.sp, front.layout.pc, front.layout.tablet),
+  )
+  let pages =
+    list.map(front.pages, fn(page) {
+      #(page.module, frames(page.sp, page.pc, page.tablet))
+    })
+  [layout, ..pages]
+  |> list.flat_map(fn(entry) {
+    let #(module, frames) = entry
+    frames
+    |> list.flat_map(fn(frame) {
+      frame.areas
+      |> list.flat_map(fn(area) { area_lengths(area) })
+      |> list.filter_map(fn(length) {
+        case length {
+          VarLength(name) ->
+            case valid_var_name(name) {
+              True -> Error(Nil)
+              False ->
+                Ok(stop.Note(
+                  class: stop.Conflict,
+                  text: front.face
+                    <> "/"
+                    <> module
+                    <> "/"
+                    <> frame.media
+                    <> ": css.Var(\""
+                    <> name
+                    <> "\") の名は a-z・0-9・- だけで書く",
+                ))
+            }
+          _ -> Error(Nil)
+        }
+      })
+    })
+  })
+}
+
+fn area_lengths(area: Area) -> List(Length) {
+  let flow = case area.flow_layout {
+    Some(StackFlow(gap:))
+    | Some(RowFlow(gap:, ..))
+    | Some(GridFlow(gap:, ..)) -> [
+      gap,
+    ]
+    _ -> []
+  }
+  case area.grid_tracks {
+    Some(GridTracks(gap:, ..)) -> [gap, ..flow]
+    None -> flow
+  }
+}
+
+/// `css.Var` の名が `[a-z0-9-]` だけで、空でないか(root の `sketch_css` と同じ規則)。
+pub fn valid_var_name(name: String) -> Bool {
+  name != ""
+  && list.all(string.to_utf_codepoints(name), fn(codepoint) {
+    let code = string.utf_codepoint_to_int(codepoint)
+    { code >= 97 && code <= 122 } || { code >= 48 && code <= 57 } || code == 45
+  })
 }
 
 fn overlay_template_notes(front: Front) -> List(stop.Note) {
@@ -878,9 +959,14 @@ fn parse_from(expression: glance.Expression) -> From {
         glance.Call(..) -> InvalidFrom("AuthOrigin は値を持たない構成子リテラルでなければならない")
         _ -> AuthOrigin
       }
+    Some("CurrentRoute") ->
+      case expression {
+        glance.Call(..) -> InvalidFrom("CurrentRoute は値を持たない構成子リテラルでなければならない")
+        _ -> CurrentRoute
+      }
     _ ->
       InvalidFrom(
-        "from は Path / Query / Session / Origin / AuthOrigin のリテラルではない",
+        "from は Path / Query / Session / Origin / AuthOrigin / CurrentRoute のリテラルではない",
       )
   }
 }
@@ -1257,9 +1343,41 @@ fn parse_area(
           |> option.then(parse_grid_tracks),
         flow_layout: g.labelled(expression, "flow")
           |> option.then(fn(flow) { parse_area_flow(flow, lengths) }),
-        pin: constructor_label(expression, "pin") |> option.unwrap(""),
+        pin: case constructor_label(expression, "pin") {
+          Some("AnchoredOverlay") -> "Overlay"
+          pin -> option.unwrap(pin, "")
+        },
+        anchor: g.labelled(expression, "pin")
+          |> option.then(parse_overlay_anchor),
         style: style_names(expression),
       ))
+    _ -> None
+  }
+}
+
+/// 寄せた Overlay の向き。側と揃えが構成子のリテラルでなければ None(中央に開く
+/// 今の Overlay のまま)。
+fn parse_overlay_anchor(
+  expression: glance.Expression,
+) -> Option(OverlayAnchor) {
+  case g.ctor_name(expression) {
+    Some("AnchoredOverlay") -> {
+      let fields = ["side", "align"]
+      let side =
+        constructor_field(expression, "side", fields)
+        |> option.then(g.ctor_name)
+      let align =
+        constructor_field(expression, "align", fields)
+        |> option.then(g.ctor_name)
+      case side, align {
+        Some("Below" as side), Some("AlignStart" as align)
+        | Some("Below" as side), Some("AlignEnd" as align)
+        | Some("Above" as side), Some("AlignStart" as align)
+        | Some("Above" as side), Some("AlignEnd" as align)
+        -> Some(OverlayAnchor(side: side, align: align))
+        _, _ -> None
+      }
+    }
     _ -> None
   }
 }
@@ -1488,6 +1606,21 @@ fn parse_length(expression: glance.Expression) -> Option(Length) {
       parse_float_arg(expression) |> option_from_result |> option.map(RemLength)
     Some("Px") ->
       parse_float_arg(expression) |> option_from_result |> option.map(PxLength)
+    Some("Dvh") ->
+      parse_float_arg(expression) |> option_from_result |> option.map(DvhLength)
+    Some("Var") ->
+      case g.args(expression) {
+        [name] -> g.string_value(name) |> option.map(VarLength)
+        _ -> None
+      }
+    Some("Env") ->
+      case g.args(expression) |> list.map(g.ctor_name) {
+        [Some("SafeTop")] -> Some(EnvLength("top"))
+        [Some("SafeRight")] -> Some(EnvLength("right"))
+        [Some("SafeBottom")] -> Some(EnvLength("bottom"))
+        [Some("SafeLeft")] -> Some(EnvLength("left"))
+        _ -> None
+      }
     _ -> None
   }
 }
@@ -1828,7 +1961,7 @@ fn placement_var_location_notes(
   vars
   |> list.filter_map(fn(var) {
     let invalid = case layout, var.from {
-      True, Path(_) -> Some("Layout に Path を置けない")
+      True, Path(_) -> Some("Layout に Path を置けない(今の page は CurrentRoute で受ける)")
       True, Query(_) -> Some("Layout に Query を置けない")
       True, Session(_) -> Some("Layout に Session を置けない")
       False, Origin(_) -> Some("Page に Origin を置けない")

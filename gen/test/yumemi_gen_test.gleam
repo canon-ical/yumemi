@@ -2600,6 +2600,220 @@ pub fn front_emit_area_flow_variants_and_grid_tracks_test() {
   |> list.each(fn(row) { string.contains(css, row) |> should.be_true })
 }
 
+// yumemi-0119(0.11.9)── Layout に今の route(`CurrentRoute`)。値は Page ごとの route の
+// 綴りの定数で、shell の var の行に出る。使う面にだけ shell の route の分岐が出る。
+pub fn front_layout_current_route_reaches_shell_var_rows_test() {
+  let files =
+    synthetic_front_files_with_layout(
+      "Layout(\n"
+      <> "  vars: [Var(name: \"route\", from: CurrentRoute)],\n"
+      <> "  sp: Frame(\n"
+      <> "    areas: [Area(name: \"page\", flow: css.Stack(gap: style.s0), pin: css.NoPin, style: [])],\n"
+      <> "    placements: [],\n"
+      <> "    cols: [],\n"
+      <> "    rows: [],\n"
+      <> "    template: [],\n"
+      <> "  ),\n"
+      <> "  pc: None,\n"
+      <> "  tablet: None,\n"
+      <> ")",
+    )
+  let assert Ok(#(_, shell)) =
+    list.find(files, fn(file) { file.0 == "public/src/gen/shell.mjs" })
+  string.contains(
+    shell,
+    "{ name: \"route\", optional: false, from: { type: \"route\", value: \"/article/:slug\" } },",
+  )
+  |> should.be_true
+  string.contains(
+    shell,
+    "} else if (source.type === \"route\") {\n      value = source.value;\n",
+  )
+  |> should.be_true
+  let assert Ok(#(_, load)) =
+    list.find(files, fn(file) {
+      file.0 == "public/src/gen/load/article/arg_slug/page.gleam"
+    })
+  string.contains(load, "route: String") |> should.be_true
+}
+
+pub fn front_shell_without_current_route_has_no_route_branch_test() {
+  let assert Ok(#(_, shell)) =
+    list.find(
+      synthetic_front_files_with_layout(empty_variable_layout()),
+      fn(file) { file.0 == "public/src/gen/shell.mjs" },
+    )
+  string.contains(shell, "source.type === \"route\"") |> should.be_false
+}
+
+pub fn current_route_var_is_read_and_allowed_in_layout_and_page_test() {
+  let value =
+    front_from_units(
+      [
+        layout_unit(
+          "Layout(vars: [Var(name: \"route\", from: CurrentRoute)], sp: Frame(areas: [], placements: [], cols: [], rows: [], template: []), pc: None, tablet: None)",
+        ),
+        source_unit(
+          "pages/example/page",
+          page_source(variable_page(
+            "[Var(name: \"here\", from: CurrentRoute)]",
+            "",
+          )),
+        ),
+      ],
+      app().services,
+    )
+  value.layout.vars
+  |> list.map(fn(var) { var.from })
+  |> should.equal([front.CurrentRoute])
+  let notes =
+    front_notes(
+      [
+        layout_unit(
+          "Layout(vars: [Var(name: \"route\", from: CurrentRoute), Var(name: \"bad\", from: CurrentRoute(\"x\"))], sp: Frame(areas: [], placements: [], cols: [], rows: [], template: []), pc: None, tablet: None)",
+        ),
+        source_unit(
+          "pages/example/page",
+          page_source(variable_page(
+            "[Var(name: \"here\", from: CurrentRoute)]",
+            "",
+          )),
+        ),
+      ],
+      app().services,
+    )
+  list.any(notes, fn(note) { string.contains(note.text, "を置けない") })
+  |> should.be_false
+  list.any(notes, fn(note) {
+    string.contains(note.text, "CurrentRoute は値を持たない構成子リテラル")
+  })
+  |> should.be_true
+}
+
+// 寄せた Overlay は anchor positioning の @supports の中だけで寄り、backdrop を暗く
+// しない。中央の Overlay の規則(`[popover]::backdrop`)は今のまま。
+pub fn front_emit_anchored_overlay_css_test() {
+  let files =
+    synthetic_front_files_with_layout(
+      "Layout(\n"
+      <> "  sp: Frame(\n"
+      <> "    areas: [\n"
+      <> "      Area(name: \"page\", flow: css.Stack(gap: style.s0), pin: css.NoPin, style: []),\n"
+      <> "      Area(name: \"account\", flow: css.Stack(gap: style.s0), pin: css.AnchoredOverlay(side: css.Below, align: css.AlignEnd), style: []),\n"
+      <> "      Area(name: \"help\", flow: css.Stack(gap: style.s0), pin: css.AnchoredOverlay(css.Above, css.AlignStart), style: []),\n"
+      <> "      Area(name: \"dialog\", flow: css.Stack(gap: style.s0), pin: css.Overlay, style: []),\n"
+      <> "    ],\n"
+      <> "    placements: [],\n"
+      <> "    cols: [],\n"
+      <> "    rows: [],\n"
+      <> "    template: [],\n"
+      <> "  ),\n"
+      <> "  pc: None,\n"
+      <> "  tablet: None,\n"
+      <> "  vars: [],\n"
+      <> ")",
+    )
+  let assert Ok(#(_, css)) =
+    list.find(files, fn(file) {
+      file.0 == "public/priv/static/_yumemi/style.css"
+    })
+  [
+    "[popover]::backdrop { background: rgba(0, 0, 0, 0.45); }\n@supports (anchor-name: --yumemi) {\n",
+    "  [data-yumemi-overlay-opener][popovertarget=\"yumemi-overlay-account\"] { anchor-name: --yumemi-overlay-account; }\n"
+      <> "  [data-yumemi-overlay][data-yumemi-area=\"account\"] {\n"
+      <> "    position-anchor: --yumemi-overlay-account;\n"
+      <> "    position-area: block-end span-inline-start;\n"
+      <> "    position-try-fallbacks: flip-block;\n"
+      <> "    inset: auto;\n"
+      <> "    margin: 0;\n"
+      <> "  }\n"
+      <> "  [data-yumemi-overlay][data-yumemi-area=\"account\"]::backdrop { background: transparent; }\n",
+    "    position-anchor: --yumemi-overlay-help;\n    position-area: block-start span-inline-end;\n",
+  ]
+  |> list.each(fn(row) { string.contains(css, row) |> should.be_true })
+  string.contains(css, "yumemi-overlay-dialog") |> should.be_false
+  string.contains(css, "grid-area: account;") |> should.be_false
+  list.any(files, fn(file) {
+    string.contains(file.1, "overlay_area(\"account\"")
+  })
+  |> should.be_true
+}
+
+// 0.11.9 の Length(Var・Env・Dvh)を Area の flow の gap と style の定数で読む。
+pub fn front_emit_new_lengths_reach_area_css_test() {
+  let assert Ok(face_units) = source.load("fixtures/article/public")
+  let face_units =
+    face_units
+    |> list.map(fn(unit) {
+      case unit.path {
+        "style" ->
+          source_unit(
+            "style",
+            unit.text
+              <> "\npub const sv: css.Length = css.Var(\"ma-space-2\")\n"
+              <> "pub const sv2: css.Length = sv\n",
+          )
+        _ -> unit
+      }
+    })
+    |> list.filter(fn(unit) { unit.path != "layout" })
+    |> list.append([
+      source_unit(
+        "layout",
+        layout_source(
+          "Layout(\n"
+          <> "  sp: Frame(\n"
+          <> "    areas: [\n"
+          <> "      Area(name: \"page\", flow: css.Stack(gap: css.Var(\"ma-gap\")), pin: css.NoPin, style: []),\n"
+          <> "      Area(name: \"bar\", flow: css.Row(gap: css.Env(css.SafeBottom), wrap: False), pin: css.NoPin, style: []),\n"
+          <> "      Area(name: \"tall\", flow: css.Grid(cols: 2, gap: css.Dvh(2.5)), pin: css.NoPin, style: []),\n"
+          <> "      Area(name: \"named\", flow: css.Stack(gap: style.sv2), pin: css.NoPin, style: []),\n"
+          <> "      Area(name: \"rail\", flow: css.GridTracks(cols: [track.Fr(1)], gap: css.Var(\"ma-rail\")), pin: css.NoPin, style: []),\n"
+          <> "    ],\n"
+          <> "    placements: [],\n"
+          <> "    cols: [],\n"
+          <> "    rows: [],\n"
+          <> "    template: [],\n"
+          <> "  ),\n"
+          <> "  pc: None,\n"
+          <> "  tablet: None,\n"
+          <> "  vars: [],\n"
+          <> ")",
+        ),
+      ),
+    ])
+  let files = synthetic_front_files(face_units)
+  let assert Ok(#(_, css)) =
+    list.find(files, fn(file) {
+      file.0 == "public/priv/static/_yumemi/style.css"
+    })
+  [
+    "grid-area: page;\n  display: flex;\n  flex-direction: column;\n  align-items: stretch;\n  gap: var(--ma-gap);\n}",
+    "grid-area: bar;\n  display: flex;\n  flex-direction: row;\n  flex-wrap: nowrap;\n  gap: env(safe-area-inset-bottom, 0px);\n}",
+    "grid-area: tall;\n  display: grid;\n  grid-template-columns: repeat(2, minmax(0, 1fr));\n  gap: 2.5dvh;\n}",
+    "grid-area: named;\n  display: flex;\n  flex-direction: column;\n  align-items: stretch;\n  gap: var(--ma-space-2);\n}",
+    "grid-area: rail;\n  display: grid;\n  grid-template-columns: 1fr;\n  gap: var(--ma-rail);\n}",
+  ]
+  |> list.each(fn(row) { string.contains(css, row) |> should.be_true })
+}
+
+pub fn invalid_var_length_name_is_a_conflict_test() {
+  let notes =
+    front_notes(
+      [
+        layout_unit(
+          "Layout(vars: [], sp: Frame(areas: [Area(name: \"page\", flow: css.Stack(gap: css.Var(\"x;}a b\")), pin: css.NoPin, style: [])], placements: [], cols: [], rows: [], template: []), pc: None, tablet: None)",
+        ),
+      ],
+      app().services,
+    )
+  list.any(notes, fn(note) {
+    note.class == stop.Conflict
+    && string.contains(note.text, "css.Var(\"x;}a b\") の名は a-z・0-9・- だけで書く")
+  })
+  |> should.be_true
+}
+
 pub fn front_emit_grid_tracks_template_and_fixed_cells_test() {
   let files =
     synthetic_front_files_with_layout(
