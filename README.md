@@ -8,6 +8,8 @@ Open source, coming soon. https://gleam.canon-ical.com/
 
 ## Status
 
+**Under development.** The API may change between 0.x releases.
+
 Extracted from the `framework/` directory of a production application on 2026-09-16, history included. Module namespace is still `framework/*`; the package name is `yumemi`. Published on Hex as [`yumemi`](https://hex.pm/packages/yumemi) (0.2.0 = the 2026-09-16 extraction; the generator and gen-3/gen-4 changes ship from 0.3.0).
 
 ## Layout
