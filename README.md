@@ -138,9 +138,9 @@ A Service whose logic runs `step.commit` and continues after it (and is not a qu
 - **Grid style:** `front.StyledFrame(.., style:)` puts a Style on the grid element (see Grid style above).
 - **Pin:** `BottomFlush` (bottom 0, safe area as inner padding); `Bottom` is unchanged.
 - **Style:** `Wrap(Anywhere / BreakWord / WrapNormal)` (`overflow-wrap`).
+- Regenerating an app that uses none of these is byte-identical.
 
 0.11.11 changes documentation only (one README sentence and one source comment). No code, type or generated output changes.
-- Regenerating an app that uses none of these is byte-identical.
 
 **Imports outside the package**
 
