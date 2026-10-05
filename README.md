@@ -109,7 +109,7 @@ A Service whose logic runs `step.commit` and continues after it (and is not a qu
 - **Gate: a fixed redirect that keeps the query.** `To.FixedKeep(location)` answers 302 to `location` plus the request's query. `Fixed(location)` is unchanged (drops the query). The hash never reaches the server; on a page load the browser carries the original hash across a redirect without one, and a client navigation falls back to that page load. `location` follows the same face-path rule as `RedirectBack` and has no `?` either.
 - A gate that uses neither word gets the same `gate.mjs` as 0.11.4, character for character.
 - **A missing root statement stops generation.** A Service with a root Entity reads its root with `db/queries/<service>/root.sql`. Without it the runtime answers 503, so the generator now stops with exit 3 naming the Service. Services that build their root another way are not stopped: a Service answered by a `service_<name>` hook (a Durable Object port), a queue consumer that borrows the root of a Service that has a root statement and calls it through the queue, `Rootless`, and roots with no Entity (`Carried` only).
-- **Faces narrower than the entries are enforced at runtime.** A Service that declares two or more faces gets `entries: [..]` in `src/gen/registry.mjs` when an entry outside its faces could still route it (same credential kind; a `ReadOnly` entry only for a Read Service), and check 7 answers 403 on any other entry. A Service with one face keeps `entry: '<name>'` as before (the same face repeated counts as one); a Service whose faces hold every entry that could route it (all four session faces in musearch) gets neither.
+- **Faces narrower than the entries are enforced at runtime.** A Service that declares two or more faces gets `entries: [..]` in `src/gen/registry.mjs` when an entry outside its faces could still route it (same credential kind; a `ReadOnly` entry only for a Read Service), and check 7 answers 403 on any other entry. A Service with one face keeps `entry: '<name>'` as before (the same face repeated counts as one); a Service whose faces hold every entry that could route it (all four session faces in our in-house service) gets neither.
 
 0.11.6 changes when the outbox is swept, without changing the public types:
 
@@ -138,6 +138,8 @@ A Service whose logic runs `step.commit` and continues after it (and is not a qu
 - **Grid style:** `front.StyledFrame(.., style:)` puts a Style on the grid element (see Grid style above).
 - **Pin:** `BottomFlush` (bottom 0, safe area as inner padding); `Bottom` is unchanged.
 - **Style:** `Wrap(Anywhere / BreakWord / WrapNormal)` (`overflow-wrap`).
+
+0.11.11 changes documentation only (one README sentence and one source comment). No code, type or generated output changes.
 - Regenerating an app that uses none of these is byte-identical.
 
 **Imports outside the package**
