@@ -7,7 +7,7 @@
 //// `Http` に足すと既存 3 入口の宣言が全部書き換えになる(26 の負例 (o)「既存 3 入口に `credential` を書かないまま (a)〜(j) が通る」が成立しなくなる)。
 //// `Http` は `credential: Session` の略記、`HttpApi` が `credential` を明示する形。**6 欄の並びを共通にしてある**ので
 //// `entry.name` / `.hosts` / `.prefix` / `.admit` / `.subject` / `.services` の accessor は両方の constructor で効き、読む側は分岐を持たない。
-//// **`prefix` は `Http` / `HttpApi` の両方に足す** ── 既存の入口宣言は面ごとに 1 語を足す書き換えになる(musearch 追随便で 5 語)。
+//// **`prefix` は `Http` / `HttpApi` の両方に足す** ── 既存の入口宣言は面ごとに 1 語を足す書き換えになる(自社運営サービスの追随便で 5 語)。
 //// 媒体が増えても constructor は増やさない ── 足すのは `Credential` の variant(`HttpApi(.., credential: Session)` は `Http` と同値、書いてよい)。
 ////
 //// ▲ への契約 ── 入口の媒体を読む口は `entry.credential(Entry) -> Credential` 1 本(`Http` は `Session`)。gen は各入口の宣言からこの値を吐く。
