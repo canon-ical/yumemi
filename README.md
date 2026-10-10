@@ -2,7 +2,7 @@
 
 **Have a sweet Gleam.** 設計を書けば、コードが生まれる。
 
-A framework for [Gleam](https://gleam.run) on Cloudflare Workers. You describe an application in five words — Entity, Property, Type, Service, Authorization — and yumemi derives the Gleam implementation and every entrance to it: HTTP, MCP, CLI.
+A framework for [Gleam](https://gleam.run) on Cloudflare Workers. You describe an application in five words — Entity, Property, Type, Service, Authorization — and write each Service's logic; yumemi derives the Gleam code around that logic (types, codecs, reads, authorization checks, writes, the route table, SQL) and the HTTP entrance to it. MCP and CLI entrances are designed to come from the same description but are not generated yet.
 
 Open source, coming soon. https://gleam.canon-ical.com/
 
