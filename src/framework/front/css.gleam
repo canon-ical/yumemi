@@ -98,8 +98,16 @@ pub type OverflowWrap {
 }
 
 pub type Interaction {
+  /// `:hover`。touch の端末では指で押した後も残る(地が残る)。
   Hover
+  /// `:focus`。指やマウスで押した後も残る(枠が残る)。
   Focus
+  /// `:focus-visible`。ブラウザがキーボードの焦点と見たときだけ(指やマウスで押した
+  /// 後には出ない)。焦点の枠はこちらに掛ける。
+  FocusVisible
+  /// `@media (hover: hover) { :hover }`。hover が出来る端末(マウスなど)でだけ。
+  /// touch の端末では押した後に地が残らない。
+  HoverCapable
   Disabled
   /// 今いる所(`aria-current` が `false` 以外)。ナビの選択中の項目に掛ける。
   Current

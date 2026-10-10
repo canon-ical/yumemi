@@ -4937,6 +4937,45 @@ pub fn front_emit_wrap_style_constant_passes_test() {
   string.contains(page, "styled_area(\"page\", style.url,") |> should.be_true
 }
 
+// 0.11.14:FocusVisible・HoverCapable を持つ style の定数も、Area の style として今と
+// 同じ経路で通る(生成は名で引くだけ、CSS は root の sketch_css が書く)。
+pub fn front_emit_focus_visible_and_hover_capable_style_constant_passes_test() {
+  let assert Ok(face_units) = source.load("fixtures/article/public")
+  let face_units =
+    face_units
+    |> list.map(fn(unit) {
+      case unit.path {
+        "style" ->
+          source_unit(
+            "style",
+            unit.text
+              <> "\npub const tab: List(css.Style) = [css.State(css.FocusVisible, [css.Outline(css.Px(2.0), css.Px(1.0), \"blue\")]), css.State(css.HoverCapable, [css.Background(\"red\")])]\n",
+          )
+        _ -> unit
+      }
+    })
+    |> list.filter(fn(unit) { unit.path != "layout" })
+    |> list.append([
+      source_unit(
+        "layout",
+        layout_source(
+          "Layout(vars: [], sp: Frame(areas: [Area(name: \"page\", flow: css.Stack(gap: style.s0), pin: css.NoPin, style: style.tab)], placements: [], cols: [], rows: [], template: []), pc: None, tablet: None)",
+        ),
+      ),
+    ])
+  let test_app = app()
+  front_from_units_named("public", face_units, test_app.services)
+  |> front.notes(test_app.services)
+  |> list.any(fn(note) { string.contains(note.text, "style") })
+  |> should.be_false
+  let files = synthetic_front_files(face_units)
+  let assert Ok(#(_, page)) =
+    list.find(files, fn(file) {
+      file.0 == "public/src/gen/load/article/arg_slug/page.gleam"
+    })
+  string.contains(page, "styled_area(\"page\", style.tab,") |> should.be_true
+}
+
 // 0.11.12:shell の任意の const。fixture の shell に足して、head に 4 つの要素(title の後ろ、この順)と
 // client.mjs の service worker の登録が出る。
 fn shell_with_head(extra: String) -> List(source.Unit) {
