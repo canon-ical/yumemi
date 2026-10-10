@@ -48,8 +48,31 @@ pub type Shell {
     accent: String,
     present: Bool,
     missing: List(String),
+    head: ShellHead,
   )
 }
+
+/// shell の任意の const(0.11.12)。在れば head(と client.mjs)に出す。無ければ 0.11.11 と同じ出力。
+/// `invalid` は在るのに空でない String の定数でない const の名(`title` と同じく宣言の不足で止める)。
+pub type ShellHead {
+  ShellHead(
+    manifest: Option(String),
+    theme_color: Option(String),
+    icon: Option(String),
+    apple_touch_icon: Option(String),
+    service_worker: Option(String),
+    invalid: List(String),
+  )
+}
+
+pub const empty_shell_head = ShellHead(
+  manifest: None,
+  theme_color: None,
+  icon: None,
+  apple_touch_icon: None,
+  service_worker: None,
+  invalid: [],
+)
 
 pub type Layout {
   Layout(
@@ -791,6 +814,7 @@ fn shell_from_units(units: List(Unit), package_name: String) -> Shell {
         accent: "",
         present: False,
         missing: [],
+        head: empty_shell_head,
       )
     Ok(unit) -> {
       let module = g.in_order(unit.module)
@@ -824,8 +848,53 @@ fn shell_from_units(units: List(Unit), package_name: String) -> Shell {
           missing_label("title", title),
           missing_theme,
         ]),
+        head: shell_head(module),
       )
     }
+  }
+}
+
+fn shell_head(module: glance.Module) -> ShellHead {
+  let manifest = optional_shell_string(module, "manifest")
+  let theme_color = optional_shell_string(module, "theme_color")
+  let icon = optional_shell_string(module, "icon")
+  let apple_touch_icon = optional_shell_string(module, "apple_touch_icon")
+  let service_worker = optional_shell_string(module, "service_worker")
+  let named = [
+    #("manifest", manifest),
+    #("theme_color", theme_color),
+    #("icon", icon),
+    #("apple_touch_icon", apple_touch_icon),
+    #("service_worker", service_worker),
+  ]
+  ShellHead(
+    manifest: option.from_result(manifest),
+    theme_color: option.from_result(theme_color),
+    icon: option.from_result(icon),
+    apple_touch_icon: option.from_result(apple_touch_icon),
+    service_worker: option.from_result(service_worker),
+    invalid: list.filter_map(named, fn(pair) {
+      case pair.1 {
+        Error(True) -> Ok(pair.0)
+        _ -> Error(Nil)
+      }
+    }),
+  )
+}
+
+/// 任意の String の const。`Error(False)` は無い(出さない)、`Error(True)` は在るのに
+/// 空でない String の定数でない(型違い・空文字)。
+fn optional_shell_string(
+  module: glance.Module,
+  name: String,
+) -> Result(String, Bool) {
+  case public_named_constant(module, name) {
+    None -> Error(False)
+    Some(constant) ->
+      case g.string_value(constant.value) {
+        Some("") | None -> Error(True)
+        Some(value) -> Ok(value)
+      }
   }
 }
 
@@ -853,12 +922,23 @@ fn missing_label(name: String, value: Option(a)) -> List(String) {
 fn shell_notes(front: Front) -> List(stop.Note) {
   case front.shell.present {
     True ->
-      list.map(front.shell.missing, fn(name) {
-        stop.Note(
-          class: stop.Missing,
-          text: front.face <> "/src/shell.gleam: " <> name <> " が無い",
-        )
-      })
+      list.append(
+        list.map(front.shell.missing, fn(name) {
+          stop.Note(
+            class: stop.Missing,
+            text: front.face <> "/src/shell.gleam: " <> name <> " が無い",
+          )
+        }),
+        list.map(front.shell.head.invalid, fn(name) {
+          stop.Note(
+            class: stop.Missing,
+            text: front.face
+              <> "/src/shell.gleam: "
+              <> name
+              <> " は空でない String の定数で書く",
+          )
+        }),
+      )
     False -> [
       stop.Note(class: stop.Missing, text: front.face <> "/src/shell.gleam: 無い"),
     ]
