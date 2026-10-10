@@ -192,9 +192,21 @@ pub fn emit(
         list.append(attached_live, blob_entry_files),
       ),
     )
-  let island_files = case all_live_files {
-    [] -> []
-    _ -> [
+  let island_files = case all_live_files, model_.shell.head.service_worker {
+    [], None -> []
+    // 0.11.12:島が無くても shell の service_worker があれば、登録だけの client.mjs を出す
+    [], Some(service_worker) -> [
+      File(
+        path: face_name <> "/priv/static/_yumemi/client.mjs",
+        text: js_header(
+          face_name <> "/src/shell.gleam",
+          digest.short(hash.entry(hashes) <> service_worker),
+        )
+          <> "\n\n"
+          <> service_worker_text(Some(service_worker)),
+      ),
+    ]
+    _, _ -> [
       File(
         path: face_name <> "/src/gen/live/transport_ffi.mjs",
         text: transport_text(face_name, model_, hashes),
@@ -1831,9 +1843,17 @@ fn transport_text(
   front: reader_front.Front,
   hashes: hash.Hashes,
 ) -> String {
+  let service_worker_input = case front.shell.head.service_worker {
+    Some(service_worker) -> service_worker
+    None -> ""
+  }
   js_header(
     face_name <> "/src/components/*.gleam and src/entry.gleam",
-    digest.short(hash.entry(hashes) <> string.inspect(front.components)),
+    digest.short(
+      hash.entry(hashes)
+      <> string.inspect(front.components)
+      <> service_worker_input,
+    ),
   )
   <> "\n"
   <> "const selectedFiles = new Map();\n"
@@ -2103,6 +2123,25 @@ fn client_text(
   <> "}\n\n"
   <> "boot();\n"
   <> navigation.1
+  <> service_worker_text(front.shell.head.service_worker)
+}
+
+/// 0.11.12:shell の service_worker を読み込み時に 1 回登録する。client 遷移では client.mjs を
+/// 読み直さないので 1 回のまま。`serviceWorker` が無い環境では何もせず、失敗は握る。
+fn service_worker_text(service_worker: Option(String)) -> String {
+  case service_worker {
+    None -> ""
+    Some(path) ->
+      "\nif (globalThis.navigator?.serviceWorker) {\n"
+      <> "  try {\n"
+      <> "    globalThis.navigator.serviceWorker.register("
+      <> quoted(path)
+      <> ").catch(() => {});\n"
+      <> "  } catch (_error) {\n"
+      <> "    // 登録できなくても画面は壊さない\n"
+      <> "  }\n"
+      <> "}\n"
+  }
 }
 
 fn client_component_import(component: reader_front.Component) -> String {
@@ -3783,11 +3822,46 @@ fn page_render_text(
   <> "      raw_html.title([], "
   <> quoted(front.shell.title)
   <> "),\n"
+  <> shell_head_text(front.shell.head)
   <> "    ]),\n"
   <> "    raw_html.body([], [styled_body]),\n"
   <> "  ])\n"
   <> "}\n\n"
   <> theme_global_text(front, theme, theme_background_blob)
+}
+
+/// shell の任意の const(0.11.12)を title の後ろに出す。無い const の要素は出さない。
+fn shell_head_text(head: reader_front.ShellHead) -> String {
+  [
+    #(head.manifest, "link", "rel", "manifest", "href"),
+    #(head.theme_color, "meta", "name", "theme-color", "content"),
+    #(head.icon, "link", "rel", "icon", "href"),
+    #(head.apple_touch_icon, "link", "rel", "apple-touch-icon", "href"),
+  ]
+  |> list.filter_map(fn(row) {
+    let #(value, tag, key, kind, value_key) = row
+    case value {
+      Some(value) ->
+        Ok(
+          "      raw_html."
+          <> tag
+          <> "([\n"
+          <> "        attribute.attribute("
+          <> quoted(key)
+          <> ", "
+          <> quoted(kind)
+          <> "),\n"
+          <> "        attribute.attribute("
+          <> quoted(value_key)
+          <> ", "
+          <> quoted(value)
+          <> "),\n"
+          <> "      ]),\n",
+        )
+      None -> Error(Nil)
+    }
+  })
+  |> string.concat
 }
 
 fn theme_source(sources: List(LoadSource)) -> Option(LoadSource) {
@@ -5344,7 +5418,7 @@ fn shell_text(
   <> shell_decoder_text(decoder_services)
   <> "\n"
   <> shell_runtime_text(
-    front.components != [],
+    front.components != [] || option.is_some(front.shell.head.service_worker),
     uses_current_route(front),
     static_grid_css(front.layout)
       <> static_pages_grid_css(front.pages)

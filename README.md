@@ -26,6 +26,31 @@ Extracted from the `framework/` directory of a production application on 2026-09
 gleam build
 ```
 
+## `framework/front` ── Shell: the home screen and the service worker (0.11.12)
+
+A face's `src/shell.gleam` holds the constants the generator puts in every page's `<head>`. `lang`, `title` and `theme` are required (as before). Five more are optional `String` constants; each one that is present adds one element after the `<title>`, in this order, and a shell without them generates exactly what 0.11.11 did:
+
+| Constant | Goes out as |
+|---|---|
+| `manifest` | `<link rel="manifest" href="..">` |
+| `theme_color` | `<meta name="theme-color" content="..">` |
+| `icon` | `<link rel="icon" href="..">` (the favicon) |
+| `apple_touch_icon` | `<link rel="apple-touch-icon" href="..">` |
+| `service_worker` | the generated `priv/static/_yumemi/client.mjs` calls `navigator.serviceWorker.register("..")` once when it loads |
+
+```gleam
+pub const manifest: String = "/manifest.webmanifest"
+pub const theme_color: String = "#A93632"
+pub const icon: String = "/favicon.svg"
+pub const apple_touch_icon: String = "/apple-touch-icon.png"
+pub const service_worker: String = "/sw.js"
+```
+
+- The files themselves (the manifest, the icons, `sw.js`) are the face's static assets under `priv/static/`; the generator only links them.
+- The registration does nothing where `navigator.serviceWorker` is missing, and a failed registration is swallowed (the page keeps working). Client navigation does not reload `client.mjs`, so it registers once per page load. A face without islands gets a `client.mjs` that only registers the worker (and the page loads it); a face with neither gets no `client.mjs`, as before.
+- Client navigation swaps the whole `<head>` (except the client script), so each element stays exactly once after a navigation.
+- A constant that is present but is not a non-empty `String` constant (another type, or `""`) stops the generator like a missing `title`: exit 3, `<face>/src/shell.gleam: <name> は空でない String の定数で書く`.
+
 ## `framework/front` ── Style (0.11.10)
 
 `framework/front/css`'s `Style` is the typed vocabulary a Page / Area / component carries; `framework/front/sketch_css` maps it to CSS (sketch classes, so a Style used by an island also lands in the island's shadow `<style>`). Color values are strings passed straight through, so `var(--ma-color-bg)` and `color-mix(...)` work — the app owns its palette, yumemi bakes in no hex. Every word also works inside `State(Hover / Focus / Disabled / Current, ..)` and `Responsive(SP / PC / Tablet, ..)`.
@@ -143,6 +168,11 @@ A Service whose logic runs `step.commit` and continues after it (and is not a qu
 - Regenerating an app that uses none of these is byte-identical.
 
 0.11.11 changes documentation only (one README sentence and one source comment). No code, type or generated output changes.
+
+0.11.12 adds, without changing the existing output:
+
+- **Shell:** the optional constants `manifest`, `theme_color`, `icon`, `apple_touch_icon` (elements in `<head>`) and `service_worker` (registered by the generated `client.mjs`) (see Shell above). A wrong type or an empty string stops with exit 3.
+- Regenerating an app that uses none of these is byte-identical.
 
 **Imports outside the package**
 

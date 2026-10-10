@@ -4936,3 +4936,172 @@ pub fn front_emit_wrap_style_constant_passes_test() {
     })
   string.contains(page, "styled_area(\"page\", style.url,") |> should.be_true
 }
+
+// 0.11.12:shell の任意の const。fixture の shell に足して、head に 4 つの要素(title の後ろ、この順)と
+// client.mjs の service worker の登録が出る。
+fn shell_with_head(extra: String) -> List(source.Unit) {
+  let assert Ok(face_units) = source.load("fixtures/article/public")
+  list.map(face_units, fn(unit) {
+    case unit.path {
+      "shell" -> source_unit("shell", unit.text <> extra)
+      _ -> unit
+    }
+  })
+}
+
+const shell_head_consts = "\npub const manifest: String = \"/manifest.webmanifest\"\n"
+  <> "pub const theme_color: String = \"#A93632\"\n"
+  <> "pub const icon: String = \"/favicon.ico\"\n"
+  <> "pub const apple_touch_icon: String = \"/apple-touch-icon.png\"\n"
+  <> "pub const service_worker: String = \"/sw.js\"\n"
+
+fn file_text(files: List(#(String, String)), path: String) -> String {
+  let assert Ok(#(_, text)) = list.find(files, fn(file) { file.0 == path })
+  text
+}
+
+pub fn front_emit_shell_head_consts_render_in_head_test() {
+  let face_units = shell_with_head(shell_head_consts)
+  let test_app = app()
+  front_from_units_named("public", face_units, test_app.services)
+  |> front.notes(test_app.services)
+  |> list.filter(fn(note) { string.contains(note.text, "shell.gleam") })
+  |> should.equal([])
+  let files = synthetic_front_files(face_units)
+  let page = file_text(files, "public/src/gen/load/article/arg_slug/page.gleam")
+  string.contains(
+    page,
+    "      raw_html.title([], \"yumemi front fixture\"),\n"
+      <> "      raw_html.link([\n"
+      <> "        attribute.attribute(\"rel\", \"manifest\"),\n"
+      <> "        attribute.attribute(\"href\", \"/manifest.webmanifest\"),\n"
+      <> "      ]),\n"
+      <> "      raw_html.meta([\n"
+      <> "        attribute.attribute(\"name\", \"theme-color\"),\n"
+      <> "        attribute.attribute(\"content\", \"#A93632\"),\n"
+      <> "      ]),\n"
+      <> "      raw_html.link([\n"
+      <> "        attribute.attribute(\"rel\", \"icon\"),\n"
+      <> "        attribute.attribute(\"href\", \"/favicon.ico\"),\n"
+      <> "      ]),\n"
+      <> "      raw_html.link([\n"
+      <> "        attribute.attribute(\"rel\", \"apple-touch-icon\"),\n"
+      <> "        attribute.attribute(\"href\", \"/apple-touch-icon.png\"),\n"
+      <> "      ]),\n"
+      <> "    ]),\n"
+      <> "    raw_html.body([], [styled_body]),\n",
+  )
+  |> should.be_true
+  let client = file_text(files, "public/priv/static/_yumemi/client.mjs")
+  string.contains(
+    client,
+    "if (globalThis.navigator?.serviceWorker) {\n"
+      <> "  try {\n"
+      <> "    globalThis.navigator.serviceWorker.register(\"/sw.js\").catch(() => {});\n",
+  )
+  |> should.be_true
+  // 登録は 1 回、島の登録(boot)は今のまま
+  string.split(client, "serviceWorker.register(")
+  |> list.length
+  |> should.equal(2)
+  string.contains(client, "boot();\n") |> should.be_true
+}
+
+// 1 つだけ書けば、その要素だけが出る(他の 3 つと登録は出ない)。
+pub fn front_emit_shell_head_one_const_test() {
+  let files =
+    synthetic_front_files(shell_with_head(
+      "\npub const theme_color: String = \"#112233\"\n",
+    ))
+  let page = file_text(files, "public/src/gen/load/article/arg_slug/page.gleam")
+  string.contains(page, "\"theme-color\"") |> should.be_true
+  string.contains(page, "\"manifest\"") |> should.be_false
+  string.contains(page, "\"icon\"") |> should.be_false
+  string.contains(page, "\"apple-touch-icon\"") |> should.be_false
+  file_text(files, "public/priv/static/_yumemi/client.mjs")
+  |> string.contains("serviceWorker")
+  |> should.be_false
+}
+
+// const を書かない shell の生成は 0.11.11 と同じ(head・client.mjs・shell.mjs)。
+pub fn front_emit_shell_without_head_consts_is_unchanged_test() {
+  let assert Ok(face_units) = source.load("fixtures/article/public")
+  let plain = synthetic_front_files(face_units)
+  let page = file_text(plain, "public/src/gen/load/article/arg_slug/page.gleam")
+  string.contains(
+    page,
+    "      raw_html.title([], \"yumemi front fixture\"),\n"
+      <> "    ]),\n"
+      <> "    raw_html.body([], [styled_body]),\n",
+  )
+  |> should.be_true
+  file_text(plain, "public/priv/static/_yumemi/client.mjs")
+  |> string.contains("serviceWorker")
+  |> should.be_false
+  // 島の在る面では、足した const の在る無しで shell.mjs は頭の sha の行の他は変わらない
+  let with = synthetic_front_files(shell_with_head(shell_head_consts))
+  without_first_line(file_text(with, "public/src/gen/shell.mjs"))
+  |> should.equal(
+    without_first_line(file_text(plain, "public/src/gen/shell.mjs")),
+  )
+}
+
+fn without_first_line(text: String) -> String {
+  case string.split_once(text, "\n") {
+    Ok(#(_, rest)) -> rest
+    Error(_) -> text
+  }
+}
+
+// 島の無い面でも service_worker があれば、登録だけの client.mjs と shell の script の差し込みが出る。
+pub fn front_emit_service_worker_without_islands_test() {
+  let face_units =
+    shell_with_head("\npub const service_worker: String = \"/sw.js\"\n")
+    |> list.filter(fn(unit) { !string.starts_with(unit.path, "components/") })
+  let files = synthetic_front_files(face_units)
+  let client = file_text(files, "public/priv/static/_yumemi/client.mjs")
+  string.contains(client, "serviceWorker.register(\"/sw.js\")")
+  |> should.be_true
+  string.contains(client, "lustreRegister") |> should.be_false
+  file_text(files, "public/src/gen/shell.mjs")
+  |> string.contains(
+    "  return rendered.replace(\"</head>\", '<script type=\"module\" src=\"/_yumemi/client.mjs\"></script></head>');\n",
+  )
+  |> should.be_true
+  // service_worker も島も無い面は client.mjs を出さず、script も差さない
+  let assert Ok(base_units) = source.load("fixtures/article/public")
+  let bare =
+    base_units
+    |> list.filter(fn(unit) { !string.starts_with(unit.path, "components/") })
+    |> synthetic_front_files
+  list.any(bare, fn(file) { file.0 == "public/priv/static/_yumemi/client.mjs" })
+  |> should.be_false
+  file_text(bare, "public/src/gen/shell.mjs")
+  |> string.contains("  return rendered;\n")
+  |> should.be_true
+}
+
+// 型違い・空文字は title と同じく宣言の不足(exit 3)で止める。
+pub fn shell_head_invalid_consts_are_exit_three_test() {
+  let face_units =
+    shell_with_head(
+      "\npub const manifest: Int = 1\n"
+      <> "pub const icon: String = \"\"\n"
+      <> "pub const service_worker: String = \"/sw.js\"\n",
+    )
+  let test_app = app()
+  let notes =
+    front_from_units_named("public", face_units, test_app.services)
+    |> front.notes(test_app.services)
+    |> list.filter(fn(note) { string.contains(note.text, "shell.gleam") })
+  list.length(notes) |> should.equal(2)
+  let report = stop.report(notes)
+  string.contains(
+    report,
+    "public/src/shell.gleam: manifest は空でない String の定数で書く",
+  )
+  |> should.be_true
+  string.contains(report, "public/src/shell.gleam: icon は空でない String の定数で書く")
+  |> should.be_true
+  stop.worst(notes) |> should.equal(3)
+}
