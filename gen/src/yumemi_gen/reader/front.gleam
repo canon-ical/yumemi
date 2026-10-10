@@ -61,6 +61,8 @@ pub type ShellHead {
     icon: Option(String),
     apple_touch_icon: Option(String),
     service_worker: Option(String),
+    /// 0.11.15:`<head>` に出す stylesheet の href(並びの順)。const が無ければ空。
+    stylesheets: List(String),
     invalid: List(String),
   )
 }
@@ -71,6 +73,7 @@ pub const empty_shell_head = ShellHead(
   icon: None,
   apple_touch_icon: None,
   service_worker: None,
+  stylesheets: [],
   invalid: [],
 )
 
@@ -860,6 +863,7 @@ fn shell_head(module: glance.Module) -> ShellHead {
   let icon = optional_shell_string(module, "icon")
   let apple_touch_icon = optional_shell_string(module, "apple_touch_icon")
   let service_worker = optional_shell_string(module, "service_worker")
+  let stylesheets = optional_shell_strings(module, "stylesheets")
   let named = [
     #("manifest", manifest),
     #("theme_color", theme_color),
@@ -873,13 +877,40 @@ fn shell_head(module: glance.Module) -> ShellHead {
     icon: option.from_result(icon),
     apple_touch_icon: option.from_result(apple_touch_icon),
     service_worker: option.from_result(service_worker),
+    stylesheets: result.unwrap(stylesheets, []),
     invalid: list.filter_map(named, fn(pair) {
       case pair.1 {
         Error(True) -> Ok(pair.0)
         _ -> Error(Nil)
       }
-    }),
+    })
+      |> list.append(case stylesheets {
+        Error(True) -> ["stylesheets"]
+        _ -> []
+      }),
   )
+}
+
+/// 任意の String の List の const(0.11.15)。`Error(False)` は無い、`Error(True)` は在るのに List の literal で
+/// ない・空でない String でない要素を持つ。
+fn optional_shell_strings(
+  module: glance.Module,
+  name: String,
+) -> Result(List(String), Bool) {
+  case public_named_constant(module, name) {
+    None -> Error(False)
+    Some(constant) ->
+      case constant.value {
+        glance.List(elements: elements, rest: None, ..) ->
+          list.try_map(elements, fn(element) {
+            case g.string_value(element) {
+              Some("") | None -> Error(True)
+              Some(value) -> Ok(value)
+            }
+          })
+        _ -> Error(True)
+      }
+  }
 }
 
 /// 任意の String の const。`Error(False)` は無い(出さない)、`Error(True)` は在るのに
@@ -935,7 +966,10 @@ fn shell_notes(front: Front) -> List(stop.Note) {
             text: front.face
               <> "/src/shell.gleam: "
               <> name
-              <> " は空でない String の定数で書く",
+              <> case name {
+              "stylesheets" -> " は空でない String の List の定数で書く"
+              _ -> " は空でない String の定数で書く"
+            },
           )
         }),
       )

@@ -1981,8 +1981,10 @@ pub fn client_notes(
 }
 
 /// client で差し替えてよい Page の route(0.11.4、H9)と、client 遷移で数える pageview の送り先(r2)。面の Page の
-/// route から、門の `frame_src` の Page を外す(CSP の header は頁の読み込みにしか効かない)。外した Page へ・から の
-/// 遷移は頁の読み込みのまま。pageview の Page は外さない ── 門が client 遷移の fetch に数える印を差し、client が送る。
+/// route を全部出し、門の `frame_src` の Page は応答に持つ CSP の header の値を `csp` に route ごとに出す(0.11.15)。
+/// client は今の document を読み込んだ Page と CSP が同じ行き先だけを取り、違えば頁の読み込み(CSP の header は
+/// 頁の読み込みにしか効かない)。CSP を持つ Page の無い面は 0.11.14 と同じ字。pageview の Page も入る ── 門が
+/// client 遷移の fetch に数える印を差し、client が送る。
 fn navigation(
   app: model.App,
   back_units: List(Unit),
@@ -1990,15 +1992,25 @@ fn navigation(
   front: reader_front.Front,
 ) -> #(List(String), String) {
   let #(gate, _) = read_gate(app, back_units, package, front)
-  let csp = case gate.frame_hosts {
-    [] -> []
-    _ -> gate.frame_src
+  let routes = front_route_paths(front)
+  let csp = case gate_emit.csp(gate) {
+    Some(value) ->
+      case
+        list.filter(routes, fn(path) {
+          list.any(gate.frame_src, fn(match) { reader_gate.covers(match, path) })
+        })
+      {
+        [] -> ""
+        framed ->
+          ", csp: { "
+          <> string.join(
+            list.map(framed, fn(path) { quoted(path) <> ": " <> quoted(value) }),
+            ", ",
+          )
+          <> " }"
+      }
+    None -> ""
   }
-  let routes =
-    front_route_paths(front)
-    |> list.filter(fn(path) {
-      !list.any(csp, fn(match) { reader_gate.covers(match, path) })
-    })
   let pageview = case gate.pageview {
     Some(pageview) ->
       ", pageview: { endpoint: "
@@ -2010,7 +2022,7 @@ fn navigation(
       <> " }"
     None -> ""
   }
-  #(routes, pageview)
+  #(routes, csp <> pageview)
 }
 
 fn client_text(
@@ -3945,13 +3957,19 @@ fn page_render_text(
   <> theme_global_text(front, theme, theme_background_blob)
 }
 
-/// shell の任意の const(0.11.12)を title の後ろに出す。無い const の要素は出さない。
+/// shell の任意の const(0.11.12)を title の後ろに出す。無い const の要素は出さない。`stylesheets`(0.11.15)は
+/// その後ろに並びの順で `<link rel="stylesheet">` を出す(client 遷移の head の差し替えで残る)。
 fn shell_head_text(head: reader_front.ShellHead) -> String {
+  let stylesheets =
+    list.map(head.stylesheets, fn(href) {
+      #(Some(href), "link", "rel", "stylesheet", "href")
+    })
   [
     #(head.manifest, "link", "rel", "manifest", "href"),
     #(head.theme_color, "meta", "name", "theme-color", "content"),
     #(head.icon, "link", "rel", "icon", "href"),
     #(head.apple_touch_icon, "link", "rel", "apple-touch-icon", "href"),
+    ..stylesheets
   ]
   |> list.filter_map(fn(row) {
     let #(value, tag, key, kind, value_key) = row

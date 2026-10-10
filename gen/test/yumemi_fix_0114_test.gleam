@@ -302,8 +302,9 @@ pub fn navigation_keeps_counted_pages_and_passes_pageview_test() {
   |> should.be_true
 }
 
-/// r2(柏木 P1-7):門の `frame_src`(CSP)の Page は route 表から外す(頁の読み込みのまま)。
-pub fn navigation_skips_csp_pages_test() {
+/// r2(柏木 P1-7)→ 0.11.15:門の `frame_src`(CSP)の Page も route 表に入れ、その CSP の値を持たせる
+/// (`csp` に route ごと。client は今の document の CSP と同じ行き先だけを取る)。
+pub fn navigation_carries_csp_pages_test() {
   let assert Ok(back_units) = source.load(article_fixture)
   let assert Ok(entry) =
     list.find(back_units, fn(unit) { unit.path == "entry" })
@@ -332,7 +333,7 @@ pub fn navigation_skips_csp_pages_test() {
     face_file([framed], [csp_gate], "public/priv/static/_yumemi/client.mjs")
   string.contains(
     text,
-    "startNavigation({ routes: [\"/article/:slug\"], boot });",
+    "startNavigation({ routes: [\"/article/:slug\", \"/status\"], boot, csp: { \"/status\": \"frame-src https://frames.example\" } });",
   )
   |> should.be_true
 }
