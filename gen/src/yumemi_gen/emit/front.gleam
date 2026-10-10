@@ -3559,6 +3559,121 @@ fn output_has_custom_type(
   })
 }
 
+/// 面のどこかの Page が theme を取るか。取らない面の shell には theme の path を
+/// たどる実行時を出さない(theme を書かない面の生成を変えないため)。
+fn uses_page_theme(
+  app: model.App,
+  units: List(Unit),
+  front: reader_front.Front,
+) -> Bool {
+  list.any(front.pages, fn(page) {
+    page_sources(app, units, page, front.blocks, app.services)
+    |> list.any(fn(source) { source.type_name == "PageTheme" })
+  })
+}
+
+/// theme を取る Service の Out の中で、PageTheme の値に着くまでの欄の path。
+/// 各段は #(欄名, その欄が Option か)で、型が PageTheme か Option(PageTheme) の
+/// 欄で終わる。Page の `theme: Some(name)` の `name` はその最後の欄の名で、名の
+/// 合う path を取る。合う path が無ければ一番浅い path を取る。着けなければ None。
+fn page_theme_path(
+  units: List(Unit),
+  service: String,
+  name: String,
+) -> Option(List(#(String, Bool))) {
+  let service_path = "service/" <> service
+  case output_type(units, service_path) {
+    Some(type_) -> {
+      let paths =
+        theme_paths(units, scope_for(units, service_path), type_, [], [])
+        |> list.sort(fn(left, right) {
+          int.compare(list.length(left), list.length(right))
+        })
+      let named =
+        list.find(paths, fn(path) {
+          case list.last(path) {
+            Ok(step) -> step.0 == name
+            Error(_) -> False
+          }
+        })
+      case named, paths {
+        Ok(path), _ -> Some(path)
+        Error(_), [path, ..] -> Some(path)
+        Error(_), [] -> None
+      }
+    }
+    None -> None
+  }
+}
+
+fn theme_paths(
+  units: List(Unit),
+  scope: Scope,
+  type_: glance.Type,
+  prefix: List(#(String, Bool)),
+  seen: List(String),
+) -> List(List(#(String, Bool))) {
+  case record_fields(units, scope, type_, 0) {
+    Some(#(key, record_scope, fields)) ->
+      case list.contains(seen, key) {
+        True -> []
+        False ->
+          list.flat_map(fields, fn(field) {
+            case field {
+              glance.LabelledVariantField(label: label, item: item) -> {
+                let #(inner, optional) = option_inner(item)
+                let steps = [#(label, optional), ..prefix]
+                case type_name(inner) == "PageTheme" {
+                  True -> [list.reverse(steps)]
+                  False ->
+                    theme_paths(units, record_scope, inner, steps, [key, ..seen])
+                }
+              }
+              glance.UnlabelledVariantField(..) -> []
+            }
+          })
+      }
+    None -> []
+  }
+}
+
+fn option_inner(type_: glance.Type) -> #(glance.Type, Bool) {
+  case type_ {
+    glance.NamedType(name: "Option", parameters: [inner], ..) -> #(inner, True)
+    _ -> #(type_, False)
+  }
+}
+
+/// 型が 1 つの variant の record なら、その欄と、欄の型を読む scope。alias はたどる。
+fn record_fields(
+  units: List(Unit),
+  scope: Scope,
+  type_: glance.Type,
+  depth: Int,
+) -> Option(#(String, Scope, List(glance.VariantField))) {
+  case type_, resolved_path(scope, type_) {
+    glance.NamedType(name: name, ..), Some(path) if depth < 8 ->
+      case unit_for(units, path) {
+        Some(unit) -> {
+          let module = g.in_order(unit.module)
+          let record_scope = scope_for(units, path)
+          case
+            g.find_custom_type(module, name),
+            g.find_type_alias(module, name)
+          {
+            Some(glance.CustomType(variants: [variant], ..)), _ ->
+              Some(#(path <> ":" <> name, record_scope, variant.fields))
+            None, Some(alias) ->
+              record_fields(units, record_scope, alias.aliased, depth + 1)
+            _, _ -> None
+          }
+        }
+        None -> None
+      }
+    _, _ -> None
+  }
+}
+
 fn unique_load_sources(sources: List(LoadSource)) -> List(LoadSource) {
   list.fold(sources, [], add_load_source)
 }
@@ -5420,6 +5535,7 @@ fn shell_text(
   <> shell_runtime_text(
     front.components != [] || option.is_some(front.shell.head.service_worker),
     uses_current_route(front),
+    uses_page_theme(app, units, front),
     static_grid_css(front.layout)
       <> static_pages_grid_css(front.pages)
       <> generated_front_css(front),
@@ -5624,7 +5740,7 @@ fn shell_page_tables(
       <> shell_given_rows(app, front, page)
       <> "    ],\n"
       <> "    sources: [\n"
-      <> shell_source_rows(app, front, page, sources)
+      <> shell_source_rows(app, units, front, page, sources)
       <> "    ],\n"
       <> "  }],"
     })
@@ -5723,6 +5839,7 @@ fn js_export_name(name: String) -> String {
 
 fn shell_source_rows(
   app: model.App,
+  units: List(Unit),
   front: reader_front.Front,
   page: reader_front.Page,
   sources: List(LoadSource),
@@ -5730,7 +5847,21 @@ fn shell_source_rows(
   sources
   |> list.map(fn(source) {
     case source.type_name == "PageTheme" {
-      True -> "      { theme: true },\n"
+      True ->
+        case page_theme_path(units, source.service, source.name) {
+          Some(path) ->
+            "      { theme: true, from: service.Service$"
+            <> naming.pascal(source.service)
+            <> "$const, path: ["
+            <> string.join(
+              list.map(path, fn(step) {
+                "[" <> quoted(step.0) <> ", " <> bool_text(step.1) <> "]"
+              }),
+              ", ",
+            )
+            <> "] },\n"
+          None -> "      { theme: true },\n"
+        }
       False -> {
         "      { service: service.Service$"
         <> naming.pascal(source.service)
@@ -6438,6 +6569,7 @@ fn uses_current_route(front: reader_front.Front) -> Bool {
 fn shell_runtime_text(
   include_client: Bool,
   include_route: Bool,
+  include_theme: Bool,
   grid_css: String,
 ) -> String {
   "function areaNames(areas) {\n"
@@ -6539,10 +6671,23 @@ fn shell_runtime_text(
   <> "  }\n"
   <> "  return app.fetch(new Request(target, request));\n"
   <> "}\n\n"
-  <> "function pageTheme(definition, root) {\n"
-  <> "  if (!(definition.theme instanceof Some)) return Option$None$const;\n"
-  <> "  return root[definition.theme[0]] ?? Option$None$const;\n"
-  <> "}\n\n"
+  <> case include_theme {
+    True ->
+      "function pageTheme(path, value) {\n"
+      <> "  if (value === undefined || value === null) return Option$None$const;\n"
+      <> "  for (const [field, optional] of path) {\n"
+      <> "    value = value[field];\n"
+      <> "    if (value instanceof Some) value = value[0];\n"
+      <> "    else if (optional || value === undefined || value === null) return Option$None$const;\n"
+      <> "  }\n"
+      <> "  return new Some(value);\n"
+      <> "}\n\n"
+    False ->
+      "function pageTheme(definition, root) {\n"
+      <> "  if (!(definition.theme instanceof Some)) return Option$None$const;\n"
+      <> "  return root[definition.theme[0]] ?? Option$None$const;\n"
+      <> "}\n\n"
+  }
   <> "function failure(status, body) {\n"
   <> "  return new Response(body, {status, headers: {\"content-type\": \"text/plain; charset=utf-8\"}});\n"
   <> "}\n\n"
@@ -6597,12 +6742,22 @@ fn shell_runtime_text(
   <> "    vars[field.name] = value;\n"
   <> "  }\n"
   <> "  const values = [vars];\n"
-  <> "  let root = null;\n"
-  <> "  for (const source of matched.spec.sources) {\n"
-  <> "    if (source.theme) {\n"
-  <> "      values.push(pageTheme(matched.definition, root));\n"
-  <> "      continue;\n"
-  <> "    }\n"
+  <> case include_theme {
+    True ->
+      "  const read = new Map();\n"
+      <> "  for (const source of matched.spec.sources) {\n"
+      <> "    if (source.theme) {\n"
+      <> "      values.push(pageTheme(source.path ?? [], read.get(source.from)));\n"
+      <> "      continue;\n"
+      <> "    }\n"
+    False ->
+      "  let root = null;\n"
+      <> "  for (const source of matched.spec.sources) {\n"
+      <> "    if (source.theme) {\n"
+      <> "      values.push(pageTheme(matched.definition, root));\n"
+      <> "      continue;\n"
+      <> "    }\n"
+  }
   <> "    const response = await readFromApp(env.APP, request, source.service, argsFor(vars, source.args));\n"
   <> "    if (!response.ok) {\n"
   <> "      if (response.status === 403) return failure(403, \"adult declaration required\");\n"
@@ -6611,7 +6766,10 @@ fn shell_runtime_text(
   <> "      return failure(response.status, source.root ? \"root read failed\" : \"widget read failed\");\n"
   <> "    }\n"
   <> "    const decoded = source.decoder(await response.json());\n"
-  <> "    if (source.root) root = decoded;\n"
+  <> case include_theme {
+    True -> "    read.set(source.service, decoded);\n"
+    False -> "    if (source.root) root = decoded;\n"
+  }
   <> "    values.push(source.optional ? new Some(decoded) : decoded);\n"
   <> "  }\n"
   <> "  const givens = [];\n"

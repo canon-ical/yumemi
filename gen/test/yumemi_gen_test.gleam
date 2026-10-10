@@ -5046,6 +5046,127 @@ pub fn front_emit_shell_without_head_consts_is_unchanged_test() {
   )
 }
 
+// 0.11.13:Page の theme は、theme を選んだ Service の Out の中の PageTheme まで欄をたどって取る。
+// fixture の ArticleRead の Out を `look: Look`(`Look(theme: Option(PageTheme))`)へ包み直し、
+// 後ろに Feed(WidgetList)の root を足す ── theme の Service が最後の root でない、theme が 2 段目。
+fn synthetic_front_files_with_nested_theme() -> List(#(String, String)) {
+  let assert Ok(back_units) = source.load(fixture)
+  let back_units =
+    list.map(back_units, fn(unit) {
+      case unit.path == "service/article_read" {
+        True ->
+          source_unit(
+            "service/article_read",
+            unit.text
+              |> string.replace(
+                "    theme: Option(PageTheme),\n  )\n}",
+                "    look: Look,\n  )\n}\n\npub type Look {\n  Look(theme: Option(PageTheme))\n}",
+              )
+              |> string.replace("theme: None))", "look: Look(theme: None)))"),
+          )
+        False -> unit
+      }
+    })
+  let assert Ok(test_app) = reader.read(back_units)
+  let assert Ok(face_units) = source.load("fixtures/article/public")
+  let face_units =
+    list.map(face_units, fn(unit) {
+      case unit.path == "pages/article/arg_slug/page" {
+        True ->
+          source_unit(
+            unit.path,
+            string.replace(
+              unit.text,
+              "      Fixed(area: \"page\", block: blocks.Notice, cell: Flow),\n",
+              "      Fixed(area: \"page\", block: blocks.Notice, cell: Flow),\n"
+                <> "      Fixed(area: \"page\", block: blocks.Feed, cell: Flow),\n",
+            ),
+          )
+        False -> unit
+      }
+    })
+  let assert Ok(front_model) =
+    front.read_with_package("public", "public", face_units, test_app.services)
+  let package =
+    face.Package(
+      name: "public",
+      path: "fixtures/article/public",
+      pages: face.UndeclaredPages,
+      units: face_units,
+    )
+  front_emit.emit(
+    test_app,
+    back_units,
+    package,
+    front_model,
+    hash.of(back_units),
+  )
+  |> list.map(fn(file) { #(file.path, file.text) })
+}
+
+@external(javascript, "./yumemi_gen_test_ffi.mjs", "page_theme_from_shell")
+fn page_theme_from_shell(shell: String, background: String) -> String
+
+pub fn front_emit_page_theme_follows_out_path_test() {
+  let files = synthetic_front_files_with_nested_theme()
+  let shell = file_text(files, "public/src/gen/shell.mjs")
+  // root が 2 つ(layout の WidgetList・ArticleRead)、theme は ArticleRead の look.theme から
+  string.contains(
+    shell,
+    "      { service: service.Service$WidgetList$const, args: [[\"widget\", \"widget\", true], [\"slug\", \"slug\", true]], decoder: decodeWidgetList, optional: false, root: true },\n"
+      <> "      { service: service.Service$ArticleRead$const, args: [[\"slug\", \"slug\", false]], decoder: decodeArticleRead, optional: false, root: true },\n"
+      <> "      { theme: true, from: service.Service$ArticleRead$const, path: [[\"look\", false], [\"theme\", true]] },\n",
+  )
+  |> should.be_true
+  string.contains(shell, "    read.set(source.service, decoded);\n")
+  |> should.be_true
+  // 実行時:値が在れば Some、None なら None(load の theme_global が既定の色へ)
+  page_theme_from_shell(shell, "#ccffa6") |> should.equal("Some:#ccffa6")
+  page_theme_from_shell(shell, "") |> should.equal("None")
+  let page = file_text(files, "public/src/gen/load/article/arg_slug/page.gleam")
+  string.contains(page, "theme: Option(article_read.PageTheme),")
+  |> should.be_true
+  string.contains(
+    page,
+    "    None -> #(\"#FAF7F0\", \"none\", \"#3D2419\", \"#A93632\")\n",
+  )
+  |> should.be_true
+}
+
+// theme を取る Page の無い面の shell.mjs は 0.11.12 の実行時のまま(theme の path をたどる字が出ない)。
+pub fn front_emit_without_page_theme_keeps_runtime_test() {
+  let assert Ok(face_units) = source.load("fixtures/article/public")
+  let face_units =
+    list.map(face_units, fn(unit) {
+      case unit.path == "pages/article/arg_slug/page" {
+        True ->
+          source_unit(
+            unit.path,
+            string.replace(
+              unit.text,
+              "  theme: Some(\"theme\"),\n",
+              "  theme: None,\n",
+            ),
+          )
+        False -> unit
+      }
+    })
+  let shell =
+    file_text(synthetic_front_files(face_units), "public/src/gen/shell.mjs")
+  string.contains(shell, "{ theme: true") |> should.be_false
+  string.contains(
+    shell,
+    "function pageTheme(definition, root) {\n"
+      <> "  if (!(definition.theme instanceof Some)) return Option$None$const;\n"
+      <> "  return root[definition.theme[0]] ?? Option$None$const;\n"
+      <> "}\n",
+  )
+  |> should.be_true
+  string.contains(shell, "    if (source.root) root = decoded;\n")
+  |> should.be_true
+  string.contains(shell, "read.set(") |> should.be_false
+}
+
 fn without_first_line(text: String) -> String {
   case string.split_once(text, "\n") {
     Ok(#(_, rest)) -> rest
