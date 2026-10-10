@@ -51,6 +51,16 @@ pub const service_worker: String = "/sw.js"
 - Client navigation swaps the whole `<head>` (except the client script), so each element stays exactly once after a navigation.
 - A constant that is present but is not a non-empty `String` constant (another type, or `""`) stops the generator like a missing `title`: exit 3, `<face>/src/shell.gleam: <name> は空でない String の定数で書く`.
 
+## `framework/front` ── Page theme: where the colours come from (0.11.13)
+
+`Page(.., theme: Some(name), ..)` paints the page with a `PageTheme` value read on the server (the body's `--bg`, `--bg-image`, `--text`, `--accent`; the shell's `theme` constant gives the defaults). `theme: None` paints the defaults only.
+
+- **Which Service:** the first of the Page's sources (in placement order, the layout's first) whose `Out` holds a `PageTheme` somewhere in its type. No extra read: the value is taken from that Service's response, which the page reads anyway.
+- **Where in its `Out`:** the generator follows the `Out`'s labelled record fields (through `Option`, records and type aliases; not into `List`) to a field whose type is `PageTheme` or `Option(PageTheme)`. `name` is the label of that last field: `Some("theme")` with `Out(muse: Public, ..)` and `Public(.., theme: Option(PageTheme))` reads `muse.theme`. When no path ends in a field called `name`, the shallowest path is taken.
+- **At runtime:** a `None` on the way (or a `None` theme) gives `None`, and the page uses the defaults.
+- `name` is also the name of the `Data` field (`theme: Option(<service>.PageTheme)`) in the generated `load/**/page.gleam`.
+- When no field path reaches a `PageTheme`, the generator does not stop: `load/**/page.gleam` is what 0.11.12 generated (with no source holding one, it names `<root service>.PageTheme`, which does not compile), the shell's theme row stays `{ theme: true }`, and the page gets `None` (the defaults) at runtime.
+
 ## `framework/front` ── Style (0.11.10)
 
 `framework/front/css`'s `Style` is the typed vocabulary a Page / Area / component carries; `framework/front/sketch_css` maps it to CSS (sketch classes, so a Style used by an island also lands in the island's shadow `<style>`). Color values are strings passed straight through, so `var(--ma-color-bg)` and `color-mix(...)` work — the app owns its palette, yumemi bakes in no hex. Every word also works inside `State(Hover / Focus / Disabled / Current, ..)` and `Responsive(SP / PC / Tablet, ..)`.
@@ -173,6 +183,11 @@ A Service whose logic runs `step.commit` and continues after it (and is not a qu
 
 - **Shell:** the optional constants `manifest`, `theme_color`, `icon`, `apple_touch_icon` (elements in `<head>`) and `service_worker` (registered by the generated `client.mjs`) (see Shell above). A wrong type or an empty string stops with exit 3.
 - Regenerating an app that uses none of these is byte-identical.
+
+0.11.13 fixes `Page(theme: Some(name))`, which always gave `None` at runtime (the shell looked up `name` at the top of the last source's `Out`):
+
+- **Page theme:** the theme is taken from the Service the generator picked, along the field path to its `PageTheme` (see Page theme above). Only the generated `shell.mjs` of a face with a themed Page changes (the theme row and the `pageTheme` lookup).
+- Regenerating a face with no `theme: Some(..)` Page is byte-identical.
 
 **Imports outside the package**
 

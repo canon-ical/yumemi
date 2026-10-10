@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { Some, Option$None$const } from "../gleam_stdlib/gleam/option.mjs";
 import {
   bundle_front,
   prepareTemporaryPackage,
@@ -122,4 +123,27 @@ export function path_manifest_keeps_other_versions() {
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+}
+
+// 0.11.13:生成の shell.mjs から pageTheme と theme の行(path)を取り出し、decode 済みの値の形
+// (Gleam の record は欄名の property、Option は Some / None)を path どおりに組んで引く。
+// background が "" なら PageTheme の欄を None にする。
+export function page_theme_from_shell(shell, background) {
+  const fnMatch = shell.match(/function pageTheme\(path, value\) \{[\s\S]*?\n\}\n/);
+  const rowMatch = shell.match(/\{ theme: true, from: service\.Service\$\w+\$const, path: (\[.*?\]) \}/);
+  if (!fnMatch || !rowMatch) return "missing";
+  const pageTheme = new Function("Some", "Option$None$const", fnMatch[0] + "\nreturn pageTheme;")(
+    Some,
+    Option$None$const,
+  );
+  const path = JSON.parse(rowMatch[1]);
+  let value = background === "" ? null : { background: new Some(background) };
+  for (let index = path.length - 1; index >= 0; index -= 1) {
+    const [field, optional] = path[index];
+    const held = optional ? (value === null ? Option$None$const : new Some(value)) : value;
+    value = { [field]: held };
+  }
+  const result = pageTheme(path, value);
+  if (result instanceof Some) return "Some:" + result[0].background[0];
+  return result === Option$None$const ? "None" : "other";
 }
