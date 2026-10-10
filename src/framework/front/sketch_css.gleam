@@ -7,6 +7,7 @@ import gleam/string
 import sketch/css as sketch_css
 import sketch/css/length
 import sketch/css/media
+import sketch/internals/cache/cache as sketch_style
 
 pub fn class(styles: List(css.Style)) -> sketch_css.Class {
   styles
@@ -46,9 +47,15 @@ pub fn to_sketch(style: css.Style) -> List(sketch_css.Style) {
     ]
     css.Flow(flow) -> flow_style(flow)
     css.State(state, styles) -> state_style(state, styles)
-    css.Responsive(at, styles) -> [
-      sketch_css.media(breakpoint(at), list.flat_map(styles, to_sketch)),
-    ]
+    css.Responsive(at, styles) -> {
+      let #(hovers, styles) = list.partition(styles, is_hover_capable)
+      [
+        sketch_css.media(breakpoint(at), list.flat_map(styles, to_sketch)),
+        ..list.flat_map(hovers, fn(style) {
+          hover_capable_in(media.to_string(breakpoint(at)) <> " and", style)
+        })
+      ]
+    }
     css.Animation(animation) -> [
       sketch_css.animation(animation_name(animation)),
     ]
@@ -184,8 +191,40 @@ fn state_style(
   case state {
     css.Hover -> [sketch_css.hover(styles)]
     css.Focus -> [sketch_css.focus(styles)]
+    css.FocusVisible -> [sketch_css.focus_visible(styles)]
+    css.HoverCapable -> [
+      sketch_style.Media(hover_capable_query, [sketch_css.hover(styles)]),
+    ]
     css.Disabled -> [sketch_css.disabled(styles)]
     css.Current -> [sketch_css.selector(current_selector, styles)]
+  }
+}
+
+/// hover が出来る端末だけの media。sketch の `media.Query` に `hover` が無いので、
+/// sketch の `Media` を字で組む(`css.media` と同じ形 ── `@media` の中は class の
+/// `:hover` で、詳細度は `Hover` と同じ)。
+const hover_capable_query = "@media (hover: hover)"
+
+fn is_hover_capable(style: css.Style) -> Bool {
+  case style {
+    css.State(css.HoverCapable, _) -> True
+    _ -> False
+  }
+}
+
+/// `Responsive` の中の `HoverCapable`。sketch は media の中の media を落とすので、
+/// 幅の media と `(hover: hover)` を `and` で 1 つの media にする。
+fn hover_capable_in(
+  prefix: String,
+  style: css.Style,
+) -> List(sketch_css.Style) {
+  case style {
+    css.State(css.HoverCapable, styles) -> [
+      sketch_style.Media(prefix <> " (hover: hover)", [
+        sketch_css.hover(list.flat_map(styles, to_sketch)),
+      ]),
+    ]
+    _ -> to_sketch(style)
   }
 }
 

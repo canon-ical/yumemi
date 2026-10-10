@@ -49,7 +49,8 @@ pub fn main() {
   v01110_styled_frame_carries_grid_style()
   v01110_bottom_flush_is_a_pin()
   v01110_wrap_renders_overflow_wrap()
-  io.println("Framework checks passed: 24 groups")
+  v01114_focus_visible_and_hover_capable_render_to_css()
+  io.println("Framework checks passed: 25 groups")
 }
 
 fn vars_are_typed_sources() {
@@ -862,6 +863,94 @@ fn assert_not_contains(
     True -> panic as "test failed"
     False -> Nil
   }
+}
+
+// ── 0.11.14 ── キーボードの焦点だけの `FocusVisible`、hover が出来る端末だけの
+// `HoverCapable`。既存の 4 語の字は 0.11.13 と同じ。
+
+fn v01114_focus_visible_and_hover_capable_render_to_css() {
+  let ring = [css.Outline(css.Px(2.0), css.Px(1.0), "blue")]
+  assert_equal(
+    css_of([css.State(css.FocusVisible, ring)]),
+    ".css-D95FD3F1 {\n}\n\n.css-D95FD3F1:focus-visible {\n    outline-style: solid;\n    outline-width: 2.0px;\n    outline-offset: 1.0px;\n    outline-color: blue;\n}",
+    "FocusVisible is :focus-visible",
+  )
+  assert_not_contains(
+    css_of([css.State(css.FocusVisible, ring)]),
+    ":focus {",
+    "FocusVisible has no plain :focus",
+  )
+  // `@media` の中も class の `:hover`(詳細度は `Hover` と同じ、地の class に勝つ)。
+  let hover_capable =
+    css_of([
+      css.Background("transparent"),
+      css.State(css.HoverCapable, [css.Background("red")]),
+    ])
+  assert_equal(
+    hover_capable,
+    ".css-0886F019 {\n  background-color: transparent;\n}\n\n@media (hover: hover) {\n  .css-0886F019 {\n  }\n  .css-0886F019:hover {\n      background-color: red;\n  }\n}",
+    "HoverCapable is :hover inside @media (hover: hover)",
+  )
+  // `Responsive` の中では幅の media と `and` で 1 つの media にする(sketch は media
+  // の中の media を落とす)。
+  let nested =
+    css_of([
+      css.Responsive(css.SP, [
+        css.Color("navy"),
+        css.State(css.HoverCapable, [css.Background("red")]),
+      ]),
+    ])
+  assert_contains(
+    nested,
+    "@media (max-width: 767.0px) {\n  .css-",
+    "Responsive keeps its own media",
+  )
+  assert_contains(
+    nested,
+    "@media (max-width: 767.0px) and (hover: hover) {",
+    "HoverCapable inside Responsive joins the media",
+  )
+  assert_contains(
+    nested,
+    ":hover {\n      background-color: red;",
+    "HoverCapable inside Responsive keeps its styles",
+  )
+  // 既存の語の字(0.11.13 の出力と同じ)。
+  assert_equal(
+    css_of([css.State(css.Hover, [css.Background("red")])]),
+    ".css-3F4F7A6A {\n}\n\n.css-3F4F7A6A:hover {\n    background-color: red;\n}",
+    "Hover is unchanged",
+  )
+  assert_equal(
+    css_of([css.State(css.Focus, ring)]),
+    ".css-0FD88250 {\n}\n\n.css-0FD88250:focus {\n    outline-style: solid;\n    outline-width: 2.0px;\n    outline-offset: 1.0px;\n    outline-color: blue;\n}",
+    "Focus is unchanged",
+  )
+  assert_equal(
+    css_of([css.State(css.Disabled, [css.Color("gray")])]),
+    ".css-883077B5 {\n}\n\n.css-883077B5:disabled {\n    color: gray;\n}",
+    "Disabled is unchanged",
+  )
+  assert_equal(
+    css_of([css.State(css.Current, [css.Color("navy")])]),
+    ".css-E55DB4F5 {\n}\n\n.css-E55DB4F5[aria-current]:not([aria-current=\"false\"]) {\n    color: navy;\n}",
+    "Current is unchanged",
+  )
+  let sp_hover =
+    css_of([
+      css.Responsive(css.SP, [css.State(css.Hover, [css.Background("red")])]),
+    ])
+  assert_not_contains(sp_hover, "(hover: hover)", "Hover in Responsive")
+  // 島の shadow の `<style>` にも出る(島の Style も Block の Style も同じ sketch_css)。
+  let island =
+    island_shadow_style(
+      front_sketch_css.class([
+        css.State(css.FocusVisible, ring),
+        css.State(css.HoverCapable, [css.Background("red")]),
+      ]),
+    )
+  assert_contains(island, ":focus-visible {", "island has FocusVisible")
+  assert_contains(island, "@media (hover: hover) {", "island has HoverCapable")
 }
 
 fn v01110_styled_frame_carries_grid_style() {

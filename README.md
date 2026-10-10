@@ -63,14 +63,14 @@ pub const service_worker: String = "/sw.js"
 
 ## `framework/front` ── Style (0.11.10)
 
-`framework/front/css`'s `Style` is the typed vocabulary a Page / Area / component carries; `framework/front/sketch_css` maps it to CSS (sketch classes, so a Style used by an island also lands in the island's shadow `<style>`). Color values are strings passed straight through, so `var(--ma-color-bg)` and `color-mix(...)` work — the app owns its palette, yumemi bakes in no hex. Every word also works inside `State(Hover / Focus / Disabled / Current, ..)` and `Responsive(SP / PC / Tablet, ..)`.
+`framework/front/css`'s `Style` is the typed vocabulary a Page / Area / component carries; `framework/front/sketch_css` maps it to CSS (sketch classes, so a Style used by an island also lands in the island's shadow `<style>`). Color values are strings passed straight through, so `var(--ma-color-bg)` and `color-mix(...)` work — the app owns its palette, yumemi bakes in no hex. Every word also works inside `State(Hover / Focus / FocusVisible / HoverCapable / Disabled / Current, ..)` and `Responsive(SP / PC / Tablet, ..)`.
 
 | Style | CSS |
 |---|---|
 | `Color(value)` | `color` |
 | `Background(value)` | `background-color` |
 | `Border(edge: AllEdges / BottomEdge, width, style: Solid / Dashed / Dotted, color)` | `border` / `border-bottom` (e.g. the 2px tab underline) |
-| `Outline(width, offset, color)` | `outline-style: solid` / `outline-width` / `outline-offset` / `outline-color` — the focus ring, inside `State(Focus, ..)` |
+| `Outline(width, offset, color)` | `outline-style: solid` / `outline-width` / `outline-offset` / `outline-color` — the focus ring, inside `State(FocusVisible, ..)` (0.11.14; `State(Focus, ..)` also keeps it after a tap) |
 | `Space(property:, value:)` | `margin` / `padding` / `gap` / `width` / `height` / `border-radius`, and (0.11.7) `min-width` / `min-height` / `max-width` |
 | `Text(family:, size:, weight:, line_height:)` | `font-family` (`System` / `SansSerif` / `Serif` / `Monospace`, or `Named("var(--ma-font-ui)")` / `Named("\"Noto Sans JP\", sans-serif)")`), `font-size`, `font-weight` (`Normal` 400 / `Medium` 500 / `SemiBold` 600 / `Bold` 700), `line-height` |
 | `Crop(fit: Cover / Contain / Fill / ScaleDown / FitNone, ratio: Ratio(w, h))` | `object-fit` and `aspect-ratio` |
@@ -78,6 +78,8 @@ pub const service_worker: String = "/sw.js"
 | `Marker(marker: NoMarker)` | (0.11.8) `list-style: none` — drops the `ul` / `li` bullet (clear the indent with `Space(Padding, Px(0.0))`) |
 | `Decoration(line: NoDecoration / Underline)` | (0.11.8) `text-decoration: none` / `underline` — e.g. a row link without the underline, underlined again inside `State(Hover / Focus, ..)` |
 | `Wrap(wrap: Anywhere / BreakWord / WrapNormal)` | (0.11.10) `overflow-wrap: anywhere` / `break-word` / `normal` — `Anywhere` breaks a long URL or an unbroken word at the line's width, so the row's `scrollWidth` stays its `clientWidth` (it also lowers the min-content width, so the word does not widen a flex / grid item); `BreakWord` breaks it too but keeps the min-content width |
+| `State(FocusVisible, styles)` | (0.11.14) `:focus-visible` — the focus ring for keyboard focus only. `Focus` (`:focus`) also matches after a tap or a click, so a ring put there stays on a tapped button; put the ring here instead |
+| `State(HoverCapable, styles)` | (0.11.14) `@media (hover: hover) { .class:hover { .. } }` — hover on devices that can hover (a mouse). On a touch screen `:hover` stays true after a tap, so a `Hover` background stays on the tapped button; this one is not applied there. Same specificity as `Hover` (the class plus `:hover`), so it beats the class's own background. Inside `Responsive(at, ..)` it becomes one media, `@media (<at>) and (hover: hover)` |
 | `State(Current, styles)` | (0.11.9) `[aria-current]:not([aria-current="false"])` — the item that is where the user is (`aria-current="page"`, also `step` / `location` / `true`). Mark the nav item with `aria-current` (a Layout block learns the page from `CurrentRoute`, below) and give it e.g. the 2px underline with `Border(BottomEdge, ..)` |
 | `Flow(..)` `State(..)` `Responsive(..)` `Animation(..)` | layout, interaction states, breakpoints, animations (unchanged) |
 
@@ -188,6 +190,11 @@ A Service whose logic runs `step.commit` and continues after it (and is not a qu
 
 - **Page theme:** the theme is taken from the Service the generator picked, along the field path to its `PageTheme` (see Page theme above). Only the generated `shell.mjs` of a face with a themed Page changes (the theme row and the `pageTheme` lookup).
 - Regenerating a face with no `theme: Some(..)` Page is byte-identical.
+
+0.11.14 adds, without changing the existing variants' meaning or output:
+
+- **Style:** `State(FocusVisible, ..)` (`:focus-visible`, keyboard focus only) and `State(HoverCapable, ..)` (`:hover` inside `@media (hover: hover)`), so a tapped button keeps neither the focus ring nor the hover background (see Style above). `Hover`, `Focus`, `Disabled` and `Current` render exactly as in 0.11.13.
+- Regenerating an app that uses none of these is byte-identical.
 
 **Imports outside the package**
 
