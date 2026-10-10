@@ -5085,6 +5085,71 @@ pub fn front_emit_shell_without_head_consts_is_unchanged_test() {
   )
 }
 
+// 0.11.15:shell の `stylesheets` は 0.11.12 の要素の後ろに、並びの順で `<link rel="stylesheet">` を出す。
+pub fn front_emit_shell_stylesheets_render_in_head_test() {
+  let face_units =
+    shell_with_head(
+      "\npub const icon: String = \"/favicon.ico\"\n"
+      <> "pub const stylesheets: List(String) = [\"/tokens.css\", \"/www.css\"]\n",
+    )
+  let test_app = app()
+  front_from_units_named("public", face_units, test_app.services)
+  |> front.notes(test_app.services)
+  |> list.filter(fn(note) { string.contains(note.text, "shell.gleam") })
+  |> should.equal([])
+  let files = synthetic_front_files(face_units)
+  let page = file_text(files, "public/src/gen/load/article/arg_slug/page.gleam")
+  string.contains(
+    page,
+    "      raw_html.link([\n"
+      <> "        attribute.attribute(\"rel\", \"icon\"),\n"
+      <> "        attribute.attribute(\"href\", \"/favicon.ico\"),\n"
+      <> "      ]),\n"
+      <> "      raw_html.link([\n"
+      <> "        attribute.attribute(\"rel\", \"stylesheet\"),\n"
+      <> "        attribute.attribute(\"href\", \"/tokens.css\"),\n"
+      <> "      ]),\n"
+      <> "      raw_html.link([\n"
+      <> "        attribute.attribute(\"rel\", \"stylesheet\"),\n"
+      <> "        attribute.attribute(\"href\", \"/www.css\"),\n"
+      <> "      ]),\n"
+      <> "    ]),\n"
+      <> "    raw_html.body([], [styled_body]),\n",
+  )
+  |> should.be_true
+  // 空の並びは何も出さない
+  let empty =
+    synthetic_front_files(shell_with_head(
+      "\npub const stylesheets: List(String) = []\n",
+    ))
+  file_text(empty, "public/src/gen/load/article/arg_slug/page.gleam")
+  |> string.contains("\"stylesheet\"")
+  |> should.be_false
+}
+
+// List の literal でない・空の String の要素・String でない要素は exit 3 の宣言の不足。
+pub fn front_shell_stylesheets_invalid_test() {
+  let test_app = app()
+  [
+    "pub const stylesheets: String = \"/www.css\"",
+    "pub const stylesheets: List(String) = [\"/www.css\", \"\"]",
+    "pub const stylesheets: List(Int) = [1]",
+  ]
+  |> list.each(fn(line) {
+    front_from_units_named(
+      "public",
+      shell_with_head("\n" <> line <> "\n"),
+      test_app.services,
+    )
+    |> front.notes(test_app.services)
+    |> list.filter(fn(note) { string.contains(note.text, "shell.gleam") })
+    |> list.map(fn(note) { note.text })
+    |> should.equal([
+      "public/src/shell.gleam: stylesheets は空でない String の List の定数で書く",
+    ])
+  })
+}
+
 // 0.11.13:Page の theme は、theme を選んだ Service の Out の中の PageTheme まで欄をたどって取る。
 // fixture の ArticleRead の Out を `look: Look`(`Look(theme: Option(PageTheme))`)へ包み直し、
 // 後ろに Feed(WidgetList)の root を足す ── theme の Service が最後の root でない、theme が 2 段目。

@@ -18,19 +18,28 @@ import yumemi_gen/reader/gate.{
   reads_session,
 }
 
+/// 門が `frame_src` の Page の応答に付ける CSP の header の値。許す host が無ければ付けない。
+/// client 遷移の route 表(`emit/front` の `navigation`)も同じ値を Page ごとに持つ。
+pub fn csp(gate: Gate) -> option.Option(String) {
+  case gate.frame_hosts {
+    [] -> None
+    hosts ->
+      Some(
+        "frame-src "
+        <> string.join(list.map(hosts, fn(host) { "https://" <> host }), " "),
+      )
+  }
+}
+
 pub fn text(header: String, gate: Gate, route_paths: List(String)) -> String {
   let reads_session = reads_session(gate)
   let pageview_routes = case gate.pageview {
     Some(pageview) -> expand(pageview.pages, route_paths)
     None -> []
   }
-  let frame_src = case gate.frame_hosts {
-    [] -> "null"
-    hosts ->
-      quoted(
-        "frame-src "
-        <> string.join(list.map(hosts, fn(host) { "https://" <> host }), " "),
-      )
+  let frame_src = case csp(gate) {
+    None -> "null"
+    Some(value) -> quoted(value)
   }
   header
   <> "\n\n"

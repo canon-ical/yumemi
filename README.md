@@ -26,7 +26,7 @@ Extracted from the `framework/` directory of a production application on 2026-09
 gleam build
 ```
 
-## `framework/front` ── Shell: the home screen and the service worker (0.11.12)
+## `framework/front` ── Shell: the home screen, the service worker and the stylesheets (0.11.12, 0.11.15)
 
 A face's `src/shell.gleam` holds the constants the generator puts in every page's `<head>`. `lang`, `title` and `theme` are required (as before). Five more are optional `String` constants; each one that is present adds one element after the `<title>`, in this order, and a shell without them generates exactly what 0.11.11 did:
 
@@ -38,18 +38,31 @@ A face's `src/shell.gleam` holds the constants the generator puts in every page'
 | `apple_touch_icon` | `<link rel="apple-touch-icon" href="..">` |
 | `service_worker` | the generated `priv/static/_yumemi/client.mjs` calls `navigator.serviceWorker.register("..")` once when it loads |
 
+`stylesheets` (0.11.15) is an optional `List(String)` constant: one `<link rel="stylesheet" href="..">` per item, in list order, after the elements above. Put the face's site-wide stylesheets here rather than in a Block: a `<link>` in `<head>` holds the first paint until it has loaded, and client navigation keeps it (see Client navigation below), where a `<link>` in `<body>` is rebuilt — and revalidated — on every navigation. An empty list adds nothing.
+
 ```gleam
 pub const manifest: String = "/manifest.webmanifest"
 pub const theme_color: String = "#A93632"
 pub const icon: String = "/favicon.svg"
 pub const apple_touch_icon: String = "/apple-touch-icon.png"
 pub const service_worker: String = "/sw.js"
+pub const stylesheets: List(String) = ["/brand/tokens.css", "/brand/site.css"]
 ```
 
 - The files themselves (the manifest, the icons, `sw.js`) are the face's static assets under `priv/static/`; the generator only links them.
 - The registration does nothing where `navigator.serviceWorker` is missing, and a failed registration is swallowed (the page keeps working). Client navigation does not reload `client.mjs`, so it registers once per page load. A face without islands gets a `client.mjs` that only registers the worker (and the page loads it); a face with neither gets no `client.mjs`, as before.
-- Client navigation swaps the whole `<head>` (except the client script), so each element stays exactly once after a navigation.
-- A constant that is present but is not a non-empty `String` constant (another type, or `""`) stops the generator like a missing `title`: exit 3, `<face>/src/shell.gleam: <name> は空でない String の定数で書く`.
+- Client navigation keeps the `<head>` elements the next page also has and swaps the rest, so each element stays exactly once after a navigation.
+- A constant that is present but is not a non-empty `String` constant (another type, or `""`) stops the generator like a missing `title`: exit 3, `<face>/src/shell.gleam: <name> は空でない String の定数で書く`. For `stylesheets` the same holds when it is not a list literal of non-empty strings: `<face>/src/shell.gleam: stylesheets は空でない String の List の定数で書く`.
+
+## `framework/front` ── Client navigation (0.11.4, 0.11.15)
+
+The generated client calls `framework/front/navigate.mjs`'s `start({routes, csp, boot, pageview})`. `routes` lists every Page route of the face; `csp` maps each route of a gate `frame_src` Page to the `content-security-policy` value the gate sends with it (`frame-src https://<host> ..` from the entry's `frame_src` hosts). A face without such Pages gets no `csp` key, exactly as in 0.11.14.
+
+- **Which clicks.** A plain left click on a same-origin link, from a routed Page to a routed Page, whose destination has the same CSP as the Page that loaded the current document (both none, or the same value). A CSP header only takes effect on a page load, so a link to a Page with another CSP — or from a Page without one to a Page with one — is a page load, and the destination's policy holds. Modified clicks, `target`, `download` and links to unrouted paths are page loads, as before.
+- **Which responses.** One fetch with `x-yumemi-navigate: 1` (the gate, the adult declaration and the session go through the server as before). It falls back to a page load on a redirect (a gate's 302, e.g. to `/enter`), a non-200, a non-HTML body, a `content-security-policy` header that differs from the route table's value for that Page (or is present where the table has none, or missing where it has one), a page with scripts other than the client, or an already-registered given island. 0.11.14 fell back on any CSP header.
+- **The head.** Elements whose `outerHTML` is the same in the current and the next `<head>` stay where they are (a stylesheet is not re-requested); the others are removed or inserted at the next page's positions, so the order follows the next page. The client script stays.
+- **Stylesheets load before the body changes.** A stylesheet new to `<head>`, and a copy (in `<head>`, marked `data-yumemi-hold`) of each stylesheet that only the next page's `<body>` links (an article's font CSS, say), is inserted with `media="not all"` and awaited (load or error, at most 3 seconds); then its `media` is restored, the old head elements leave and the body is swapped. A copy is removed once the body's own `<link>` has loaded. The old page stays on screen meanwhile, so no unstyled page shows; the swap waits for those downloads.
+- **Pageviews, back / forward and reload after a write** are unchanged: the gate's mark in `<head>` counts the navigation (`kind` `spa`), back / forward take the same path, and `navigate.reload()` refetches a routed Page in place (`kind` `reload`).
 
 ## `framework/front` ── Page theme: where the colours come from (0.11.13)
 
@@ -195,6 +208,13 @@ A Service whose logic runs `step.commit` and continues after it (and is not a qu
 
 - **Style:** `State(FocusVisible, ..)` (`:focus-visible`, keyboard focus only) and `State(HoverCapable, ..)` (`:hover` inside `@media (hover: hover)`), so a tapped button keeps neither the focus ring nor the hover background (see Style above). `Hover`, `Focus`, `Disabled` and `Current` render exactly as in 0.11.13.
 - Regenerating an app that uses none of these is byte-identical.
+
+0.11.15 changes client navigation and adds a Shell constant:
+
+- **Pages with a CSP navigate on the client.** The gate's `frame_src` Pages are now in the client's route table with their CSP (`csp` in `start`), and the client takes a navigation only between Pages with the same CSP as the one that loaded the document, checking the response's header against the table (see Client navigation above). A face whose Pages all carry the same `frame_src` navigates on the client everywhere. Only the generated `client.mjs` of a face with `frame_src` Pages changes (the routes line).
+- **The head is diffed, and stylesheets are awaited.** Navigation keeps identical `<head>` elements in place, and swaps the body only after new head stylesheets and the next body's stylesheets have loaded (see Client navigation above).
+- **Shell:** the optional constant `stylesheets: List(String)` (`<link rel="stylesheet">` in `<head>`) (see Shell above).
+- Regenerating a face with no `frame_src` Page and no `stylesheets` is byte-identical (the framework code in the bundled `client.mjs` changes with the version, as with any version that changes `navigate.mjs`).
 
 **Imports outside the package**
 
