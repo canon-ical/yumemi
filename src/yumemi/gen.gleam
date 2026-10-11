@@ -3,7 +3,7 @@
 //// 出すのは生成束 ── `src/gen/types/*`、`src/gen/query.gleam` と
 //// `src/gen/query/{from,field}.gleam`、`src/gen/reads/*`、`src/gen/root/*`、
 //// `db/queries/<service>/<name>.sql`(読み)、verb / phase、`src/gen/allow/*`(root が指す allow)。
-//// 出力先が app そのものか app を含む dir(musearch なら `<root>/api` か `<root>`)なら、生成物を在るべき場所に
+//// 出力先が app そのものか app を含む dir(app が `<root>/api` にあれば `<root>/api` か `<root>`)なら、生成物を在るべき場所に
 //// 置く ── back は app の下、面は面の package の下(`place`)。このとき `db/queries` へは既に在る
 //// `-- GENERATED` の file だけを書く(生成器だけが出す SQL は `src/gen/sql.mjs` に束ねる ── `into_app`)。
 //// 出力先が別の dir なら、back は `<out>/src/gen/..`、面は `<out>/<面>/..` に並べる。
@@ -80,7 +80,7 @@ fn locked_yumemi(dir: String) -> String
 fn running_yumemi() -> String
 
 /// 第 41 条:生成器が読み書きする package(app と面)の yumemi の lock が、走っている生成器の版と違えば名指して
-/// 止める。lock(manifest.toml)の無い package は照合しない。生成器の触らない package(musearch の auth の類)は
+/// 止める。lock(manifest.toml)の無い package は照合しない。生成器の触らない package(認証だけの package の類)は
 /// 見ない(Y1 鷹野の裁き 2、段 D まで照合の外)。
 pub fn lock_notes(running: String, packages: List(String)) -> List(Note) {
   case running {

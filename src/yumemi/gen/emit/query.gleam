@@ -1,4 +1,4 @@
-//// 束2 ── 読みの語彙。3 module に割れる(2026-09-16 人見裁定)。
+//// 束2 ── 読みの語彙。3 module に割れる。
 ////   `src/gen/query/from.gleam`  ── From だけ
 ////   `src/gen/query/field.gleam` ── Field だけ
 ////   `src/gen/query.gleam`       ── 残り(Arrow / Operand / Cond / … / Select)と From / Field の型別名
@@ -6,7 +6,7 @@
 //// From と Entity Consent の `version` 列が `ConsentVersion` で衝突し `Duplicate definition`)。
 //// From / Field / Arrow / Operand は Entity 宣言から、残りは yumemi/query.gleam の
 //// 構成子をそのまま単型に写す(アプリは語彙を足せない、20:664)。`Select` の `Pick` も
-//// framework 側に同じ形で在る(役員 人見 09-25、1 対 1 は test が見る)。
+//// framework 側に同じ形で在る(1 対 1 は test が見る)。
 
 import gleam/list
 import gleam/string

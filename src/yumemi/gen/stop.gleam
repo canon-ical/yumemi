@@ -8,8 +8,8 @@
 //// | 2 | 構文が読めない | 生成器の作者 |
 //// | 3 | 宣言の不足 | 書き手(Agent) |
 //// | 4 | 宣言の矛盾 | 書き手(Agent) |
-//// | 5 | 語彙の不足 | framework 保守者(役員 人見) |
-//// | 6 | 不可逆な差分 | framework 保守者(役員 人見) |
+//// | 5 | 語彙の不足 | framework 保守者 |
+//// | 6 | 不可逆な差分 | framework 保守者 |
 
 import gleam/int
 import gleam/list

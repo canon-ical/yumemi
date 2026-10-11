@@ -262,7 +262,7 @@ fn pair_of(
 }
 
 /// Session の入口どうしで口が違う(prefix の違う面)Service は、先頭の面の口を本体の行に、残りの面の口を
-/// `<service>_<入口>` の別名の行(`target` が本体)にする。musearch の面は prefix が全部 `/api` で当たらない。
+/// `<service>_<入口>` の別名の行(`target` が本体)にする。面の prefix が全部 `/api` で当たらない。
 fn face_aliases(
   app: App,
   routes: List(entry.Route),
@@ -341,7 +341,7 @@ fn only_entry(app: App, service: Service) -> Option(String) {
 /// 面を 2 つ以上、入口の全部でなく宣言した Service は、許す入口の集合の外で検査 7 が 403 にする(`entries`、
 /// 0.11.5)。付けるのは、この Service の行(本体・面の別名・`server.aliases`)に検査 2 で当たりうる入口 ──
 /// 媒体(Session / ApiKey)が合い、ReadOnly の入口なら Read の Service ── が面の外に残るときだけ。当たりうる入口を
-/// 全部面に持つ Service(musearch の 4 面全部)は何も付けない。面 1 つは今までどおり `entry`。
+/// 全部面に持つ Service(4 面の app で 4 面全部)は何も付けない。面 1 つは今までどおり `entry`。
 fn entry_field(app: App, service: Service, pair: Option(Pair)) -> String {
   let named =
     list.filter(app.entries, fn(entry) {

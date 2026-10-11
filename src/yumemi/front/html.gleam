@@ -1,4 +1,4 @@
-//// タグ(0.12、51 v6「html と el」)。musearch の ★ が使う 53 種と SVG の `svg` / `path`、殻の部品。
+//// タグ(0.12、51 v6「html と el」)。業務の CMS の ★ が使う 53 種と SVG の `svg` / `path`、殻の部品。
 //// sketch_lustre の `html` と同じ名前・同じ引数の順(class を取る形と `_` の付く取らない形)。
 //// `style`・`script`・`link` は置かない(生の CSS は `el.stylesheet`)。
 

@@ -829,7 +829,7 @@ type Hop {
 
 /// root を持たない Service(`Root(at, seed)`)の名前付き読みに allow 句を入れる。
 /// allow が相(`Only`)か owner(`NoOwner` 以外)を絞るときだけ入れる。句の形は
-/// musearch の `article_search/nearest.sql` と同じ ── 実行側が渡す句の jsonb を
+/// app の近傍検索の SQL と同じ ── 実行側が渡す句の jsonb を
 /// `jsonb_array_elements` で開き、相は allow の Entity の `phase`、owner
 /// `Via<Entity>Party` はその Entity の `party` 列と party の穴で照らす。
 /// owner `Self` は主体の鍵の穴で照らす。ただし句が全部 `Self` でどの `As<X>` も allow の Entity
