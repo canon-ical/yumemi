@@ -1,4 +1,4 @@
-// GENERATED from admin/src/{gate.gleam,pages/**} and src/{entry,server}.gleam [sha256:f489ce4ec759] — 手で編集しない
+// GENERATED from admin/src/{gate.gleam,pages/**} and src/{entry,server}.gleam [sha256:ce51a78b5a99] — 手で編集しない
 
 import * as route from "./route.mjs";
 

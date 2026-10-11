@@ -1,4 +1,4 @@
-//// GENERATED from service Logic / verb / reads / outbox contracts [sha256:bbf198d7f83a] — 手で編集しない
+//// GENERATED from service Logic / verb / reads / outbox contracts [sha256:5a7812900d2a] — 手で編集しない
 import { SQL } from './sql.mjs';
 import * as c from './codec.mjs';
 import * as subject from './subject.mjs';

@@ -1,4 +1,4 @@
-// GENERATED from admin/src/{gen/route.gleam,gen/load/**,pages/**,layout.gleam,shell.gleam} [sha256:34e3c63826f4] — 手で編集しない
+// GENERATED from admin/src/{gen/route.gleam,gen/load/**,pages/**,layout.gleam,shell.gleam} [sha256:e616ee3ccc02] — 手で編集しない
 
 import * as api from "./api.mjs";
 import * as blocksPreview from "./blocks_preview.mjs";
@@ -12,7 +12,7 @@ import * as service from "./service.mjs";
 import {Ok} from "../gleam.mjs";
 import {Some, Option$None$const} from "../../gleam_stdlib/gleam/option.mjs";
 import {run as decodeRun} from "../../gleam_stdlib/gleam/dynamic/decode.mjs";
-import {to_document_string} from "../../lustre/lustre/element.mjs";
+import {to_document_string} from "../../yumemi/yumemi/front/el.mjs";
 
 const pageRoutes = [...route.routes];
 const pages = new Map([
@@ -87,7 +87,7 @@ function mediaBlock(media, body) {
 }
 
 function gridCssFromLayout(_layout) {
-  return "\n[data-yumemi-grid=\"layout\"] {\n  display: grid;\n  grid-template-columns: minmax(0, 1fr);\n  grid-template-areas: \"page\";\n  gap: 0;\n}\n[data-yumemi-grid=\"layout\"] > [data-yumemi-area=\"page\"] {\n  grid-area: page;\n}\n\n[data-yumemi-grid=\"page:pages/home/page\"] {\n  display: grid;\n  grid-template-columns: minmax(0, 1fr);\n  grid-template-areas: \"page\";\n  gap: 0;\n}\n[data-yumemi-grid=\"page:pages/home/page\"] > [data-yumemi-area=\"page\"] {\n  grid-area: page;\n}\n[data-yumemi-badge] {\n  position: absolute;\n  inset-block-start: 0;\n  inset-inline-end: 0;\n  display: inline-flex;\n  align-items: center;\n  justify-content: center;\n  min-width: 1.25rem;\n  height: 1.25rem;\n  padding-inline: 0.25rem;\n  border-radius: 999px;\n  color: var(--bg);\n  background: var(--accent);\n  font: 600 0.75rem/1 system-ui, sans-serif;\n}\n[data-yumemi-badge][data-count=\"\"],\n[data-yumemi-badge][data-count=\"0\"] { display: none; }\n";
+  return "\n[data-yumemi-grid=\"layout\"] {\n  display: grid;\n  grid-template-columns: minmax(0, 1fr);\n  grid-template-areas: \"page\";\n  gap: 0;\n}\n[data-yumemi-grid=\"layout\"] > [data-yumemi-area=\"page\"] {\n  grid-area: page;\n  display: flex;\n  flex-direction: column;\n  align-items: stretch;\n  gap: 0.0px;\n}\n\n[data-yumemi-grid=\"page:pages/home/page\"] {\n  display: grid;\n  grid-template-columns: minmax(0, 1fr);\n  grid-template-areas: \"page\";\n  gap: 0;\n}\n[data-yumemi-grid=\"page:pages/home/page\"] > [data-yumemi-area=\"page\"] {\n  grid-area: page;\n  display: flex;\n  flex-direction: column;\n  align-items: stretch;\n  gap: 0.0px;\n}\n[data-yumemi-badge] {\n  position: absolute;\n  inset-block-start: 0;\n  inset-inline-end: 0;\n  display: inline-flex;\n  align-items: center;\n  justify-content: center;\n  min-width: 1.25rem;\n  height: 1.25rem;\n  padding-inline: 0.25rem;\n  border-radius: 999px;\n  color: var(--yumemi-theme-bg);\n  background: var(--yumemi-theme-accent);\n  font: 600 0.75rem/1 system-ui, sans-serif;\n}\n[data-yumemi-badge][data-count=\"\"],\n[data-yumemi-badge][data-count=\"0\"] { display: none; }\n";
 }
 
 function matchPage(pathname) {

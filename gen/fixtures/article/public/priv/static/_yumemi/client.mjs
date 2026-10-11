@@ -1,4 +1,4 @@
-// GENERATED from public/src/components/*.gleam and src/entry.gleam [sha256:a2db3813520e] — 手で編集しない
+// GENERATED from public/src/components/*.gleam and src/entry.gleam [sha256:6f2920a23485] — 手で編集しない
 // public/build/dev/javascript/prelude.mjs
 var CustomType = class {
   withFields(fields) {
@@ -19,20 +19,20 @@ var List = class {
     return [...this];
   }
   atLeastLength(desired) {
-    let current = this;
-    while (desired-- > 0 && current) current = current.tail;
-    return current !== void 0;
+    let current2 = this;
+    while (desired-- > 0 && current2) current2 = current2.tail;
+    return current2 !== void 0;
   }
   hasLength(desired) {
-    let current = this;
-    while (desired-- > 0 && current) current = current.tail;
-    return desired === -1 && current instanceof Empty;
+    let current2 = this;
+    while (desired-- > 0 && current2) current2 = current2.tail;
+    return desired === -1 && current2 instanceof Empty;
   }
   countLength() {
-    let current = this;
+    let current2 = this;
     let length3 = 0;
-    while (current) {
-      current = current.tail;
+    while (current2) {
+      current2 = current2.tail;
       length3++;
     }
     return length3 - 1;
@@ -50,8 +50,8 @@ function toList(elements, tail) {
 }
 var ListIterator = class {
   #current;
-  constructor(current) {
-    this.#current = current;
+  constructor(current2) {
+    this.#current = current2;
   }
   next() {
     if (this.#current instanceof Empty) {
@@ -4539,8 +4539,8 @@ var COMMENT_NODE = 8;
 var SUPPORTS_MOVE_BEFORE = !!globalThis.HTMLElement?.prototype?.moveBefore;
 
 // public/build/dev/javascript/lustre/lustre/vdom/reconciler.ffi.mjs
-var setTimeout = globalThis.setTimeout;
-var clearTimeout = globalThis.clearTimeout;
+var setTimeout2 = globalThis.setTimeout;
+var clearTimeout2 = globalThis.clearTimeout;
 var createElementNS = (ns, name) => globalThis.document.createElementNS(ns, name);
 var createTextNode = (data) => globalThis.document.createTextNode(data);
 var createComment = (data) => globalThis.document.createComment(data);
@@ -4583,12 +4583,12 @@ var insertMetadataChild = (kind, parent, node, index4, key) => {
 };
 var getPath = (node) => {
   let path = "";
-  for (let current = node[meta]; current.parent; current = current.parent) {
-    const separator = current.parent && current.parent.kind === map_kind ? separator_subtree : separator_element;
-    if (current.key) {
-      path = `${separator}${current.key}${path}`;
+  for (let current2 = node[meta]; current2.parent; current2 = current2.parent) {
+    const separator = current2.parent && current2.parent.kind === map_kind ? separator_subtree : separator_element;
+    if (current2.key) {
+      path = `${separator}${current2.key}${path}`;
     } else {
-      const index4 = current.parent.children.indexOf(current);
+      const index4 = current2.parent.children.indexOf(current2);
       path = `${separator}${index4}${path}`;
     }
   }
@@ -4663,10 +4663,10 @@ var Reconciler = class {
   }
   // CHANGES -------------------------------------------------------------------
   #insert(parent, { children, before }) {
-    const fragment5 = createDocumentFragment();
+    const fragment4 = createDocumentFragment();
     const beforeEl = this.#getReference(parent, before);
-    this.#insertChildren(fragment5, null, parent, before | 0, children);
-    insertBefore(parent.parentNode, fragment5, beforeEl);
+    this.#insertChildren(fragment4, null, parent, before | 0, children);
+    insertBefore(parent.parentNode, fragment4, beforeEl);
   }
   #replace(parent, { index: index4, with: child2 }) {
     this.#removeChildren(parent, index4 | 0, 1);
@@ -4739,7 +4739,7 @@ var Reconciler = class {
     const { debouncers, children } = node;
     for (const { timeout } of debouncers.values()) {
       if (timeout) {
-        clearTimeout(timeout);
+        clearTimeout2(timeout);
       }
     }
     debouncers.clear();
@@ -4895,7 +4895,7 @@ var Reconciler = class {
     } else if (debounceOrThrottle) {
       const { timeout } = debounceOrThrottle;
       if (timeout) {
-        clearTimeout(timeout);
+        clearTimeout2(timeout);
       }
       map7.delete(name);
     }
@@ -4930,8 +4930,8 @@ var Reconciler = class {
     }
     const debounce = debouncers.get(type);
     if (debounce) {
-      clearTimeout(debounce.timeout);
-      debounce.timeout = setTimeout(() => {
+      clearTimeout2(debounce.timeout);
+      debounce.timeout = setTimeout2(() => {
         if (event4 === throttles.get(type)?.lastEvent) return;
         this.#dispatch(event4, data);
       }, debounce.delay);
@@ -5436,22 +5436,22 @@ async function adoptStylesheets(shadowRoot) {
   }
   shadowRoot.adoptedStyleSheets = shadowRoot.host.getRootNode().adoptedStyleSheets;
   const pending = [];
-  for (const sheet of globalThis.document.styleSheets) {
+  for (const sheet2 of globalThis.document.styleSheets) {
     try {
-      shadowRoot.adoptedStyleSheets.push(sheet);
+      shadowRoot.adoptedStyleSheets.push(sheet2);
     } catch {
       try {
-        let copiedSheet = copiedStyleSheets.get(sheet);
+        let copiedSheet = copiedStyleSheets.get(sheet2);
         if (!copiedSheet) {
           copiedSheet = new CSSStyleSheet();
-          for (const rule of sheet.cssRules) {
+          for (const rule of sheet2.cssRules) {
             copiedSheet.insertRule(rule.cssText, copiedSheet.cssRules.length);
           }
-          copiedStyleSheets.set(sheet, copiedSheet);
+          copiedStyleSheets.set(sheet2, copiedSheet);
         }
         shadowRoot.adoptedStyleSheets.push(copiedSheet);
       } catch {
-        const node = sheet.ownerNode.cloneNode();
+        const node = sheet2.ownerNode.cloneNode();
         shadowRoot.prepend(node);
         pending.push(node);
       }
@@ -5588,9 +5588,9 @@ var make_component = ({ init: init5, update: update6, view: view5, config }, nam
           break;
       }
     }
-    formDisabledCallback(disabled2) {
+    formDisabledCallback(disabled3) {
       if (Option$isSome(config.on_form_disabled)) {
-        this.dispatch(Option$Some$0(config.on_form_disabled)(disabled2));
+        this.dispatch(Option$Some$0(config.on_form_disabled)(disabled3));
       }
     }
     // LUSTRE RUNTIME METHODS --------------------------------------------------
@@ -5738,8 +5738,8 @@ var Style$NoStyle$const = new NoStyle();
 function new$5() {
   return new Cache2(make(), make());
 }
-function get_definitions(class$4) {
-  let $ = class$4.definitions;
+function get_definitions(class$5) {
+  let $ = class$5.definitions;
   let medias = $.medias;
   let selectors = $.selectors;
   let class$1 = $.class;
@@ -5833,15 +5833,15 @@ function dismissCurrentStylesheet() {
 function styled(app5) {
   const created = stylesheet(new Persistent());
   if (!Result$isOk(created)) return app5;
-  const sheet = Result$Ok$0(created);
-  setStyleSheet(sheet);
+  const sheet2 = Result$Ok$0(created);
+  setStyleSheet(sheet2);
   const view5 = (model) => {
-    setCurrentStylesheet(sheet);
+    setCurrentStylesheet(sheet2);
     try {
       const element5 = app5.view(model);
-      const current = getStyleSheet();
-      if (!Result$isOk(current) || Result$Ok$0(current).id !== sheet.id) return element5;
-      const css = render(Result$Ok$0(current));
+      const current2 = getStyleSheet();
+      if (!Result$isOk(current2) || Result$Ok$0(current2).id !== sheet2.id) return element5;
+      const css = render(Result$Ok$0(current2));
       return css === "" ? element5 : fragment2(toList([style(toList([]), css), element5]));
     } finally {
       dismissCurrentStylesheet();
@@ -5860,10 +5860,26 @@ function matches2(route, pathname) {
   if (expected.length !== actual.length) return false;
   return expected.every((segment, index4) => segment.startsWith(":") ? actual[index4] !== "" : segment === actual[index4] || segment.replaceAll("_", "-") === actual[index4]);
 }
-function routed(routes, pathname) {
-  return routes.some((route) => matches2(route, pathname));
+function row(entry) {
+  return typeof entry === "string" ? { route: entry, csp: null } : { route: entry.route, csp: entry.csp ?? null };
 }
-function intercept(event4, routes, location) {
+function policy(routes, pathname) {
+  let found;
+  for (const entry of routes) {
+    const { route, csp } = row(entry);
+    if (!matches2(route, pathname)) continue;
+    if (found !== void 0 && found !== csp) return void 0;
+    found = csp;
+  }
+  return found;
+}
+function routed(routes, pathname) {
+  return policy(routes, pathname) !== void 0;
+}
+function samePolicy(headers, csp) {
+  return (headers.get("content-security-policy") ?? null) === csp;
+}
+function intercept(event4, routes, location, loaded = policy(routes, location.pathname)) {
   if (event4.defaultPrevented || event4.button !== 0) return null;
   if (event4.metaKey || event4.ctrlKey || event4.shiftKey || event4.altKey) return null;
   const path = typeof event4.composedPath === "function" ? event4.composedPath() : [event4.target];
@@ -5879,7 +5895,9 @@ function intercept(event4, routes, location) {
   }
   if (url.origin !== location.origin) return null;
   if (url.pathname === location.pathname && url.search === location.search && url.hash !== "") return null;
-  if (!routed(routes, location.pathname) || !routed(routes, url.pathname)) return null;
+  const here = policy(routes, location.pathname);
+  const there = policy(routes, url.pathname);
+  if (here === void 0 || there === void 0 || here !== loaded || there !== loaded) return null;
   return url;
 }
 function swappable(doc, defined2) {
@@ -5888,6 +5906,124 @@ function swappable(doc, defined2) {
   if (client.length !== 1 || scripts.length !== 1 || client[0].parentElement !== doc.head) return false;
   if (!doc.body) return false;
   return ![...doc.body.querySelectorAll("[data-yumemi-given]")].some((element5) => defined2(element5.localName));
+}
+function common(current2, incoming) {
+  const rows = current2.length;
+  const columns = incoming.length;
+  const table2 = Array.from({ length: rows + 1 }, () => new Array(columns + 1).fill(0));
+  for (let i2 = rows - 1; i2 >= 0; i2 -= 1) {
+    for (let j2 = columns - 1; j2 >= 0; j2 -= 1) {
+      table2[i2][j2] = current2[i2] === incoming[j2] ? table2[i2 + 1][j2 + 1] + 1 : Math.max(table2[i2 + 1][j2], table2[i2][j2 + 1]);
+    }
+  }
+  const match = new Array(columns).fill(-1);
+  let i = 0;
+  let j = 0;
+  while (i < rows && j < columns) {
+    if (current2[i] === incoming[j]) {
+      match[j] = i;
+      i += 1;
+      j += 1;
+    } else if (table2[i + 1][j] >= table2[i][j + 1]) i += 1;
+    else j += 1;
+  }
+  return match;
+}
+var holdMark = "data-yumemi-hold";
+var holdLimit = 3e3;
+var quietMedia = "not all";
+function nodeKey(node) {
+  return node.nodeType === 1 ? node.outerHTML : `#${node.nodeType}:${node.nodeValue}`;
+}
+function isStylesheet(node) {
+  return node.nodeType === 1 && node.localName === "link" && /(^|\s)stylesheet(\s|$)/i.test(node.getAttribute("rel") ?? "");
+}
+function stylesheets2(root2) {
+  const found = [];
+  const walk = (node) => {
+    for (const child2 of node.childNodes) {
+      if (isStylesheet(child2)) found.push(child2);
+      else if (child2.nodeType === 1) walk(child2);
+    }
+  };
+  walk(root2);
+  return found;
+}
+function settled(link, limit) {
+  return new Promise((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      link.removeEventListener("load", done);
+      link.removeEventListener("error", done);
+      resolve();
+    };
+    const timer = setTimeout(done, limit);
+    link.addEventListener("load", done);
+    link.addEventListener("error", done);
+  });
+}
+function setMedia(node, media2) {
+  if (media2 === null) node.removeAttribute("media");
+  else node.setAttribute("media", media2);
+}
+function stage(target, doc, keep, limit = holdLimit) {
+  const head = target.head;
+  const current2 = [...head.childNodes].filter((node) => !keep(node) && !(node.nodeType === 1 && node.hasAttribute(holdMark)));
+  const incoming = [...doc.head.childNodes].filter((node) => !keep(node));
+  const match = common(current2.map(nodeKey), incoming.map(nodeKey));
+  const kept = new Set(match.filter((index4) => index4 >= 0).map((index4) => current2[index4]));
+  const outgoing = current2.filter((node) => !kept.has(node));
+  const final = incoming.map((node, index4) => match[index4] >= 0 ? current2[match[index4]] : target.adoptNode(node));
+  const placed = new Set(kept);
+  const waits = [];
+  const quiet = [];
+  const place = (only) => {
+    let next = null;
+    for (let index4 = final.length - 1; index4 >= 0; index4 -= 1) {
+      const node = final[index4];
+      if (!placed.has(node) && only(node)) {
+        if (isStylesheet(node)) {
+          quiet.push([node, node.getAttribute("media")]);
+          waits.push(settled(node, limit));
+          node.setAttribute("media", quietMedia);
+        }
+        head.insertBefore(node, next);
+        placed.add(node);
+      }
+      if (placed.has(node)) next = node;
+    }
+  };
+  place(isStylesheet);
+  const headHrefs = new Set(final.filter(isStylesheet).map((node) => node.getAttribute("href")));
+  const bodyLinks = doc.body ? stylesheets2(doc.body).filter((link) => !headHrefs.has(link.getAttribute("href"))) : [];
+  const holds = bodyLinks.map((link) => {
+    const copy = target.createElement("link");
+    for (const name of link.getAttributeNames()) copy.setAttribute(name, link.getAttribute(name));
+    copy.setAttribute(holdMark, "");
+    quiet.push([copy, link.getAttribute("media")]);
+    waits.push(settled(copy, limit));
+    copy.setAttribute("media", quietMedia);
+    head.appendChild(copy);
+    return copy;
+  });
+  const ready = Promise.all(waits).then(() => void 0);
+  const commit = () => {
+    place(() => true);
+    for (const [node, media2] of quiet) setMedia(node, media2);
+    for (const node of outgoing) node.remove();
+    const lang = doc.documentElement?.getAttribute("lang") ?? null;
+    if (lang !== null) target.documentElement.setAttribute("lang", lang);
+    const body = target.adoptNode(doc.body);
+    const done = bodyLinks.map((link) => settled(link, limit));
+    target.body.replaceWith(body);
+    return Promise.all(done).then(() => {
+      for (const copy of holds) copy.remove();
+    });
+  };
+  const cancel = () => {
+    for (const [node] of quiet) node.remove();
+  };
+  return { ready, commit, cancel };
 }
 function hashTarget(url, byId) {
   if (!url.hash) return null;
@@ -5932,8 +6068,12 @@ function reload() {
   if (refresh !== null) return refresh();
   globalThis.location.assign(globalThis.location.href);
 }
-function start4({ routes, boot: boot2, pageview = null }) {
+function table(routes, csp = {}) {
+  return routes.map((route) => ({ route, csp: Object.hasOwn(csp, route) ? csp[route] : null }));
+}
+function start4({ routes: paths, csp = {}, boot: boot2, pageview = null }) {
   if (typeof window === "undefined" || typeof history?.pushState !== "function") return;
+  const routes = table(paths, csp);
   let pending = null;
   const page = (location) => location.pathname + location.search;
   let shown = page(globalThis.location);
@@ -5941,21 +6081,15 @@ function start4({ routes, boot: boot2, pageview = null }) {
     if (replace3) globalThis.location.replace(url.href);
     else globalThis.location.assign(url.href);
   };
-  const swap = (doc) => {
-    const keep = (node) => node.nodeName === "SCRIPT" && node.getAttribute("src") === clientSrc;
-    const incoming = [...doc.head.childNodes].filter((node) => !keep(node)).map((node) => document.adoptNode(node));
-    const outgoing = [...document.head.childNodes].filter((node) => !keep(node));
-    for (const node of incoming) document.head.appendChild(node);
-    for (const node of outgoing) node.remove();
-    const lang = doc.documentElement.getAttribute("lang");
-    if (lang !== null) document.documentElement.setAttribute("lang", lang);
-    document.body.replaceWith(document.adoptNode(doc.body));
-  };
+  const keep = (node) => node.nodeName === "SCRIPT" && node.getAttribute("src") === clientSrc;
+  const loaded = policy(routes, globalThis.location.pathname);
   const go = async (url, mode) => {
     const push = mode === "push";
     pending?.abort();
     const controller = new AbortController();
     pending = controller;
+    const csp2 = policy(routes, url.pathname);
+    if (csp2 === void 0 || csp2 !== loaded) return load(url, !push);
     let response;
     try {
       response = await fetch(url.href, {
@@ -5970,7 +6104,7 @@ function start4({ routes, boot: boot2, pageview = null }) {
       return load(url, !push);
     }
     const type = response.headers.get("content-type") ?? "";
-    if (response.type === "opaqueredirect" || response.status !== 200 || !type.startsWith("text/html") || response.headers.has("content-security-policy")) {
+    if (response.type === "opaqueredirect" || response.status !== 200 || !type.startsWith("text/html") || !samePolicy(response.headers, csp2)) {
       return load(url, !push);
     }
     let html;
@@ -5983,11 +6117,14 @@ function start4({ routes, boot: boot2, pageview = null }) {
     if (controller.signal.aborted) return;
     const doc = new DOMParser().parseFromString(html, "text/html");
     if (!swappable(doc, (tag) => globalThis.customElements.get(tag) !== void 0)) return load(url, !push);
+    const count = pageview !== null && counted(doc);
+    const staged = stage(document, doc, keep);
+    await staged.ready;
+    if (controller.signal.aborted) return staged.cancel();
     pending = null;
     const from3 = globalThis.location.pathname;
     const scroll = [window.scrollX, window.scrollY];
-    const count = pageview !== null && counted(doc);
-    swap(doc);
+    void staged.commit();
     if (push) history.pushState({ yumemi: "navigate" }, "", url.href);
     shown = page(url);
     if (mode !== "refresh") {
@@ -5997,11 +6134,11 @@ function start4({ routes, boot: boot2, pageview = null }) {
     }
     boot2();
     if (mode === "refresh") {
-      const keep = () => window.scrollTo(scroll[0], scroll[1]);
-      keep();
+      const stay = () => window.scrollTo(scroll[0], scroll[1]);
+      stay();
       requestAnimationFrame(() => {
-        keep();
-        requestAnimationFrame(keep);
+        stay();
+        requestAnimationFrame(stay);
       });
     }
     if (count) sendPageview(pageview, url, mode === "refresh" ? "reload" : "spa", from3);
@@ -6014,7 +6151,7 @@ function start4({ routes, boot: boot2, pageview = null }) {
   };
   if (history.state === null) history.replaceState({ yumemi: "navigate" }, "", globalThis.location.href);
   document.addEventListener("click", (event4) => {
-    const url = intercept(event4, routes, globalThis.location);
+    const url = intercept(event4, routes, globalThis.location, loaded);
     if (url === null) return;
     event4.preventDefault();
     void go(url, "push");
@@ -6098,6 +6235,18 @@ var AutoSize = class extends CustomType {
 var TrackSize$AutoSize$const = new AutoSize();
 
 // public/build/dev/javascript/yumemi/yumemi/front/css.mjs
+var SafeTop = class extends CustomType {
+};
+var SafeArea$SafeTop$const = new SafeTop();
+var SafeRight = class extends CustomType {
+};
+var SafeArea$SafeRight$const = new SafeRight();
+var SafeBottom = class extends CustomType {
+};
+var SafeArea$SafeBottom$const = new SafeBottom();
+var SafeLeft = class extends CustomType {
+};
+var SafeArea$SafeLeft$const = new SafeLeft();
 var Margin = class extends CustomType {
 };
 var SpaceProperty$Margin$const = new Margin();
@@ -6116,6 +6265,15 @@ var SpaceProperty$Height$const = new Height();
 var Radius = class extends CustomType {
 };
 var SpaceProperty$Radius$const = new Radius();
+var MinWidth = class extends CustomType {
+};
+var SpaceProperty$MinWidth$const = new MinWidth();
+var MinHeight = class extends CustomType {
+};
+var SpaceProperty$MinHeight$const = new MinHeight();
+var MaxWidth = class extends CustomType {
+};
+var SpaceProperty$MaxWidth$const = new MaxWidth();
 var System = class extends CustomType {
 };
 var FontFamily$System$const = new System();
@@ -6134,18 +6292,123 @@ var FontWeight$Normal$const = new Normal2();
 var Medium = class extends CustomType {
 };
 var FontWeight$Medium$const = new Medium();
+var SemiBold = class extends CustomType {
+};
+var FontWeight$SemiBold$const = new SemiBold();
 var Bold = class extends CustomType {
 };
 var FontWeight$Bold$const = new Bold();
+var AllEdges = class extends CustomType {
+};
+var BorderEdge$AllEdges$const = new AllEdges();
+var TopEdge = class extends CustomType {
+};
+var BorderEdge$TopEdge$const = new TopEdge();
+var BottomEdge = class extends CustomType {
+};
+var BorderEdge$BottomEdge$const = new BottomEdge();
+var Solid = class extends CustomType {
+};
+var BorderStyle$Solid$const = new Solid();
+var Dashed = class extends CustomType {
+};
+var BorderStyle$Dashed$const = new Dashed();
+var Dotted = class extends CustomType {
+};
+var BorderStyle$Dotted$const = new Dotted();
+var Cover = class extends CustomType {
+};
+var ObjectFit$Cover$const = new Cover();
+var Contain = class extends CustomType {
+};
+var ObjectFit$Contain$const = new Contain();
+var Fill = class extends CustomType {
+};
+var ObjectFit$Fill$const = new Fill();
+var ScaleDown = class extends CustomType {
+};
+var ObjectFit$ScaleDown$const = new ScaleDown();
+var FitNone = class extends CustomType {
+};
+var ObjectFit$FitNone$const = new FitNone();
+var BorderBox = class extends CustomType {
+};
+var BoxSizing$BorderBox$const = new BorderBox();
+var ContentBox = class extends CustomType {
+};
+var BoxSizing$ContentBox$const = new ContentBox();
+var NoMarker = class extends CustomType {
+};
+var ListMarker$NoMarker$const = new NoMarker();
+var NoDecoration = class extends CustomType {
+};
+var TextDecoration$NoDecoration$const = new NoDecoration();
+var Underline = class extends CustomType {
+};
+var TextDecoration$Underline$const = new Underline();
+var Anywhere = class extends CustomType {
+};
+var OverflowWrap$Anywhere$const = new Anywhere();
+var BreakWord = class extends CustomType {
+};
+var OverflowWrap$BreakWord$const = new BreakWord();
+var WrapNormal = class extends CustomType {
+};
+var OverflowWrap$WrapNormal$const = new WrapNormal();
 var Hover = class extends CustomType {
 };
 var Interaction$Hover$const = new Hover();
 var Focus = class extends CustomType {
 };
 var Interaction$Focus$const = new Focus();
+var FocusVisible = class extends CustomType {
+};
+var Interaction$FocusVisible$const = new FocusVisible();
+var HoverCapable = class extends CustomType {
+};
+var Interaction$HoverCapable$const = new HoverCapable();
 var Disabled = class extends CustomType {
 };
 var Interaction$Disabled$const = new Disabled();
+var Current = class extends CustomType {
+};
+var Interaction$Current$const = new Current();
+var Waiting = class extends CustomType {
+};
+var Interaction$Waiting$const = new Waiting();
+var Succeeded = class extends CustomType {
+};
+var Interaction$Succeeded$const = new Succeeded();
+var Failed = class extends CustomType {
+};
+var Interaction$Failed$const = new Failed();
+var ThemeImage = class extends CustomType {
+};
+var Interaction$ThemeImage$const = new ThemeImage();
+var Transparent = class extends CustomType {
+};
+var Paint$Transparent$const = new Transparent();
+var CurrentColor = class extends CustomType {
+};
+var Paint$CurrentColor$const = new CurrentColor();
+var ThemeBackground = class extends CustomType {
+};
+var ThemeSlot$ThemeBackground$const = new ThemeBackground();
+var ThemeText = class extends CustomType {
+};
+var ThemeSlot$ThemeText$const = new ThemeText();
+var ThemeAccent = class extends CustomType {
+};
+var ThemeSlot$ThemeAccent$const = new ThemeAccent();
+var TextStart = class extends CustomType {
+};
+var TextAlignment$TextStart$const = new TextStart();
+var TextCenter = class extends CustomType {
+};
+var TextAlignment$TextCenter$const = new TextCenter();
+var TextEnd = class extends CustomType {
+};
+var TextAlignment$TextEnd$const = new TextEnd();
 var SP = class extends CustomType {
 };
 var Breakpoint$SP$const = new SP();
@@ -6164,41 +6427,50 @@ var Pin$Top$const = new Top();
 var Bottom = class extends CustomType {
 };
 var Pin$Bottom$const = new Bottom();
+var BottomFlush = class extends CustomType {
+};
+var Pin$BottomFlush$const = new BottomFlush();
 var NoPin = class extends CustomType {
 };
 var Pin$NoPin$const = new NoPin();
 var Overlay = class extends CustomType {
 };
 var Pin$Overlay$const = new Overlay();
-var Fade = class extends CustomType {
+var Below = class extends CustomType {
 };
-var Animation$Fade$const = new Fade();
-var SlideUp = class extends CustomType {
+var OverlaySide$Below$const = new Below();
+var Above = class extends CustomType {
 };
-var Animation$SlideUp$const = new SlideUp();
-var Pulse = class extends CustomType {
+var OverlaySide$Above$const = new Above();
+var AlignStart = class extends CustomType {
 };
-var Animation$Pulse$const = new Pulse();
+var OverlayAlign$AlignStart$const = new AlignStart();
+var AlignEnd = class extends CustomType {
+};
+var OverlayAlign$AlignEnd$const = new AlignEnd();
+
+// public/build/dev/javascript/yumemi/yumemi/front/sheet_ffi.mjs
+var sheet = Result$Error(void 0);
 
 // public/build/dev/javascript/yumemi/yumemi/front.mjs
 var AuthOrigin = class extends CustomType {
 };
 var From$AuthOrigin$const = new AuthOrigin();
+var CurrentRoute = class extends CustomType {
+};
+var From$CurrentRoute$const = new CurrentRoute();
 var SubjectHandle = class extends CustomType {
 };
 var SessionKey$SubjectHandle$const = new SubjectHandle();
 var SubjectId = class extends CustomType {
 };
 var SessionKey$SubjectId$const = new SubjectId();
-var Flow = class extends CustomType {
+var Flow2 = class extends CustomType {
 };
-var Cell$Flow$const = new Flow();
-
-// public/build/dev/javascript/yumemi/yumemi/front/el.mjs
-var text4 = text3;
+var Cell$Flow$const = new Flow2();
 
 // public/build/dev/javascript/yumemi/yumemi/front/live.mjs
-var State = class extends CustomType {
+var State2 = class extends CustomType {
   constructor(args, given, last, waiting) {
     super();
     this.args = args;
@@ -6367,7 +6639,7 @@ var File = class extends CustomType {
 var Field$File$const = new File();
 function init(_) {
   return [
-    new State(new Args(""), void 0, Option$None$const, false),
+    new State2(new Args(""), void 0, Option$None$const, false),
     none()
   ];
 }
@@ -6393,7 +6665,7 @@ function update2(model, msg) {
   if (msg instanceof Set2) {
     let value2 = msg[1];
     return [
-      new State(new Args(value2), model.given, model.last, model.waiting),
+      new State2(new Args(value2), model.given, model.last, model.waiting),
       none()
     ];
   } else if (msg instanceof Send) {
@@ -6402,7 +6674,7 @@ function update2(model, msg) {
       return [model, none()];
     } else {
       return [
-        new State(model.args, model.given, model.last, true),
+        new State2(model.args, model.given, model.last, true),
         send3(model.args)
       ];
     }
@@ -6411,7 +6683,7 @@ function update2(model, msg) {
   } else {
     let result = msg[0];
     return [
-      new State(model.args, model.given, new Some(result), false),
+      new State2(model.args, model.given, new Some(result), false),
       none()
     ];
   }
@@ -6443,7 +6715,7 @@ function view(it) {
           on_click(Event$Send$const),
           disabled(it.waiting)
         ]),
-        toList([text4("Upload article image")])
+        toList([text3("Upload article image")])
       ),
       (() => {
         let $ = it.last;
@@ -6453,18 +6725,18 @@ function view(it) {
             let key = $1[0];
             return p_(
               toList([attribute2("data-blob-key", key)]),
-              toList([text4(key)])
+              toList([text3(key)])
             );
           } else {
             return p_(
               List$Empty$const,
-              toList([text4("upload failed")])
+              toList([text3("upload failed")])
             );
           }
         } else {
           return p_(
             List$Empty$const,
-            toList([text4("choose a file")])
+            toList([text3("choose a file")])
           );
         }
       })()
@@ -6511,7 +6783,7 @@ var Pattern = class extends CustomType {
     this.regex = regex;
   }
 };
-var Text2 = class extends CustomType {
+var Text3 = class extends CustomType {
   constructor(min2, max2) {
     super();
     this.min = min2;
@@ -6557,7 +6829,7 @@ function validate(raw, spec) {
     let max2 = spec.max;
     let regex = spec.regex;
     _block = within(raw, min2, max2) && matches3(raw, regex);
-  } else if (spec instanceof Text2) {
+  } else if (spec instanceof Text3) {
     let min2 = spec.min;
     let max2 = spec.max;
     _block = within(raw, min2, max2);
@@ -6625,7 +6897,7 @@ var Broke = class extends CustomType {
 };
 function init2(given) {
   return [
-    new State(new Args2("", "", ""), given, Option$None$const, false),
+    new State2(new Args2("", "", ""), given, Option$None$const, false),
     none()
   ];
 }
@@ -6758,7 +7030,7 @@ function update3(model, msg) {
     if ($ instanceof Slug) {
       let value2 = msg[1];
       return [
-        new State(
+        new State2(
           (() => {
             let _record = model.args;
             return new Args2(value2, _record.blob, _record.existing);
@@ -6772,7 +7044,7 @@ function update3(model, msg) {
     } else if ($ instanceof Blob) {
       let value2 = msg[1];
       return [
-        new State(
+        new State2(
           (() => {
             let _record = model.args;
             return new Args2(_record.slug, value2, _record.existing);
@@ -6786,7 +7058,7 @@ function update3(model, msg) {
     } else {
       let value2 = msg[1];
       return [
-        new State(
+        new State2(
           (() => {
             let _record = model.args;
             return new Args2(_record.slug, _record.blob, value2);
@@ -6807,13 +7079,13 @@ function update3(model, msg) {
       if ($1 instanceof Ok) {
         let args = $1[0];
         return [
-          new State(model.args, model.given, model.last, true),
+          new State2(model.args, model.given, model.last, true),
           send4(args)
         ];
       } else {
         let errors = $1[0];
         return [
-          new State(
+          new State2(
             model.args,
             model.given,
             new Some(new Error2(new Broke(validation_error_text(errors)))),
@@ -6826,12 +7098,12 @@ function update3(model, msg) {
   } else if (msg instanceof Given) {
     let given = msg[0];
     return [
-      new State(model.args, given, model.last, model.waiting),
+      new State2(model.args, given, model.last, model.waiting),
       none()
     ];
   } else {
     let result = msg[0];
-    let next = new State(model.args, model.given, new Some(result), false);
+    let next = new State2(model.args, model.given, new Some(result), false);
     if (result instanceof Ok) {
       return [next, none()];
     } else {
@@ -6869,19 +7141,19 @@ function view2(it) {
           on_click(Event$Send$const),
           disabled(it.waiting)
         ]),
-        toList([text4("Save image")])
+        toList([text3("Save image")])
       ),
       (() => {
         let $ = it.last;
         if ($ instanceof Some) {
           let $1 = $[0];
           if ($1 instanceof Ok) {
-            return p_(List$Empty$const, toList([text4("saved")]));
+            return p_(List$Empty$const, toList([text3("saved")]));
           } else {
-            return p_(List$Empty$const, toList([text4("failed")]));
+            return p_(List$Empty$const, toList([text3("failed")]));
           }
         } else {
-          return p_(List$Empty$const, toList([text4("ready")]));
+          return p_(List$Empty$const, toList([text3("ready")]));
         }
       })()
     ])
@@ -7043,7 +7315,7 @@ var Broke2 = class extends CustomType {
 };
 function init3(given) {
   return [
-    new State(new Args3(""), given, Option$None$const, false),
+    new State2(new Args3(""), given, Option$None$const, false),
     none()
   ];
 }
@@ -7163,7 +7435,7 @@ function update4(model, msg) {
   if (msg instanceof Set2) {
     let value2 = msg[1];
     return [
-      new State(new Args3(value2), model.given, model.last, model.waiting),
+      new State2(new Args3(value2), model.given, model.last, model.waiting),
       none()
     ];
   } else if (msg instanceof Send) {
@@ -7175,13 +7447,13 @@ function update4(model, msg) {
       if ($1 instanceof Ok) {
         let args = $1[0];
         return [
-          new State(model.args, model.given, model.last, true),
+          new State2(model.args, model.given, model.last, true),
           send5(args)
         ];
       } else {
         let errors = $1[0];
         return [
-          new State(
+          new State2(
             model.args,
             model.given,
             new Some(new Error2(new Broke2(validation_error_text2(errors)))),
@@ -7194,12 +7466,12 @@ function update4(model, msg) {
   } else if (msg instanceof Given) {
     let given = msg[0];
     return [
-      new State(model.args, given, model.last, model.waiting),
+      new State2(model.args, given, model.last, model.waiting),
       none()
     ];
   } else {
     let result = msg[0];
-    let next = new State(model.args, model.given, new Some(result), false);
+    let next = new State2(model.args, model.given, new Some(result), false);
     if (result instanceof Ok) {
       return [next, none()];
     } else {
@@ -7229,7 +7501,7 @@ function view3(it) {
       on_click(Event$Send$const),
       disabled(it.waiting)
     ]),
-    toList([text4(label(it))])
+    toList([text3(label(it))])
   );
 }
 function app3() {
@@ -7454,10 +7726,10 @@ function decoder4() {
                     "Pattern match failed, no pattern matched the value.",
                     {
                       value: $,
-                      start: 2355,
-                      end: 2389,
-                      pattern_start: 2366,
-                      pattern_end: 2375
+                      start: 2352,
+                      end: 2386,
+                      pattern_start: 2363,
+                      pattern_end: 2372
                     }
                   );
                 }
@@ -7538,7 +7810,7 @@ var Broke3 = class extends CustomType {
 };
 function init4(given) {
   return [
-    new State(
+    new State2(
       new Args4("", "", "", "", ""),
       given,
       Option$None$const,
@@ -7598,11 +7870,11 @@ function error_failure3(value2) {
   let code = $;
   return new Broke3(code);
 }
-function list_items(text5) {
-  if (text5 === "") {
+function list_items(text4) {
+  if (text4 === "") {
     return new Ok(List$Empty$const);
   } else {
-    let $ = parse(text5, list2(string2));
+    let $ = parse(text4, list2(string2));
     if ($ instanceof Ok) {
       return $;
     } else {
@@ -7687,7 +7959,7 @@ function validate4(model) {
       validate_field3(
         Field$Title$const,
         model.args.title,
-        new Text2(1, 120),
+        new Text3(1, 120),
         "must contain 1 to 120 characters"
       ),
       validate_field3(
@@ -7710,7 +7982,7 @@ function update5(model, msg) {
     if ($ instanceof Slug3) {
       let value2 = msg[1];
       return [
-        new State(
+        new State2(
           (() => {
             let _record = model.args;
             return new Args4(
@@ -7730,7 +8002,7 @@ function update5(model, msg) {
     } else if ($ instanceof Title) {
       let value2 = msg[1];
       return [
-        new State(
+        new State2(
           (() => {
             let _record = model.args;
             return new Args4(
@@ -7750,7 +8022,7 @@ function update5(model, msg) {
     } else if ($ instanceof Body) {
       let value2 = msg[1];
       return [
-        new State(
+        new State2(
           (() => {
             let _record = model.args;
             return new Args4(
@@ -7770,7 +8042,7 @@ function update5(model, msg) {
     } else if ($ instanceof Category2) {
       let value2 = msg[1];
       return [
-        new State(
+        new State2(
           (() => {
             let _record = model.args;
             return new Args4(
@@ -7790,7 +8062,7 @@ function update5(model, msg) {
     } else {
       let value2 = msg[1];
       return [
-        new State(
+        new State2(
           (() => {
             let _record = model.args;
             return new Args4(
@@ -7817,13 +8089,13 @@ function update5(model, msg) {
       if ($1 instanceof Ok) {
         let args = $1[0];
         return [
-          new State(model.args, model.given, model.last, true),
+          new State2(model.args, model.given, model.last, true),
           send6(args)
         ];
       } else {
         let errors = $1[0];
         return [
-          new State(
+          new State2(
             model.args,
             model.given,
             new Some(new Error2(new Broke3(validation_error_text3(errors)))),
@@ -7836,12 +8108,12 @@ function update5(model, msg) {
   } else if (msg instanceof Given) {
     let given = msg[0];
     return [
-      new State(model.args, given, model.last, model.waiting),
+      new State2(model.args, given, model.last, model.waiting),
       none()
     ];
   } else {
     let result = msg[0];
-    let next = new State(model.args, model.given, new Some(result), false);
+    let next = new State2(model.args, model.given, new Some(result), false);
     if (result instanceof Ok) {
       return [next, reload_page()];
     } else {
@@ -7876,7 +8148,7 @@ function view4(it) {
             let category = item[0];
             return option_(
               toList([value(category.name)]),
-              toList([text4(category.name)])
+              toList([text3(category.name)])
             );
           }
         )
@@ -7886,7 +8158,7 @@ function view4(it) {
           on_click(Event$Send$const),
           disabled(it.waiting)
         ]),
-        toList([text4("\u30BF\u30B0\u3092\u4FDD\u5B58")])
+        toList([text3("\u30BF\u30B0\u3092\u4FDD\u5B58")])
       )
     ])
   );

@@ -1,5 +1,5 @@
 import yumemi/front
-import yumemi/front/el
+import sketch/lustre/element as el
 import yumemi/front/live as front_live
 import gen/api
 import gen/live/blob_copy

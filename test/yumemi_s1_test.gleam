@@ -12,6 +12,7 @@ import yumemi/gen/model
 import yumemi/gen/reader/gate
 import yumemi/gen/source
 import yumemi/gen/stop
+import yumemi_gen_test
 
 fn unit(path: String, text: String) -> source.Unit {
   let assert Ok(module) = glance.module(text)
@@ -230,7 +231,8 @@ fn registry_of(dir: String) -> String {
 pub fn missing_root_sql_stops_generation_test() {
   let dir = copy_app("gen/fixtures/article")
   remove(dir, "db/queries/article_read/root.sql")
-  let notes = notes_of(dir)
+  // 0.12 段 B の数えの警告(exit 0)は外して見る
+  let notes = notes_of(dir) |> yumemi_gen_test.without_stage_b_counts
   remove_app(dir)
   notes
   |> should.equal([
@@ -253,7 +255,8 @@ pub fn port_service_without_root_sql_is_not_stopped_test() {
     "  Hook(name: \"attached_blob_copy\", module: \"hooks\"),\n  Hook(name: \"service_article_read\", module: \"hooks\"),\n",
   )
   |> should.be_true
-  let notes = notes_of(dir)
+  // 0.12 段 B の数えの警告(exit 0)は外して見る
+  let notes = notes_of(dir) |> yumemi_gen_test.without_stage_b_counts
   remove_app(dir)
   notes |> should.equal([])
 }

@@ -1,4 +1,4 @@
-/* GENERATED from public/src/layout.gleam [sha256:e655e9bc7350] — 手で編集しない */
+/* GENERATED from public/src/layout.gleam [sha256:9a2e25734c21] — 手で編集しない */
 
 [data-yumemi-grid="layout"] {
   display: grid;
@@ -8,21 +8,37 @@
 }
 [data-yumemi-grid="layout"] > [data-yumemi-area="header"] {
   grid-area: header;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.0px;
   position: sticky;
   top: env(safe-area-inset-top);
   z-index: 3;
 }
 [data-yumemi-grid="layout"] > [data-yumemi-area="page"] {
   grid-area: page;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 16.0px;
 }
 [data-yumemi-grid="layout"] > [data-yumemi-area="footer"] {
   grid-area: footer;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  gap: 0.0px;
   position: sticky;
   bottom: env(safe-area-inset-bottom);
   z-index: 3;
 }
 [data-yumemi-grid="layout"] > [data-yumemi-area="aside"] {
   grid-area: aside;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8.0px;
   display: none;
 }
 @media (min-width: 1024px) {
@@ -32,19 +48,34 @@
   }
 [data-yumemi-grid="layout"] > [data-yumemi-area="header"] {
   grid-area: header;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.0px;
   position: sticky;
   top: env(safe-area-inset-top);
   z-index: 3;
 }
 [data-yumemi-grid="layout"] > [data-yumemi-area="page"] {
   grid-area: page;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 16.0px;
 }
 [data-yumemi-grid="layout"] > [data-yumemi-area="aside"] {
   grid-area: aside;
-  display: block;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8.0px;
 }
 [data-yumemi-grid="layout"] > [data-yumemi-area="footer"] {
   grid-area: footer;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  gap: 0.0px;
   position: sticky;
   bottom: env(safe-area-inset-bottom);
   z-index: 3;
@@ -59,12 +90,24 @@
 }
 [data-yumemi-grid="page:pages/article/arg_slug/page"] > [data-yumemi-area="page"] {
   grid-area: page;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 16.0px;
 }
 [data-yumemi-grid="page:pages/article/arg_slug/page"] > [data-yumemi-area="rail"] {
   grid-area: rail;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8.0px;
 }
 [data-yumemi-grid="page:pages/article/arg_slug/page"] > [data-yumemi-area="aside"] {
   grid-area: aside;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8.0px;
   display: none;
 }
 @media (min-width: 1024px) {
@@ -74,13 +117,24 @@
   }
 [data-yumemi-grid="page:pages/article/arg_slug/page"] > [data-yumemi-area="page"] {
   grid-area: page;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 16.0px;
 }
 [data-yumemi-grid="page:pages/article/arg_slug/page"] > [data-yumemi-area="rail"] {
   grid-area: rail;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8.0px;
 }
 [data-yumemi-grid="page:pages/article/arg_slug/page"] > [data-yumemi-area="aside"] {
   grid-area: aside;
-  display: block;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8.0px;
 }
 }
 
@@ -92,6 +146,10 @@
 }
 [data-yumemi-grid="page:pages/status/page"] > [data-yumemi-area="page"] {
   grid-area: page;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.0px;
 }
 [data-yumemi-badge] {
   position: absolute;
@@ -104,8 +162,8 @@
   height: 1.25rem;
   padding-inline: 0.25rem;
   border-radius: 999px;
-  color: var(--bg);
-  background: var(--accent);
+  color: var(--yumemi-theme-bg);
+  background: var(--yumemi-theme-accent);
   font: 600 0.75rem/1 system-ui, sans-serif;
 }
 [data-yumemi-badge][data-count=""],

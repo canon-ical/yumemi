@@ -48,9 +48,44 @@ gleam test    # the runtime checks and the generator tests (fixtures in gen/fixt
 
 To generate a fixture in place, run the generator from the root (`gleam run -m yumemi/gen -- gen/fixtures/article gen/fixtures/article`). The fixture faces have no `package.json`, so first link the root's esbuild into each face that has a client (`public` in `article`: `mkdir -p gen/fixtures/article/public/node_modules/.bin && ln -s "$PWD/node_modules/.bin/esbuild" gen/fixtures/article/public/node_modules/.bin/esbuild`); without it the generator stops with exit 3. When yumemi's `[dependencies]` change, run `gleam update yumemi` in each fixture face, or its client build cannot see the new packages.
 
+## `yumemi/front` ── Elements and attributes (0.12)
+
+A Block, a Layout's Block and the docs page are written with yumemi's own element tree; a ★ module imports `yumemi/front/el`, `yumemi/front/html`, `yumemi/front/attr` and `yumemi/front/css`, and never `lustre` or `sketch/lustre` (the generator stops on that import, exit 4, article 1; a face's `gleam.toml` listing `lustre` / `sketch_lustre` stops too, article 2). The only exception until stage C is a 0.11-shaped interactive Component (a `components/` module with `pub fn app`) — it still runs on lustre in its shadow root, and the generator prints how many such modules a face has (`[exit 0 警告] <face>: 第 1・2 条の例外 ..: N module`).
+
+```gleam
+import yumemi/front/attr
+import yumemi/front/css
+import yumemi/front/el.{type Element}
+import yumemi/front/html
+
+const card = [css.Color(css.Token("ma-color-ink")), css.Space(css.Padding, css.Px(16.0))]
+
+pub fn view(it: In) -> Element {
+  html.section(css.class(card), [attr.data("slug", it.slug)], [
+    html.h1_([], [el.text(it.title)]),
+    html.a_([attr.href(it.link)], [el.text("more")]),
+  ])
+}
+```
+
+- `el.Element` and `el.Attribute` are opaque and take no type parameter. `el.text` / `el.each` / `el.none` / `el.fragment`, the framework words (`el.opener` / `el.closer` / `el.badge` / `el.each_modal` / `el.img`) and `el.to_string` (for tests) are public; the rest of `el` is `@internal` and a ★ calling it stops the generator (article 3).
+- `html` has the 53 tags musearch uses plus `svg` / `path`, each as `tag(class, attributes, children)` and `tag_(attributes, children)`, with sketch_lustre's names and argument order. There is no `style`, `script` or `link`.
+- `attr` has typed attributes with lustre's names, `data(name, value)`, `aria(name, value)` and `role(attr.Status | ..)`. There is no free-name attribute, no `class` (a class is the tag's first argument, `css.class(styles)`), no `style` and no event.
+- Rendering never fails a page: a `data` / `aria` name that is not `[a-z][a-z0-9-]*` drops that attribute (a literal one stops the generator, article 7); `href` / `src` are dropped unless the scheme is `http`, `https`, `mailto`, `tel` or none (a relative URL); the same attribute written twice keeps the last one (written twice literally in one list stops the generator, article 8); `</` and `<!--` inside the generated `<style>` become `<\/` and `<\!--`. Fragments leave no comment markers, and a `textarea` / `pre` whose text starts with a newline keeps it.
+- Until stage C a Block places a 0.11 interactive Component with `el.legacy_island("like-button", [#("slug", it.slug)])` (a tag that is not a custom-element name renders nothing; an `on*` / `style` / `class` / `srcdoc` / non-`[a-z][a-z0-9-]*` argument is dropped).
+
+### The raw-CSS escape (0.12)
+
+`shell.stylesheets` (below) and `el.stylesheet(el.static_sheet("fonts/mincho.css"))` in a Block load a `.css` file from the face's `priv/static/`. Both are an escape hatch that the generator checks and counts:
+
+- the file must exist under `priv/static/` (exit 3, article 28) and the `static_sheet` path must be a string literal (exit 4, article 31);
+- no selector may name generated output — `[data-yumemi-…]`, a generated class `.css-<8 hex>`, or an element whose name starts with `yumemi-` (exit 4, article 29). An interactive Component's own tag (`like-button`) and its `:state()` are fine, and so is reading `var(--yumemi-theme-*)` in a declaration;
+- no `@import` (exit 4, article 30);
+- the rules are counted per face — each top-level block is one rule, an `@media` block is one — and printed as a warning (exit 0): `[exit 0 警告] <face>: 生の CSS の逃げ道 <n> file(..)、規則 <n>`, also in `_diagnostics.txt`.
+
 ## `yumemi/front` ── Shell: the home screen, the service worker and the stylesheets (0.11.12, 0.11.15)
 
-A face's `src/shell.gleam` holds the constants the generator puts in every page's `<head>`. `lang`, `title` and `theme` are required (as before). Five more are optional `String` constants; each one that is present adds one element after the `<title>`, in this order, and a shell without them generates exactly what 0.11.11 did:
+A face's `src/shell.gleam` holds the constants the generator puts in every page's `<head>`. `lang`, `title` and `theme` are required (as before; from 0.12 `theme` is `pub const theme: theme.Defaults = theme.Defaults(background: "#FAF7F0", text: "#3D2419", accent: "#A93632", background_image: None)` — the three colours are `#rrggbb` literals, exit 4 otherwise, and `background_image` is `None` or `Some("<path under priv/static>")`, exit 3 when the file is missing; article 26). Five more are optional `String` constants; each one that is present adds one element after the `<title>`, in this order, and a shell without them generates exactly what 0.11.11 did:
 
 | Constant | Goes out as |
 |---|---|
@@ -60,7 +95,7 @@ A face's `src/shell.gleam` holds the constants the generator puts in every page'
 | `apple_touch_icon` | `<link rel="apple-touch-icon" href="..">` |
 | `service_worker` | the generated `priv/static/_yumemi/client.mjs` calls `navigator.serviceWorker.register("..")` once when it loads |
 
-`stylesheets` (0.11.15) is an optional `List(String)` constant: one `<link rel="stylesheet" href="..">` per item, in list order, after the elements above. Put the face's site-wide stylesheets here rather than in a Block: a `<link>` in `<head>` holds the first paint until it has loaded, and client navigation keeps it (see Client navigation below), where a `<link>` in `<body>` is rebuilt — and revalidated — on every navigation. An empty list adds nothing.
+`stylesheets` (0.11.15) is an optional `List(String)` constant: one `<link rel="stylesheet" href="..">` per item, in list order, after the elements above. From 0.12 each file is checked and counted as the raw-CSS escape (above). Put the face's site-wide stylesheets here rather than in a Block: a `<link>` in `<head>` holds the first paint until it has loaded, and client navigation keeps it (see Client navigation below), where a `<link>` in `<body>` is rebuilt — and revalidated — on every navigation. An empty list adds nothing.
 
 ```gleam
 pub const manifest: String = "/manifest.webmanifest"
@@ -86,25 +121,42 @@ The generated client calls `yumemi/front/navigate.mjs`'s `start({routes, csp, bo
 - **Stylesheets load before the body changes.** A stylesheet new to `<head>`, and a copy (in `<head>`, marked `data-yumemi-hold`) of each stylesheet that only the next page's `<body>` links (an article's font CSS, say), is inserted with `media="not all"` and awaited (load or error, at most 3 seconds); then its `media` is restored, the old head elements leave and the body is swapped. A copy is removed once the body's own `<link>` has loaded. The old page stays on screen meanwhile, so no unstyled page shows; the swap waits for those downloads.
 - **Pageviews, back / forward and reload after a write** are unchanged: the gate's mark in `<head>` counts the navigation (`kind` `spa`), back / forward take the same path, and `navigate.reload()` refetches a routed Page in place (`kind` `reload`).
 
-## `yumemi/front` ── Page theme: where the colours come from (0.11.13)
+## `yumemi/front` ── Page theme: where the colours come from (0.11.13, 0.12)
 
-`Page(.., theme: Some(name), ..)` paints the page with a `PageTheme` value read on the server (the body's `--bg`, `--bg-image`, `--text`, `--accent`; the shell's `theme` constant gives the defaults). `theme: None` paints the defaults only.
+`Page(.., theme: Some(name), ..)` paints the page with a `yumemi/front/theme.PageTheme` read on the server; `theme: None` paints the shell's `theme` defaults only.
 
-- **Which Service:** the first of the Page's sources (in placement order, the layout's first) whose `Out` holds a `PageTheme` somewhere in its type. No extra read: the value is taken from that Service's response, which the page reads anyway.
-- **Where in its `Out`:** the generator follows the `Out`'s labelled record fields (through `Option`, records and type aliases; not into `List`) to a field whose type is `PageTheme` or `Option(PageTheme)`. `name` is the label of that last field: `Some("theme")` with `Out(muse: Public, ..)` and `Public(.., theme: Option(PageTheme))` reads `muse.theme`. When no path ends in a field called `name`, the shallowest path is taken.
-- **At runtime:** a `None` on the way (or a `None` theme) gives `None`, and the page uses the defaults.
-- `name` is also the name of the `Data` field (`theme: Option(<service>.PageTheme)`) in the generated `load/**/page.gleam`.
-- When no field path reaches a `PageTheme`, the generator does not stop: `load/**/page.gleam` is what 0.11.12 generated (with no source holding one, it names `<root service>.PageTheme`, which does not compile), the shell's theme row stays `{ theme: true }`, and the page gets `None` (the defaults) at runtime.
+```gleam
+// yumemi/front/theme
+pub type PageTheme {
+  PageTheme(background: Option(color.Color), background_image: Option(blob.Blob),
+            text: Option(color.Color), accent: Option(color.Color))
+}
+```
+
+- **Colours are a type.** `yumemi/front/color.Color` is opaque: `color.parse` accepts `#` and six hex digits only (`"#fff;}</style>"` is an `Error`), and the output is rebuilt from the parsed digits (lower case). An Entity or a Service `Out` holds `theme.PageTheme` (or `color.Color`) directly; the face copies (`src/gen/out/*`) keep yumemi's types instead of `String`, and the back's codec reads a stored colour with `color.parse`.
+- **Output:** four custom properties on `body` — `--yumemi-theme-bg`, `--yumemi-theme-bg-image` (`url("..")`, the URL built by the app's `media.url(blob, media.W1600)` as before), `--yumemi-theme-text`, `--yumemi-theme-accent` — and, on a page with a background image, `data-yumemi-theme-image` on `body`. A ★ reads them with `css.Theme(css.ThemeBackground | ThemeText | ThemeAccent)` and `css.State(css.ThemeImage, ..)`, never by name.
+- **Which Service and where in its `Out`:** unchanged from 0.11.13 — the first source whose `Out` reaches a `PageTheme` through labelled record fields (through `Option`, records and aliases), `name` choosing the last field's label — except that the field must be yumemi's `theme.PageTheme` (an app type that is merely called `PageTheme` is not taken). When no source of a `theme: Some(name)` Page reaches one, the generator stops (exit 4, article 27).
 
 ## `yumemi/front` ── Style (0.11.10)
 
-`yumemi/front/css`'s `Style` is the typed vocabulary a Page / Area / component carries; `yumemi/front/sketch_css` maps it to CSS (sketch classes, so a Style used by an island also lands in the island's shadow `<style>`). Color values are strings passed straight through, so `var(--ma-color-bg)` and `color-mix(...)` work — the app owns its palette, yumemi bakes in no hex. Every word also works inside `State(Hover / Focus / FocusVisible / HoverCapable / Disabled / Current, ..)` and `Responsive(SP / PC / Tablet, ..)`.
+`yumemi/front/css`'s `Style` is the typed vocabulary a Page / Area / component carries; `yumemi/front/sketch_css` maps it to CSS (sketch classes; a 0.11 island's Style still lands in the island's shadow `<style>`). `css.class(styles)` makes the `Class` a tag takes. Every word also works inside `State(Hover / Focus / FocusVisible / HoverCapable / Disabled / Current / Waiting / Succeeded / Failed / ThemeImage, ..)` and `Responsive(SP / PC / Tablet, ..)`.
+
+Colours are a closed type, `css.Paint` (0.12; before, a string passed straight through):
+
+| Paint | CSS |
+|---|---|
+| `Hex("#a1b2c3")` | the hex, lower case — a string literal of `#` and six hex digits (exit 4 otherwise, article 23) |
+| `Token("ma-color-ink")` | `var(--ma-color-ink)` — the name is `[a-z0-9-]+` (exit 4 otherwise, article 24) |
+| `Theme(ThemeBackground / ThemeText / ThemeAccent)` | `var(--yumemi-theme-bg)` / `-text` / `-accent` (Page theme, above) |
+| `Mix(a, b, percent)` | `color-mix(in oklab, a percent%, b)` — `percent` 0–100 (exit 4 otherwise, article 25) |
+| `Transparent` / `CurrentColor` | `transparent` / `currentcolor` |
 
 | Style | CSS |
 |---|---|
 | `Color(value)` | `color` |
 | `Background(value)` | `background-color` |
-| `Border(edge: AllEdges / BottomEdge, width, style: Solid / Dashed / Dotted, color)` | `border` / `border-bottom` (e.g. the 2px tab underline) |
+| `Border(edge: AllEdges / TopEdge / BottomEdge, width, style: Solid / Dashed / Dotted, color)` | `border` / `border-top` (0.12) / `border-bottom` (e.g. the 2px tab underline) |
+| `TextAlign(align: TextStart / TextCenter / TextEnd)` | (0.12) `text-align: start / center / end` |
 | `Outline(width, offset, color)` | `outline-style: solid` / `outline-width` / `outline-offset` / `outline-color` — the focus ring, inside `State(FocusVisible, ..)` (0.11.14; `State(Focus, ..)` also keeps it after a tap) |
 | `Space(property:, value:)` | `margin` / `padding` / `gap` / `width` / `height` / `border-radius`, and (0.11.7) `min-width` / `min-height` / `max-width` |
 | `Text(family:, size:, weight:, line_height:)` | `font-family` (`System` / `SansSerif` / `Serif` / `Monospace`, or `Named("var(--ma-font-ui)")` / `Named("\"Noto Sans JP\", sans-serif)")`), `font-size`, `font-weight` (`Normal` 400 / `Medium` 500 / `SemiBold` 600 / `Bold` 700), `line-height` |
@@ -116,7 +168,9 @@ The generated client calls `yumemi/front/navigate.mjs`'s `start({routes, csp, bo
 | `State(FocusVisible, styles)` | (0.11.14) `:focus-visible` — the focus ring for keyboard focus only. `Focus` (`:focus`) also matches after a tap or a click, so a ring put there stays on a tapped button; put the ring here instead |
 | `State(HoverCapable, styles)` | (0.11.14) `@media (hover: hover) { .class:hover { .. } }` — hover on devices that can hover (a mouse). On a touch screen `:hover` stays true after a tap, so a `Hover` background stays on the tapped button; this one is not applied there. Same specificity as `Hover` (the class plus `:hover`), so it beats the class's own background. Inside `Responsive(at, ..)` it becomes one media, `@media (<at>) and (hover: hover)` |
 | `State(Current, styles)` | (0.11.9) `[aria-current]:not([aria-current="false"])` — the item that is where the user is (`aria-current="page"`, also `step` / `location` / `true`). Mark the nav item with `aria-current` (a Layout block learns the page from `CurrentRoute`, below) and give it e.g. the 2px underline with `Border(BottomEdge, ..)` |
-| `Flow(..)` `State(..)` `Responsive(..)` `Animation(..)` | layout, interaction states, breakpoints, animations (unchanged) |
+| `State(Waiting / Succeeded / Failed, styles)` | (0.12) inside an interactive Component whose custom state is `waiting` / `ok` / `error`. Written twice: `@supports selector(:state(x)) { .class:is(:state(x) *) {..} }` and `@supports not selector(:state(x)) { .class:is([data-yumemi-state~="x"] *) {..} }` for browsers without `:state()`. Inside `Responsive(..)` the two selectors are written without `@supports` (sketch drops an at-rule inside a media) |
+| `State(ThemeImage, styles)` | (0.12) `.class:is([data-yumemi-theme-image] *)` — on a page with a background image |
+| `Flow(..)` `State(..)` `Responsive(..)` | layout, interaction states, breakpoints (unchanged). `Animation` was removed in 0.12 (no `@keyframes` was ever emitted) |
 
 Lengths (`css.Length`) are `Px(n)` / `Rem(n)` and, from 0.11.9:
 

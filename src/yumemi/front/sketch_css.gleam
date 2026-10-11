@@ -2,6 +2,7 @@ import gleam/float
 import gleam/int
 import gleam/list
 import gleam/string
+import sketch
 import sketch/css as sketch_css
 import sketch/css/length
 import sketch/css/media
@@ -9,16 +10,111 @@ import sketch/internals/cache/cache as sketch_style
 import yumemi/front/css
 import yumemi/front/track
 
+/// sketch の Class。0.11 の形の interactive Component(`pub fn app` を持つ module、段 C の
+/// Y3 で消す)だけが使う。★ の Block と Layout は `css.class` を要素の関数に渡す。
 pub fn class(styles: List(css.Style)) -> sketch_css.Class {
   styles
   |> list.flat_map(to_sketch)
   |> sketch_css.class
 }
 
+@external(javascript, "./sheet_ffi.mjs", "current")
+fn current_sheet() -> Result(sketch.StyleSheet, Nil)
+
+@external(javascript, "./sheet_ffi.mjs", "set_current")
+fn set_current_sheet(sheet: Result(sketch.StyleSheet, Nil)) -> Nil
+
+/// `css.Class` の class 名。いま集めている stylesheet(`collect`)に規則を足して名を返す。
+/// 集めていない所(test や Block リストの外で描いたとき)では、その場の stylesheet を 1 つ
+/// 持って名だけを返す。
+@internal
+pub fn class_name(class: css.Class) -> String {
+  let sheet = case current_sheet() {
+    Ok(sheet) -> sheet
+    Error(_) -> new_sheet()
+  }
+  let #(sheet, name) =
+    css.class_styles(class)
+    |> list.flat_map(to_sketch)
+    |> sketch_css.class
+    |> sketch.class_name(sheet)
+  set_current_sheet(Ok(sheet))
+  name
+}
+
+/// `body` を描く間に使った class の CSS を集める。戻りは #(CSS の字, body の値)。
+@internal
+pub fn collect(body: fn() -> a) -> #(String, a) {
+  let previous = current_sheet()
+  set_current_sheet(Ok(new_sheet()))
+  let value = body()
+  let css = case current_sheet() {
+    Ok(sheet) -> sketch.render(sheet)
+    Error(_) -> ""
+  }
+  set_current_sheet(previous)
+  #(css, value)
+}
+
+fn new_sheet() -> sketch.StyleSheet {
+  let assert Ok(sheet) = sketch.stylesheet(strategy: sketch.Ephemeral)
+  sheet
+}
+
+/// 色を CSS の字にする。形の合わない Hex・Token は `unset`(宣言の外へ出る字を書かない)。
+pub fn paint_to_string(paint: css.Paint) -> String {
+  case paint {
+    css.Hex(value) ->
+      case valid_hex(value) {
+        True -> string.lowercase(value)
+        False -> "unset"
+      }
+    css.Token(name) ->
+      case valid_var_name(name) {
+        True -> "var(--" <> name <> ")"
+        False -> "unset"
+      }
+    css.Theme(slot) -> "var(" <> theme_variable(slot) <> ")"
+    css.Mix(a:, b:, percent:) ->
+      "color-mix(in oklab, "
+      <> paint_to_string(a)
+      <> " "
+      <> int.to_string(int.clamp(percent, 0, 100))
+      <> "%, "
+      <> paint_to_string(b)
+      <> ")"
+    css.Transparent -> "transparent"
+    css.CurrentColor -> "currentcolor"
+  }
+}
+
+/// 頁の色の custom property の名(body に framework が出す)。
+pub fn theme_variable(slot: css.ThemeSlot) -> String {
+  case slot {
+    css.ThemeBackground -> "--yumemi-theme-bg"
+    css.ThemeText -> "--yumemi-theme-text"
+    css.ThemeAccent -> "--yumemi-theme-accent"
+  }
+}
+
+/// `#` と 16 進 6 桁か。
+pub fn valid_hex(value: String) -> Bool {
+  case string.to_graphemes(value) {
+    ["#", ..digits] ->
+      list.length(digits) == 6
+      && list.all(digits, fn(digit) {
+        string.contains("0123456789abcdefABCDEF", digit)
+      })
+    _ -> False
+  }
+}
+
 pub fn to_sketch(style: css.Style) -> List(sketch_css.Style) {
   case style {
-    css.Color(value) -> [sketch_css.color(value)]
-    css.Background(value) -> [sketch_css.background_color(value)]
+    css.Color(value) -> [sketch_css.color(paint_to_string(value))]
+    css.Background(value) -> [
+      sketch_css.background_color(paint_to_string(value)),
+    ]
     css.Border(edge:, width:, style:, color:) -> [
       border(edge, width, style, color),
     ]
@@ -26,7 +122,7 @@ pub fn to_sketch(style: css.Style) -> List(sketch_css.Style) {
       sketch_css.outline_style("solid"),
       sketch_css.outline_width(length_to_string(width)),
       sketch_css.outline_offset(length_to_string(offset)),
-      sketch_css.outline_color(color),
+      sketch_css.outline_color(paint_to_string(color)),
     ]
     css.Crop(fit:, ratio:) -> [
       sketch_css.object_fit(object_fit(fit)),
@@ -46,19 +142,17 @@ pub fn to_sketch(style: css.Style) -> List(sketch_css.Style) {
       sketch_css.line_height(length_to_string(line_height)),
     ]
     css.Flow(flow) -> flow_style(flow)
+    css.TextAlign(align) -> [sketch_css.text_align(text_align(align))]
     css.State(state, styles) -> state_style(state, styles)
     css.Responsive(at, styles) -> {
       let #(hovers, styles) = list.partition(styles, is_hover_capable)
       [
-        sketch_css.media(breakpoint(at), list.flat_map(styles, to_sketch)),
+        sketch_css.media(breakpoint(at), list.flat_map(styles, in_media)),
         ..list.flat_map(hovers, fn(style) {
           hover_capable_in(media.to_string(breakpoint(at)) <> " and", style)
         })
       ]
     }
-    css.Animation(animation) -> [
-      sketch_css.animation(animation_name(animation)),
-    ]
   }
 }
 
@@ -80,13 +174,26 @@ fn border(
   edge: css.BorderEdge,
   width: css.Length,
   style: css.BorderStyle,
-  color: String,
+  color: css.Paint,
 ) -> sketch_css.Style {
   let value =
-    length_to_string(width) <> " " <> border_style(style) <> " " <> color
+    length_to_string(width)
+    <> " "
+    <> border_style(style)
+    <> " "
+    <> paint_to_string(color)
   case edge {
     css.AllEdges -> sketch_css.border(value)
+    css.TopEdge -> sketch_css.border_top(value)
     css.BottomEdge -> sketch_css.border_bottom(value)
+  }
+}
+
+fn text_align(value: css.TextAlignment) -> String {
+  case value {
+    css.TextStart -> "start"
+    css.TextCenter -> "center"
+    css.TextEnd -> "end"
   }
 }
 
@@ -197,7 +304,57 @@ fn state_style(
     ]
     css.Disabled -> [sketch_css.disabled(styles)]
     css.Current -> [sketch_css.selector(current_selector, styles)]
+    css.Waiting -> component_state("waiting", styles)
+    css.Succeeded -> component_state("ok", styles)
+    css.Failed -> component_state("error", styles)
+    css.ThemeImage -> [sketch_css.selector(theme_image_selector, styles)]
   }
+}
+
+/// 地の画像のある頁の内側。framework が body に立てる。
+const theme_image_selector = ":is([data-yumemi-theme-image] *)"
+
+/// 祖先の interactive Component の custom state。`:state()` を持つ browser には
+/// `@supports selector(:state(x))` の中の `:state(x)` で、持たない browser には runtime が
+/// 写す `data-yumemi-state` の属性で効かせる(2 通りの規則)。
+fn component_state(
+  name: String,
+  styles: List(sketch_css.Style),
+) -> List(sketch_css.Style) {
+  [
+    sketch_style.Media("@supports selector(:state(" <> name <> "))", [
+      sketch_css.selector(state_selector(name), styles),
+    ]),
+    sketch_style.Media("@supports not selector(:state(" <> name <> "))", [
+      sketch_css.selector(state_attribute_selector(name), styles),
+    ]),
+  ]
+}
+
+fn state_selector(name: String) -> String {
+  ":is(:state(" <> name <> ") *)"
+}
+
+fn state_attribute_selector(name: String) -> String {
+  ":is([data-yumemi-state~=\"" <> name <> "\"] *)"
+}
+
+/// `Responsive` の中の状態。sketch は media の中の at-rule を落とすので、`@supports` で
+/// 包まずに 2 通りの選択子を並べる(`:is()` は読めない選択子を含んでも規則を捨てない)。
+fn component_state_in_media(
+  state: css.Interaction,
+  styles: List(css.Style),
+) -> List(sketch_css.Style) {
+  let styles = list.flat_map(styles, to_sketch)
+  let name = case state {
+    css.Waiting -> "waiting"
+    css.Succeeded -> "ok"
+    _ -> "error"
+  }
+  [
+    sketch_css.selector(state_selector(name), styles),
+    sketch_css.selector(state_attribute_selector(name), styles),
+  ]
 }
 
 /// hover が出来る端末だけの media。sketch の `media.Query` に `hover` が無いので、
@@ -209,6 +366,16 @@ fn is_hover_capable(style: css.Style) -> Bool {
   case style {
     css.State(css.HoverCapable, _) -> True
     _ -> False
+  }
+}
+
+fn in_media(style: css.Style) -> List(sketch_css.Style) {
+  case style {
+    css.State(css.Waiting as state, styles)
+    | css.State(css.Succeeded as state, styles)
+    | css.State(css.Failed as state, styles) ->
+      component_state_in_media(state, styles)
+    _ -> to_sketch(style)
   }
 }
 
@@ -290,13 +457,5 @@ fn font_weight(value: css.FontWeight) -> String {
     css.Medium -> "500"
     css.SemiBold -> "600"
     css.Bold -> "700"
-  }
-}
-
-fn animation_name(value: css.Animation) -> String {
-  case value {
-    css.Fade -> "fade"
-    css.SlideUp -> "slide-up"
-    css.Pulse -> "pulse"
   }
 }

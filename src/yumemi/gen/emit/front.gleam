@@ -8,6 +8,7 @@ import gleam/option.{type Option, None, Some}
 import gleam/order
 import gleam/result
 import gleam/string
+import simplifile
 import yumemi/front as framework_front
 import yumemi/front/css as framework_css
 import yumemi/front/sketch_css as framework_sketch_css
@@ -23,6 +24,7 @@ import yumemi/gen/face
 import yumemi/gen/glance_util as g
 import yumemi/gen/model
 import yumemi/gen/naming
+import yumemi/gen/raw_css
 import yumemi/gen/reader/front as reader_front
 import yumemi/gen/reader/gate as reader_gate
 import yumemi/gen/source.{type Unit, Unit}
@@ -313,7 +315,7 @@ fn skeleton_file(
     list.append(
       [
         "import yumemi/front/el",
-        "import sketch/lustre/element/html",
+        "import yumemi/front/html",
       ],
       case service {
         Some(name) -> ["import gen/out/" <> name]
@@ -362,7 +364,7 @@ fn skeleton_file(
     <> in_type
     <> "\n\npub fn view("
     <> view_argument
-    <> ": In) -> el.Element(Nil) {\n  html.div_([], [\n"
+    <> ": In) -> el.Element {\n  html.div_([], [\n"
     <> string.concat(list.map(children, fn(child) { "    " <> child <> ",\n" }))
     <> "  ])\n}\n"
   File(
@@ -755,7 +757,10 @@ fn blocks_preview_text(
     )
     |> list.unique
     |> list.map(fn(path) { "import " <> path })
-  let option_imports = case string.contains(area_children, "None") {
+  let option_imports = case
+    string.contains(area_children, "None")
+    || string.contains(area_children, "default_page_theme()")
+  {
     True -> ["import gleam/option.{None}"]
     False -> []
   }
@@ -783,10 +788,22 @@ fn blocks_preview_text(
   }
   let opaque_imports =
     list.append(
-      case string.contains(area_children, "default_blob()") {
-        True -> ["import yumemi/blob.{type Blob, parse as parse_blob}"]
-        False -> []
-      },
+      list.flatten([
+        case string.contains(area_children, "default_blob()") {
+          True -> ["import yumemi/blob.{type Blob, parse as parse_blob}"]
+          False -> []
+        },
+        case string.contains(area_children, "default_color()") {
+          True -> [
+            "import yumemi/front/color.{type Color, parse as parse_color}",
+          ]
+          False -> []
+        },
+        case string.contains(area_children, "default_page_theme()") {
+          True -> ["import yumemi/front/theme"]
+          False -> []
+        },
+      ]),
       list.append(
         case string.contains(area_children, "default_party_id()") {
           True -> [
@@ -813,11 +830,7 @@ fn blocks_preview_text(
     list.append(
       [
         "import yumemi/front/el",
-        "import lustre/attribute",
-        "import lustre/element/html as raw_html",
-        "import sketch/lustre as sketch_lustre",
-        "import sketch/lustre/element",
-        "import sketch/lustre/element/html",
+        "import yumemi/front/html",
       ],
       list.append(
         block_imports,
@@ -842,6 +855,20 @@ fn blocks_preview_text(
         "\nfn default_blob() -> Blob {\n"
         <> "  let assert Ok(value) = parse_blob(\"placeholder\")\n"
         <> "  value\n}\n"
+      False -> ""
+    }
+    <> case string.contains(area_children, "default_color()") {
+      True ->
+        "\nfn default_color() -> Color {\n"
+        <> "  let assert Ok(value) = parse_color(\"#000000\")\n"
+        <> "  value\n}\n"
+      False -> ""
+    }
+    <> case string.contains(area_children, "default_page_theme()") {
+      True ->
+        "\nfn default_page_theme() -> theme.PageTheme {\n"
+        <> "  theme.PageTheme(background: None, background_image: None, text: None, accent: None)\n"
+        <> "}\n"
       False -> ""
     }
     <> case string.contains(area_children, "default_time()") {
@@ -879,20 +906,15 @@ fn blocks_preview_text(
   <> "\n"
   <> string.join(list.sort(body_imports, string.compare), "\n")
   <> default_helpers
-  <> "\npub fn view() -> element.Element(Nil) {\n"
-  <> "  html.div_([attribute.attribute(\"data-yumemi-blocks-preview\", \"pc\")], [\n"
+  <> "\npub fn view() -> el.Element {\n"
+  <> "  html.div_([el.attribute(\"data-yumemi-blocks-preview\", \"pc\")], [\n"
   <> "    "
   <> area_children
   <> "\n  ])\n}\n\n"
-  <> "pub fn render() -> element.Element(Nil) {\n"
-  <> "  let assert Ok(stylesheet) =\n"
-  <> "    sketch_lustre.construct(fn(stylesheet) { stylesheet })\n"
-  <> "  let output =\n"
-  <> "    sketch_lustre.render(stylesheet, in: [sketch_lustre.node()], after: fn() { view() })\n"
-  <> "  let assert Ok(_) = sketch_lustre.teardown(stylesheet)\n"
-  <> "  raw_html.html([], [\n"
-  <> "    raw_html.head([], []),\n"
-  <> "    raw_html.body([], [output]),\n"
+  <> "pub fn render() -> el.Element {\n"
+  <> "  html.html([], [\n"
+  <> "    html.head([], []),\n"
+  <> "    html.body_([], [el.styled(fn() { view() }, \"\")]),\n"
   <> "  ])\n}\n"
 }
 
@@ -922,7 +944,7 @@ fn preview_area_text(
     )
     <> "    ]"
   let attributes =
-    "[attribute.attribute(\"data-yumemi-area\", " <> quoted(name) <> ")]"
+    "[el.attribute(\"data-yumemi-area\", " <> quoted(name) <> ")]"
   case name {
     "header" -> "html.header_(" <> attributes <> ", " <> children_text <> ")"
     "nav" -> "html.nav_(" <> attributes <> ", " <> children_text <> ")"
@@ -1182,6 +1204,8 @@ fn default_custom_expression(
             "yumemi/er" ->
               relation_default(output_module, type_name(type_), field_name)
             "yumemi/blob" -> "default_blob()"
+            "yumemi/front/color" -> "default_color()"
+            "yumemi/front/theme" -> "default_page_theme()"
             "yumemi/party" -> "default_party_id()"
             "yumemi/time" ->
               case type_name(type_) {
@@ -3539,7 +3563,7 @@ fn page_placements(page: reader_front.Page) -> List(reader_front.Placement) {
 }
 
 fn page_theme_service(
-  app: model.App,
+  _app: model.App,
   units: List(Unit),
   sources: List(LoadSource),
   fallback: String,
@@ -3547,25 +3571,12 @@ fn page_theme_service(
   case
     list.find(sources, fn(source) {
       source.type_name == "Out"
-      && output_has_custom_type(app, units, source.service, "PageTheme")
+      && option.is_some(page_theme_path(units, source.service, ""))
     })
   {
     Ok(source) -> source.service
     Error(_) -> fallback
   }
-}
-
-fn output_has_custom_type(
-  app: model.App,
-  units: List(Unit),
-  service: String,
-  name: String,
-) -> Bool {
-  let #(state, _) = out_state(app, units, "service/" <> service)
-  list.any(state.custom, fn(declaration) {
-    let CustomDecl(definition: definition, ..) = declaration
-    definition.name == name
-  })
 }
 
 /// 面のどこかの Page が theme を取るか。取らない面の shell には theme の path を
@@ -3632,7 +3643,7 @@ fn theme_paths(
               glance.LabelledVariantField(label: label, item: item) -> {
                 let #(inner, optional) = option_inner(item)
                 let steps = [#(label, optional), ..prefix]
-                case type_name(inner) == "PageTheme" {
+                case is_page_theme(record_scope, inner) {
                   True -> [list.reverse(steps)]
                   False ->
                     theme_paths(units, record_scope, inner, steps, [key, ..seen])
@@ -3644,6 +3655,12 @@ fn theme_paths(
       }
     None -> []
   }
+}
+
+/// 型が `yumemi/front/theme.PageTheme` か(型名の字の一致では拾わない、0.12)。
+fn is_page_theme(scope: Scope, type_: glance.Type) -> Bool {
+  type_name(type_) == "PageTheme"
+  && resolved_path(scope, type_) == Some("yumemi/front/theme")
 }
 
 fn option_inner(type_: glance.Type) -> #(glance.Type, Bool) {
@@ -3791,7 +3808,10 @@ fn block_source(
 }
 
 fn load_source_type(source: LoadSource) -> String {
-  let out = source.service <> "." <> source.type_name
+  let out = case source.type_name {
+    "PageTheme" -> "theme.PageTheme"
+    _ -> source.service <> "." <> source.type_name
+  }
   case source.optional {
     True -> "Option(" <> out <> ")"
     False -> out
@@ -3911,47 +3931,37 @@ fn page_render_text(
   page_sources: List(LoadSource),
   theme_background_blob: Bool,
 ) -> String {
-  let theme = theme_source(page_sources)
-  let theme_call = case theme {
-    Some(_) -> "theme_global(it.theme)"
-    None -> "theme_global()"
+  let theme_value = case theme_source(page_sources) {
+    Some(_) -> "it.theme"
+    None -> "None"
   }
-  "pub fn render(it: Data) -> element.Element(Nil) {\n"
-  <> "  let assert Ok(stylesheet) =\n"
-  <> "    sketch_lustre.construct(fn(stylesheet) {\n"
-  <> "      sketch.global(stylesheet, "
-  <> theme_call
-  <> ")\n"
-  <> "    })\n"
-  <> "  let output = render_view(stylesheet, fn() { view(it) })\n"
-  <> "  let assert Ok(_) = sketch_lustre.teardown(stylesheet)\n"
-  <> "  output\n"
-  <> "}\n\n"
-  <> "fn render_view(\n"
-  <> "  stylesheet: sketch.StyleSheet,\n"
-  <> "  body: fn() -> element.Element(Nil),\n"
-  <> ") -> element.Element(Nil) {\n"
-  <> "  let styled_body =\n"
-  <> "    sketch_lustre.render(stylesheet, in: [sketch_lustre.node()], after: body)\n"
+  "pub fn render(it: Data) -> el.Element {\n"
+  <> "  let page_theme = "
+  <> theme_value
   <> "\n"
-  <> "  raw_html.html([attribute.attribute(\"lang\", "
+  <> "  html.html([el.attribute(\"lang\", "
   <> quoted(front.shell.lang)
   <> ")], [\n"
-  <> "    raw_html.head([], [\n"
-  <> "      raw_html.meta([attribute.attribute(\"charset\", \"utf-8\")]),\n"
-  <> "      raw_html.meta([\n"
-  <> "        attribute.attribute(\"name\", \"viewport\"),\n"
-  <> "        attribute.attribute(\"content\", \"width=device-width, initial-scale=1, viewport-fit=cover\"),\n"
+  <> "    html.head([], [\n"
+  <> "      html.meta([el.attribute(\"charset\", \"utf-8\")]),\n"
+  <> "      html.meta([\n"
+  <> "        el.attribute(\"name\", \"viewport\"),\n"
+  <> "        el.attribute(\"content\", \"width=device-width, initial-scale=1, viewport-fit=cover\"),\n"
   <> "      ]),\n"
-  <> "      raw_html.title([], "
+  <> "      html.title([], "
   <> quoted(front.shell.title)
   <> "),\n"
   <> shell_head_text(front.shell.head)
   <> "    ]),\n"
-  <> "    raw_html.body([], [styled_body]),\n"
+  <> "    html.body_([theme_image_attribute(page_theme)], [\n"
+  <> "      el.styled(\n"
+  <> "        fn() { view(it) },\n"
+  <> "        theme.body_rule(page_theme, theme_defaults(), theme_image_url),\n"
+  <> "      ),\n"
+  <> "    ]),\n"
   <> "  ])\n"
   <> "}\n\n"
-  <> theme_global_text(front, theme, theme_background_blob)
+  <> theme_global_text(front, theme_background_blob)
 }
 
 /// shell の任意の const(0.11.12)を title の後ろに出す。無い const の要素は出さない。`stylesheets`(0.11.15)は
@@ -3973,20 +3983,20 @@ fn shell_head_text(head: reader_front.ShellHead) -> String {
     case value {
       Some(value) ->
         Ok(
-          "      raw_html."
-          <> tag
-          <> "([\n"
-          <> "        attribute.attribute("
+          "      el.element("
+          <> quoted(tag)
+          <> ", [\n"
+          <> "        el.attribute("
           <> quoted(key)
           <> ", "
           <> quoted(kind)
           <> "),\n"
-          <> "        attribute.attribute("
+          <> "        el.attribute("
           <> quoted(value_key)
           <> ", "
           <> quoted(value)
           <> "),\n"
-          <> "      ]),\n",
+          <> "      ], []),\n",
         )
       None -> Error(Nil)
     }
@@ -3999,171 +4009,54 @@ fn theme_source(sources: List(LoadSource)) -> Option(LoadSource) {
   |> option.from_result
 }
 
+/// 頁の色の地の画像は `theme.PageTheme` の `Option(Blob)`。theme を取る頁は app の media の
+/// variant(`media.W1600`)で URL を組む(今の形のまま、`gen/media` へつなぐのは段 C)。
 fn theme_background_is_blob(
-  units: List(Unit),
+  _units: List(Unit),
   theme: Option(LoadSource),
 ) -> Bool {
-  case theme {
-    Some(source) -> {
-      let service_path = "service/" <> source.service
-      let service_scope = scope_for(units, service_path)
-      let theme_path = case
-        unqualified_module(service_scope.imports, source.type_name)
-      {
-        Some(path) -> path
-        None -> service_path
-      }
-      case unit_for(units, theme_path) {
-        Some(unit) -> {
-          let module = g.in_order(unit.module)
-          case g.find_custom_type(module, source.type_name) {
-            Some(definition) -> theme_definition_background_is_blob(definition)
-            None -> theme_background_from_any_unit(units, source.type_name)
-          }
-        }
-        None -> False
-      }
-    }
-    None -> False
-  }
-}
-
-fn theme_background_from_any_unit(
-  units: List(Unit),
-  type_name: String,
-) -> Bool {
-  case
-    list.find_map(units, fn(unit) {
-      let module = g.in_order(unit.module)
-      case g.find_custom_type(module, type_name) {
-        Some(definition) -> Ok(definition)
-        None -> Error(Nil)
-      }
-    })
-  {
-    Ok(definition) -> theme_definition_background_is_blob(definition)
-    Error(_) -> False
-  }
-}
-
-fn theme_definition_background_is_blob(definition: glance.CustomType) -> Bool {
-  case definition.variants {
-    [variant, ..] ->
-      case
-        list.find_map(variant.fields, fn(field) {
-          case g.variant_field_label(field) {
-            Some("background_image") -> Ok(g.variant_field_type(field))
-            _ -> Error(Nil)
-          }
-        })
-      {
-        Ok(type_) -> theme_field_is_blob(type_)
-        Error(_) -> False
-      }
-    [] -> False
-  }
-}
-
-fn theme_field_is_blob(type_: glance.Type) -> Bool {
-  case type_ {
-    glance.NamedType(name: "Option", parameters: [inner], ..) ->
-      theme_field_is_blob(inner)
-    glance.NamedType(name: "Blob", ..) -> True
-    _ -> False
-  }
+  option.is_some(theme)
 }
 
 fn theme_global_text(
   front: reader_front.Front,
-  theme: Option(LoadSource),
   theme_background_blob: Bool,
 ) -> String {
-  let defaults =
-    quoted(front.shell.background)
-    <> ", "
-    <> quoted(front.shell.background_image)
-    <> ", "
-    <> quoted(front.shell.text)
-    <> ", "
-    <> quoted(front.shell.accent)
-  case theme {
-    Some(source) ->
-      "fn theme_global(value: Option("
-      <> source.service
-      <> "."
-      <> source.type_name
-      <> ")) -> raw_css.Global {\n"
-      <> "  let #(background, background_image, text, accent) = case value {\n"
-      <> "    Some("
-      <> source.service
-      <> "."
-      <> source.type_name
-      <> "(background:, background_image:, text:, accent:)) -> #(\n"
-      <> "      option_string(background, "
-      <> quoted(front.shell.background)
-      <> "),\n"
-      <> "      option_background(background_image),\n"
-      <> "      option_string(text, "
-      <> quoted(front.shell.text)
-      <> "),\n"
-      <> "      option_string(accent, "
-      <> quoted(front.shell.accent)
-      <> "),\n"
-      <> "    )\n"
-      <> "    None -> #("
-      <> defaults
-      <> ")\n"
-      <> "  }\n\n"
-      <> theme_global_body()
-      <> "}\n\n"
-      <> option_string_text()
-      <> "\n"
-      <> option_background_text(theme_background_blob)
-    None ->
-      "fn theme_global() -> raw_css.Global {\n"
-      <> "  let #(background, background_image, text, accent) = #("
-      <> defaults
-      <> ")\n\n"
-      <> theme_global_body()
-      <> "}\n"
+  let image = case front.shell.background_image {
+    "" -> "None"
+    path -> "Some(" <> quoted(path) <> ")"
   }
-}
-
-fn theme_global_body() -> String {
-  "  raw_css.global(\"body\", [\n"
-  <> "    raw_css.property(\"--bg\", background),\n"
-  <> "    raw_css.property(\"--bg-image\", background_image),\n"
-  <> "    raw_css.property(\"--text\", text),\n"
-  <> "    raw_css.property(\"--accent\", accent),\n"
-  <> "  ])\n"
-}
-
-fn option_string_text() -> String {
-  "fn option_string(value: Option(String), default: String) -> String {\n"
-  <> "  case value {\n"
-  <> "    Some(value) -> value\n"
-  <> "    None -> default\n"
-  <> "  }\n}\n"
-}
-
-fn option_background_text(blob: Bool) -> String {
-  case blob {
+  "fn theme_defaults() -> theme.Defaults {\n"
+  <> "  theme.Defaults(\n"
+  <> "    background: "
+  <> quoted(front.shell.background)
+  <> ",\n"
+  <> "    text: "
+  <> quoted(front.shell.text)
+  <> ",\n"
+  <> "    accent: "
+  <> quoted(front.shell.accent)
+  <> ",\n"
+  <> "    background_image: "
+  <> image
+  <> ",\n"
+  <> "  )\n"
+  <> "}\n\n"
+  <> "fn theme_image_attribute(value: Option(theme.PageTheme)) -> el.Attribute {\n"
+  <> "  case theme.has_image(value, theme_defaults()) {\n"
+  <> "    True -> el.attribute(\"data-yumemi-theme-image\", \"\")\n"
+  <> "    False -> el.no_attribute()\n"
+  <> "  }\n"
+  <> "}\n\n"
+  <> case theme_background_blob {
     True ->
-      "fn option_background(value: Option(Blob)) -> String {\n"
-      <> "  case value {\n"
-      <> "    Some(value) -> "
-      <> quoted("url(\"")
-      <> " <> media.url(value, media.W1600) <> "
-      <> quoted("\")")
-      <> "\n"
-      <> "    None -> \"none\"\n"
-      <> "  }\n}\n"
+      "fn theme_image_url(value: Blob) -> String {\n"
+      <> "  media.url(value, media.W1600)\n"
+      <> "}\n"
     False ->
-      "fn option_background(value: Option(String)) -> String {\n"
-      <> "  case value {\n"
-      <> "    Some(value) -> value\n"
-      <> "    None -> \"none\"\n"
-      <> "  }\n}\n"
+      "fn theme_image_url(value: Blob) -> String {\n"
+      <> "  blob.to_string(value)\n"
+      <> "}\n"
   }
 }
 
@@ -4182,29 +4075,18 @@ fn load_imports(
   theme_background_blob: Bool,
   body: String,
 ) -> String {
-  let html_body = string.replace(body, "raw_html.", "")
   let base =
     [
       #("css", "yumemi/front/css"),
-      #("el", "yumemi/front/el as el"),
-      #("sketch_css", "yumemi/front/sketch_css"),
+      #("el", "yumemi/front/el"),
+      #("html", "yumemi/front/html"),
+      #("theme", "yumemi/front/theme"),
       #("list", "gleam/list"),
-      #("attribute", "lustre/attribute"),
-      #("raw_html", "lustre/element/html as raw_html"),
-      #("sketch", "sketch"),
-      #("raw_css", "sketch/css as raw_css"),
-      #("sketch_lustre", "sketch/lustre as sketch_lustre"),
-      #("element", "sketch/lustre/element"),
-      #("html", "sketch/lustre/element/html"),
       #("style", "style"),
     ]
     |> list.filter_map(fn(item) {
       let #(reference, path) = item
-      let rendered = case path == "sketch/lustre/element/html" {
-        True -> html_body
-        False -> body
-      }
-      case module_alias_used(rendered, reference) {
+      case module_alias_used(body, reference) {
         True -> Ok(path)
         False -> Error(Nil)
       }
@@ -4227,9 +4109,13 @@ fn load_imports(
     _ -> ["gleam/option.{" <> string.join(option_items, ", ") <> "}"]
   }
   let base = list.append(base, option)
-  let blob = case theme_background_blob {
-    True -> ["yumemi/blob.{type Blob}", "media"]
-    False -> []
+  let blob = case
+    theme_background_blob,
+    string.contains(body, "fn theme_image_url")
+  {
+    True, _ -> ["yumemi/blob.{type Blob}", "media"]
+    False, True -> ["yumemi/blob.{type Blob}"]
+    False, False -> []
   }
   let layout = case include_layout {
     True -> ["gen/load/layout"]
@@ -4431,7 +4317,7 @@ fn page_view_text(
       "it.vars",
       list.append(page.vars, front.layout.vars),
     )
-  "pub fn view(it: Data) -> element.Element(Nil) {\n"
+  "pub fn view(it: Data) -> el.Element {\n"
   <> "  "
   <> grid_element_open(
     "\"layout\"",
@@ -4440,7 +4326,7 @@ fn page_view_text(
   <> "[\n"
   <> areas
   <> "  ])\n}\n\n"
-  <> "fn page_children(it: Data) -> List(element.Element(Nil)) {\n"
+  <> "fn page_children(it: Data) -> List(el.Element) {\n"
   <> page_children
   <> "}\n\n"
   <> styled_area_text()
@@ -4527,11 +4413,10 @@ fn page_children_text(
 
 /// 格子の要素を開く式(子の list の手前まで)。style が無ければ今の `html.div_`。
 fn grid_element_open(name: String, style: Option(String)) -> String {
-  let attributes =
-    "[attribute.attribute(\"data-yumemi-grid\", " <> name <> ")], "
+  let attributes = "[el.attribute(\"data-yumemi-grid\", " <> name <> ")], "
   case style {
     None -> "html.div_(" <> attributes
-    Some(style) -> "html.div(sketch_css.class(" <> style <> "), " <> attributes
+    Some(style) -> "html.div(css.class(" <> style <> "), " <> attributes
   }
 }
 
@@ -4682,11 +4567,11 @@ fn styled_area_text() -> String {
   "fn styled_area(\n"
   <> "  name: String,\n"
   <> "  styles: List(css.Style),\n"
-  <> "  children: List(element.Element(Nil)),\n"
-  <> ") -> element.Element(Nil) {\n"
+  <> "  children: List(el.Element),\n"
+  <> ") -> el.Element {\n"
   <> "  html.div(\n"
-  <> "    sketch_css.class(styles),\n"
-  <> "    [attribute.attribute(\"data-yumemi-area\", name)],\n"
+  <> "    css.class(styles),\n"
+  <> "    [el.attribute(\"data-yumemi-area\", name)],\n"
   <> "    children,\n"
   <> "  )\n"
   <> "}\n\n"
@@ -4695,9 +4580,9 @@ fn styled_area_text() -> String {
 fn plain_area_text() -> String {
   "fn plain_area(\n"
   <> "  name: String,\n"
-  <> "  children: List(element.Element(Nil)),\n"
-  <> ") -> element.Element(Nil) {\n"
-  <> "  html.div_([attribute.attribute(\"data-yumemi-area\", name)], children)\n"
+  <> "  children: List(el.Element),\n"
+  <> ") -> el.Element {\n"
+  <> "  html.div_([el.attribute(\"data-yumemi-area\", name)], children)\n"
   <> "}\n\n"
 }
 
@@ -4705,17 +4590,17 @@ fn overlay_area_text() -> String {
   "fn overlay_area(\n"
   <> "  name: String,\n"
   <> "  styles: List(css.Style),\n"
-  <> "  children: List(element.Element(Nil)),\n"
-  <> ") -> element.Element(Nil) {\n"
+  <> "  children: List(el.Element),\n"
+  <> ") -> el.Element {\n"
   <> "  let attributes = [\n"
-  <> "    attribute.attribute(\"id\", el.overlay_id_prefix <> name),\n"
-  <> "    attribute.attribute(\"popover\", \"\"),\n"
-  <> "    attribute.attribute(\"data-yumemi-area\", name),\n"
-  <> "    attribute.attribute(\"data-yumemi-overlay\", \"\"),\n"
+  <> "    el.attribute(\"id\", el.overlay_id_prefix <> name),\n"
+  <> "    el.attribute(\"popover\", \"\"),\n"
+  <> "    el.attribute(\"data-yumemi-area\", name),\n"
+  <> "    el.attribute(\"data-yumemi-overlay\", \"\"),\n"
   <> "  ]\n"
   <> "  case styles {\n"
   <> "    [] -> html.div_(attributes, children)\n"
-  <> "    _ -> html.div(sketch_css.class(styles), attributes, children)\n"
+  <> "    _ -> html.div(css.class(styles), attributes, children)\n"
   <> "  }\n"
   <> "}\n\n"
 }
@@ -4800,7 +4685,7 @@ fn placement_helper_text(
   <> helper
   <> "("
   <> argument
-  <> ": Data) -> List(element.Element(Nil)) {\n"
+  <> ": Data) -> List(el.Element) {\n"
   <> body
   <> "\n}\n"
   <> extra
@@ -4892,7 +4777,7 @@ fn fixed_cell_wrapper(children: String, style: String) -> String {
   <> indent_expression(children, "    ")
   <> ",\n"
   <> "    fn(child) {\n"
-  <> "      html.div_([attribute.attribute(\"style\", "
+  <> "      html.div_([el.attribute(\"style\", "
   <> quoted(style)
   <> ")], [child])\n"
   <> "    },\n"
@@ -5166,7 +5051,7 @@ fn rows_helper_text(
   <> out
   <> ".Row)"
   <> vars_parameter
-  <> ") -> List(element.Element(Nil)) {\n"
+  <> ") -> List(el.Element) {\n"
   <> "  case rows {\n    [] -> []\n    [row, ..rest] ->\n      case row {\n"
   <> rows
   <> fallback
@@ -5642,7 +5527,7 @@ fn shell_imports(
     "import {Some, Option$None$const} from \"../../gleam_stdlib/gleam/option.mjs\";",
     "import {Ok} from \"../gleam.mjs\";",
     "import {run as decodeRun} from \"../../gleam_stdlib/gleam/dynamic/decode.mjs\";",
-    "import {to_document_string} from \"../../lustre/lustre/element.mjs\";",
+    "import {to_document_string} from \"../../yumemi/yumemi/front/el.mjs\";",
     "import * as frontCss from \"../../yumemi/yumemi/front/css.mjs\";",
     "import * as api from \"./api.mjs\";",
     "import * as blocksPreview from \"./blocks_preview.mjs\";",
@@ -6102,8 +5987,8 @@ fn badge_css() -> String {
   <> "  height: 1.25rem;\n"
   <> "  padding-inline: 0.25rem;\n"
   <> "  border-radius: 999px;\n"
-  <> "  color: var(--bg);\n"
-  <> "  background: var(--accent);\n"
+  <> "  color: var(--yumemi-theme-bg);\n"
+  <> "  background: var(--yumemi-theme-accent);\n"
   <> "  font: 600 0.75rem/1 system-ui, sans-serif;\n"
   <> "}\n"
   <> "[data-yumemi-badge][data-count=\"\"],\n"
@@ -7201,6 +7086,8 @@ fn named_decoder(
       case path {
         "yumemi/time" -> opaque_model_decoder(name)
         "yumemi/blob" -> opaque_model_decoder("Blob")
+        "yumemi/front/theme" -> "page_theme_decoder()"
+        "yumemi/front/color" -> "color_decoder()"
         "yumemi/party" -> opaque_model_decoder(name)
         _ ->
           case string.starts_with(path, "entity/") {
@@ -7964,6 +7851,8 @@ fn model_ref_decoder(
           case path {
             "yumemi/time" -> opaque_model_decoder(name)
             "yumemi/blob" -> opaque_model_decoder("Blob")
+            "yumemi/front/theme" -> "page_theme_decoder()"
+            "yumemi/front/color" -> "color_decoder()"
             "yumemi/party" -> opaque_model_decoder(name)
             "yumemi/er" -> relation_decoder(name)
             _ ->
@@ -8274,6 +8163,18 @@ fn collect_named(
         "yumemi/time" -> add_time_decoder_import(state, path, name)
         "yumemi/blob" ->
           add_function_import(add_import(state, path, name), path, "parse")
+        "yumemi/front/theme" ->
+          add_function_import(
+            add_import(state, path, name),
+            path,
+            "decoder as page_theme_decoder",
+          )
+        "yumemi/front/color" ->
+          add_function_import(
+            add_import(state, path, name),
+            path,
+            "decoder as color_decoder",
+          )
         "yumemi/party" -> add_import(state, path, name)
         _ -> collect_back_named(state, app, units, scope, path, name)
       }
@@ -8451,6 +8352,18 @@ fn collect_model_named(
     "yumemi/time" -> add_time_decoder_import(state, path, name)
     "yumemi/blob" ->
       add_function_import(add_import(state, path, name), path, "parse")
+    "yumemi/front/theme" ->
+      add_function_import(
+        add_import(state, path, name),
+        path,
+        "decoder as page_theme_decoder",
+      )
+    "yumemi/front/color" ->
+      add_function_import(
+        add_import(state, path, name),
+        path,
+        "decoder as color_decoder",
+      )
     "yumemi/party" -> add_import(state, path, name)
     _ ->
       case string.starts_with(path, "gen/types/") {
@@ -9628,4 +9541,239 @@ fn type_parameters(parameters: List(String)) -> String {
 
 fn without(values: List(String), value: String) -> List(String) {
   list.filter(values, fn(item) { item != value })
+}
+
+// ── 記述面・頁の色・生の CSS の条文(0.12 段 B)── 面の file を見る検査 ──────────
+
+/// 第 2・26〜30 条と、生の CSS の規則の数え(exit 0 の警告、面ごとに 1 行)。
+pub fn surface_notes(
+  app: model.App,
+  units: List(Unit),
+  package: face.Package,
+  front: reader_front.Front,
+) -> List(stop.Note) {
+  list.flatten([
+    lustre_dependency_notes(package, front),
+    shell_theme_notes(package, front),
+    page_theme_notes(app, units, front),
+    raw_css_notes(package, front),
+  ])
+}
+
+/// 第 2 条:面の `gleam.toml` の直接の依存に lustre / sketch_lustre が無い。0.11 の形の
+/// interactive Component を持つ面だけが例外(段 C の Y3 で消す)。
+fn lustre_dependency_notes(
+  package: face.Package,
+  front: reader_front.Front,
+) -> List(stop.Note) {
+  case simplifile.read(package.path <> "/gleam.toml") {
+    Ok(toml) -> {
+      let found =
+        direct_dependencies(toml)
+        |> list.filter(fn(name) { name == "lustre" || name == "sketch_lustre" })
+      case found, front.legacy_components {
+        [], _ -> []
+        _, [_, ..] -> []
+        names, [] -> [
+          stop.Note(
+            class: stop.Conflict,
+            text: package.name
+              <> "/gleam.toml: 直接の依存に "
+              <> string.join(names, "・")
+              <> " がある(第 2 条、0.12 の ★ は yumemi の el・html・attr で書く)",
+          ),
+        ]
+      }
+    }
+    Error(_) -> []
+  }
+}
+
+fn direct_dependencies(toml: String) -> List(String) {
+  toml
+  |> string.split("\n")
+  |> list.fold(#(False, []), fn(acc, line) {
+    let #(inside, names) = acc
+    let line = string.trim(line)
+    case string.starts_with(line, "[") {
+      True -> #(line == "[dependencies]", names)
+      False ->
+        case inside, string.split_once(line, "=") {
+          True, Ok(#(name, _)) -> #(inside, [string.trim(name), ..names])
+          _, _ -> #(inside, names)
+        }
+    }
+  })
+  |> fn(acc) { list.reverse(acc.1) }
+}
+
+/// 第 26 条:Shell の `theme` の 3 色は `#rrggbb` の literal、地の画像は `priv/static` に在る。
+fn shell_theme_notes(
+  package: face.Package,
+  front: reader_front.Front,
+) -> List(stop.Note) {
+  case front.shell.present {
+    False -> []
+    True -> {
+      let colors =
+        [
+          #("background", front.shell.background),
+          #("text", front.shell.text),
+          #("accent", front.shell.accent),
+        ]
+        |> list.filter_map(fn(pair) {
+          case reader_front.is_hex_color(pair.1) || pair.1 == "" {
+            True -> Error(Nil)
+            False ->
+              Ok(stop.Note(
+                class: stop.Conflict,
+                text: package.name
+                  <> "/src/shell.gleam: theme."
+                  <> pair.0
+                  <> " \""
+                  <> pair.1
+                  <> "\" が #rrggbb の literal でない(第 26 条)",
+              ))
+          }
+        })
+      let image = case front.shell.background_image {
+        "" -> []
+        path ->
+          case static_file_exists(package, path) {
+            True -> []
+            False -> [
+              stop.Note(
+                class: stop.Missing,
+                text: package.name
+                  <> "/src/shell.gleam: theme.background_image の "
+                  <> path
+                  <> " が priv/static に無い(第 26 条)",
+              ),
+            ]
+          }
+      }
+      list.append(colors, image)
+    }
+  }
+}
+
+/// 第 27 条:`theme: Some(name)` の Page の source のどれかの Out に `theme.PageTheme` がある。
+fn page_theme_notes(
+  app: model.App,
+  units: List(Unit),
+  front: reader_front.Front,
+) -> List(stop.Note) {
+  front.pages
+  |> list.filter_map(fn(page) {
+    case page.theme {
+      None -> Error(Nil)
+      Some(name) -> {
+        let found =
+          page_sources(app, units, page, front.blocks, app.services)
+          |> list.any(fn(source) {
+            source.type_name == "PageTheme"
+            && option.is_some(page_theme_path(
+              units,
+              source.service,
+              source.name,
+            ))
+          })
+        case found {
+          True -> Error(Nil)
+          False ->
+            Ok(stop.Note(
+              class: stop.Conflict,
+              text: front.face
+                <> "/"
+                <> page.module
+                <> ": theme: Some(\""
+                <> name
+                <> "\") の source のどの Out にも yumemi/front/theme.PageTheme が無い(第 27 条)",
+            ))
+        }
+      }
+    }
+  })
+}
+
+/// 第 28〜30 条と規則の数え。数えは exit 0 の警告で、面ごとに 1 行。
+fn raw_css_notes(
+  package: face.Package,
+  front: reader_front.Front,
+) -> List(stop.Note) {
+  let shell_sheets =
+    list.map(front.shell.head.stylesheets, fn(href) {
+      #("src/shell.gleam stylesheets", href)
+    })
+  let block_sheets =
+    list.map(front.static_sheets, fn(pair) {
+      #("src/" <> pair.0 <> ".gleam el.static_sheet", pair.1)
+    })
+  let sheets = list.append(shell_sheets, block_sheets)
+  let checked =
+    list.map(sheets, fn(sheet) {
+      let #(where, path) = sheet
+      let label = package.name <> "/" <> where <> " " <> path
+      case simplifile.read(static_path(package, path)) {
+        Error(_) -> #(0, [
+          stop.Note(
+            class: stop.Missing,
+            text: label <> ": file が priv/static に無い(第 28 条)",
+          ),
+        ])
+        Ok(css) -> {
+          let scan = raw_css.scan(css)
+          let generated =
+            list.map(scan.generated, fn(selector) {
+              stop.Note(
+                class: stop.Conflict,
+                text: label <> ": 生成物を名指す選択子(第 29 条): " <> selector,
+              )
+            })
+          let imports = case scan.imports {
+            True -> [
+              stop.Note(
+                class: stop.Conflict,
+                text: label <> ": @import がある(第 30 条)",
+              ),
+            ]
+            False -> []
+          }
+          #(scan.rules, list.append(generated, imports))
+        }
+      }
+    })
+  let rules = list.fold(checked, 0, fn(total, item) { total + item.0 })
+  let count = case sheets {
+    [] -> []
+    _ -> [
+      stop.Note(
+        class: stop.Warning,
+        text: package.name
+          <> ": 生の CSS の逃げ道 "
+          <> int.to_string(list.length(sheets))
+          <> " file(shell.stylesheets "
+          <> int.to_string(list.length(shell_sheets))
+          <> "・el.static_sheet "
+          <> int.to_string(list.length(block_sheets))
+          <> ")、規則 "
+          <> int.to_string(rules),
+      ),
+    ]
+  }
+  list.append(list.flat_map(checked, fn(item) { item.1 }), count)
+}
+
+fn static_path(package: face.Package, path: String) -> String {
+  case string.starts_with(path, "/") {
+    True -> package.path <> "/priv/static" <> path
+    False -> package.path <> "/priv/static/" <> path
+  }
+}
+
+fn static_file_exists(package: face.Package, path: String) -> Bool {
+  case simplifile.is_file(static_path(package, path)) {
+    Ok(True) -> True
+    _ -> False
+  }
 }

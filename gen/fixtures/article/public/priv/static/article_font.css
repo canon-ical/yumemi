@@ -1,0 +1,11 @@
+/* 記事の書体(生の CSS の逃げ道、el.static_sheet)。生成物を名指さない。 */
+article-body,
+.article-font {
+  font-family: serif;
+}
+
+@media (min-width: 1024px) {
+  .article-font {
+    font-size: 1.125rem;
+  }
+}

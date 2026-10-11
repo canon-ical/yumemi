@@ -2,11 +2,10 @@
 
 import yumemi/front/css
 import yumemi/front/el
-import yumemi/front/sketch_css
 import gen/out/article_read
 import gleam/option.{type Option, None, Some}
-import lustre/attribute
-import sketch/lustre/element/html
+import yumemi/front/attr
+import yumemi/front/html
 
 pub type In =
   article_read.Out
@@ -38,13 +37,13 @@ pub const sample: In = article_read.Out(
 )
 
 const card: List(css.Style) = [
-  css.Color("#2b1d3a"),
+  css.Color(css.Hex("#2b1d3a")),
   css.Space(property: css.Padding, value: css.Px(16.0)),
   css.Space(property: css.Gap, value: css.Px(8.0)),
 ]
 
 const title: List(css.Style) = [
-  css.Color("#f5e9ff"),
+  css.Color(css.Hex("#f5e9ff")),
   css.Text(
     family: css.System,
     size: css.Rem(1.5),
@@ -54,7 +53,7 @@ const title: List(css.Style) = [
 ]
 
 const body: List(css.Style) = [
-  css.Color("#d9c6f0"),
+  css.Color(css.Hex("#d9c6f0")),
   css.Text(
     family: css.System,
     size: css.Rem(1.0),
@@ -63,42 +62,42 @@ const body: List(css.Style) = [
   ),
 ]
 
-pub fn view(it: In, arg: Arg) -> el.Element(Nil) {
+pub fn view(it: In, arg: Arg) -> el.Element {
   html.section(
-    sketch_css.class(card),
+    css.class(card),
     [
-      attribute.attribute("data-slug", arg.slug),
-      attribute.attribute("data-term", option.unwrap(arg.term, "")),
-      attribute.attribute("data-subject", option.unwrap(arg.subject_handle, "")),
-      attribute.attribute("data-www-origin", arg.www_origin),
-      attribute.attribute("data-auth-origin", arg.auth_origin),
-      attribute.attribute("data-view-only", arg.view_only),
+      attr.data("slug", arg.slug),
+      attr.data("term", option.unwrap(arg.term, "")),
+      attr.data("subject", option.unwrap(arg.subject_handle, "")),
+      attr.data("www-origin", arg.www_origin),
+      attr.data("auth-origin", arg.auth_origin),
+      attr.data("view-only", arg.view_only),
     ],
     [
-      html.h1(sketch_css.class(title), [], [el.text(it.article.title)]),
-      html.p(sketch_css.class(body), [], [el.text(it.article.body)]),
+      html.h1(css.class(title), [], [el.text(it.article.title)]),
+      html.p(css.class(body), [], [el.text(it.article.body)]),
       el.opener("article-dialog", [el.text("Open article options")]),
       el.badge(None, [el.text("none")]),
       el.badge(Some(0), [el.text("zero")]),
       el.badge(Some(3), [el.text("three")]),
       html.div_([], [
-        el.island("like-button", [
-          attribute.attribute("slug", it.article.slug),
+        el.legacy_island("like-button", [
+          #("slug", it.article.slug),
         ]),
-        el.island("pick-tag", [
-          attribute.attribute("slug", "article"),
-          attribute.attribute("title", "本日の記事"),
-          attribute.attribute("body", "夜のシフトが得意な新人です。よろしくお願いします。"),
-          attribute.attribute("category", "news"),
-          attribute.attribute("tags", "fixture,gleam,cloudflare"),
-          attribute.attribute("selected", "fixture"),
+        el.legacy_island("pick-tag", [
+          #("slug", "article"),
+          #("title", "本日の記事"),
+          #("body", "夜のシフトが得意な新人です。よろしくお願いします。"),
+          #("category", "news"),
+          #("tags", "fixture,gleam,cloudflare"),
+          #("selected", "fixture"),
         ]),
-        el.island("blob-save", [
-          attribute.attribute("slug", it.article.slug),
-          attribute.attribute("blob", "stored-image-key"),
-          attribute.attribute("existing", "stored-optional-key"),
+        el.legacy_island("blob-save", [
+          #("slug", it.article.slug),
+          #("blob", "stored-image-key"),
+          #("existing", "stored-optional-key"),
         ]),
-        el.island("article-blob-copy", []),
+        el.legacy_island("article-blob-copy", []),
       ]),
     ],
   )

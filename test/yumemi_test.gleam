@@ -3,7 +3,6 @@ import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
 import gleeunit
-import lustre/element as lustre_element
 import sketch
 import sketch/css as sketch_class
 import yumemi/front
@@ -258,8 +257,8 @@ fn overlay_pin_is_supported() {
 fn area_overlay_controls_share_the_area_id() {
   let opener = el.opener("settings", [el.text("Open")])
   let closer = el.closer("settings", [el.text("Close")])
-  let opener_html = lustre_element.to_string(opener)
-  let closer_html = lustre_element.to_string(closer)
+  let opener_html = el.to_string(opener)
+  let closer_html = el.to_string(closer)
 
   assert_equal(
     el.overlay_id_prefix,
@@ -291,13 +290,13 @@ fn area_overlay_controls_share_the_area_id() {
 fn badge_counts_keep_the_same_dom_shape() {
   let no_count =
     el.badge(None, [el.text("Inbox")])
-    |> lustre_element.to_string
+    |> el.to_string
   let zero_count =
     el.badge(Some(0), [el.text("Inbox")])
-    |> lustre_element.to_string
+    |> el.to_string
   let positive_count =
     el.badge(Some(3), [el.text("Inbox")])
-    |> lustre_element.to_string
+    |> el.to_string
 
   assert_equal(
     no_count,
@@ -371,8 +370,8 @@ fn render_two_each_modals() -> String {
       )
     })
 
-  lustre_element.fragment([first_list, second_list])
-  |> lustre_element.to_string
+  el.fragment([first_list, second_list])
+  |> el.to_string
 }
 
 // ── yumemi-look(0.11.7)── Style に足した見た目の語彙 7 つ ─────────────────
@@ -387,17 +386,18 @@ fn css_of(styles: List(css.Style)) -> String {
 }
 
 fn look_background_border_and_outline_render_to_css() {
-  let background = css_of([css.Background("var(--ma-color-bg)")])
+  let background = css_of([css.Background(css.Token("ma-color-bg"))])
   assert_contains(
     background,
     "background-color: var(--ma-color-bg);",
     "Background renders background-color",
   )
-  let mixed = css_of([css.Background("color-mix(in srgb, #000 50%, #fff)")])
+  let mixed =
+    css_of([css.Background(css.Mix(css.Hex("#000000"), css.Hex("#ffffff"), 50))])
   assert_contains(
     mixed,
-    "background-color: color-mix(in srgb, #000 50%, #fff);",
-    "Background passes color-mix through",
+    "background-color: color-mix(in oklab, #000000 50%, #ffffff);",
+    "Background renders css.Mix as color-mix",
   )
   let around =
     css_of([
@@ -405,7 +405,7 @@ fn look_background_border_and_outline_render_to_css() {
         edge: css.AllEdges,
         width: css.Px(1.0),
         style: css.Solid,
-        color: "var(--ma-color-line)",
+        color: css.Token("ma-color-line"),
       ),
     ])
   assert_contains(
@@ -419,7 +419,7 @@ fn look_background_border_and_outline_render_to_css() {
         edge: css.BottomEdge,
         width: css.Px(2.0),
         style: css.Dashed,
-        color: "#b92c22",
+        color: css.Hex("#b92c22"),
       ),
     ])
   assert_contains(
@@ -432,7 +432,7 @@ fn look_background_border_and_outline_render_to_css() {
       css.Outline(
         width: css.Px(3.0),
         offset: css.Px(3.0),
-        color: "var(--ma-color-focus)",
+        color: css.Token("ma-color-focus"),
       ),
     ])
   assert_contains(outline, "outline-style: solid;", "Outline style is solid")
@@ -510,9 +510,9 @@ fn look_styles_work_inside_state_and_responsive() {
         css.Outline(
           width: css.Px(3.0),
           offset: css.Px(3.0),
-          color: "var(--ma-color-focus)",
+          color: css.Token("ma-color-focus"),
         ),
-        css.Background("var(--ma-color-focus-bg)"),
+        css.Background(css.Token("ma-color-focus-bg")),
       ]),
     ])
   assert_contains(focused, ":focus", "State Focus selector")
@@ -538,7 +538,7 @@ fn look_styles_work_inside_state_and_responsive() {
           edge: css.BottomEdge,
           width: css.Px(2.0),
           style: css.Solid,
-          color: "var(--ma-color-line)",
+          color: css.Token("ma-color-line"),
         ),
         css.Space(property: css.MaxWidth, value: css.Rem(60.0)),
       ]),
@@ -555,17 +555,17 @@ fn look_styles_work_inside_state_and_responsive() {
 fn look_styles_reach_island_shadow_style() {
   let class =
     front_sketch_css.class([
-      css.Background("var(--ma-color-bg)"),
+      css.Background(css.Token("ma-color-bg")),
       css.Border(
         edge: css.BottomEdge,
         width: css.Px(2.0),
         style: css.Solid,
-        color: "var(--ma-color-line)",
+        color: css.Token("ma-color-line"),
       ),
       css.Outline(
         width: css.Px(3.0),
         offset: css.Px(3.0),
-        color: "var(--ma-color-focus)",
+        color: css.Token("ma-color-focus"),
       ),
       css.Crop(fit: css.Cover, ratio: css.Ratio(width: 1.0, height: 1.0)),
     ])
@@ -739,14 +739,14 @@ fn v0119_current_route_is_a_var_source() {
 fn v0119_current_state_renders_aria_current_selector() {
   let rendered =
     css_of([
-      css.Color("var(--ma-color-muted)"),
+      css.Color(css.Token("ma-color-muted")),
       css.State(css.Current, [
-        css.Color("var(--ma-color-fg)"),
+        css.Color(css.Token("ma-color-fg")),
         css.Border(
           edge: css.BottomEdge,
           width: css.Px(2.0),
           style: css.Solid,
-          color: "var(--ma-color-accent)",
+          color: css.Token("ma-color-accent"),
         ),
       ]),
     ])
@@ -760,7 +760,7 @@ fn v0119_current_state_renders_aria_current_selector() {
     "border-bottom: 2.0px solid var(--ma-color-accent);",
     "Border inside State(Current)",
   )
-  let hover = css_of([css.State(css.Hover, [css.Color("red")])])
+  let hover = css_of([css.State(css.Hover, [css.Color(css.Hex("#ff0000"))])])
   assert_contains(hover, ":hover", "Hover is unchanged")
   assert_not_contains(hover, "aria-current", "Hover has no aria-current")
 }
@@ -843,17 +843,23 @@ fn v0119_lengths_var_env_dvh_render_to_css() {
   )
 }
 
-fn assert_equal(actual: a, expected: a, _label: String) -> Nil {
+fn assert_equal(actual: a, expected: a, label: String) -> Nil {
   case actual == expected {
     True -> Nil
-    False -> panic as "test failed"
+    False ->
+      panic as {
+        "test failed: " <> label <> "\nactual: " <> string.inspect(actual)
+      }
   }
 }
 
-fn assert_contains(haystack: String, needle: String, _label: String) -> Nil {
+fn assert_contains(haystack: String, needle: String, label: String) -> Nil {
   case string.contains(haystack, needle) {
     True -> Nil
-    False -> panic as "test failed"
+    False ->
+      panic as {
+        "test failed: " <> label <> "\nwant: " <> needle <> "\nin: " <> haystack
+      }
   }
 }
 
@@ -872,10 +878,10 @@ fn assert_not_contains(
 // `HoverCapable`。既存の 4 語の字は 0.11.13 と同じ。
 
 fn v01114_focus_visible_and_hover_capable_render_to_css() {
-  let ring = [css.Outline(css.Px(2.0), css.Px(1.0), "blue")]
+  let ring = [css.Outline(css.Px(2.0), css.Px(1.0), css.Hex("#0000ff"))]
   assert_equal(
     css_of([css.State(css.FocusVisible, ring)]),
-    ".css-D95FD3F1 {\n}\n\n.css-D95FD3F1:focus-visible {\n    outline-style: solid;\n    outline-width: 2.0px;\n    outline-offset: 1.0px;\n    outline-color: blue;\n}",
+    ".css-C4323170 {\n}\n\n.css-C4323170:focus-visible {\n    outline-style: solid;\n    outline-width: 2.0px;\n    outline-offset: 1.0px;\n    outline-color: #0000ff;\n}",
     "FocusVisible is :focus-visible",
   )
   assert_not_contains(
@@ -886,12 +892,12 @@ fn v01114_focus_visible_and_hover_capable_render_to_css() {
   // `@media` の中も class の `:hover`(詳細度は `Hover` と同じ、地の class に勝つ)。
   let hover_capable =
     css_of([
-      css.Background("transparent"),
-      css.State(css.HoverCapable, [css.Background("red")]),
+      css.Background(css.Transparent),
+      css.State(css.HoverCapable, [css.Background(css.Hex("#ff0000"))]),
     ])
   assert_equal(
     hover_capable,
-    ".css-0886F019 {\n  background-color: transparent;\n}\n\n@media (hover: hover) {\n  .css-0886F019 {\n  }\n  .css-0886F019:hover {\n      background-color: red;\n  }\n}",
+    ".css-E2BBF3DD {\n  background-color: transparent;\n}\n\n@media (hover: hover) {\n  .css-E2BBF3DD {\n  }\n  .css-E2BBF3DD:hover {\n      background-color: #ff0000;\n  }\n}",
     "HoverCapable is :hover inside @media (hover: hover)",
   )
   // `Responsive` の中では幅の media と `and` で 1 つの media にする(sketch は media
@@ -899,8 +905,8 @@ fn v01114_focus_visible_and_hover_capable_render_to_css() {
   let nested =
     css_of([
       css.Responsive(css.SP, [
-        css.Color("navy"),
-        css.State(css.HoverCapable, [css.Background("red")]),
+        css.Color(css.Hex("#000080")),
+        css.State(css.HoverCapable, [css.Background(css.Hex("#ff0000"))]),
       ]),
     ])
   assert_contains(
@@ -915,33 +921,35 @@ fn v01114_focus_visible_and_hover_capable_render_to_css() {
   )
   assert_contains(
     nested,
-    ":hover {\n      background-color: red;",
+    ":hover {\n      background-color: #ff0000;",
     "HoverCapable inside Responsive keeps its styles",
   )
   // 既存の語の字(0.11.13 の出力と同じ)。
   assert_equal(
-    css_of([css.State(css.Hover, [css.Background("red")])]),
-    ".css-3F4F7A6A {\n}\n\n.css-3F4F7A6A:hover {\n    background-color: red;\n}",
+    css_of([css.State(css.Hover, [css.Background(css.Hex("#ff0000"))])]),
+    ".css-D3CB5EDE {\n}\n\n.css-D3CB5EDE:hover {\n    background-color: #ff0000;\n}",
     "Hover is unchanged",
   )
   assert_equal(
     css_of([css.State(css.Focus, ring)]),
-    ".css-0FD88250 {\n}\n\n.css-0FD88250:focus {\n    outline-style: solid;\n    outline-width: 2.0px;\n    outline-offset: 1.0px;\n    outline-color: blue;\n}",
+    ".css-FDF154F3 {\n}\n\n.css-FDF154F3:focus {\n    outline-style: solid;\n    outline-width: 2.0px;\n    outline-offset: 1.0px;\n    outline-color: #0000ff;\n}",
     "Focus is unchanged",
   )
   assert_equal(
-    css_of([css.State(css.Disabled, [css.Color("gray")])]),
-    ".css-883077B5 {\n}\n\n.css-883077B5:disabled {\n    color: gray;\n}",
+    css_of([css.State(css.Disabled, [css.Color(css.Hex("#808080"))])]),
+    ".css-DA7E8A47 {\n}\n\n.css-DA7E8A47:disabled {\n    color: #808080;\n}",
     "Disabled is unchanged",
   )
   assert_equal(
-    css_of([css.State(css.Current, [css.Color("navy")])]),
-    ".css-E55DB4F5 {\n}\n\n.css-E55DB4F5[aria-current]:not([aria-current=\"false\"]) {\n    color: navy;\n}",
+    css_of([css.State(css.Current, [css.Color(css.Hex("#000080"))])]),
+    ".css-92F748B6 {\n}\n\n.css-92F748B6[aria-current]:not([aria-current=\"false\"]) {\n    color: #000080;\n}",
     "Current is unchanged",
   )
   let sp_hover =
     css_of([
-      css.Responsive(css.SP, [css.State(css.Hover, [css.Background("red")])]),
+      css.Responsive(css.SP, [
+        css.State(css.Hover, [css.Background(css.Hex("#ff0000"))]),
+      ]),
     ])
   assert_not_contains(sp_hover, "(hover: hover)", "Hover in Responsive")
   // 島の shadow の `<style>` にも出る(島の Style も Block の Style も同じ sketch_css)。
@@ -949,7 +957,7 @@ fn v01114_focus_visible_and_hover_capable_render_to_css() {
     island_shadow_style(
       front_sketch_css.class([
         css.State(css.FocusVisible, ring),
-        css.State(css.HoverCapable, [css.Background("red")]),
+        css.State(css.HoverCapable, [css.Background(css.Hex("#ff0000"))]),
       ]),
     )
   assert_contains(island, ":focus-visible {", "island has FocusVisible")

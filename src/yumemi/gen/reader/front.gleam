@@ -35,6 +35,13 @@ pub type Front {
     page_service_args: List(PageServiceArgs),
     violations: List(Violation),
     overlay_calls: List(OverlayCall),
+    /// 記述面と Css の条文(第 1〜3・7・8・23〜25・31 条)の停止。
+    surface_notes: List(stop.Note),
+    /// 第 1 条の例外にした module(0.11 の形の interactive Component、`pub fn app` を持つ)。
+    /// 段 C の Y3 で消す。
+    legacy_components: List(String),
+    /// `el.static_sheet` の path(第 28〜30 条の file の検査と規則の数えは emit が持つ)。
+    static_sheets: List(#(String, String)),
   )
 }
 
@@ -380,6 +387,19 @@ fn read_with_package_and_warning(
       list.map(units, fn(unit) { unit_violations(unit, components) }),
     )
   let overlay_calls = overlay_calls(units)
+  let legacy_components =
+    units
+    |> list.filter(is_legacy_component)
+    |> list.map(fn(unit) { unit.path })
+  let surface_notes =
+    list.flat_map(units, fn(unit) {
+      surface_unit_notes(
+        face,
+        unit,
+        list.contains(legacy_components, unit.path),
+      )
+    })
+  let static_sheets = list.flat_map(units, static_sheet_paths)
   Ok(Front(
     face: face,
     package_name: package_name,
@@ -394,6 +414,9 @@ fn read_with_package_and_warning(
     page_service_args: page_service_args,
     violations: violations,
     overlay_calls: overlay_calls,
+    surface_notes: surface_notes,
+    legacy_components: legacy_components,
+    static_sheets: static_sheets,
   ))
 }
 
@@ -401,6 +424,8 @@ fn read_with_package_and_warning(
 pub fn notes(front: Front, services: List(model.Service)) -> List(stop.Note) {
   list.flatten([
     shell_notes(front),
+    front.surface_notes,
+    legacy_component_notes(front),
     violation_notes(front.face, front.violations),
     overlay_template_notes(front),
     overlay_call_notes(front),
@@ -825,7 +850,7 @@ fn shell_from_units(units: List(Unit), package_name: String) -> Shell {
       let lang = constant_string(module, "lang")
       let title = constant_string(module, "title")
       let background = theme_string(theme, "background")
-      let background_image = theme_string(theme, "background_image")
+      let background_image = theme_image(theme)
       let text = theme_string(theme, "text")
       let accent = theme_string(theme, "accent")
       let missing_theme = case theme {
@@ -842,7 +867,7 @@ fn shell_from_units(units: List(Unit), package_name: String) -> Shell {
         lang: option.unwrap(lang, "ja"),
         title: option.unwrap(title, package_name),
         background: option.unwrap(background, "#FAF7F0"),
-        background_image: option.unwrap(background_image, "none"),
+        background_image: option.unwrap(background_image, ""),
         text: option.unwrap(text, "#3D2419"),
         accent: option.unwrap(accent, "#A93632"),
         present: True,
@@ -941,6 +966,33 @@ fn theme_string(
   theme
   |> option.then(fn(constant) { g.labelled(constant.value, label) })
   |> option.then(g.string_value)
+}
+
+/// Shell の `theme.background_image`。`theme.Defaults` の `None` / `Some("<priv/static の path>")`
+/// を ""(無い)/ path にする。0.11 の形の文字列(`"none"` は無い)も読む。
+fn theme_image(theme: Option(glance.Constant)) -> Option(String) {
+  case
+    theme
+    |> option.then(fn(constant) {
+      g.labelled(constant.value, "background_image")
+    })
+  {
+    Some(value) ->
+      case g.string_value(value), value {
+        Some("none"), _ -> Some("")
+        Some(path), _ -> Some(path)
+        None, glance.Variable(name: "None", ..) -> Some("")
+        None,
+          glance.Call(
+            function: glance.Variable(name: "Some", ..),
+            arguments: [glance.UnlabelledField(item: item)],
+            ..,
+          )
+        -> g.string_value(item)
+        None, _ -> None
+      }
+    None -> None
+  }
 }
 
 fn missing_label(name: String, value: Option(a)) -> List(String) {
@@ -3084,36 +3136,18 @@ fn unit_violations(unit: Unit, components: List(Component)) -> List(Violation) {
     module.imports
     |> list.filter_map(fn(definition) {
       let imported = definition.definition.module
-      case string.starts_with(imported, "lustre/internals") {
-        True -> Ok(InternalImport(module: unit.path, imported: imported))
-        False -> Error(Nil)
-      }
+      // 0.11.15 の lustre の禁則(`lustre/internals` の import と `attribute.class`・
+      // `attribute.style`・`element.element` の直呼び)は 0.12 で第 1 条に吸収した。
+      let _ = imported
+      Error(Nil)
     })
-  let direct =
-    list.append(
-      module.functions
-        |> list.flat_map(fn(definition) {
-          let function = definition.definition
-          forbidden_calls(function.body, module.imports)
-          |> list.map(fn(target) {
-            DirectCall(module: unit.path, target: target)
-          })
-        }),
-      module.constants
-        |> list.flat_map(fn(definition) {
-          forbidden_in_expression(definition.definition.value, module.imports)
-          |> list.map(fn(target) {
-            DirectCall(module: unit.path, target: target)
-          })
-        }),
-    )
   let islands = case
     list.find(components, fn(component) { component.module == unit.path })
   {
     Ok(component) if component.nested_island -> [NestedIsland(module: unit.path)]
     _ -> []
   }
-  list.append(imports, list.append(direct, islands))
+  list.append(imports, islands)
 }
 
 fn public_constant(
@@ -3546,71 +3580,6 @@ fn is_constructor_call(expression: glance.Expression, name: String) -> Bool {
   }
 }
 
-fn forbidden_calls(
-  statements: List(glance.Statement),
-  imports: List(glance.Definition(glance.Import)),
-) -> List(String) {
-  statements
-  |> list.flat_map(fn(statement) { forbidden_in_statement(statement, imports) })
-  |> list.unique
-}
-
-fn forbidden_in_statement(
-  statement: glance.Statement,
-  imports: List(glance.Definition(glance.Import)),
-) -> List(String) {
-  statement_expressions(statement)
-  |> list.flat_map(fn(expression) {
-    forbidden_in_expression(expression, imports)
-  })
-}
-
-fn forbidden_in_expression(
-  expression: glance.Expression,
-  imports: List(glance.Definition(glance.Import)),
-) -> List(String) {
-  let own = case expression {
-    glance.Call(function: function, ..) ->
-      case forbidden_target(function, imports) {
-        Some(target) -> [target]
-        None -> []
-      }
-    _ -> []
-  }
-  list.append(
-    own,
-    expression_children(expression)
-      |> list.flat_map(fn(child) { forbidden_in_expression(child, imports) }),
-  )
-}
-
-fn forbidden_target(
-  expression: glance.Expression,
-  imports: List(glance.Definition(glance.Import)),
-) -> Option(String) {
-  case expression {
-    glance.FieldAccess(
-      container: glance.Variable(name: alias, ..),
-      label: label,
-      ..,
-    ) ->
-      case imported_module(imports, alias) {
-        Some("lustre/attribute") if label == "class" || label == "style" ->
-          Some("attribute." <> label)
-        Some("lustre/element") if label == "element" -> Some("element.element")
-        _ -> None
-      }
-    glance.Variable(name: name, ..) ->
-      case unqualified_module(imports, name) {
-        Some("lustre/attribute") if name == "class" || name == "style" ->
-          Some("attribute." <> name)
-        Some("lustre/element") if name == "element" -> Some("element.element")
-        _ -> None
-      }
-    _ -> None
-  }
-}
-
 fn imported_module(
   imports: List(glance.Definition(glance.Import)),
   alias: String,
@@ -3668,7 +3637,10 @@ fn nested_island(statements: List(glance.Statement)) -> Bool {
 }
 
 fn island_inside(expression: glance.Expression, inside: Bool) -> Bool {
-  let here = g.ctor_name(expression) == Some("island")
+  let here = case g.ctor_name(expression) {
+    Some("island") | Some("legacy_island") -> True
+    _ -> False
+  }
   let nested = here && inside
   nested
   || list.any(expression_children(expression), fn(child) {
@@ -3781,4 +3753,373 @@ fn bit_option_expressions(
 fn clause_expressions(clause: glance.Clause) -> List(glance.Expression) {
   let glance.Clause(guard: guard, body: body, ..) = clause
   [body, ..option_to_list(guard)]
+}
+
+// ── 記述面と Css の条文(0.12 段 B、51 v6「生成器が止めるもの」)──────────────
+
+/// 0.11 の形の interactive Component(`pub fn app` を持つ module)。第 1 条・第 2 条の例外で、
+/// 段 C の Y3 で消す一時の口。
+pub fn is_legacy_component(unit: Unit) -> Bool {
+  string.starts_with(unit.path, "components/")
+  && list.any(g.in_order(unit.module).functions, fn(definition) {
+    definition.definition.name == "app"
+    && definition.definition.publicity == glance.Public
+  })
+}
+
+fn legacy_component_notes(front: Front) -> List(stop.Note) {
+  case front.legacy_components {
+    [] -> []
+    modules -> [
+      stop.Note(
+        class: stop.Warning,
+        text: front.face
+          <> ": 第 1・2 条の例外(0.11 の lustre の interactive Component、段 C の Y3 で消す): "
+          <> int.to_string(list.length(modules))
+          <> " module ("
+          <> string.join(modules, ", ")
+          <> ")",
+      ),
+    ]
+  }
+}
+
+/// ★ の module の中の関数呼び出しと構成子の呼び出し(module は import から解いた道)。
+type CallSite {
+  CallSite(module: String, name: String, arguments: List(glance.Expression))
+}
+
+fn unit_expressions(module: glance.Module) -> List(glance.Expression) {
+  list.append(
+    list.flat_map(module.functions, fn(definition) {
+      list.flat_map(definition.definition.body, statement_expressions)
+    }),
+    list.map(module.constants, fn(definition) { definition.definition.value }),
+  )
+}
+
+fn all_expressions(expression: glance.Expression) -> List(glance.Expression) {
+  [
+    expression,
+    ..list.flat_map(expression_children(expression), all_expressions)
+  ]
+}
+
+fn call_sites(module: glance.Module) -> List(CallSite) {
+  unit_expressions(module)
+  |> list.flat_map(all_expressions)
+  |> list.filter_map(fn(expression) {
+    case expression {
+      glance.Call(function: function, arguments: arguments, ..) ->
+        case resolve_callee(function, module.imports) {
+          Some(#(path, name)) ->
+            Ok(CallSite(
+              module: path,
+              name: name,
+              arguments: list.flat_map(arguments, field_expressions),
+            ))
+          None -> Error(Nil)
+        }
+      _ -> Error(Nil)
+    }
+  })
+}
+
+/// 呼び出しでない参照(`list.map(xs, el.element)` のような関数の値)も第 3 条に掛ける。
+fn references(module: glance.Module) -> List(#(String, String)) {
+  unit_expressions(module)
+  |> list.flat_map(all_expressions)
+  |> list.filter_map(fn(expression) {
+    case resolve_callee(expression, module.imports) {
+      Some(found) -> Ok(found)
+      None -> Error(Nil)
+    }
+  })
+}
+
+fn resolve_callee(
+  expression: glance.Expression,
+  imports: List(glance.Definition(glance.Import)),
+) -> Option(#(String, String)) {
+  case expression {
+    glance.FieldAccess(
+      container: glance.Variable(name: alias, ..),
+      label: label,
+      ..,
+    ) ->
+      imported_module(imports, alias)
+      |> option.map(fn(path) { #(path, label) })
+    glance.Variable(name: name, ..) ->
+      unqualified_module(imports, name)
+      |> option.map(fn(path) { #(path, name) })
+    _ -> None
+  }
+}
+
+fn is_lustre_module(path: String) -> Bool {
+  path == "lustre"
+  || string.starts_with(path, "lustre/")
+  || path == "sketch/lustre"
+  || string.starts_with(path, "sketch/lustre/")
+}
+
+/// yumemi の `@internal` の口(生成物と yumemi の html / attr だけが呼ぶ)。
+fn is_internal_reference(path: String, name: String) -> Bool {
+  case path, name {
+    "yumemi/front/el", "element"
+    | "yumemi/front/el", "namespaced"
+    | "yumemi/front/el", "raw_text"
+    | "yumemi/front/el", "attribute"
+    | "yumemi/front/el", "no_attribute"
+    | "yumemi/front/el", "class_attribute"
+    | "yumemi/front/el", "styled"
+    | "yumemi/front/el", "to_document_string"
+    | "yumemi/front/el", "escape"
+    | "yumemi/front/el", "Node"
+    | "yumemi/front/el", "RawText"
+    | "yumemi/front/el", "Attribute"
+    | "yumemi/front/html", "html"
+    | "yumemi/front/html", "head"
+    | "yumemi/front/html", "body"
+    | "yumemi/front/html", "body_"
+    | "yumemi/front/html", "meta"
+    | "yumemi/front/html", "title"
+    | "yumemi/front/css", "class_styles"
+    | "yumemi/front/sketch_css", "class_name"
+    | "yumemi/front/sketch_css", "collect"
+    | "yumemi/front/theme", "body_rule"
+    | "yumemi/front/theme", "has_image"
+    -> True
+    _, _ -> False
+  }
+}
+
+fn surface_unit_notes(
+  face: String,
+  unit: Unit,
+  legacy: Bool,
+) -> List(stop.Note) {
+  let module = g.in_order(unit.module)
+  let where = face <> "/" <> unit.path
+  let conflict = fn(text) {
+    stop.Note(class: stop.Conflict, text: where <> ": " <> text)
+  }
+  // 第 1 条:lustre を import しない(0.11 の形の interactive Component だけが例外)
+  let lustre = case legacy {
+    True -> []
+    False ->
+      module.imports
+      |> list.filter(fn(definition) {
+        is_lustre_module(definition.definition.module)
+      })
+      |> list.map(fn(definition) {
+        conflict(
+          "★ が lustre を import している(第 1 条、0.12 の ★ は yumemi/front の el・html・attr で書く): "
+          <> definition.definition.module,
+        )
+      })
+  }
+  // 第 3 条:yumemi の @internal を呼ばない
+  let internal =
+    references(module)
+    |> list.unique
+    |> list.filter(fn(found) { is_internal_reference(found.0, found.1) })
+    |> list.map(fn(found) {
+      conflict(
+        "yumemi の @internal の口を呼んでいる(第 3 条): "
+        <> last_segment(found.0)
+        <> "."
+        <> found.1,
+      )
+    })
+  let calls = call_sites(module)
+  let literal_notes =
+    list.flat_map(calls, fn(call) {
+      case call.module, call.name, call.arguments {
+        // 第 7 条
+        "yumemi/front/attr", "data", [name, ..]
+        | "yumemi/front/attr", "aria", [name, ..]
+        ->
+          case g.string_value(name) {
+            Some(literal) ->
+              case is_attribute_name(literal) {
+                True -> []
+                False -> [
+                  conflict(
+                    "attr."
+                    <> call.name
+                    <> " の名 \""
+                    <> literal
+                    <> "\" が [a-z][a-z0-9-]* でない(第 7 条)",
+                  ),
+                ]
+              }
+            None -> []
+          }
+        // 第 23 条
+        "yumemi/front/css", "Hex", [value] ->
+          case g.string_value(value) {
+            Some(literal) ->
+              case is_hex_color(literal) {
+                True -> []
+                False -> [
+                  conflict(
+                    "css.Hex の値 \"" <> literal <> "\" が # と 16 進 6 桁でない(第 23 条)",
+                  ),
+                ]
+              }
+            None -> [conflict("css.Hex の値が文字列の literal でない(第 23 条)")]
+          }
+        // 第 24 条
+        "yumemi/front/css", "Token", [value] ->
+          case g.string_value(value) {
+            Some(literal) ->
+              case is_token_name(literal) {
+                True -> []
+                False -> [
+                  conflict(
+                    "css.Token の名 \""
+                    <> literal
+                    <> "\" が [a-z0-9-]+ でない(第 24 条)",
+                  ),
+                ]
+              }
+            None -> []
+          }
+        // 第 25 条
+        "yumemi/front/css", "Mix", [_, _, percent] ->
+          case int_literal(percent) {
+            Some(value) if value < 0 || value > 100 -> [
+              conflict(
+                "css.Mix の percent "
+                <> int.to_string(value)
+                <> " が 0〜100 の外(第 25 条)",
+              ),
+            ]
+            _ -> []
+          }
+        // 第 31 条
+        "yumemi/front/el", "static_sheet", [path] ->
+          case g.string_value(path) {
+            Some(_) -> []
+            None -> [
+              conflict("el.static_sheet の path が文字列の literal でない(第 31 条)"),
+            ]
+          }
+        _, _, _ -> []
+      }
+    })
+  // 第 8 条:1 つの要素の属性の列に同じ名の属性が静的に 2 つ
+  let duplicate_notes =
+    unit_expressions(module)
+    |> list.flat_map(all_expressions)
+    |> list.filter_map(fn(expression) {
+      case expression {
+        glance.List(elements: elements, rest: None, ..) -> {
+          let names =
+            list.filter_map(elements, fn(element) {
+              static_attribute_name(element, module.imports)
+            })
+          case duplicated(names) {
+            [] -> Error(Nil)
+            found ->
+              Ok(conflict(
+                "1 つの要素の属性の列に同じ名の属性が 2 つある(第 8 条): " <> string.join(found, ", "),
+              ))
+          }
+        }
+        _ -> Error(Nil)
+      }
+    })
+  list.flatten([lustre, internal, literal_notes, duplicate_notes])
+}
+
+/// 属性の列の要素が `attr.<名>(..)` なら、出る属性の名(`data` / `aria` は literal の名から)。
+fn static_attribute_name(
+  expression: glance.Expression,
+  imports: List(glance.Definition(glance.Import)),
+) -> Result(String, Nil) {
+  case expression {
+    glance.Call(function: function, arguments: arguments, ..) ->
+      case resolve_callee(function, imports) {
+        Some(#("yumemi/front/attr", "none")) -> Error(Nil)
+        Some(#("yumemi/front/attr", "data" as prefix))
+        | Some(#("yumemi/front/attr", "aria" as prefix)) ->
+          case list.flat_map(arguments, field_expressions) {
+            [name, ..] ->
+              case g.string_value(name) {
+                Some(literal) -> Ok(prefix <> "-" <> literal)
+                None -> Error(Nil)
+              }
+            [] -> Error(Nil)
+          }
+        Some(#("yumemi/front/attr", name)) -> Ok(name)
+        _ -> Error(Nil)
+      }
+    _ -> Error(Nil)
+  }
+}
+
+fn duplicated(names: List(String)) -> List(String) {
+  names
+  |> list.filter(fn(name) { list.count(names, fn(other) { other == name }) > 1 })
+  |> list.unique
+}
+
+fn int_literal(expression: glance.Expression) -> Option(Int) {
+  case expression {
+    glance.Int(value: value, ..) -> option.from_result(int.parse(value))
+    glance.NegateInt(value: glance.Int(value: value, ..), ..) ->
+      int.parse(value)
+      |> result.map(fn(value) { 0 - value })
+      |> option.from_result
+    _ -> None
+  }
+}
+
+/// `[a-z][a-z0-9-]*`。
+pub fn is_attribute_name(name: String) -> Bool {
+  case string.to_graphemes(name) {
+    [first, ..rest] ->
+      string.contains("abcdefghijklmnopqrstuvwxyz", first)
+      && list.all(rest, fn(char) {
+        string.contains("abcdefghijklmnopqrstuvwxyz0123456789-", char)
+      })
+    [] -> False
+  }
+}
+
+/// `[a-z0-9-]+`。
+fn is_token_name(name: String) -> Bool {
+  name != ""
+  && list.all(string.to_graphemes(name), fn(char) {
+    string.contains("abcdefghijklmnopqrstuvwxyz0123456789-", char)
+  })
+}
+
+/// `#` と 16 進 6 桁。
+pub fn is_hex_color(value: String) -> Bool {
+  case string.to_graphemes(value) {
+    ["#", ..digits] ->
+      list.length(digits) == 6
+      && list.all(digits, fn(char) {
+        string.contains("0123456789abcdefABCDEF", char)
+      })
+    _ -> False
+  }
+}
+
+/// `el.static_sheet("..")` の literal の path(#(module, path))。
+fn static_sheet_paths(unit: Unit) -> List(#(String, String)) {
+  call_sites(g.in_order(unit.module))
+  |> list.filter_map(fn(call) {
+    case call.module, call.name, call.arguments {
+      "yumemi/front/el", "static_sheet", [path] ->
+        case g.string_value(path) {
+          Some(literal) -> Ok(#(unit.path, literal))
+          None -> Error(Nil)
+        }
+      _, _, _ -> Error(Nil)
+    }
+  })
 }

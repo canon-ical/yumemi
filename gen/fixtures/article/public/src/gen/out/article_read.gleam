@@ -1,7 +1,8 @@
-//// GENERATED from src/service/article_read.gleam [sha256:1b23b9f30356] — 手で編集しない
+//// GENERATED from src/service/article_read.gleam [sha256:859f3f801967] — 手で編集しない
 
 import gleam/dynamic/decode
 import gleam/option.{type Option}
+import yumemi/front/theme.{type PageTheme, decoder as page_theme_decoder}
 
 pub type Slug =
   String
@@ -44,15 +45,6 @@ pub type Category {
 
 pub type Tag {
   Tag(name: TagName)
-}
-
-pub type PageTheme {
-  PageTheme(
-    background: Option(String),
-    background_image: Option(String),
-    text: Option(String),
-    accent: Option(String),
-  )
 }
 
 pub type Out {
@@ -119,38 +111,7 @@ pub fn decoder() -> decode.Decoder(Out) {
             fn(tags) {
               decode.field(
                 "theme",
-                decode.optional(
-                  decode.field(
-                    "background",
-                    decode.optional(decode.string),
-                    fn(background) {
-                      decode.field(
-                        "background_image",
-                        decode.optional(decode.string),
-                        fn(background_image) {
-                          decode.field(
-                            "text",
-                            decode.optional(decode.string),
-                            fn(text) {
-                              decode.field(
-                                "accent",
-                                decode.optional(decode.string),
-                                fn(accent) {
-                                  decode.success(PageTheme(
-                                    background: background,
-                                    background_image: background_image,
-                                    text: text,
-                                    accent: accent,
-                                  ))
-                                },
-                              )
-                            },
-                          )
-                        },
-                      )
-                    },
-                  ),
-                ),
+                decode.optional(page_theme_decoder()),
                 fn(theme) {
                   decode.success(Out(
                     article: article,

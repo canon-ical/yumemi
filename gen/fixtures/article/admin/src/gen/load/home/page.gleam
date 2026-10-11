@@ -1,18 +1,15 @@
-//// GENERATED from admin/src/pages/home/page.gleam [sha256:38b74da7dca1] — 手で編集しない
+//// GENERATED from admin/src/pages/home/page.gleam [sha256:a2a327ea7269] — 手で編集しない
 
 import blocks/admin_header
-import yumemi/front/css
-import yumemi/front/sketch_css
 import gen/load/layout
 import gleam/list
-import lustre/attribute
-import lustre/element/html as raw_html
-import sketch
-import sketch/css as raw_css
-import sketch/lustre as sketch_lustre
-import sketch/lustre/element
-import sketch/lustre/element/html
+import gleam/option.{type Option, None}
 import style
+import yumemi/blob.{type Blob}
+import yumemi/front/css
+import yumemi/front/el
+import yumemi/front/html
+import yumemi/front/theme
 
 pub type Vars {
   Vars(subject: String)
@@ -26,65 +23,59 @@ pub fn load(vars: Vars) -> Data {
   Data(layout: layout.load(), vars: vars)
 }
 
-pub fn render(it: Data) -> element.Element(Nil) {
-  let assert Ok(stylesheet) =
-    sketch_lustre.construct(fn(stylesheet) {
-      sketch.global(stylesheet, theme_global())
-    })
-  let output = render_view(stylesheet, fn() { view(it) })
-  let assert Ok(_) = sketch_lustre.teardown(stylesheet)
-  output
-}
-
-fn render_view(
-  stylesheet: sketch.StyleSheet,
-  body: fn() -> element.Element(Nil),
-) -> element.Element(Nil) {
-  let styled_body =
-    sketch_lustre.render(stylesheet, in: [sketch_lustre.node()], after: body)
-
-  raw_html.html([attribute.attribute("lang", "ja")], [
-    raw_html.head([], [
-      raw_html.meta([attribute.attribute("charset", "utf-8")]),
-      raw_html.meta([
-        attribute.attribute("name", "viewport"),
-        attribute.attribute(
+pub fn render(it: Data) -> el.Element {
+  let page_theme = None
+  html.html([el.attribute("lang", "ja")], [
+    html.head([], [
+      html.meta([el.attribute("charset", "utf-8")]),
+      html.meta([
+        el.attribute("name", "viewport"),
+        el.attribute(
           "content",
           "width=device-width, initial-scale=1, viewport-fit=cover",
         ),
       ]),
-      raw_html.title([], "yumemi admin fixture"),
+      html.title([], "yumemi admin fixture"),
     ]),
-    raw_html.body([], [styled_body]),
+    html.body_([theme_image_attribute(page_theme)], [
+      el.styled(
+        fn() { view(it) },
+        theme.body_rule(page_theme, theme_defaults(), theme_image_url),
+      ),
+    ]),
   ])
 }
 
-fn theme_global() -> raw_css.Global {
-  let #(background, background_image, text, accent) = #(
-    "#FAF7F0",
-    "none",
-    "#3D2419",
-    "#A93632",
+fn theme_defaults() -> theme.Defaults {
+  theme.Defaults(
+    background: "#FAF7F0",
+    text: "#3D2419",
+    accent: "#A93632",
+    background_image: None,
   )
-
-  raw_css.global("body", [
-    raw_css.property("--bg", background),
-    raw_css.property("--bg-image", background_image),
-    raw_css.property("--text", text),
-    raw_css.property("--accent", accent),
-  ])
 }
 
-pub fn view(it: Data) -> element.Element(Nil) {
-  html.div_([attribute.attribute("data-yumemi-grid", "layout")], [
+fn theme_image_attribute(value: Option(theme.PageTheme)) -> el.Attribute {
+  case theme.has_image(value, theme_defaults()) {
+    True -> el.attribute("data-yumemi-theme-image", "")
+    False -> el.no_attribute()
+  }
+}
+
+fn theme_image_url(value: Blob) -> String {
+  blob.to_string(value)
+}
+
+pub fn view(it: Data) -> el.Element {
+  html.div_([el.attribute("data-yumemi-grid", "layout")], [
     styled_area("page", style.page, page_children(it)),
   ])
 }
 
-fn page_children(it: Data) -> List(element.Element(Nil)) {
+fn page_children(it: Data) -> List(el.Element) {
   [
     html.div_(
-      [attribute.attribute("data-yumemi-grid", "page:pages/home/page")],
+      [el.attribute("data-yumemi-grid", "page:pages/home/page")],
       list.flatten([
         [styled_area("page", style.page, page_placement_0(it))],
       ]),
@@ -95,15 +86,15 @@ fn page_children(it: Data) -> List(element.Element(Nil)) {
 fn styled_area(
   name: String,
   styles: List(css.Style),
-  children: List(element.Element(Nil)),
-) -> element.Element(Nil) {
+  children: List(el.Element),
+) -> el.Element {
   html.div(
-    sketch_css.class(styles),
-    [attribute.attribute("data-yumemi-area", name)],
+    css.class(styles),
+    [el.attribute("data-yumemi-area", name)],
     children,
   )
 }
 
-fn page_placement_0(it: Data) -> List(element.Element(Nil)) {
+fn page_placement_0(it: Data) -> List(el.Element) {
   [admin_header.view(Nil, admin_header.Arg(subject: it.vars.subject))]
 }

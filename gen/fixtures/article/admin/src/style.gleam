@@ -1,6 +1,6 @@
 import yumemi/front/css
 
-pub const ink: css.Style = css.Color("#2b1d3a")
+pub const ink: css.Style = css.Color(css.Hex("#2b1d3a"))
 
 pub const body: css.Style = css.Text(
   family: css.System,
@@ -16,4 +16,4 @@ pub const heading: css.Style = css.Text(
   line_height: css.Rem(1.8),
 )
 
-pub const page: List(css.Style) = [css.Color("#fffaff")]
+pub const page: List(css.Style) = [css.Color(css.Hex("#fffaff"))]

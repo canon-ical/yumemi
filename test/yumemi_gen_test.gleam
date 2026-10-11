@@ -13,6 +13,7 @@ import gleam/uri
 import gleeunit/should
 import simplifile
 import yumemi/blob
+import yumemi/front/theme
 import yumemi/gen as yumemi_gen
 import yumemi/gen/digest
 import yumemi/gen/emit/front as front_emit
@@ -956,21 +957,25 @@ pub fn every_file_carries_the_generated_header_test() {
   files()
   |> list.filter_map(fn(entry) {
     let #(path, found) = entry
-    let valid = case string.ends_with(path, ".sql") {
-      True -> string.starts_with(found, "-- GENERATED ")
-      False ->
-        case string.ends_with(path, ".mjs") {
-          // back の JS(`src/gen/*.mjs`、WGy)は api の既存の頭 `////` に揃える。
-          True ->
-            string.starts_with(found, "// GENERATED ")
-            || string.starts_with(found, "//// GENERATED ")
-          False ->
-            case string.ends_with(path, ".css") {
-              True -> string.starts_with(found, "/* GENERATED ")
-              False -> string.starts_with(found, "//// GENERATED ")
-            }
-        }
-    }
+    // `_diagnostics.txt` は停止と警告の報告で、生成した source でない(0.12 段 B で fixture に
+    // 警告 2 行 ── 第 1・2 条の例外の数と生の CSS の規則の数 ── が出るようになった)。
+    let valid =
+      path == "_diagnostics.txt"
+      || case string.ends_with(path, ".sql") {
+        True -> string.starts_with(found, "-- GENERATED ")
+        False ->
+          case string.ends_with(path, ".mjs") {
+            // back の JS(`src/gen/*.mjs`、WGy)は api の既存の頭 `////` に揃える。
+            True ->
+              string.starts_with(found, "// GENERATED ")
+              || string.starts_with(found, "//// GENERATED ")
+            False ->
+              case string.ends_with(path, ".css") {
+                True -> string.starts_with(found, "/* GENERATED ")
+                False -> string.starts_with(found, "//// GENERATED ")
+              }
+          }
+      }
     case valid {
       True -> Error(Nil)
       False -> Ok(path)
@@ -1833,8 +1838,23 @@ pub fn mixed_direction_keyset_has_no_generator_note_test() {
 }
 
 pub fn a_clean_app_has_no_notes_test() {
-  notes_of(fixture) |> should.equal([])
+  notes_of(fixture) |> without_stage_b_counts |> should.equal([])
+  stop.worst(notes_of(fixture)) |> should.equal(0)
   stop.worst([]) |> should.equal(0)
+}
+
+/// 0.12 段 B の数えの警告(exit 0)── 第 1・2 条の例外にした 0.11 の interactive Component の数と、
+/// 生の CSS の逃げ道の規則の数。fixture の public はどちらも持つ。
+pub fn without_stage_b_counts(notes: List(stop.Note)) -> List(stop.Note) {
+  list.filter(notes, fn(note) {
+    !{
+      note.class == stop.Warning
+      && {
+        string.contains(note.text, "第 1・2 条の例外")
+        || string.contains(note.text, "生の CSS の逃げ道")
+      }
+    }
+  })
 }
 
 pub fn escalating_notes_win_over_generator_notes_test() {
@@ -2021,9 +2041,9 @@ pub fn front_emit_overlay_area_and_badge_use_generator_css_test() {
   let page = text("public/src/gen/load/article/arg_slug/page.gleam")
   [
     "overlay_area(\"article-dialog\", [],",
-    "attribute.attribute(\"id\", el.overlay_id_prefix <> name)",
-    "attribute.attribute(\"popover\", \"\")",
-    "attribute.attribute(\"data-yumemi-overlay\", \"\")",
+    "el.attribute(\"id\", el.overlay_id_prefix <> name)",
+    "el.attribute(\"popover\", \"\")",
+    "el.attribute(\"data-yumemi-overlay\", \"\")",
   ]
   |> list.each(fn(row) { string.contains(page, row) |> should.be_true })
 
@@ -2232,23 +2252,24 @@ pub fn front_emit_validate_errors_name_the_failed_constraint_test() {
 pub fn front_emit_shell_carries_language_title_and_theme_test() {
   let page = text("public/src/gen/load/article/arg_slug/page.gleam")
   [
-    "attribute.attribute(\"lang\", \"ja\")",
-    "raw_html.title([], \"yumemi front fixture\")",
-    "option_string(background, \"#FAF7F0\")",
-    "option_string(text, \"#3D2419\")",
-    "option_string(accent, \"#A93632\")",
-    "option_background(background_image)",
+    "el.attribute(\"lang\", \"ja\")",
+    "html.title([], \"yumemi front fixture\")",
+    "    background: \"#FAF7F0\",\n",
+    "    text: \"#3D2419\",\n",
+    "    accent: \"#A93632\",\n",
+    "    background_image: None,\n",
+    "theme.body_rule(page_theme, theme_defaults(), theme_image_url)",
   ]
   |> list.each(fn(row) { string.contains(page, row) |> should.be_true })
 }
 
 pub fn front_emit_shell_includes_viewport_meta_test() {
   let page = text("public/src/gen/load/article/arg_slug/page.gleam")
-  string.contains(page, "attribute.attribute(\"name\", \"viewport\")")
+  string.contains(page, "el.attribute(\"name\", \"viewport\")")
   |> should.be_true
   string.contains(
     page,
-    "attribute.attribute(\"content\", \"width=device-width, initial-scale=1, viewport-fit=cover\")",
+    "el.attribute(\"content\", \"width=device-width, initial-scale=1, viewport-fit=cover\")",
   )
   |> should.be_true
 }
@@ -2282,11 +2303,11 @@ pub fn front_emit_blocks_preview_places_layout_blocks_by_area_test() {
       file.0 == "public/src/gen/blocks_preview.gleam"
     })
   [
-    "html.header_([attribute.attribute(\"data-yumemi-area\", \"header\")], [",
+    "html.header_([el.attribute(\"data-yumemi-area\", \"header\")], [",
     "site_header.view(Nil)",
-    "html.nav_([attribute.attribute(\"data-yumemi-area\", \"nav\")], [",
+    "html.nav_([el.attribute(\"data-yumemi-area\", \"nav\")], [",
     "feed.view(feed.sample)",
-    "html.footer_([attribute.attribute(\"data-yumemi-area\", \"footer\")], [",
+    "html.footer_([el.attribute(\"data-yumemi-area\", \"footer\")], [",
     "summary.view(summary.sample, summary.Arg(slug: \"preview\"))",
   ]
   |> list.each(fn(row) { string.contains(preview, row) |> should.be_true })
@@ -2349,13 +2370,24 @@ pub fn front_emit_blob_theme_wraps_image_in_quoted_css_url_test() {
     list.find(files, fn(file) {
       file.0 == "public/src/gen/load/article/arg_slug/page.gleam"
     })
-  string.contains(
-    page,
-    "Some(value) -> \"url(\\\"\" <> media.url(value, media.W1600) <> \"\\\")\"",
-  )
-  |> should.be_true
+  // 0.12:地の画像の URL は app の media の variant で組み(今の形のまま)、`url("..")` の CSS の
+  // 文字列は yumemi の `theme.body_rule` が `\`・`"`・改行を escape して包む
+  string.contains(page, "  media.url(value, media.W1600)\n") |> should.be_true
   string.contains(page, "import media") |> should.be_true
   string.contains(page, "yumemi/blob.{type Blob}") |> should.be_true
+  let assert Ok(image) = blob.parse("a\"b")
+  theme.body_rule(
+    Some(theme.PageTheme(
+      background: None,
+      background_image: Some(image),
+      text: None,
+      accent: None,
+    )),
+    theme.Defaults("#000000", "#111111", "#222222", None),
+    fn(value) { "/media/" <> blob.to_string(value) },
+  )
+  |> string.contains("--yumemi-theme-bg-image: url(\"/media/a\\\"b\");")
+  |> should.be_true
 }
 
 pub fn front_blob_theme_media_url_matches_segment_encoding_test() {
@@ -2416,8 +2448,7 @@ pub fn present_shell_missing_consts_are_exit_three_test() {
 pub fn present_shell_missing_theme_field_is_exit_three_test() {
   let assert Ok(units) = source.load("gen/fixtures/article/public")
   let assert Ok(shell) = list.find(units, fn(unit) { unit.path == "shell" })
-  let partial =
-    string.replace(shell.text, "  background_image: \"none\",\n", "")
+  let partial = string.replace(shell.text, "  background_image: None,\n", "")
   let units =
     units
     |> list.filter(fn(unit) { unit.path != "shell" })
@@ -2459,7 +2490,7 @@ pub fn static_material_copy_keeps_front_four_names_and_markdown_structure_test()
   string.contains(external, "pub const hosts: List(Host)") |> should.be_true
 
   let document = static_emit.api_v1_text(sources.api_v1, sources.api_v1_hash)
-  string.contains(document, "pub fn nodes() -> List(el.Element(Nil))")
+  string.contains(document, "pub fn nodes() -> List(el.Element)")
   |> should.be_true
   string.contains(document, "heading1(\"Fixture API\")") |> should.be_true
   string.contains(document, "html.table(") |> should.be_true
@@ -4091,7 +4122,8 @@ pub fn direct_attribute_class_is_exit_four_test() {
       ],
       [],
     )
-  assert_one_note(notes, stop.Conflict, "attribute.class")
+  // 0.12:`attribute.class` の直呼びは第 1 条(lustre の import)に吸収した
+  assert_one_note(notes, stop.Conflict, "第 1 条")
   stop.worst(notes) |> should.equal(4)
 }
 
@@ -4104,7 +4136,8 @@ pub fn lustre_internal_import_is_exit_four_test() {
       ],
       [],
     )
-  assert_one_note(notes, stop.Conflict, "lustre 内部 module")
+  // 0.12:`lustre/internals` の import は第 1 条(lustre の import)に吸収した
+  assert_one_note(notes, stop.Conflict, "第 1 条")
   stop.worst(notes) |> should.equal(4)
 }
 
@@ -4788,7 +4821,7 @@ pub fn front_emit_styled_frame_grid_style_test() {
     })
   string.contains(
     page,
-    "html.div(sketch_css.class([css.Responsive(css.PC, style.wide), ..[style.shell, style.paper]]), [attribute.attribute(\"data-yumemi-grid\", \"layout\")], [\n",
+    "html.div(css.class([css.Responsive(css.PC, style.wide), ..[style.shell, style.paper]]), [el.attribute(\"data-yumemi-grid\", \"layout\")], [\n",
   )
   |> should.be_true
   string.contains(page, "styled_area(\"page\", style.ink,") |> should.be_true
@@ -4823,12 +4856,12 @@ pub fn front_emit_frame_without_style_keeps_plain_grid_test() {
     })
   string.contains(
     page,
-    "html.div_([attribute.attribute(\"data-yumemi-grid\", \"layout\")], [\n",
+    "html.div_([el.attribute(\"data-yumemi-grid\", \"layout\")], [\n",
   )
   |> should.be_true
   string.contains(page, "data-yumemi-grid\", \"layout\")], [\n")
   |> should.be_true
-  string.contains(page, "sketch_css.class([css.Responsive") |> should.be_false
+  string.contains(page, "css.class([css.Responsive") |> should.be_false
 }
 
 // Page の StyledFrame は Page の格子を作り、その要素に style を掛ける。
@@ -4852,7 +4885,7 @@ pub fn front_emit_page_styled_frame_makes_page_grid_test() {
     })
   string.contains(
     page,
-    "[html.div(sketch_css.class(style.shell), [attribute.attribute(\"data-yumemi-grid\", \"page:",
+    "[html.div(css.class(style.shell), [el.attribute(\"data-yumemi-grid\", \"page:",
   )
   |> should.be_true
 }
@@ -4991,7 +5024,17 @@ fn shell_with_head(extra: String) -> List(source.Unit) {
   let assert Ok(face_units) = source.load("gen/fixtures/article/public")
   list.map(face_units, fn(unit) {
     case unit.path {
-      "shell" -> source_unit("shell", unit.text <> extra)
+      // fixture の public は 0.12 で `stylesheets` を持つ。足す const と重ならないよう外す
+      "shell" ->
+        source_unit(
+          "shell",
+          string.replace(
+            unit.text,
+            "\npub const stylesheets: List(String) = [\"/fixture.css\"]\n",
+            "",
+          )
+            <> extra,
+        )
       _ -> unit
     }
   })
@@ -5019,25 +5062,25 @@ pub fn front_emit_shell_head_consts_render_in_head_test() {
   let page = file_text(files, "public/src/gen/load/article/arg_slug/page.gleam")
   string.contains(
     page,
-    "      raw_html.title([], \"yumemi front fixture\"),\n"
-      <> "      raw_html.link([\n"
-      <> "        attribute.attribute(\"rel\", \"manifest\"),\n"
-      <> "        attribute.attribute(\"href\", \"/manifest.webmanifest\"),\n"
-      <> "      ]),\n"
-      <> "      raw_html.meta([\n"
-      <> "        attribute.attribute(\"name\", \"theme-color\"),\n"
-      <> "        attribute.attribute(\"content\", \"#A93632\"),\n"
-      <> "      ]),\n"
-      <> "      raw_html.link([\n"
-      <> "        attribute.attribute(\"rel\", \"icon\"),\n"
-      <> "        attribute.attribute(\"href\", \"/favicon.ico\"),\n"
-      <> "      ]),\n"
-      <> "      raw_html.link([\n"
-      <> "        attribute.attribute(\"rel\", \"apple-touch-icon\"),\n"
-      <> "        attribute.attribute(\"href\", \"/apple-touch-icon.png\"),\n"
-      <> "      ]),\n"
+    "      html.title([], \"yumemi front fixture\"),\n"
+      <> "      el.element(\"link\", [\n"
+      <> "        el.attribute(\"rel\", \"manifest\"),\n"
+      <> "        el.attribute(\"href\", \"/manifest.webmanifest\"),\n"
+      <> "      ], []),\n"
+      <> "      el.element(\"meta\", [\n"
+      <> "        el.attribute(\"name\", \"theme-color\"),\n"
+      <> "        el.attribute(\"content\", \"#A93632\"),\n"
+      <> "      ], []),\n"
+      <> "      el.element(\"link\", [\n"
+      <> "        el.attribute(\"rel\", \"icon\"),\n"
+      <> "        el.attribute(\"href\", \"/favicon.ico\"),\n"
+      <> "      ], []),\n"
+      <> "      el.element(\"link\", [\n"
+      <> "        el.attribute(\"rel\", \"apple-touch-icon\"),\n"
+      <> "        el.attribute(\"href\", \"/apple-touch-icon.png\"),\n"
+      <> "      ], []),\n"
       <> "    ]),\n"
-      <> "    raw_html.body([], [styled_body]),\n",
+      <> "    html.body_([theme_image_attribute(page_theme)], [\n",
   )
   |> should.be_true
   let client = file_text(files, "public/priv/static/_yumemi/client.mjs")
@@ -5073,14 +5116,14 @@ pub fn front_emit_shell_head_one_const_test() {
 
 // const を書かない shell の生成は 0.11.11 と同じ(head・client.mjs・shell.mjs)。
 pub fn front_emit_shell_without_head_consts_is_unchanged_test() {
-  let assert Ok(face_units) = source.load("gen/fixtures/article/public")
-  let plain = synthetic_front_files(face_units)
+  // fixture の public は 0.12 で `stylesheets` を持つので、外した shell で見る
+  let plain = synthetic_front_files(shell_with_head(""))
   let page = file_text(plain, "public/src/gen/load/article/arg_slug/page.gleam")
   string.contains(
     page,
-    "      raw_html.title([], \"yumemi front fixture\"),\n"
+    "      html.title([], \"yumemi front fixture\"),\n"
       <> "    ]),\n"
-      <> "    raw_html.body([], [styled_body]),\n",
+      <> "    html.body_([theme_image_attribute(page_theme)], [\n",
   )
   |> should.be_true
   file_text(plain, "public/priv/static/_yumemi/client.mjs")
@@ -5110,20 +5153,20 @@ pub fn front_emit_shell_stylesheets_render_in_head_test() {
   let page = file_text(files, "public/src/gen/load/article/arg_slug/page.gleam")
   string.contains(
     page,
-    "      raw_html.link([\n"
-      <> "        attribute.attribute(\"rel\", \"icon\"),\n"
-      <> "        attribute.attribute(\"href\", \"/favicon.ico\"),\n"
-      <> "      ]),\n"
-      <> "      raw_html.link([\n"
-      <> "        attribute.attribute(\"rel\", \"stylesheet\"),\n"
-      <> "        attribute.attribute(\"href\", \"/tokens.css\"),\n"
-      <> "      ]),\n"
-      <> "      raw_html.link([\n"
-      <> "        attribute.attribute(\"rel\", \"stylesheet\"),\n"
-      <> "        attribute.attribute(\"href\", \"/www.css\"),\n"
-      <> "      ]),\n"
+    "      el.element(\"link\", [\n"
+      <> "        el.attribute(\"rel\", \"icon\"),\n"
+      <> "        el.attribute(\"href\", \"/favicon.ico\"),\n"
+      <> "      ], []),\n"
+      <> "      el.element(\"link\", [\n"
+      <> "        el.attribute(\"rel\", \"stylesheet\"),\n"
+      <> "        el.attribute(\"href\", \"/tokens.css\"),\n"
+      <> "      ], []),\n"
+      <> "      el.element(\"link\", [\n"
+      <> "        el.attribute(\"rel\", \"stylesheet\"),\n"
+      <> "        el.attribute(\"href\", \"/www.css\"),\n"
+      <> "      ], []),\n"
       <> "    ]),\n"
-      <> "    raw_html.body([], [styled_body]),\n",
+      <> "    html.body_([theme_image_attribute(page_theme)], [\n",
   )
   |> should.be_true
   // 空の並びは何も出さない
@@ -5172,8 +5215,8 @@ fn synthetic_front_files_with_nested_theme() -> List(#(String, String)) {
             "service/article_read",
             unit.text
               |> string.replace(
-                "    theme: Option(PageTheme),\n  )\n}",
-                "    look: Look,\n  )\n}\n\npub type Look {\n  Look(theme: Option(PageTheme))\n}",
+                "    theme: Option(theme.PageTheme),\n  )\n}",
+                "    look: Look,\n  )\n}\n\npub type Look {\n  Look(theme: Option(theme.PageTheme))\n}",
               )
               |> string.replace("theme: None))", "look: Look(theme: None)))"),
           )
@@ -5237,13 +5280,10 @@ pub fn front_emit_page_theme_follows_out_path_test() {
   page_theme_from_shell(shell, "#ccffa6") |> should.equal("Some:#ccffa6")
   page_theme_from_shell(shell, "") |> should.equal("None")
   let page = file_text(files, "public/src/gen/load/article/arg_slug/page.gleam")
-  string.contains(page, "theme: Option(article_read.PageTheme),")
+  // 0.12:theme の欄は yumemi の `theme.PageTheme`、既定は Shell の `theme.Defaults`
+  string.contains(page, "theme: Option(theme.PageTheme),")
   |> should.be_true
-  string.contains(
-    page,
-    "    None -> #(\"#FAF7F0\", \"none\", \"#3D2419\", \"#A93632\")\n",
-  )
-  |> should.be_true
+  string.contains(page, "    background: \"#FAF7F0\",\n") |> should.be_true
 }
 
 // theme を取る Page の無い面の shell.mjs は 0.11.12 の実行時のまま(theme の path をたどる字が出ない)。
