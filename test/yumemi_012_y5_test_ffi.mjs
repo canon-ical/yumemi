@@ -224,11 +224,14 @@ check("initial once", sent.length === 1 && sent[0].url === config.endpoint && fi
   && first.source_key === "ig_1" && first.referrer_host === "search.example" && /^[0-9a-f-]{36}$/.test(first.id), sent);
 check("only declared fields", Object.keys(first).sort().join() === "client_at,id,kind,path,referrer_host,source_key", first);
 
-// client の遷移:navigate の種類を覚え、navigatesuccess で今の document の印を見て 1 回
+// client の遷移:navigate の種類を覚え、navigatesuccess で今の document の印を見て 1 回(遷移の側が intercept() で
+// 取った移動は navigatesuccess の時点で navigation.transition が null でない)
 location.href = "https://www.example/article/b";
 navigation.dispatchEvent(Object.assign(new Event("navigate"), { navigationType: "push", hashChange: false, downloadRequest: null }));
 globalThis.location = new URL("https://www.example/article/b");
+navigation.transition = { navigationType: "push" };
 navigation.dispatchEvent(new Event("navigatesuccess"));
+navigation.transition = null;
 await settle();
 check("spa once with prev", sent.length === 2 && sent[1].body.kind === "spa" && sent[1].body.path === "/article/b"
   && sent[1].body.prev === first.id && !("referrer_path" in sent[1].body), sent);
@@ -237,12 +240,23 @@ navigation.dispatchEvent(new Event("navigatesuccess"));
 await settle();
 check("fragment not counted", sent.length === 2, sent);
 navigation.dispatchEvent(Object.assign(new Event("navigate"), { navigationType: "reload", hashChange: false, downloadRequest: null }));
+navigation.transition = { navigationType: "reload" };
 navigation.dispatchEvent(new Event("navigatesuccess"));
+navigation.transition = null;
 await settle();
 check("navigation reload", sent.length === 3 && sent[2].body.kind === "reload", sent);
+// 島の history.pushState / replaceState:navigate と navigatesuccess は出るが transition は null(頁は替わらない)
+for (const navigationType of ["push", "replace"]) {
+  navigation.dispatchEvent(Object.assign(new Event("navigate"), { navigationType, hashChange: false, downloadRequest: null }));
+  navigation.dispatchEvent(new Event("navigatesuccess"));
+}
+await settle();
+check("pushState and replaceState not counted", sent.length === 3, sent);
 marked = false;
 navigation.dispatchEvent(Object.assign(new Event("navigate"), { navigationType: "traverse", hashChange: false, downloadRequest: null }));
+navigation.transition = { navigationType: "traverse" };
 navigation.dispatchEvent(new Event("navigatesuccess"));
+navigation.transition = null;
 await settle();
 check("no mark after navigation not counted", sent.length === 3, sent);
 marked = true;

@@ -405,7 +405,7 @@ pub fn sender_sends_once_per_load_and_navigation_test() {
   let out = sender_checks()
   string.contains(out, "NG ") |> should.be_false
   string.contains(out, "STDERR") |> should.be_false
-  count(out, "ok ") |> should.equal(8)
+  count(out, "ok ") |> should.equal(9)
 }
 
 @external(javascript, "./yumemi_012_y5_test_ffi.mjs", "gate_checks")

@@ -8297,7 +8297,7 @@ function start5({ endpoint, key, fields }) {
     const navigated = pending;
     pending = null;
     current = location.href;
-    if (navigated === null || !marked()) return;
+    if (navigated === null || navigation.transition == null || !marked()) return;
     const url = new URL(location.href);
     idle(() => send7(navigated.type === "reload" ? "reload" : "spa", url, navigated.from));
   });

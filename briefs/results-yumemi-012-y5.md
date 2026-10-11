@@ -212,6 +212,7 @@ $$;
 - **payload**:`base64url(JSON {"id": "<32 桁の hex、crypto.getRandomValues の 16 byte>"}) + "." + base64url(HMAC-SHA256)`。鍵は app の `browser.key_binding` の Secret。申告すると同じ id に `"<claim>": "<申告の時刻 ISO>"` が足される。個人を指す値(IP・UA・party・session)は入れない
 - **外へ送らない**:印の id は自分の origin の受け口(app の Worker)と自分の DB(`framework.pageview_mark` / `_event`、`Store` のとき)にだけ届く。第三者の origin・計測の外部サービスへは送らない。HttpOnly なので頁の JS からも読めない。client が送る本文(`kind`・`client_at`・`path`・`prev`・`referrer_*`・宣言した query の欄・event の id)にも印は載らない(印は cookie で届き、受け口が読む)
 - **使い道**:ユニーク(期間の中の印の数)と訪問(同じ印の 30 分以内の並び)の数え。行の保存期間と purge は 1.0 の後(本便は持たない)
+- (柏木 ゲート 2 で追記)**器 `Store` の event の行は、サインイン中の要求なら session の party を `framework.pageview_event.party` に記録する**(`server/http.mjs` の受け口が `s.resolved?.party` を渡す)。cookie の payload に party は入らないが、DB の上では印と party が結び付く。82 の「確認できなかったこと」の 2 つ目(器が party を記録するか)の答えで、82 の 2(容易照合性で個人情報になる)が `Store` を使うどのアプリにも当たる
 
 ## BRIEF との食い違い・判断したこと
 
@@ -231,6 +232,7 @@ $$;
 - 81 の取り合いの見込みのうち本便が触ったもの:`navigation`(CSP の行を `gate_emit.csp_routes` に、pageview の行を消した)、`shell_runtime_text` の 3 行、`emit` の client.mjs の条件と media、`emit/http.gleam`(`browser_cookie`・`roles`・`pageviews`・`pageview_js` ── `Color` の関数とは別)、生成器の入口(`gen.gleam` の `counted` を入れる `let app` と `cms.notes` の 1 行)
 - `yumemi_fix_0114_test.navigation_keeps_counted_pages_and_passes_pageview_test` は期待を `startNavigation({ routes: [..], boot });` にした(Y4 の形に合わせて解く)
 - Y4 の merge 後に、navigate.mjs の注釈と README の遷移の節に `adult` が残っていないか、client の遷移で beacon が 1 回か(81 の確かめること 1)
+- (柏木 ゲート 2 で追記)送り手は `navigatesuccess` の時点で `navigation.transition` が null なら数えない形にした(Y4 の README・results の約束「送り手は transition が null でない時だけ数える」への追随)。直す前は、島の `history.replaceState` / `pushState`(頁は替わらない)で `spa` が 1 回ずつ余分に送られていた(Chromium で再現)。この形では、Y4 の前の navigate.mjs(fetch・差し替えの後に `pushState`、intercept しない)の click の遷移は数えない ── 81 の「間の main では client の遷移の pageview が送られない」と同じ
 - 継ぎ目(鷹野の裁き 4 の 7 つ)のうち本便の側:`gen/media` の `src`(`el.Src`)と地の画像の URL は未着手、`ToService` の数えは警告 1 行のまま(段 C で 1 行へ統合)
 
 ## 確かめていないこと

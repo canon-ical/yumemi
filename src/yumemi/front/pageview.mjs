@@ -7,7 +7,8 @@
 //   待つ。kind は navigation の種類が `reload` なら `reload`、他は `initial`。bfcache から戻った頁は数えない
 // - client の遷移:Navigation API の `navigatesuccess`(遷移の側が来た頁の印を今の document に置いた後)。kind は
 //   その遷移の `navigate` の種類が `reload` なら `reload`、他(`push` / `replace` / `traverse`)は `spa`。
-//   fragment だけの遷移は数えない
+//   数えるのは遷移の側が `intercept()` で取った移動(`navigation.transition` が null でない)だけで、fragment だけの
+//   遷移と、頁の替わらない `history.pushState` / `replaceState`(transition は null)は数えない
 //
 // 本文の欄は門の `fields` の宣言だけ。event の id(`crypto.randomUUID()`)は常に足す。送りに失敗したら同じ本文で
 // 1 回だけ送り直す(同じ id なので受け口が重ねない)。前の event の id は sessionStorage の `key` に持つ。
@@ -103,7 +104,8 @@ export function start({ endpoint, key, fields }) {
     const navigated = pending;
     pending = null;
     current = location.href;
-    if (navigated === null || !marked()) return;
+    // 島の `pushState` / `replaceState` も `navigatesuccess` を出すが、transition は null で印は今の頁のまま
+    if (navigated === null || navigation.transition == null || !marked()) return;
     const url = new URL(location.href);
     idle(() => send(navigated.type === "reload" ? "reload" : "spa", url, navigated.from));
   });
