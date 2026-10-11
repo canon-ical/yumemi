@@ -7,10 +7,10 @@ pub type MediaVariant {
   Cast
 }
 
-pub const ink: css.Style = css.Color("#2b1d3a")
-pub const paper: css.Style = css.Color("#fffaff")
-pub const accent: css.Style = css.Color("#7a3f8c")
-pub const muted: css.Style = css.Color("#6f6574")
+pub const ink: css.Style = css.Color(css.Hex("#2b1d3a"))
+pub const paper: css.Style = css.Color(css.Hex("#fffaff"))
+pub const accent: css.Style = css.Color(css.Hex("#7a3f8c"))
+pub const muted: css.Style = css.Color(css.Hex("#6f6574"))
 
 pub const body: css.Style = css.Text(
   family: css.System,

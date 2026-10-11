@@ -1,7 +1,7 @@
 //// Interactive Component ── choices come from the generated reload Out.
 
 import yumemi/front
-import yumemi/front/el
+import sketch/lustre/element as el
 import yumemi/front/live as front_live
 import gen/live/article_create
 import gen/out/article_list

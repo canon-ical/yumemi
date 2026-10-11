@@ -1,4 +1,4 @@
-//// GENERATED from public/src/{layout.gleam,pages/**/page.gleam,blocks/*.gleam} [sha256:b5e213793c66] — 手で編集しない
+//// GENERATED from public/src/{layout.gleam,pages/**/page.gleam,blocks/*.gleam} [sha256:db776cf1b806] — 手で編集しない
 
 import blocks/article
 import blocks/feed
@@ -7,23 +7,19 @@ import blocks/row_article
 import blocks/row_summary
 import blocks/site_header
 import blocks/summary
-import yumemi/front/el
 import gleam/option.{None}
-import lustre/attribute
-import lustre/element/html as raw_html
-import sketch/lustre as sketch_lustre
-import sketch/lustre/element
-import sketch/lustre/element/html
+import yumemi/front/el
+import yumemi/front/html
 
-pub fn view() -> element.Element(Nil) {
-  html.div_([attribute.attribute("data-yumemi-blocks-preview", "pc")], [
-    html.header_([attribute.attribute("data-yumemi-area", "header")], [
+pub fn view() -> el.Element {
+  html.div_([el.attribute("data-yumemi-blocks-preview", "pc")], [
+    html.header_([el.attribute("data-yumemi-area", "header")], [
       html.div_([], [
         el.text("blocks/site_header | of Nil | Nil"),
         site_header.view(Nil),
       ]),
     ]),
-    html.div_([attribute.attribute("data-yumemi-area", "page")], [
+    html.div_([el.attribute("data-yumemi-area", "page")], [
       html.div_([], [
         el.text("blocks/article | of ArticleRead | article_read.Out"),
         article.view(
@@ -63,25 +59,18 @@ pub fn view() -> element.Element(Nil) {
         summary.view(summary.sample, summary.Arg(slug: "preview")),
       ]),
     ]),
-    html.div_([attribute.attribute("data-yumemi-area", "aside")], [
+    html.div_([el.attribute("data-yumemi-area", "aside")], [
       el.text("aside"),
     ]),
-    html.footer_([attribute.attribute("data-yumemi-area", "footer")], [
+    html.footer_([el.attribute("data-yumemi-area", "footer")], [
       el.text("footer"),
     ]),
   ])
 }
 
-pub fn render() -> element.Element(Nil) {
-  let assert Ok(stylesheet) =
-    sketch_lustre.construct(fn(stylesheet) { stylesheet })
-  let output =
-    sketch_lustre.render(stylesheet, in: [sketch_lustre.node()], after: fn() {
-      view()
-    })
-  let assert Ok(_) = sketch_lustre.teardown(stylesheet)
-  raw_html.html([], [
-    raw_html.head([], []),
-    raw_html.body([], [output]),
+pub fn render() -> el.Element {
+  html.html([], [
+    html.head([], []),
+    html.body_([], [el.styled(fn() { view() }, "")]),
   ])
 }

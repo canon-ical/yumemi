@@ -1,4 +1,4 @@
-//// GENERATED from src/service/article_create.gleam [sha256:f1d1d3f20711] — 手で編集しない
+//// GENERATED from src/service/article_create.gleam [sha256:43db2627c6d8] — 手で編集しない
 
 pub type Slug =
   String

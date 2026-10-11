@@ -1,7 +1,5 @@
-//// GENERATED from src/components/like_button.gleam [sha256:0ca7721b0f95] — 手で編集しない
+//// GENERATED from src/components/like_button.gleam [sha256:aaa44fe5356c] — 手で編集しない
 
-import yumemi/front/live
-import yumemi/spec
 import gen/out/article_publish
 import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
@@ -10,6 +8,8 @@ import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
 import lustre/effect.{type Effect}
+import yumemi/front/live
+import yumemi/spec
 
 pub type Args {
   Args(slug: String)

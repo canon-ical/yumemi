@@ -49,6 +49,7 @@ pub type FontWeight {
 
 pub type BorderEdge {
   AllEdges
+  TopEdge
   BottomEdge
 }
 
@@ -111,6 +112,43 @@ pub type Interaction {
   Disabled
   /// 今いる所(`aria-current` が `false` 以外)。ナビの選択中の項目に掛ける。
   Current
+  /// 祖先の interactive Component が送りを待っている(`:state(waiting)`)。`:state()` の
+  /// 無い browser では runtime が写す `[data-yumemi-state~="waiting"]` で効く。
+  Waiting
+  /// 祖先の interactive Component の最後の送りが成功した(`:state(ok)`)。
+  Succeeded
+  /// 祖先の interactive Component の最後の送りが失敗した(`:state(error)`)。
+  Failed
+  /// 地の画像のある頁(framework が body に立てる `data-yumemi-theme-image` の内側)。
+  ThemeImage
+}
+
+/// 色。字の素通しは無く、どの値も CSS の色の字を framework が組む。
+pub type Paint {
+  /// `#rrggbb` の literal(生成器が検査する、第 23 条)。形の合わない字は `unset`。
+  Hex(String)
+  /// `var(--<name>)`。名は `[a-z0-9-]+`(第 24 条)。合わない名は `unset`。
+  Token(String)
+  /// 頁の色(`--yumemi-theme-*`)。
+  Theme(ThemeSlot)
+  /// `color-mix(in oklab, a p%, b)`。`percent` は 0〜100(第 25 条、外れた値は端に寄せる)。
+  Mix(a: Paint, b: Paint, percent: Int)
+  Transparent
+  CurrentColor
+}
+
+/// 頁の色の 3 色(地・字・差し色)。
+pub type ThemeSlot {
+  ThemeBackground
+  ThemeText
+  ThemeAccent
+}
+
+/// 行の中の揃え(`text-align`)。
+pub type TextAlignment {
+  TextStart
+  TextCenter
+  TextEnd
 }
 
 pub type Breakpoint {
@@ -120,10 +158,10 @@ pub type Breakpoint {
 }
 
 pub type Style {
-  Color(value: String)
-  Background(value: String)
-  Border(edge: BorderEdge, width: Length, style: BorderStyle, color: String)
-  Outline(width: Length, offset: Length, color: String)
+  Color(value: Paint)
+  Background(value: Paint)
+  Border(edge: BorderEdge, width: Length, style: BorderStyle, color: Paint)
+  Outline(width: Length, offset: Length, color: Paint)
   Crop(fit: ObjectFit, ratio: Ratio)
   Sizing(box: BoxSizing)
   Marker(marker: ListMarker)
@@ -137,9 +175,9 @@ pub type Style {
     line_height: Length,
   )
   Flow(flow: Flow)
+  TextAlign(align: TextAlignment)
   State(state: Interaction, styles: List(Style))
   Responsive(at: Breakpoint, styles: List(Style))
-  Animation(animation: Animation)
 }
 
 pub type Flow {
@@ -178,12 +216,21 @@ pub type OverlayAlign {
   AlignEnd
 }
 
-pub type Animation {
-  Fade
-  SlideUp
-  Pulse
-}
-
 pub type Img(blob, media) {
   Img(blob: blob, media: media)
+}
+
+/// 要素に掛ける Style の束。`html.div(css.class(styles), ..)` のように要素の関数の第 1 引数で
+/// 渡す。class 名は描くときに framework が Style から作る(同じ Style なら同じ名)。
+pub opaque type Class {
+  Class(styles: List(Style))
+}
+
+pub fn class(styles: List(Style)) -> Class {
+  Class(styles)
+}
+
+@internal
+pub fn class_styles(class: Class) -> List(Style) {
+  class.styles
 }

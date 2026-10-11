@@ -7,7 +7,7 @@
 //// | 型 | 写し |
 //// |---|---|
 //// | 値型(`gen/types/*`) | `parse('<名>', v)`(整数の値型は `Number(v)`、文字列は `String(v)`) |
-//// | `PartyId` / `Blob` / `Secret` | `checked(party.parse(v))` / `checked(blob.parse(String(v)))` / `secret.hmac(String(v))` |
+//// | `PartyId` / `Blob` / `Color` / `Secret` | `checked(party.parse(v))` / `checked(blob.parse(String(v)))` / `checked(color.parse(String(v)))` / `secret.hmac(String(v))` |
 //// | `Datetime` / `Date` / `Time` | `cDatetime(v)` / `cDate(v)` / `cTime(v)` |
 //// | `Int` / `Float` / `Bool` / `String` | `Number(v)` / `Number(v)` / `Boolean(v)` / `String(v)` |
 //// | `Held(E)` / `Has(E)` / `Link(E)` | `er.held_from_row({key:r.<prop>_id})` / `er.from_row(..)` / `option(r.<prop>_id, v=>er.key(String(v)))` |
@@ -122,6 +122,9 @@ pub fn text(app: App, units: List(Unit), input: String) -> String {
   <> "import * as blob from '"
   <> framework
   <> "blob.mjs';\n"
+  <> "import * as color from '"
+  <> framework
+  <> "front/color.mjs';\n"
   <> "import * as er from '"
   <> framework
   <> "er.mjs';\n"
@@ -345,6 +348,8 @@ fn value_of(
       Ok(fn(v) { "checked(party.parse(" <> v <> "))" })
     Some("yumemi/blob"), "Blob" ->
       Ok(fn(v) { "checked(blob.parse(String(" <> v <> ")))" })
+    Some("yumemi/front/color"), "Color" ->
+      Ok(fn(v) { "checked(color.parse(String(" <> v <> ")))" })
     Some("yumemi/secret"), "Secret" ->
       Ok(fn(v) { "secret.hmac(String(" <> v <> "))" })
     Some("yumemi/time"), "Datetime" -> Ok(fn(v) { "cDatetime(" <> v <> ")" })

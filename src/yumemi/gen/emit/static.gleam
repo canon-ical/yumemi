@@ -59,12 +59,12 @@ pub fn api_v1_text(source: String, input_hash: String) -> String {
   "//// GENERATED from docs/api-v1.md [sha256:"
   <> input_hash
   <> "] — 手で編集しない\n\n"
+  <> "import yumemi/front/css\n"
   <> "import yumemi/front/el\n"
-  <> "import yumemi/front/sketch_css\n"
+  <> "import yumemi/front/html\n"
   <> list_import
-  <> "import sketch/lustre/element/html\n"
   <> "import style\n\n"
-  <> "pub fn nodes() -> List(el.Element(Nil)) {\n"
+  <> "pub fn nodes() -> List(el.Element) {\n"
   <> "  [\n"
   <> string.join(list.map(document.nodes, fn(node) { "    " <> node }), ",\n")
   <> "\n  ]\n}\n\n"

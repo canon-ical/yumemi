@@ -1,7 +1,5 @@
-//// GENERATED from src/components/pick_tag.gleam [sha256:cb6c05f590ba] — 手で編集しない
+//// GENERATED from src/components/pick_tag.gleam [sha256:11b9d4058a23] — 手で編集しない
 
-import yumemi/front/live
-import yumemi/spec
 import gen/out/article_create
 import gen/out/article_list
 import gleam/dynamic.{type Dynamic}
@@ -12,6 +10,8 @@ import gleam/option.{None, Some}
 import gleam/string
 import lustre/effect.{type Effect}
 import lustre/event
+import yumemi/front/live
+import yumemi/spec
 
 pub type Args {
   Args(

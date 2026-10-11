@@ -1,4 +1,4 @@
-//// GENERATED from public/src/pages/article/arg_slug/page.gleam [sha256:4ced8cac33da] — 手で編集しない
+//// GENERATED from public/src/pages/article/arg_slug/page.gleam [sha256:1ffbb352c48f] — 手で編集しない
 
 import blocks/article
 import blocks/feed
@@ -7,22 +7,18 @@ import blocks/row_article
 import blocks/row_summary
 import blocks/site_header
 import blocks/summary
-import yumemi/front/css
-import yumemi/front/el
-import yumemi/front/sketch_css
 import gen/load/layout
 import gen/out/article_read
 import gen/out/widget_list
 import gleam/list
 import gleam/option.{type Option, None, Some}
-import lustre/attribute
-import lustre/element/html as raw_html
-import sketch
-import sketch/css as raw_css
-import sketch/lustre as sketch_lustre
-import sketch/lustre/element
-import sketch/lustre/element/html
+import media
 import style
+import yumemi/blob.{type Blob}
+import yumemi/front/css
+import yumemi/front/el
+import yumemi/front/html
+import yumemi/front/theme
 
 pub type Vars {
   Vars(
@@ -42,7 +38,7 @@ pub type Data {
     vars: Vars,
     article_read: article_read.Out,
     widget_list: Option(widget_list.Out),
-    theme: Option(article_read.PageTheme),
+    theme: Option(theme.PageTheme),
   )
 }
 
@@ -50,7 +46,7 @@ pub fn load(
   vars: Vars,
   widget_list: Option(widget_list.Out),
   article_read: article_read.Out,
-  theme: Option(article_read.PageTheme),
+  theme: Option(theme.PageTheme),
 ) -> Data {
   Data(
     layout: layout.load(widget_list),
@@ -61,74 +57,59 @@ pub fn load(
   )
 }
 
-pub fn render(it: Data) -> element.Element(Nil) {
-  let assert Ok(stylesheet) =
-    sketch_lustre.construct(fn(stylesheet) {
-      sketch.global(stylesheet, theme_global(it.theme))
-    })
-  let output = render_view(stylesheet, fn() { view(it) })
-  let assert Ok(_) = sketch_lustre.teardown(stylesheet)
-  output
-}
-
-fn render_view(
-  stylesheet: sketch.StyleSheet,
-  body: fn() -> element.Element(Nil),
-) -> element.Element(Nil) {
-  let styled_body =
-    sketch_lustre.render(stylesheet, in: [sketch_lustre.node()], after: body)
-
-  raw_html.html([attribute.attribute("lang", "ja")], [
-    raw_html.head([], [
-      raw_html.meta([attribute.attribute("charset", "utf-8")]),
-      raw_html.meta([
-        attribute.attribute("name", "viewport"),
-        attribute.attribute(
+pub fn render(it: Data) -> el.Element {
+  let page_theme = it.theme
+  html.html([el.attribute("lang", "ja")], [
+    html.head([], [
+      html.meta([el.attribute("charset", "utf-8")]),
+      html.meta([
+        el.attribute("name", "viewport"),
+        el.attribute(
           "content",
           "width=device-width, initial-scale=1, viewport-fit=cover",
         ),
       ]),
-      raw_html.title([], "yumemi front fixture"),
+      html.title([], "yumemi front fixture"),
+      el.element(
+        "link",
+        [
+          el.attribute("rel", "stylesheet"),
+          el.attribute("href", "/fixture.css"),
+        ],
+        [],
+      ),
     ]),
-    raw_html.body([], [styled_body]),
+    html.body_([theme_image_attribute(page_theme)], [
+      el.styled(
+        fn() { view(it) },
+        theme.body_rule(page_theme, theme_defaults(), theme_image_url),
+      ),
+    ]),
   ])
 }
 
-fn theme_global(value: Option(article_read.PageTheme)) -> raw_css.Global {
-  let #(background, background_image, text, accent) = case value {
-    Some(article_read.PageTheme(background:, background_image:, text:, accent:)) -> #(
-      option_string(background, "#FAF7F0"),
-      option_background(background_image),
-      option_string(text, "#3D2419"),
-      option_string(accent, "#A93632"),
-    )
-    None -> #("#FAF7F0", "none", "#3D2419", "#A93632")
-  }
-
-  raw_css.global("body", [
-    raw_css.property("--bg", background),
-    raw_css.property("--bg-image", background_image),
-    raw_css.property("--text", text),
-    raw_css.property("--accent", accent),
-  ])
+fn theme_defaults() -> theme.Defaults {
+  theme.Defaults(
+    background: "#FAF7F0",
+    text: "#3D2419",
+    accent: "#A93632",
+    background_image: None,
+  )
 }
 
-fn option_string(value: Option(String), default: String) -> String {
-  case value {
-    Some(value) -> value
-    None -> default
+fn theme_image_attribute(value: Option(theme.PageTheme)) -> el.Attribute {
+  case theme.has_image(value, theme_defaults()) {
+    True -> el.attribute("data-yumemi-theme-image", "")
+    False -> el.no_attribute()
   }
 }
 
-fn option_background(value: Option(String)) -> String {
-  case value {
-    Some(value) -> value
-    None -> "none"
-  }
+fn theme_image_url(value: Blob) -> String {
+  media.url(value, media.W1600)
 }
 
-pub fn view(it: Data) -> element.Element(Nil) {
-  html.div_([attribute.attribute("data-yumemi-grid", "layout")], [
+pub fn view(it: Data) -> el.Element {
+  html.div_([el.attribute("data-yumemi-grid", "layout")], [
     styled_area("header", style.bar, layout_placement_0(it)),
     styled_area(
       "page",
@@ -139,15 +120,10 @@ pub fn view(it: Data) -> element.Element(Nil) {
   ])
 }
 
-fn page_children(it: Data) -> List(element.Element(Nil)) {
+fn page_children(it: Data) -> List(el.Element) {
   [
     html.div_(
-      [
-        attribute.attribute(
-          "data-yumemi-grid",
-          "page:pages/article/arg_slug/page",
-        ),
-      ],
+      [el.attribute("data-yumemi-grid", "page:pages/article/arg_slug/page")],
       list.flatten([
         [
           styled_area(
@@ -166,51 +142,48 @@ fn page_children(it: Data) -> List(element.Element(Nil)) {
 fn styled_area(
   name: String,
   styles: List(css.Style),
-  children: List(element.Element(Nil)),
-) -> element.Element(Nil) {
+  children: List(el.Element),
+) -> el.Element {
   html.div(
-    sketch_css.class(styles),
-    [attribute.attribute("data-yumemi-area", name)],
+    css.class(styles),
+    [el.attribute("data-yumemi-area", name)],
     children,
   )
 }
 
-fn plain_area(
-  name: String,
-  children: List(element.Element(Nil)),
-) -> element.Element(Nil) {
-  html.div_([attribute.attribute("data-yumemi-area", name)], children)
+fn plain_area(name: String, children: List(el.Element)) -> el.Element {
+  html.div_([el.attribute("data-yumemi-area", name)], children)
 }
 
 fn overlay_area(
   name: String,
   styles: List(css.Style),
-  children: List(element.Element(Nil)),
-) -> element.Element(Nil) {
+  children: List(el.Element),
+) -> el.Element {
   let attributes = [
-    attribute.attribute("id", el.overlay_id_prefix <> name),
-    attribute.attribute("popover", ""),
-    attribute.attribute("data-yumemi-area", name),
-    attribute.attribute("data-yumemi-overlay", ""),
+    el.attribute("id", el.overlay_id_prefix <> name),
+    el.attribute("popover", ""),
+    el.attribute("data-yumemi-area", name),
+    el.attribute("data-yumemi-overlay", ""),
   ]
   case styles {
     [] -> html.div_(attributes, children)
-    _ -> html.div(sketch_css.class(styles), attributes, children)
+    _ -> html.div(css.class(styles), attributes, children)
   }
 }
 
-fn layout_placement_0(_it: Data) -> List(element.Element(Nil)) {
+fn layout_placement_0(_it: Data) -> List(el.Element) {
   [site_header.view(Nil)]
 }
 
-fn layout_placement_1(it: Data) -> List(element.Element(Nil)) {
+fn layout_placement_1(it: Data) -> List(el.Element) {
   case it.layout.widget_list {
     Some(out) -> [feed.view(out)]
     None -> []
   }
 }
 
-fn page_placement_0(it: Data) -> List(element.Element(Nil)) {
+fn page_placement_0(it: Data) -> List(el.Element) {
   [
     article.view(
       it.article_read,
@@ -226,24 +199,22 @@ fn page_placement_0(it: Data) -> List(element.Element(Nil)) {
   ]
 }
 
-fn page_placement_1(it: Data) -> List(element.Element(Nil)) {
+fn page_placement_1(it: Data) -> List(el.Element) {
   [summary.view(it.article_read, summary.Arg(slug: it.vars.slug))]
 }
 
-fn page_placement_2(it: Data) -> List(element.Element(Nil)) {
+fn page_placement_2(it: Data) -> List(el.Element) {
   [notice.view(Nil, notice.Arg(slug: it.vars.slug))]
 }
 
-fn page_placement_3(it: Data) -> List(element.Element(Nil)) {
+fn page_placement_3(it: Data) -> List(el.Element) {
   case it.widget_list {
     Some(out) -> render_page_placement_3(out.rows)
     None -> []
   }
 }
 
-fn render_page_placement_3(
-  rows: List(widget_list.Row),
-) -> List(element.Element(Nil)) {
+fn render_page_placement_3(rows: List(widget_list.Row)) -> List(el.Element) {
   case rows {
     [] -> []
     [row, ..rest] ->

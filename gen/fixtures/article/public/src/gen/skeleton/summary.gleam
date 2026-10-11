@@ -1,14 +1,14 @@
-//// GENERATED from public/src/blocks/summary.gleam [sha256:77ed97afa9da] — 手で編集しない
+//// GENERATED from public/src/blocks/summary.gleam [sha256:9229583c192c] — 手で編集しない
 
-import yumemi/front/el
 import gen/out/article_read
 import gleam/string
-import sketch/lustre/element/html
+import yumemi/front/el
+import yumemi/front/html
 
 pub type In =
   article_read.Out
 
-pub fn view(it: In) -> el.Element(Nil) {
+pub fn view(it: In) -> el.Element {
   html.div_([], [
     el.text("article" <> ": " <> string.inspect(it.article)),
     el.text("category" <> ": " <> string.inspect(it.category)),

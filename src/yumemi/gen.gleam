@@ -156,6 +156,7 @@ fn generate_with_faces(
           front_emit.route_notes(app, package.name, model, hashes),
           front_emit.gate_notes(app, units, package, model),
           front_emit.client_notes(package, model),
+          front_emit.surface_notes(app, units, package, model),
         ])
       }),
     )

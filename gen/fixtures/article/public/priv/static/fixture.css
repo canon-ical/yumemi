@@ -1,0 +1,8 @@
+/* shell.stylesheets の fixture。fan-like の島のタグ名は名指してよい。 */
+like-button {
+  display: inline-block;
+}
+
+body {
+  background-image: var(--yumemi-theme-bg-image);
+}

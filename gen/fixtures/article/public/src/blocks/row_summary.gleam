@@ -1,9 +1,9 @@
 //// RowSummary Block ── widget_list の Summary 行だけを描く。
 
 import yumemi/front/el
-import yumemi/front/sketch_css
+import yumemi/front/css
 import gen/out/widget_list
-import sketch/lustre/element/html
+import yumemi/front/html
 import style
 
 pub type In =
@@ -22,11 +22,11 @@ pub const sample: In = widget_list.Summary(
   ),
 )
 
-pub fn view(it: In) -> el.Element(Nil) {
+pub fn view(it: In) -> el.Element {
   case it {
     widget_list.Summary(article: article, ..) ->
       html.div_([], [
-        html.p(sketch_css.class([style.body]), [], [el.text(article.title)]),
+        html.p(css.class([style.body]), [], [el.text(article.title)]),
         el.each_modal(
           "summary-row",
           article.slug,

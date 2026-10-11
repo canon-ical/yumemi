@@ -1,6 +1,7 @@
-//// GENERATED from src/service/article_read.gleam [sha256:1b23b9f30356] — 手で編集しない
+//// GENERATED from src/service/article_read.gleam [sha256:859f3f801967] — 手で編集しない
 
 import gleam/option.{type Option}
+import yumemi/front/theme.{type PageTheme}
 
 pub type Slug =
   String
@@ -43,15 +44,6 @@ pub type Category {
 
 pub type Tag {
   Tag(name: TagName)
-}
-
-pub type PageTheme {
-  PageTheme(
-    background: Option(String),
-    background_image: Option(String),
-    text: Option(String),
-    accent: Option(String),
-  )
 }
 
 pub type Out {

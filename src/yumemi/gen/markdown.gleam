@@ -27,48 +27,48 @@ pub fn helpers(document: Document) -> String {
     #("heading6", heading_helper(6)),
     #(
       "paragraph",
-      "fn paragraph(children: List(el.Element(Nil))) -> el.Element(Nil) {\n"
-        <> "  html.p(sketch_css.class([style.body, style.ink]), [], children)\n"
+      "fn paragraph(children: List(el.Element)) -> el.Element {\n"
+        <> "  html.p(css.class([style.body, style.ink]), [], children)\n"
         <> "}",
     ),
     #(
       "inline_code",
-      "fn inline_code(value: String) -> el.Element(Nil) {\n"
-        <> "  html.code(sketch_css.class([style.body, style.ink]), [], [el.text(value)])\n"
+      "fn inline_code(value: String) -> el.Element {\n"
+        <> "  html.code(css.class([style.body, style.ink]), [], [el.text(value)])\n"
         <> "}",
     ),
     #(
       "fenced_code",
-      "fn fenced_code(value: String) -> el.Element(Nil) {\n"
-        <> "  html.pre(sketch_css.class([style.body, style.ink]), [], [\n"
-        <> "    html.code(sketch_css.class([style.body, style.ink]), [], [el.text(value)]),\n"
+      "fn fenced_code(value: String) -> el.Element {\n"
+        <> "  html.pre(css.class([style.body, style.ink]), [], [\n"
+        <> "    html.code(css.class([style.body, style.ink]), [], [el.text(value)]),\n"
         <> "  ])\n"
         <> "}",
     ),
     #(
       "unordered_list",
-      "fn unordered_list(items: List(List(el.Element(Nil)))) -> el.Element(Nil) {\n"
-        <> "  html.ul(sketch_css.class([style.body, style.ink]), [], list.map(items, fn(children) {\n"
-        <> "    html.li(sketch_css.class([style.body, style.ink]), [], children)\n"
+      "fn unordered_list(items: List(List(el.Element))) -> el.Element {\n"
+        <> "  html.ul(css.class([style.body, style.ink]), [], list.map(items, fn(children) {\n"
+        <> "    html.li(css.class([style.body, style.ink]), [], children)\n"
         <> "  }))\n"
         <> "}",
     ),
     #(
       "table_row",
-      "fn table_row(cells: List(el.Element(Nil))) -> el.Element(Nil) {\n"
-        <> "  html.tr(sketch_css.class([style.body, style.ink]), [], cells)\n"
+      "fn table_row(cells: List(el.Element)) -> el.Element {\n"
+        <> "  html.tr(css.class([style.body, style.ink]), [], cells)\n"
         <> "}",
     ),
     #(
       "header_cell",
-      "fn header_cell(children: List(el.Element(Nil))) -> el.Element(Nil) {\n"
-        <> "  html.th(sketch_css.class([style.body, style.ink]), [], children)\n"
+      "fn header_cell(children: List(el.Element)) -> el.Element {\n"
+        <> "  html.th(css.class([style.body, style.ink]), [], children)\n"
         <> "}",
     ),
     #(
       "data_cell",
-      "fn data_cell(children: List(el.Element(Nil))) -> el.Element(Nil) {\n"
-        <> "  html.td(sketch_css.class([style.body, style.ink]), [], children)\n"
+      "fn data_cell(children: List(el.Element)) -> el.Element {\n"
+        <> "  html.td(css.class([style.body, style.ink]), [], children)\n"
         <> "}",
     ),
   ]
@@ -302,14 +302,14 @@ fn table_definition(
                   Ok(
                     "fn "
                     <> table_name
-                    <> "() -> el.Element(Nil) {\n"
-                    <> "  html.table(sketch_css.class([style.body, style.ink]), [], [\n"
-                    <> "    html.thead(sketch_css.class([style.body, style.ink]), [], [\n"
+                    <> "() -> el.Element {\n"
+                    <> "  html.table(css.class([style.body, style.ink]), [], [\n"
+                    <> "    html.thead(css.class([style.body, style.ink]), [], [\n"
                     <> "      table_row([\n"
                     <> indent_join(header_cells, "        ")
                     <> "\n      ]),\n"
                     <> "    ]),\n"
-                    <> "    html.tbody(sketch_css.class([style.body, style.ink]), [], [\n"
+                    <> "    html.tbody(css.class([style.body, style.ink]), [], [\n"
                     <> indent_join(body_rows, "      ")
                     <> "\n    ]),\n"
                     <> "  ])\n"
@@ -535,9 +535,9 @@ fn paired_marker(value: String, marker: String) -> Bool {
 fn heading_helper(level: Int) -> String {
   "fn heading"
   <> int.to_string(level)
-  <> "(value: String) -> el.Element(Nil) {\n"
+  <> "(value: String) -> el.Element {\n"
   <> "  html.h"
   <> int.to_string(level)
-  <> "(sketch_css.class([style.heading, style.ink]), [], [el.text(value)])\n"
+  <> "(css.class([style.heading, style.ink]), [], [el.text(value)])\n"
   <> "}"
 }

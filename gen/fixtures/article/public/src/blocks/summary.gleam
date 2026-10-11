@@ -2,11 +2,10 @@
 
 import yumemi/front/css
 import yumemi/front/el
-import yumemi/front/sketch_css
 import gen/out/article_read
 import gleam/option.{None}
-import lustre/attribute
-import sketch/lustre/element/html
+import yumemi/front/attr
+import yumemi/front/html
 
 pub type In =
   article_read.Out
@@ -31,13 +30,13 @@ pub const sample: In = article_read.Out(
 )
 
 const card: List(css.Style) = [
-  css.Color("#123524"),
+  css.Color(css.Hex("#123524")),
   css.Space(property: css.Padding, value: css.Px(24.0)),
   css.Space(property: css.Gap, value: css.Px(4.0)),
 ]
 
 const title: List(css.Style) = [
-  css.Color("#c8ffe0"),
+  css.Color(css.Hex("#c8ffe0")),
   css.Text(
     family: css.Serif,
     size: css.Rem(2.0),
@@ -46,14 +45,14 @@ const title: List(css.Style) = [
   ),
 ]
 
-pub fn view(it: In, arg: Arg) -> el.Element(Nil) {
+pub fn view(it: In, arg: Arg) -> el.Element {
   html.section(
-    sketch_css.class(card),
-    [attribute.attribute("data-slug", arg.slug)],
+    css.class(card),
+    [attr.data("slug", arg.slug)],
     [
-      html.h1(sketch_css.class(title), [], [el.text(it.category.name)]),
+      html.h1(css.class(title), [], [el.text(it.category.name)]),
       el.closer("article-dialog", [el.text("Close article options")]),
-      el.island("like-button", [attribute.attribute("slug", it.article.slug)]),
+      el.legacy_island("like-button", [#("slug", it.article.slug)]),
     ],
   )
 }
