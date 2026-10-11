@@ -5853,7 +5853,7 @@ function styled(app5) {
 // public/build/dev/javascript/yumemi/yumemi/front/navigate.mjs
 var clientSrc = "/_yumemi/client.mjs";
 var navigateHeader = "x-yumemi-navigate";
-var pageviewMark = 'meta[name="yumemi-pageview"]';
+var pageviewName = "yumemi-pageview";
 function matches2(route, pathname) {
   const expected = route.split("/");
   const actual = pathname.split("/");
@@ -5879,26 +5879,26 @@ function routed(routes, pathname) {
 function samePolicy(headers, csp) {
   return (headers.get("content-security-policy") ?? null) === csp;
 }
-function intercept(event4, routes, location, loaded = policy(routes, location.pathname)) {
-  if (event4.defaultPrevented || event4.button !== 0) return null;
-  if (event4.metaKey || event4.ctrlKey || event4.shiftKey || event4.altKey) return null;
-  const path = typeof event4.composedPath === "function" ? event4.composedPath() : [event4.target];
-  const anchor = path.find((node) => node?.tagName === "A" && typeof node.getAttribute === "function" && node.hasAttribute("href"));
-  if (!anchor) return null;
-  const target = anchor.getAttribute("target");
-  if (target !== null && target !== "" && target !== "_self" || anchor.hasAttribute("download")) return null;
+var refreshInfo = { yumemi: "reload" };
+function accept(event4, routes, location, loaded = policy(routes, location.pathname)) {
+  if (!event4.canIntercept || event4.defaultPrevented || event4.hashChange) return null;
+  if (event4.downloadRequest != null || event4.formData != null) return null;
+  const type = event4.navigationType;
+  if (type === "reload" ? event4.info?.yumemi !== refreshInfo.yumemi : type !== "traverse" && !event4.userInitiated) return null;
   let url;
   try {
-    url = new URL(anchor.getAttribute("href"), location.href);
+    url = new URL(event4.destination.url);
   } catch (_error) {
     return null;
   }
   if (url.origin !== location.origin) return null;
-  if (url.pathname === location.pathname && url.search === location.search && url.hash !== "") return null;
   const here = policy(routes, location.pathname);
   const there = policy(routes, url.pathname);
   if (here === void 0 || there === void 0 || here !== loaded || there !== loaded) return null;
   return url;
+}
+function stale(event4) {
+  return event4.canIntercept && event4.navigationType === "traverse" && event4.destination?.sameDocument === true && !event4.hashChange;
 }
 function swappable(doc, defined2) {
   const scripts = [...doc.querySelectorAll("script")];
@@ -5932,7 +5932,9 @@ function common(current2, incoming) {
 var holdMark = "data-yumemi-hold";
 var holdLimit = 3e3;
 var quietMedia = "not all";
+var marks = 0;
 function nodeKey(node) {
+  if (node.nodeType === 1 && node.localName === "meta" && node.getAttribute("name") === pageviewName) return `#mark:${marks += 1}`;
   return node.nodeType === 1 ? node.outerHTML : `#${node.nodeType}:${node.nodeValue}`;
 }
 function isStylesheet(node) {
@@ -6025,44 +6027,6 @@ function stage(target, doc, keep, limit = holdLimit) {
   };
   return { ready, commit, cancel };
 }
-function hashTarget(url, byId) {
-  if (!url.hash) return null;
-  try {
-    return byId(decodeURIComponent(url.hash.slice(1)));
-  } catch (_error) {
-    return null;
-  }
-}
-function counted(doc) {
-  return doc.head?.querySelector(pageviewMark) != null;
-}
-function pageviewPayload({ url, kind, from: from3, previous, sourceParam, id: id2, at: at2 }) {
-  const payload = { id: id2, client_at: at2, kind, path: url.pathname };
-  if (previous) payload.prev = previous;
-  else if (from3) payload.referrer_path = from3;
-  const sourceKey = sourceParam ? url.searchParams.get(sourceParam) : null;
-  if (sourceKey && /^[a-z0-9_]{1,16}$/.test(sourceKey)) payload.source_key = sourceKey;
-  return payload;
-}
-function sendPageview(config, url, kind, from3) {
-  let previous = null;
-  try {
-    const value2 = sessionStorage.getItem(config.key);
-    previous = value2 && /^[0-9a-f-]{36}$/.test(value2) ? value2 : null;
-  } catch (_) {
-  }
-  const id2 = crypto.randomUUID();
-  const body = JSON.stringify(pageviewPayload({ url, kind, from: from3, previous, sourceParam: config.source, id: id2, at: (/* @__PURE__ */ new Date()).toISOString() }));
-  try {
-    sessionStorage.setItem(config.key, id2);
-  } catch (_) {
-  }
-  const post = () => fetch(config.endpoint, { method: "POST", headers: { "content-type": "application/json" }, body, keepalive: true });
-  const send7 = () => void post().catch(() => post().catch(() => {
-  }));
-  if ("requestIdleCallback" in window) window.requestIdleCallback(send7, { timeout: 1e3 });
-  else requestAnimationFrame(send7);
-}
 var refresh = null;
 function reload() {
   if (refresh !== null) return refresh();
@@ -6071,25 +6035,18 @@ function reload() {
 function table(routes, csp = {}) {
   return routes.map((route) => ({ route, csp: Object.hasOwn(csp, route) ? csp[route] : null }));
 }
-function start4({ routes: paths, csp = {}, boot: boot2, pageview = null }) {
-  if (typeof window === "undefined" || typeof history?.pushState !== "function") return;
+function supported(scope = globalThis) {
+  return typeof scope.navigation?.addEventListener === "function" && typeof scope.NavigateEvent?.prototype?.intercept === "function";
+}
+function start4({ routes: paths, csp = {}, boot: boot2 }) {
+  if (typeof window === "undefined" || !supported()) return;
+  const navigation = globalThis.navigation;
   const routes = table(paths, csp);
-  let pending = null;
-  const page = (location) => location.pathname + location.search;
-  let shown = page(globalThis.location);
-  const load = (url, replace3) => {
-    if (replace3) globalThis.location.replace(url.href);
-    else globalThis.location.assign(url.href);
-  };
   const keep = (node) => node.nodeName === "SCRIPT" && node.getAttribute("src") === clientSrc;
   const loaded = policy(routes, globalThis.location.pathname);
-  const go = async (url, mode) => {
-    const push = mode === "push";
-    pending?.abort();
-    const controller = new AbortController();
-    pending = controller;
+  const load = (url) => globalThis.location.replace(url.href);
+  const swap = async (url, signal) => {
     const csp2 = policy(routes, url.pathname);
-    if (csp2 === void 0 || csp2 !== loaded) return load(url, !push);
     let response;
     try {
       response = await fetch(url.href, {
@@ -6097,70 +6054,40 @@ function start4({ routes: paths, csp = {}, boot: boot2, pageview = null }) {
         redirect: "manual",
         cache: "no-store",
         headers: { accept: "text/html", [navigateHeader]: "1" },
-        signal: controller.signal
+        signal
       });
-    } catch (error) {
-      if (controller.signal.aborted) return;
-      return load(url, !push);
+    } catch (_error) {
+      if (signal.aborted) return;
+      return load(url);
     }
     const type = response.headers.get("content-type") ?? "";
     if (response.type === "opaqueredirect" || response.status !== 200 || !type.startsWith("text/html") || !samePolicy(response.headers, csp2)) {
-      return load(url, !push);
+      return load(url);
     }
     let html;
     try {
       html = await response.text();
     } catch (_error) {
-      if (controller.signal.aborted) return;
-      return load(url, !push);
+      if (signal.aborted) return;
+      return load(url);
     }
-    if (controller.signal.aborted) return;
+    if (signal.aborted) return;
     const doc = new DOMParser().parseFromString(html, "text/html");
-    if (!swappable(doc, (tag) => globalThis.customElements.get(tag) !== void 0)) return load(url, !push);
-    const count = pageview !== null && counted(doc);
+    if (!swappable(doc, (tag) => globalThis.customElements.get(tag) !== void 0)) return load(url);
     const staged = stage(document, doc, keep);
     await staged.ready;
-    if (controller.signal.aborted) return staged.cancel();
-    pending = null;
-    const from3 = globalThis.location.pathname;
-    const scroll = [window.scrollX, window.scrollY];
+    if (signal.aborted) return staged.cancel();
     void staged.commit();
-    if (push) history.pushState({ yumemi: "navigate" }, "", url.href);
-    shown = page(url);
-    if (mode !== "refresh") {
-      const anchor = hashTarget(url, (id2) => document.getElementById(id2));
-      if (anchor) anchor.scrollIntoView();
-      else if (push) window.scrollTo(0, 0);
-    }
     boot2();
-    if (mode === "refresh") {
-      const stay = () => window.scrollTo(scroll[0], scroll[1]);
-      stay();
-      requestAnimationFrame(() => {
-        stay();
-        requestAnimationFrame(stay);
-      });
-    }
-    if (count) sendPageview(pageview, url, mode === "refresh" ? "reload" : "spa", from3);
-    document.dispatchEvent(new CustomEvent("yumemi-navigated", { detail: { url: url.href, mode } }));
   };
   refresh = () => {
-    const url = new URL(globalThis.location.href);
-    if (!routed(routes, url.pathname)) return globalThis.location.assign(url.href);
-    void go(url, "refresh");
+    if (!routed(routes, globalThis.location.pathname)) return globalThis.location.assign(globalThis.location.href);
+    navigation.reload({ info: refreshInfo });
   };
-  if (history.state === null) history.replaceState({ yumemi: "navigate" }, "", globalThis.location.href);
-  document.addEventListener("click", (event4) => {
-    const url = intercept(event4, routes, globalThis.location, loaded);
-    if (url === null) return;
-    event4.preventDefault();
-    void go(url, "push");
-  });
-  window.addEventListener("popstate", (event4) => {
-    const url = new URL(globalThis.location.href);
-    if (page(url) === shown) return;
-    if (event4.state?.yumemi !== "navigate" || !routed(routes, url.pathname)) return load(url, true);
-    void go(url, "pop");
+  navigation.addEventListener("navigate", (event4) => {
+    const url = accept(event4, routes, globalThis.location, loaded);
+    if (url !== null) event4.intercept({ handler: () => swap(url, event4.signal), scroll: event4.navigationType === "reload" ? "manual" : "after-transition" });
+    else if (stale(event4)) event4.intercept({ handler: () => load(new URL(event4.destination.url)) });
   });
 }
 
