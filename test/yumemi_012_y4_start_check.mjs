@@ -12,6 +12,7 @@ const at = (href) => {
     href: url.href, pathname: url.pathname, origin: url.origin,
     assign: (to) => loads.push(["assign", to]),
     replace: (to) => loads.push(["replace", to]),
+    reload: () => loads.push(["reload", url.href]),
   };
 };
 at("/a");
@@ -19,7 +20,7 @@ globalThis.window = globalThis;
 
 // Navigation API の無い browser:何も取らず、取り直しは頁の読み込み
 check("unsupported", !supported());
-start({ routes: ["/a", "/b"], boot: () => {} });
+start({ routes: ["/a", "/b"] });
 reload();
 check("unsupported reload loads page", loads.length === 1 && loads[0][0] === "assign" && loads[0][1] === "https://www.example/a");
 loads.length = 0;
@@ -30,11 +31,11 @@ const reloads = [];
 globalThis.NavigateEvent = class { intercept() {} };
 globalThis.navigation = {
   addEventListener: (type, listener) => { if (type === "navigate") listeners.push(listener); },
+  currentEntry: { key: "k0" },
   reload: (options) => reloads.push(options),
 };
 check("supported", supported());
-let boots = 0;
-start({ routes: ["/a", "/b"], boot: () => { boots += 1; } });
+start({ routes: ["/a", "/b"] });
 check("listens navigate", listeners.length === 1);
 const fire = (href, extra = {}) => {
   const controller = new AbortController();
@@ -83,7 +84,15 @@ loads.length = 0;
 const aborted = fire("/b");
 globalThis.fetch = async () => { aborted.abort(); throw new DOMException("aborted", "AbortError"); };
 await aborted.handlers[0]();
-check("aborted does nothing", loads.length === 0 && boots === 0);
+await tick();
+// 0.12 段 C(Y4 柏木 P1):止まった後に新しく取った遷移が無ければ、URL と中身を揃えるため今の URL を読み込み直す
+check("aborted without a newer navigation reloads", loads.length === 1 && loads[0][0] === "reload");
+loads.length = 0;
+const first = fire("/b");
+globalThis.fetch = async () => { first.abort(); fire("/a"); throw new DOMException("aborted", "AbortError"); };
+await first.handlers[0]();
+await tick();
+check("aborted by a newer taken navigation does nothing", loads.length === 0);
 // 表に当たらない頁での取り直しは頁の読み込み
 at("/c");
 reload();

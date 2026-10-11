@@ -45,8 +45,14 @@ fn named(prefix: String, name: String, value: String) -> Attribute {
 }
 
 /// `data-<name>`。名が `[a-z][a-z0-9-]*` でなければ出さない(頁を落とさない)。
+///
+/// `yumemi` で始まる名は出さない(0.12 段 C)── `data-yumemi-*` は framework と runtime の印で、★ が
+/// 書けると送り先・状態・逃げ道の印を偽れる。生成器も第 7 条で止める。
 pub fn data(name: String, value: String) -> Attribute {
-  named("data-", name, value)
+  case string.starts_with(name, "yumemi") {
+    True -> el.no_attribute()
+    False -> named("data-", name, value)
+  }
 }
 
 /// `aria-<name>`。名の扱いは `data` と同じ。

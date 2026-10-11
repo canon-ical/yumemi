@@ -1,4 +1,4 @@
-//// GENERATED from service Logic / verb / reads / outbox contracts [sha256:5a7812900d2a] — 手で編集しない
+//// GENERATED from service Logic / verb / reads / outbox contracts [sha256:73a68a69ea55] — 手で編集しない
 import { SQL } from './sql.mjs';
 import * as c from './codec.mjs';
 import * as subject from './subject.mjs';
@@ -13,6 +13,7 @@ const roots={
  article_publish:{sql:'article_publish/root',params:['arg:slug','clauses'],values:['entity:article','phase:article']},
  article_read:{sql:'article_read/root',params:['arg:slug','clauses'],values:['entity:article','phase:article']},
  article_retract:{sql:'article_retract/root',params:['arg:slug','clauses'],values:['entity:article','phase:article']},
+ article_title:{sql:'article_title/root',params:['arg:slug','clauses'],values:['entity:article','phase:article']},
 };
 const actors={
  article_blob_save:{kind:'sum',module:allow_article,variants:[['staff','StaffActor']],party:false,any:true},
@@ -21,6 +22,7 @@ const actors={
  article_publish:{kind:'direct',subject:'staff'},
  article_read:{kind:'sum',module:allow_article,variants:[['staff','StaffActor']],party:false,any:true},
  article_retract:{kind:'direct',subject:'staff'},
+ article_title:{kind:'sum',module:allow_article,variants:[['staff','StaffActor']],party:false,any:true},
  widget_list:{kind:'sum',module:allow_article,variants:[['staff','StaffActor']],party:false,any:true},
 };
 const verbs={

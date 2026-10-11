@@ -1,4 +1,4 @@
-//// GENERATED from entity / types declarations [sha256:5a7812900d2a] — 手で編集しない
+//// GENERATED from entity / types declarations [sha256:73a68a69ea55] — 手で編集しない
 // 宣言から導けない decoder(hook も無い): article(tags が Multi), staff(yumemi/idp.Name の module が読めない)
 import { Some, None } from '../../gleam_stdlib/gleam/option.mjs';
 import { toList, List } from '../gleam.mjs';

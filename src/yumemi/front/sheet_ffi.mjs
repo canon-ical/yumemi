@@ -1,13 +1,19 @@
-// yumemi yumemi/front ── いま class を集めている sketch の stylesheet を 1 つ持つ(sketch_lustre の
-// global の代わり)。`sketch_css.collect` が頁を描く間だけ差し替える。値は Gleam の Result のまま持つ。
-import { Result$Error } from "../../gleam.mjs";
+// yumemi yumemi/front ── いま class を集めている所の規則(class 名 → CSS の字、足した順)を 1 つ持つ
+// (0.12 段 C、sketch の stylesheet の代わり)。`sketch_css.collect` が頁を描く間だけ差し替える。
+let rules = null;
 
-let sheet = Result$Error(undefined);
-
-export function current() {
-  return sheet;
+export function add(name, css) {
+  if (rules !== null && !rules.has(name)) rules.set(name, css);
 }
 
-export function set_current(value) {
-  sheet = value;
+export function start() {
+  const previous = rules;
+  rules = new Map();
+  return previous;
+}
+
+export function finish(previous) {
+  const css = rules === null ? "" : [...rules.values()].join("\n\n");
+  rules = previous;
+  return css;
 }

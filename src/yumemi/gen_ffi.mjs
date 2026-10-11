@@ -452,3 +452,27 @@ export function holds_dir(outer, inner) {
 export function relative_dir(from, to) {
   return path.relative(fs.realpathSync(from), fs.realpathSync(to)).split(path.sep).join("/");
 }
+
+// ── 版の照合(0.12 段 C、51 v6 第 41 条)──────────────────────────────────────────
+
+/** manifest.toml の yumemi の行の版。lock が無い・yumemi の行が無いなら ""。 */
+export function locked_yumemi(dir) {
+  let text;
+  try { text = fs.readFileSync(path.join(dir, "manifest.toml"), "utf8"); } catch (_error) { return ""; }
+  const match = text.match(/\{ name = "yumemi", version = "([^"]+)"/);
+  return match ? match[1] : "";
+}
+
+/**
+ * 走っている生成器の版。自分の package(yumemi の root で `gleam run`)なら gleam.toml の版、app から依存として
+ * 走るなら起こした package の manifest.toml が lock した版(その lock の yumemi を gleam が組んで走らせている)。
+ */
+export function running_yumemi() {
+  const here = path.dirname(new URL(import.meta.url).pathname);
+  const root = path.resolve(here, "../../../../..");
+  let toml = "";
+  try { toml = fs.readFileSync(path.join(root, "gleam.toml"), "utf8"); } catch (_error) { return ""; }
+  const name = toml.match(/^name\s*=\s*"([^"]+)"/m)?.[1];
+  if (name === "yumemi") return toml.match(/^version\s*=\s*"([^"]+)"/m)?.[1] ?? "";
+  return locked_yumemi(root);
+}

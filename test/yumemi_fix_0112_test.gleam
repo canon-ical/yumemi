@@ -5,6 +5,7 @@ import glance
 import gleam/list
 import gleam/string
 import gleeunit/should
+import simplifile
 import yumemi/gen/emit/back
 import yumemi/gen/emit/front as front_emit
 import yumemi/gen/emit/hash
@@ -156,39 +157,42 @@ pub fn logic(_by: Actor, it: Root, _args: Args) -> Step(Out, Error, Start) {
 }
 "
 
+// 0.12 段 C:interactive Component は view と宣言だけ(lustre の app は無い)。読みは reloads で呼ぶ。
 const read_component = "
-import yumemi/front
-import yumemi/front/live as front_live
-import gen/live/article_read
+import gen/live/article_read as read
+import gen/route
 import gen/service
-import lustre
+import yumemi/front/el
+import yumemi/front/html
+import yumemi/front/live
 
-pub const calls: List(front.Target(service.Service, Nil)) = [
-  front.Of(service.ArticleRead),
-]
+pub const calls: List(service.Service) = [service.ArticleRead]
 
-pub const after_send: front_live.After = front_live.Stay
+pub const after_send: List(#(service.Service, live.After(route.Route))) = []
 
-pub fn app() -> lustre.App(Nil, article_read.State, article_read.Event) {
-  todo
+pub const reloads: live.Reloads(service.Service, read.Field) = live.Reloads(read: service.ArticleRead, on: [read.Q])
+
+pub fn view(it: read.Args) -> el.Element {
+  html.input_([read.bind(read.Q, it.q)])
 }
 "
 
 const list_component = "
-import yumemi/front
-import yumemi/front/live as front_live
-import gen/live/article_list
+import gen/live/article_list as listing
+import gen/route
 import gen/service
-import lustre
+import yumemi/front/el
+import yumemi/front/html
+import yumemi/front/live
 
-pub const calls: List(front.Target(service.Service, Nil)) = [
-  front.Of(service.ArticleList),
-]
+pub const calls: List(service.Service) = [service.ArticleList]
 
-pub const after_send: front_live.After = front_live.Stay
+pub const after_send: List(#(service.Service, live.After(route.Route))) = []
 
-pub fn app() -> lustre.App(Nil, article_list.State, article_list.Event) {
-  todo
+pub const reloads: live.Reloads(service.Service, listing.Field) = live.Reloads(read: service.ArticleList, on: [listing.Limit])
+
+pub fn view(it: listing.Args) -> el.Element {
+  html.input_([listing.bind(listing.Limit, it.limit)])
 }
 "
 
@@ -219,6 +223,16 @@ fn live_files() -> List(#(String, String)) {
   |> list.map(fn(file) { #(file.path, file.text) })
 }
 
+/// 生成の client.mjs(束ねる前)の字。0.12 段 C で Args の送り方は runtime の表(Service ごとの method・
+/// path・Args の欄の型)に移った。
+fn client(files: List(#(String, String))) -> String {
+  let assert Ok(#(_, text)) =
+    list.find(files, fn(file) {
+      file.0 == "public/priv/static/_yumemi/client.mjs"
+    })
+  text
+}
+
 fn live(files: List(#(String, String)), name: String) -> String {
   let assert Ok(#(_, text)) =
     list.find(files, fn(file) {
@@ -230,78 +244,75 @@ fn live(files: List(#(String, String)), name: String) -> String {
 }
 
 /// H1:POST の body は Args の型で encode する ── Bool は真偽、Int / Float は数、Option の中身も同じ。
+/// 0.12 段 C:encode は runtime(`interactive.mjs` の wireValue)が表の型で行う。期待を live の Gleam の字から
+/// 表の行に替えた(runtime の振る舞いは yumemi_012_y3_test の runtime_wire_* で見る)。
 pub fn live_body_encodes_args_by_type_test() {
-  let text = live(live_files(), "article_publish")
-  string.contains(text, "#(\"pinned\", case args.pinned {\n") |> should.be_true
-  string.contains(text, "\"true\" | \"True\" | \"on\" -> json.bool(True)")
-  |> should.be_true
-  string.contains(text, "\"false\" | \"False\" | \"\" -> json.bool(False)")
-  |> should.be_true
-  string.contains(text, "#(\"rank\", case int.parse(args.rank) {\n")
-  |> should.be_true
-  string.contains(text, "Ok(number) -> json.int(number)") |> should.be_true
+  let files = live_files()
+  let text = client(files)
   string.contains(
     text,
-    "case float.parse(args.weight), int.parse(args.weight) {",
+    "\"article_publish\": { \"method\": \"POST\", \"path\": \"/api/articles/:slug/publish\", \"read\": false, \"upload\": false, \"accepted\": false, \"entry\": false, \"args\": [{ \"name\": \"slug\", \"wire\": \"text\", \"blob\": false }, { \"name\": \"pinned\", \"wire\": \"bool\", \"blob\": false }, { \"name\": \"rank\", \"wire\": \"int\", \"blob\": false }, { \"name\": \"weight\", \"wire\": \"float\", \"blob\": false }, { \"name\": \"note\", \"wire\": { \"option\": \"int\" }, \"blob\": false }]",
   )
   |> should.be_true
-  string.contains(text, "  value -> case int.parse(value) {") |> should.be_true
-  string.contains(text, "#(\"slug\", json.string(args.slug))") |> should.be_true
-  string.contains(text, "json.string(args.pinned)") |> should.be_false
-  string.contains(text, "import gleam/int") |> should.be_true
-  string.contains(text, "import gleam/float") |> should.be_true
-  // POST は query を付けない
-  string.contains(text, "with_query") |> should.be_false
-  string.contains(text, "import gleam/uri") |> should.be_false
+  // live module は Args を文字列の欄で持ち、送り方を持たない
+  let module = live(files, "article_publish")
+  string.contains(
+    module,
+    "Args(slug: String, pinned: String, rank: String, weight: String, note: String)",
+  )
+  |> should.be_true
+  string.contains(module, "json.") |> should.be_false
 }
 
 /// H2:GET は path の穴に入らない Args を query に載せ、body は空。Option の空は載せない。
+/// 0.12 段 C:query は runtime が組む。表に GET と穴のある path と欄の型が載る(期待を Gleam の字から替えた)。
 pub fn live_get_puts_args_in_query_test() {
   let files = live_files()
-  let text = live(files, "article_read")
-  string.contains(text, "\"GET\",\n") |> should.be_true
+  let text = client(files)
   string.contains(
     text,
-    "with_query(\n        \"/api/articles/\" <> args.slug <> \"\",\n",
-  )
-  |> should.be_true
-  string.contains(text, "[#(\"q\", args.q)],") |> should.be_true
-  string.contains(
-    text,
-    "[#(\"pinned\", case args.pinned { \"true\" | \"True\" | \"on\" -> \"true\" \"false\" | \"False\" | \"\" -> \"false\" other -> other })],",
+    "\"article_read\": { \"method\": \"GET\", \"path\": \"/api/articles/:slug\", \"read\": true",
   )
   |> should.be_true
   string.contains(
     text,
-    "case args.since { \"\" -> [] value -> [#(\"since\", value)] },",
+    "{ \"name\": \"q\", \"wire\": \"text\", \"blob\": false }",
   )
   |> should.be_true
-  // path の穴は query に載せない
-  string.contains(text, "#(\"slug\"") |> should.be_false
-  string.contains(text, "json.object([])") |> should.be_true
-  string.contains(text, "uri.query_to_string(pairs)") |> should.be_true
-  string.contains(text, "import gleam/uri") |> should.be_true
-
-  let listing = live(files, "article_list")
-  string.contains(listing, "with_query(\n        \"/api/articles\",\n")
-  |> should.be_true
-  string.contains(listing, "[#(\"limit\", args.limit)],") |> should.be_true
   string.contains(
-    listing,
-    "case args.cursor { \"\" -> [] value -> [#(\"cursor\", value)] },",
+    text,
+    "{ \"name\": \"pinned\", \"wire\": \"bool\", \"blob\": false }",
+  )
+  |> should.be_true
+  string.contains(
+    text,
+    "{ \"name\": \"since\", \"wire\": { \"option\": \"text\" }, \"blob\": false }",
+  )
+  |> should.be_true
+  string.contains(
+    text,
+    "\"article_list\": { \"method\": \"GET\", \"path\": \"/api/articles\"",
+  )
+  |> should.be_true
+  // 読みは reloads で呼び直す(Out に List がある article_list は一覧、article_read も tags の List で一覧)
+  string.contains(
+    text,
+    "\"reloads\": { \"read\": \"article_list\", \"on\": [\"limit\"], \"list\": true }",
   )
   |> should.be_true
 }
 
-/// transport の JS は変えない(GET は body を送らない)。
+/// transport の JS は変えない(GET は body を送らない)。0.12 段 C:transport_ffi.mjs は無くなり、runtime の
+/// `call` が GET で body を送らない(期待を transport_ffi の字から runtime の字に替えた)。
 pub fn transport_keeps_get_without_body_test() {
-  let assert Ok(#(_, ffi)) =
-    list.find(live_files(), fn(file) {
-      file.0 == "public/src/gen/live/transport_ffi.mjs"
-    })
+  list.any(live_files(), fn(file) {
+    string.ends_with(file.0, "transport_ffi.mjs")
+  })
+  |> should.be_false
+  let assert Ok(runtime) = simplifile.read("src/yumemi/front/interactive.mjs")
   string.contains(
-    ffi,
-    "body: method === \"GET\" ? undefined : JSON.stringify(nextBody),",
+    runtime,
+    "body: spec.method === \"GET\" ? undefined : spec.entry && spec.args.length === 0 ? \"null\" : JSON.stringify(args),",
   )
   |> should.be_true
 }
@@ -407,53 +418,20 @@ pub opaque type Token {
 
 /// r2:`List(X)`(X がスカラ)は欄の JSON の文字列の配列を読み、要素を X の規則で JSON の配列に。
 /// record・組・Dict は欄の文字列を JSON の本文として送る。構成子が複数の sum は文字列のまま。
+/// 0.12 段 C:同じ規則を runtime の表の型(`list`・`json`・`text`)で持つ(期待を Gleam の字から替えた)。
 pub fn live_body_encodes_list_and_record_args_test() {
-  let text = live(wire_files(), "article_publish")
-  // List(Slug)── 要素は文字列
-  string.contains(text, "#(\"ids\", case list_items(args.ids) {\n")
-  |> should.be_true
-  string.contains(
-    text,
-    "  Ok(items) -> json.array(items, fn(value) { json.string(value) })",
-  )
-  |> should.be_true
-  string.contains(text, "  Error(_) -> json.string(args.ids)") |> should.be_true
-  // List(Int)── 要素は数
-  string.contains(
-    text,
-    "  Ok(items) -> json.array(items, fn(value) { case int.parse(value) {",
-  )
-  |> should.be_true
-  // Option(List(Bool))── 空なら null、それ以外は真偽の配列
-  string.contains(
-    text,
-    "#(\"flags\", case args.flags {\n  \"\" -> json.null()\n",
-  )
-  |> should.be_true
-  string.contains(text, "  value -> case list_items(value) {") |> should.be_true
-  // record・組の List・Dict は JSON の本文
-  string.contains(text, "#(\"theme\", json_text(args.theme))") |> should.be_true
-  string.contains(text, "#(\"pairs\", json_text(args.pairs))") |> should.be_true
-  string.contains(text, "#(\"meta\", json_text(args.meta))") |> should.be_true
-  // 構成子が複数の sum は文字列(back の decoder が綴りで読む)
-  string.contains(text, "#(\"place\", json.string(args.place))")
-  |> should.be_true
-  // opaque な 1 欄の型(値型の形)は文字列
-  string.contains(text, "#(\"token\", json.string(args.token))")
-  |> should.be_true
-  // 助け手と import
-  string.contains(
-    text,
-    "fn list_items(text: String) -> Result(List(String), Nil)",
-  )
-  |> should.be_true
-  string.contains(text, "json.parse(text, decode.list(decode.string))")
-  |> should.be_true
-  string.contains(text, "fn json_text(text: String) -> json.Json")
-  |> should.be_true
-  string.contains(text, "use <- decode.recursive") |> should.be_true
-  string.contains(text, "import gleam/dict") |> should.be_true
-  string.contains(text, "import gleam/int") |> should.be_true
+  let text = client(wire_files())
+  [
+    "{ \"name\": \"ids\", \"wire\": { \"list\": \"text\" }, \"blob\": false }",
+    "{ \"name\": \"ranks\", \"wire\": { \"list\": \"int\" }, \"blob\": false }",
+    "{ \"name\": \"flags\", \"wire\": { \"option\": { \"list\": \"bool\" } }, \"blob\": false }",
+    "{ \"name\": \"theme\", \"wire\": \"json\", \"blob\": false }",
+    "{ \"name\": \"pairs\", \"wire\": \"json\", \"blob\": false }",
+    "{ \"name\": \"place\", \"wire\": \"text\", \"blob\": false }",
+    "{ \"name\": \"meta\", \"wire\": \"json\", \"blob\": false }",
+    "{ \"name\": \"token\", \"wire\": \"text\", \"blob\": false }",
+  ]
+  |> list.each(fn(row) { string.contains(text, row) |> should.be_true })
 }
 
 /// r2:List も record も無い live には助け手を出さない。

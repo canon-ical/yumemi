@@ -1,3 +1,2 @@
-[exit 0 警告] public: 第 1・2 条の例外(0.11 の lustre の interactive Component、段 C の Y3 で消す): 4 module (components/article_blob_copy, components/blob_save, components/like_button, components/pick_tag)
-[exit 0 警告] public: 生の CSS の逃げ道 2 file(shell.stylesheets 1・el.static_sheet 1)、規則 4
+[exit 0 警告] public: 逃げ道 ── escape 1 種 2 か所(うち interactive Component の中 1)、生の CSS 2 file 4 規則、数える口の送り先 ToService 0
 停止コード: 0

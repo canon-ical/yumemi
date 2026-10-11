@@ -42,7 +42,8 @@ fn text(media: model.Media, hashes: hash.Hashes) -> String {
   <> "import gleam/list\n"
   <> "import gleam/string\n"
   <> "import gleam/uri\n"
-  <> "import yumemi/blob.{type Blob}\n\n"
+  <> "import yumemi/blob.{type Blob}\n"
+  <> "import yumemi/front/el\n\n"
   <> "pub type Variant {\n"
   <> string.concat(
     list.map(variants, fn(pair) {
@@ -73,6 +74,10 @@ fn text(media: model.Media, hashes: hash.Hashes) -> String {
     }),
   )
   <> "  }\n}\n\n"
+  <> "/// `el.img` の src(0.12 段 C、51 v6「media の variant」)。\n"
+  <> "pub fn src(blob: Blob, variant: Variant) -> el.Src {\n"
+  <> "  el.media_src(url(blob, variant))\n"
+  <> "}\n\n"
   <> "/// blob の key を `/` で割り、各節を百分率符号化する(`+` も `%2B`)。\n"
   <> "pub fn url(blob: Blob, variant: Variant) -> String {\n"
   <> "  let key =\n"

@@ -1,4 +1,4 @@
-//// GENERATED from public/src/pages/status/page.gleam [sha256:0dbff569d9d9] — 手で編集しない
+//// GENERATED from public/src/pages/status/page.gleam [sha256:0a96921a41ae] — 手で編集しない
 
 import blocks/feed
 import blocks/site_header
@@ -14,7 +14,7 @@ import yumemi/front/html
 import yumemi/front/theme
 
 pub type Vars {
-  Vars(www_origin: String, auth_origin: String)
+  Vars(widget: Option(String), www_origin: String, auth_origin: String)
 }
 
 pub type Data {

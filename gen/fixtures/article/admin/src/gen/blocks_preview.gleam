@@ -1,4 +1,4 @@
-//// GENERATED from admin/src/{layout.gleam,pages/**/page.gleam,blocks/*.gleam} [sha256:5c5aa2e7d1f7] — 手で編集しない
+//// GENERATED from admin/src/{layout.gleam,pages/**/page.gleam,blocks/*.gleam} [sha256:f958e160a75a] — 手で編集しない
 
 import blocks/admin_header
 import yumemi/front/el

@@ -1,4 +1,4 @@
-//// GENERATED from public/src/blocks/feed.gleam [sha256:2609aea1e5ea] — 手で編集しない
+//// GENERATED from public/src/blocks/feed.gleam [sha256:d9b74186d43c] — 手で編集しない
 
 import gen/out/widget_list
 import gleam/string

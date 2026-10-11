@@ -1,4 +1,4 @@
-//// GENERATED from src/entry.gleam [sha256:5c3196bb57ce] — 手で編集しない
+//// GENERATED from src/entry.gleam [sha256:16bb7f860a06] — 手で編集しない
 
 import gen/service
 import yumemi/front

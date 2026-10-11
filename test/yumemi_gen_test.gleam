@@ -339,7 +339,8 @@ pub fn gen_types_value_prop_keeps_property_column_test() {
 
 pub fn fixture_gleam_files_parse_including_trailing_spread_test() {
   let assert Ok(units) = source.load(fixture)
-  list.length(units) |> should.equal(16)
+  // 0.12 段 C:service/article_title を足して 17
+  list.length(units) |> should.equal(17)
   list.any(units, fn(unit) { unit.path == "trailing_spread" })
   |> should.be_true
 }
@@ -348,7 +349,8 @@ pub fn types_entities_services_counted_test() {
   let loaded = app()
   list.length(loaded.value_types) |> should.equal(5)
   list.length(loaded.entities) |> should.equal(4)
-  list.length(loaded.services) |> should.equal(7)
+  // 0.12 段 C:article_title を足して 8
+  list.length(loaded.services) |> should.equal(8)
 }
 
 pub fn lifecycle_read_from_edges_test() {
@@ -386,7 +388,8 @@ pub fn article_http_route_table_has_twelve_rows_test() {
     && string.contains(line, "path: \"")
   })
   |> list.length
-  |> should.equal(12)
+  // 0.12 段 C:fixture に読みの Service article_title(interactive Component の reloads の単一の値)を足して 13
+  |> should.equal(13)
 }
 
 pub fn entry_prefix_is_required_named_and_one_word_test() {
@@ -697,6 +700,8 @@ pub fn reads_are_emitted_for_queries_and_root_arrows_test() {
     "src/gen/reads/article_publish.gleam",
     "src/gen/reads/article_read.gleam",
     "src/gen/reads/article_retract.gleam",
+    // 0.12 段 C:article_title を足した
+    "src/gen/reads/article_title.gleam",
     "src/gen/reads/widget_list.gleam",
   ])
 }
@@ -917,6 +922,9 @@ pub fn one_statement_per_root_arrow_test() {
     "db/queries/article_read/to_tags.sql",
     "db/queries/article_retract/to_category.sql",
     "db/queries/article_retract/to_tags.sql",
+    // 0.12 段 C:article_title(root が article)にも root の矢印の 2 文
+    "db/queries/article_title/to_category.sql",
+    "db/queries/article_title/to_tags.sql",
   ])
   let found = text("db/queries/article_read/to_category.sql")
   string.starts_with(
@@ -1852,6 +1860,8 @@ pub fn without_stage_b_counts(notes: List(stop.Note)) -> List(stop.Note) {
       && {
         string.contains(note.text, "第 1・2 条の例外")
         || string.contains(note.text, "生の CSS の逃げ道")
+        // 0.12 段 C:逃げ道の数えは面ごとに 1 行(escape・生の CSS・ToService)
+        || string.contains(note.text, ": 逃げ道 ── ")
       }
     }
   })
@@ -1969,14 +1979,15 @@ pub fn front_model_reads_url_blocks_widgets_components_and_style_test() {
     "SiteHeader",
     "Summary",
   ])
+  // 0.12 段 C:Component の calls を書き換えた(given の article_list は無くなり、article_title を足した)
   value.services
   |> should.equal([
     "WidgetList",
     "ArticleRead",
-    "ArticleBlobSave",
     "ArticlePublish",
     "ArticleCreate",
-    "ArticleList",
+    "ArticleBlobSave",
+    "ArticleTitle",
   ])
   let assert Ok(page_args) =
     list.find(value.page_service_args, fn(page_args) {
@@ -2032,9 +2043,11 @@ pub fn front_model_reads_url_blocks_widgets_components_and_style_test() {
   value.blocks
   |> list.map(fn(block) { block.has_sample })
   |> should.equal([True, True, False, True, True, False, True])
+  // 0.12 段 C:after_send は書きの Service ごとの組(期待を 0.11 の After 2 値から替えた)
   value.components
-  |> list.map(fn(component) { component.after_send })
-  |> should.equal([None, None, Some("Stay"), Some("ReloadPage")])
+  |> list.map(fn(component) { list.length(component.after_send) })
+  |> list.sort(int.compare)
+  |> should.equal([0, 0, 0, 1, 1, 1, 2])
 }
 
 pub fn front_emit_overlay_area_and_badge_use_generator_css_test() {
@@ -2141,7 +2154,13 @@ pub fn front_overlay_duplicate_each_modal_scope_is_exit_four_test() {
 
 pub fn front_emit_route_uses_page_only_and_colon_arguments_test() {
   let route = text("public/src/gen/route.gleam")
-  string.contains(route, "PageRoute(path: \"/article/:slug\")")
+  // 0.12 段 C:PageRoute は Page の閉じた enum `Route` を持つ(期待に route を足した)
+  string.contains(
+    route,
+    "PageRoute(route: ArticleArgSlug, path: \"/article/:slug\")",
+  )
+  |> should.be_true
+  string.contains(route, "pub type Route {\n  ArticleArgSlug\n  Status\n}")
   |> should.be_true
   string.contains(route, "Route(service:") |> should.be_false
 }
@@ -2156,8 +2175,9 @@ pub fn front_emit_api_is_filtered_by_face_services_test() {
     api_for_entry(
       "import yumemi/entry.{type Entry, Anonymous, AnySubject, Http, ReadOnly}\n\npub type Subject {\n  Staff\n}\n\npub type Host {\n  PublicHost\n}\n\npub const entries: List(Entry(Subject, Host)) = [\n  Http(name: \"public\", hosts: [PublicHost], prefix: \"/api\", admit: Anonymous, subject: AnySubject, services: ReadOnly),\n]",
     )
+  // 0.12 段 C:given の article_list を読む Component は無くなり、読みの article_title を足した
   [
-    "service.ArticleList",
+    "service.ArticleTitle",
     "service.ArticleRead",
     "service.WidgetList",
     "path: \"/api/articles/:slug\"",
@@ -2202,51 +2222,54 @@ pub fn attached_declaration_table_matches_generated_face_api_test() {
   |> list.each(fn(route) { string.contains(api, route) |> should.be_true })
 }
 
+/// 0.12 段 C:route は runtime の表に literal で載る(期待を live の transport_send から替えた)。
 pub fn front_emit_live_contains_literal_transport_route_and_decoder_test() {
-  let live = text("public/src/gen/live/article_publish.gleam")
-  string.contains(live, "transport_send(") |> should.be_true
-  string.contains(live, "\"POST\"") |> should.be_true
-  string.contains(live, "\"/api/articles/\" <> args.slug <> \"/publish\"")
-  |> should.be_true
-  string.contains(live, "article_publish.decoder()") |> should.be_true
-
-  let out = text("public/src/gen/out/article_list.gleam")
-  string.contains(out, "pub fn decoder() -> decode.Decoder(Out)")
-  |> should.be_true
-  string.contains(out, "decode.field(\"counts\"") |> should.be_true
-}
-
-pub fn front_emit_live_send_runs_validate_test() {
-  let live = text("public/src/gen/live/article_create.gleam")
-  string.contains(live, "live.Send ->\n      case model.waiting")
-  |> should.be_true
-  string.contains(live, "case validate(model) {") |> should.be_true
+  let client = text("public/priv/static/_yumemi/client.mjs")
   string.contains(
-    live,
-    "Ok(args) -> #(live.State(..model, waiting: True), send(args))",
+    client,
+    "\"article_publish\": { \"method\": \"POST\", \"path\": \"/api/articles/:slug/publish\"",
   )
   |> should.be_true
-  string.contains(live, "pub fn validate(model: State)") |> should.be_true
+  let live = text("public/src/gen/live/article_publish.gleam")
+  string.contains(live, "transport_send(") |> should.be_false
+
+  // 0.12 段 C:client は Out を decode しない(given が無くなった)ので、decoder は頁の source の Out だけ
+  let out = text("public/src/gen/out/article_read.gleam")
+  string.contains(out, "pub fn decoder() -> decode.Decoder(Out)")
+  |> should.be_true
+  string.contains(out, "decode.field(\"tags\"") |> should.be_true
 }
 
+/// 0.12 段 C:送る前の検査は browser の制約検証(runtime が押された送りの control だけに reportValidity)。
+/// 期待を live の validate から runtime の字に替えた。
+pub fn front_emit_live_send_runs_validate_test() {
+  let assert Ok(runtime) = simplifile.read("src/yumemi/front/interactive.mjs")
+  string.contains(
+    runtime,
+    "if (typeof control.checkValidity === \"function\" && !control.checkValidity()) {",
+  )
+  |> should.be_true
+  string.contains(runtime, "const controls = controlsOf(form, service);")
+  |> should.be_true
+  let live = text("public/src/gen/live/article_create.gleam")
+  string.contains(live, "pub fn validate") |> should.be_false
+}
+
+/// 0.12 段 C:Spec の制約は control の属性(minlength・maxlength・required・pattern)に写り、文言は browser の
+/// 制約検証が出す。属性に写らない Spec(Markdown)は server の invalid_argument に任せる(期待を validate の
+/// 文言から属性に替えた)。
 pub fn front_emit_validate_errors_name_the_failed_constraint_test() {
   let live = text("public/src/gen/live/article_create.gleam")
   [
-    "must contain 1 to 64 characters and match /^[a-z0-9]+(-[a-z0-9]+)*$/",
-    "must contain 1 to 120 characters",
-    "must be valid Markdown",
-    "Error(_) -> [#(field, message)]",
+    "live.Pattern(\"[a-z0-9]+(-[a-z0-9]+)*\")",
+    "[live.MinLength(1), live.Required, live.MaxLength(120)]",
+    "Body -> live.bind(\"article_create\", \"body\", value, [])",
   ]
   |> list.each(fn(row) { string.contains(live, row) |> should.be_true })
-  string.contains(live, "#(field, \"invalid\")") |> should.be_false
 
   let publish = text("public/src/gen/live/article_publish.gleam")
-  string.contains(
-    publish,
-    "must contain 1 to 64 characters and match /^[a-z0-9]+(-[a-z0-9]+)*$/",
-  )
+  string.contains(publish, "live.Pattern(\"[a-z0-9]+(-[a-z0-9]+)*\")")
   |> should.be_true
-  string.contains(publish, "#(field, \"invalid\")") |> should.be_false
 }
 
 pub fn front_emit_shell_carries_language_title_and_theme_test() {
@@ -2370,10 +2393,12 @@ pub fn front_emit_blob_theme_wraps_image_in_quoted_css_url_test() {
     list.find(files, fn(file) {
       file.0 == "public/src/gen/load/article/arg_slug/page.gleam"
     })
-  // 0.12:地の画像の URL は app の media の variant で組み(今の形のまま)、`url("..")` の CSS の
-  // 文字列は yumemi の `theme.body_rule` が `\`・`"`・改行を escape して包む
-  string.contains(page, "  media.url(value, media.W1600)\n") |> should.be_true
-  string.contains(page, "import media") |> should.be_true
+  // 0.12 段 C:地の画像の URL は生成物 gen/media の theme_background の variant で組む(app の module の名を
+  // 焼かない、期待を `media.W1600` から替えた)。`url("..")` の CSS の文字列は yumemi の `theme.body_rule` が
+  // `\`・`"`・改行を escape して包む
+  string.contains(page, "  media.url(value, media.theme_background)\n")
+  |> should.be_true
+  string.contains(page, "import gen/media") |> should.be_true
   string.contains(page, "yumemi/blob.{type Blob}") |> should.be_true
   let assert Ok(image) = blob.parse("a\"b")
   theme.body_rule(
@@ -2998,10 +3023,11 @@ pub fn front_calls_parse_framework_target_of_and_entry_test() {
     |> list.append([
       source_unit(
         "components/pick_tag",
+        // 0.12 段 C:`pub const target` は calls に畳んだ(Of と Entry を 1 つの List に)
         "pub const calls: List(front.Target(service.Service, api.Attached)) = [\n"
           <> "  front.Of(service.ArticleCreate),\n"
-          <> "]\n"
-          <> "pub const target: api.Target = api.Entry(api.BrowserAdult)",
+          <> "  front.Entry(api.BrowserAdult),\n"
+          <> "]\n",
       ),
     ])
   let assert Ok(front_model) =
@@ -3037,10 +3063,11 @@ pub fn front_emit_generates_service_and_static_attached_live_modules_test() {
     |> list.append([
       source_unit(
         "components/pick_tag",
+        // 0.12 段 C:`pub const target` は calls に畳んだ
         "pub const calls: List(front.Target(service.Service, api.Attached)) = [\n"
           <> "  front.Of(service.ArticleCreate),\n"
-          <> "]\n"
-          <> "pub const target: api.Target = api.Entry(api.FixtureBrowser)",
+          <> "  front.Entry(api.FixtureBrowser),\n"
+          <> "]\n",
       ),
     ])
   let base_app = app()
@@ -3069,15 +3096,21 @@ pub fn front_emit_generates_service_and_static_attached_live_modules_test() {
     list.find(files, fn(file) {
       file.path == "public/src/gen/live/article_create.gleam"
     })
-  string.contains(service_live.text, "\"/api/articles\"")
+  string.contains(service_live.text, "pub type Args {")
   |> should.be_true
   let assert Ok(attached_live) =
     list.find(files, fn(file) {
       file.path == "public/src/gen/live/fixture_browser.gleam"
     })
-  string.contains(attached_live.text, "\"/fixture/browser\"")
+  // 0.12 段 C:live は State を持たず、送り先(path)は client の表に(期待を替えた)
+  let assert Ok(client) =
+    list.find(files, fn(file) {
+      file.path == "public/priv/static/_yumemi/client.mjs"
+    })
+  string.contains(client.text, "\"/fixture/browser\"") |> should.be_false
+  string.contains(attached_live.text, "live.send(\"fixture_browser\"")
   |> should.be_true
-  string.contains(attached_live.text, "live.State(Args, Nil, Dynamic, Failure)")
+  string.contains(attached_live.text, "pub fn send(class: css.Class")
   |> should.be_true
 }
 
@@ -3680,66 +3713,66 @@ pub fn front_emit_flattened_and_colliding_tags_stop_test() {
   |> should.be_true
 }
 
+/// 0.12 段 C:transport_ffi.mjs と given は無くなり、client は framework の runtime を import して表を渡す。
+/// 期待を registerWithGiven から替えた。
 pub fn front_emit_transport_and_client_are_generic_and_given_safe_test() {
-  let transport = text("public/src/gen/live/transport_ffi.mjs")
+  list.any(files(), fn(file) { string.ends_with(file.0, "transport_ffi.mjs") })
+  |> should.be_false
+  let client = text("public/priv/static/_yumemi/client.mjs")
+  string.contains(client, "data-yumemi-given") |> should.be_false
   string.contains(
-    transport,
-    "export function send(method, path, body, blobFields, onOk, onError)",
+    client,
+    "import { start as startInteractive } from \"__YUMEMI_BUILD__/yumemi/yumemi/front/interactive.mjs\";",
   )
   |> should.be_true
-  string.contains(transport, "ArticlePublish") |> should.be_false
-
-  let client = text("public/priv/static/_yumemi/client.mjs")
-  string.contains(client, "registerWithGiven") |> should.be_true
-  string.contains(client, "data-yumemi-given") |> should.be_true
-  string.contains(client, "pick-tag") |> should.be_true
+  string.contains(client, "\"pick-tag\": {") |> should.be_true
   string.contains(client, "__YUMEMI_BUILD__") |> should.be_true
 }
 
+/// 0.12 段 C:Blob の欄は file の control(`bind_file`)で、runtime が送る前に選んだ file だけを上げて key を
+/// Args に入れる(file token の Map は無くなった)。期待を transport_ffi の字から live と runtime に替えた。
 pub fn front_emit_blob_fields_issue_tokens_and_upload_only_registered_tokens_test() {
   let live = text("public/src/gen/live/article_blob_save.gleam")
   [
-    "pub fn blob_file_input() -> List(attribute.Attribute(Event))",
-    "event.on(\"change\", file_input_event(field))",
-    "fn file_token(event: Dynamic) -> String",
-    "live.Set(field, file_token(event))",
-    "blob_fields: List(String)",
-    "[\"blob\", \"existing\"]",
-    "case args.existing",
-    "\"\" -> json.null()",
+    "pub fn bind_file(field: Field) -> el.Attribute",
+    "live.bind_file(\"article_blob_save\", field_name(field))",
   ]
   |> list.each(fn(row) { string.contains(live, row) |> should.be_true })
-
-  let transport = text("public/src/gen/live/transport_ffi.mjs")
+  let client = text("public/priv/static/_yumemi/client.mjs")
   [
-    "const selectedFiles = new Map()",
-    "const uploadedFiles = new Map()",
-    "export function file_token(event)",
-    "selectedFiles.set(token, file)",
-    "selectedFiles.has(value) || uploadedFiles.has(value)",
+    "{ \"name\": \"blob\", \"wire\": \"text\", \"blob\": true }",
+    "{ \"name\": \"existing\", \"wire\": { \"option\": \"text\" }, \"blob\": true }",
   ]
-  |> list.each(fn(row) { string.contains(transport, row) |> should.be_true })
-  string.contains(transport, "document.addEventListener") |> should.be_false
+  |> list.each(fn(row) { string.contains(client, row) |> should.be_true })
+  let assert Ok(runtime) = simplifile.read("src/yumemi/front/interactive.mjs")
+  [
+    "if (files.length > 0) raw = await upload(files[0]);",
+    "if (!response.ok) throw new Error(\"blob upload failed\");",
+  ]
+  |> list.each(fn(row) { string.contains(runtime, row) |> should.be_true })
+  string.contains(runtime, "document.addEventListener(\"change\"")
+  |> should.be_false
 }
 
+/// 0.12 段 C:上げの失敗は Service の送りの前に投げ、送りを叩かずに error を立てる(runtime の buildArgs が
+/// call の前)。期待を transport_ffi から runtime に替えた。
 pub fn front_emit_blob_upload_failure_precedes_and_skips_service_request_test() {
-  let transport = text("public/src/gen/live/transport_ffi.mjs")
-  string.contains(
-    transport,
-    "if (!response.ok) throw new Error(\"blob upload failed\")",
-  )
-  |> should.be_true
-  let assert [_, after_upload] =
-    string.split(transport, "await uploadToken(value)")
-  string.contains(after_upload, "const response = await fetch(path")
+  let assert Ok(runtime) = simplifile.read("src/yumemi/front/interactive.mjs")
+  let assert [_, submit] =
+    string.split(runtime, "async yumemiSubmit(event, form, spec) {")
+  let assert [before_call, ..] =
+    string.split(submit, "outcome = await this.yumemiCall(")
+  string.contains(before_call, "const args = await buildArgs(")
   |> should.be_true
   string.contains(
-    transport,
-    "}).catch((error) => onError({ code: error?.message ?? \"network_error\" }))",
+    submit,
+    "outcome = { ok: false, value: { code: error?.code ?? \"network_error\" } };",
   )
   |> should.be_true
 }
 
+/// 0.12 段 C:上げ口の live は Args(file・from)と OutKey、送りは runtime の表の `upload`(期待を Gleam の
+/// upload_file から替えた)。
 pub fn front_emit_blob_copy_entry_uses_attached_target_route_test() {
   let api = text("public/src/gen/api.gleam")
   string.contains(api, "  BlobCopy\n") |> should.be_true
@@ -3750,9 +3783,15 @@ pub fn front_emit_blob_copy_entry_uses_attached_target_route_test() {
   |> should.be_true
 
   let live = text("public/src/gen/live/blob_copy.gleam")
-  string.contains(live, "upload_file") |> should.be_true
-  string.contains(live, "\"POST\",\n      \"/api/blobs\"") |> should.be_true
-  string.contains(live, "live.Done(Ok(key))") |> should.be_true
+  string.contains(live, "pub fn bind_file(field: Field) -> el.Attribute")
+  |> should.be_true
+  let client = text("public/priv/static/_yumemi/client.mjs")
+  string.contains(
+    client,
+    "\"blob_copy\": { \"method\": \"POST\", \"path\": \"/api/blobs\", \"read\": false, \"upload\": true,",
+  )
+  |> should.be_true
+  string.contains(client, "\"slots\": { \"key\": \"key\" }") |> should.be_true
 }
 
 pub fn client_bundle_uses_generated_output_over_input_test() {
@@ -3825,27 +3864,31 @@ pub fn front_calls_without_face_route_are_exit_four_test() {
   |> should.be_true
 }
 
+/// live module は Component の calls の Service ごと(0.12 段 C:reloads の読みも calls に並べる)。期待を
+/// State / validate / Failure から、Field・Error・When・Slot と制約検証の属性・表の After に替えた。
 pub fn front_emit_live_follows_island_calls_and_reload_out_test() {
   let paths = files() |> list.map(fn(entry) { entry.0 })
   [
     "public/src/gen/live/article_create.gleam",
     "public/src/gen/live/article_publish.gleam",
+    "public/src/gen/interactive.gleam",
   ]
   |> list.each(fn(path) { list.contains(paths, path) |> should.be_true })
   list.contains(paths, "public/src/gen/live/article_list.gleam")
   |> should.be_false
 
   let create = text("public/src/gen/live/article_create.gleam")
+  string.contains(create, "pub type State") |> should.be_false
   string.contains(
     create,
-    "pub type State = live.State(Args, article_list.Out, article_create.Out, Failure)",
+    "Slug -> live.bind(\"article_create\", \"slug\", value, [live.MinLength(1), live.Required, live.MaxLength(64), live.Pattern(\"[a-z0-9]+(-[a-z0-9]+)*\")])",
   )
   |> should.be_true
-  string.contains(create, "live.Set(Tags, value)") |> should.be_true
-  string.contains(create, "spec.Pattern(min: 1, max: 64") |> should.be_true
-  string.contains(create, "spec.Text(min: 1, max: 120)") |> should.be_true
-  string.contains(create, "spec.Markdown") |> should.be_true
-  string.contains(create, "#(next, reload_page())") |> should.be_true
+  string.contains(
+    create,
+    "Title -> live.bind(\"article_create\", \"title\", value, [live.MinLength(1), live.Required, live.MaxLength(120)])",
+  )
+  |> should.be_true
 
   let publish = text("public/src/gen/live/article_publish.gleam")
   string.contains(publish, "pub type Field {\n  Slug\n}")
@@ -3855,17 +3898,23 @@ pub fn front_emit_live_follows_island_calls_and_reload_out_test() {
     "pub type Error {\n  AlreadyPublished\n  AlreadyRetracted\n}",
   )
   |> should.be_true
-  string.contains(publish, "  Refused(Error)\n  Broke(String)")
-  |> should.be_true
-  string.contains(publish, "\"already_published\" -> Refused(AlreadyPublished)")
-  |> should.be_true
-  string.contains(publish, "pub fn validate(model: State)") |> should.be_true
-
-  let transport = text("public/src/gen/live/transport_ffi.mjs")
-  string.contains(transport, "response.json().then(onError)") |> should.be_true
   string.contains(
-    transport,
-    "onError({ code: error?.message ?? \"network_error\" })",
+    publish,
+    "pub type When {\n  Idle\n  Waiting\n  Succeeded\n  Failed\n  Refused(Error)\n}",
+  )
+  |> should.be_true
+  string.contains(publish, "AlreadyPublished -> \"already-published\"")
+  |> should.be_true
+  let client = text("public/priv/static/_yumemi/client.mjs")
+  string.contains(
+    client,
+    "\"refused\": [\"already_published\", \"already_retracted\"]",
+  )
+  |> should.be_true
+  // pick_tag は成功の後に文言を付けて読み直す
+  string.contains(
+    client,
+    "\"ok\": { \"then\": \"reload\", \"notice\": \"タグを保存しました\" }",
   )
   |> should.be_true
 }
@@ -3995,7 +4044,8 @@ pub fn front_emit_writes_one_out_file_per_service_test() {
   |> list.map(fn(entry) { entry.0 })
   |> list.filter(string.starts_with(_, "public/src/gen/out/"))
   |> list.length
-  |> should.equal(7)
+  // 0.12 段 C:article_title を足して 8
+  |> should.equal(8)
 }
 
 pub fn front_emit_load_layout_without_sources_uses_empty_data_test() {
@@ -4101,7 +4151,8 @@ pub fn service_variant_references_are_collected_from_page_widget_and_component_t
         ),
         source_unit(
           "components/search",
-          "pub const calls: List(service.Service) = [service.ArticleCreate]\npub const reloads: List(#(Slug, service.ArticleRead)) = [#(Slug, service.ArticleRead)]\npub fn view(it: State) -> el.Element(Event) { it }",
+          // 0.12 段 C:reloads は live.Reloads(read:, on:)、読みも calls に並べる
+          "pub const calls: List(service.Service) = [service.ArticleCreate]\npub const reloads: live.Reloads(service.Service, read.Field) = live.Reloads(read: service.ArticleRead, on: [read.Slug])\npub fn view(it: create.Args) -> el.Element { it }",
         ),
       ],
       [],
@@ -4122,8 +4173,13 @@ pub fn direct_attribute_class_is_exit_four_test() {
       ],
       [],
     )
-  // 0.12:`attribute.class` の直呼びは第 1 条(lustre の import)に吸収した
-  assert_one_note(notes, stop.Conflict, "第 1 条")
+  // 0.12:`attribute.class` の直呼びは第 1 条(lustre の import)に吸収した。0.12 段 C:components/ の module は
+  // interactive Component の条文(第 10・11 条ほか)にも掛かるので、第 1 条の 1 つを選んで見る
+  assert_one_note(
+    list.filter(notes, fn(note) { string.contains(note.text, "第 1 条") }),
+    stop.Conflict,
+    "第 1 条",
+  )
   stop.worst(notes) |> should.equal(4)
 }
 
@@ -4136,8 +4192,12 @@ pub fn lustre_internal_import_is_exit_four_test() {
       ],
       [],
     )
-  // 0.12:`lustre/internals` の import は第 1 条(lustre の import)に吸収した
-  assert_one_note(notes, stop.Conflict, "第 1 条")
+  // 0.12:`lustre/internals` の import は第 1 条(lustre の import)に吸収した(段 C:第 1 条の 1 つを選んで見る)
+  assert_one_note(
+    list.filter(notes, fn(note) { string.contains(note.text, "第 1 条") }),
+    stop.Conflict,
+    "第 1 条",
+  )
   stop.worst(notes) |> should.equal(4)
 }
 
@@ -4148,12 +4208,22 @@ pub fn nested_island_is_exit_four_test() {
         layout_unit("Layout(sp: Frame(areas: [], placements: []))"),
         source_unit(
           "components/bad",
-          "import yumemi/front/el\npub fn view(it: State) -> el.Element(Event) { el.island(\"outer\", [el.island(\"inner\", [])]) }",
+          // 0.12 段 C:Component を置く口は gen/interactive。Component がそれを import すれば止める
+          "import gen/interactive\nimport yumemi/front/el\npub fn view(it: State) -> el.Element { interactive.inner(it) }",
         ),
       ],
       [],
     )
-  assert_one_note(notes, stop.Conflict, "島の中に島")
+  assert_one_note(
+    list.filter(notes, fn(note) {
+      string.contains(
+        note.text,
+        "interactive Component の中に interactive Component",
+      )
+    }),
+    stop.Conflict,
+    "interactive Component の中に interactive Component",
+  )
   stop.worst(notes) |> should.equal(4)
 }
 
@@ -5091,11 +5161,11 @@ pub fn front_emit_shell_head_consts_render_in_head_test() {
       <> "    globalThis.navigator.serviceWorker.register(\"/sw.js\").catch(() => {});\n",
   )
   |> should.be_true
-  // 登録は 1 回、島の登録(boot)は今のまま
+  // 登録は 1 回。0.12 段 C:島の登録(boot)は無くなり、Component は表で define する(期待を替えた)
   string.split(client, "serviceWorker.register(")
   |> list.length
   |> should.equal(2)
-  string.contains(client, "boot();\n") |> should.be_true
+  string.contains(client, "startInteractive({\n") |> should.be_true
 }
 
 // 1 つだけ書けば、その要素だけが出る(他の 3 つと登録は出ない)。
@@ -5336,23 +5406,27 @@ pub fn front_emit_service_worker_without_islands_test() {
   let client = file_text(files, "public/priv/static/_yumemi/client.mjs")
   string.contains(client, "serviceWorker.register(\"/sw.js\")")
   |> should.be_true
-  string.contains(client, "lustreRegister") |> should.be_false
+  // 0.12 段 C:Component が無くても runtime は起こす(逃げ道と dialog の代わりと notice のため)。表は空
+  string.contains(client, "  components: {\n},\n") |> should.be_true
   file_text(files, "public/src/gen/shell.mjs")
   |> string.contains(
     "  return rendered.replace(\"</head>\", '<script type=\"module\" src=\"/_yumemi/client.mjs\"></script></head>');\n",
   )
   |> should.be_true
-  // service_worker も島も無い面は client.mjs を出さず、script も差さない
+  // service_worker も Component も無い面でも、逃げ道(fixture の public の src/escapes/clock.mjs)があれば
+  // client.mjs を出して script を差す(0.12 段 C、期待を「出さない」から替えた ── 逃げ道は client の runtime が
+  // mount する)。表は空
   let assert Ok(base_units) = source.load("gen/fixtures/article/public")
   let bare =
     base_units
     |> list.filter(fn(unit) { !string.starts_with(unit.path, "components/") })
     |> synthetic_front_files
-  list.any(bare, fn(file) { file.0 == "public/priv/static/_yumemi/client.mjs" })
-  |> should.be_false
+  file_text(bare, "public/priv/static/_yumemi/client.mjs")
+  |> string.contains("  escapes: { clock: escape_clock },\n")
+  |> should.be_true
   file_text(bare, "public/src/gen/shell.mjs")
   |> string.contains("  return rendered;\n")
-  |> should.be_true
+  |> should.be_false
 }
 
 // 型違い・空文字は title と同じく宣言の不足(exit 3)で止める。

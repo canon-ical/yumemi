@@ -1,4 +1,4 @@
-//// GENERATED from framework session / credential_floor contract [sha256:5a7812900d2a] — 手で編集しない
+//// GENERATED from framework session / credential_floor contract [sha256:73a68a69ea55] — 手で編集しない
 
 import gen/entry/auth.{type Database}
 import yumemi/io.{type Promise}

@@ -1,5 +1,5 @@
 // yumemi yumemi/front ── Page 間の client 遷移(0.11.4、H9 → 0.12 で Navigation API に寄せた)。生成の
-// `priv/static/_yumemi/client.mjs` が `start({routes, csp, boot})` を呼ぶ。`routes` は同じ面の Page の route の綴り、
+// `priv/static/_yumemi/client.mjs` が `start({routes, csp})` を呼ぶ。`routes` は同じ面の Page の route の綴り、
 // `csp` は門の CSP を持つ Page の route からその値(0.11.15)。
 //
 // click の横取り・履歴・戻る / 進む・scroll・focus・中断・# はブラウザの Navigation API に任せる。`navigation` の
@@ -12,11 +12,12 @@
 // 修飾キー・target・download・別 origin・POST の form は、ブラウザがそのまま扱う。Navigation API の無い browser では
 // 何も取らない(頁の読み込み)。
 //
-// framework に残すのは 7 つ ── 取得・差し替えの判定・head の差分・stylesheet の待ち・body の差し替え・島の再起動
-// (`boot`)・pageview の印。次の頁は server に 1 回の request で取りに行き(門・成人の申告・session の判定は server の
+// framework に残すのは 7 つ ── 取得・差し替えの判定・head の差分・stylesheet の待ち・body の差し替え・interactive
+// Component の再起動・pageview の印。再起動は呼び出しでなく、来た body の custom element が define 済みの class で
+// 接続時に起きること(0.12 段 C、`boot()` の呼び直しは無くなった)。次の頁は server に 1 回の request で取りに行き(門・成人の申告・session の判定は server の
 // 今までの道を通る)、200 の HTML で、応答の CSP の header が表と同じ値で、同じ面の client を持ち、差し替えられる形
-// なら head と body を差し替えて `boot` を呼ぶ。取れない(redirect・200 でない・HTML でない・CSP の header が表と違う・
-// script を持つ・given の島が既に登録済み)ときは、行き先を頁の読み込みで開き直す(URL は取った時点で行き先に
+// なら head と body を差し替える。取れない(redirect・200 でない・HTML でない・CSP の header が表と違う・
+// script を持つ)ときは、行き先を頁の読み込みで開き直す(URL は取った時点で行き先に
 // 替わっているので、履歴は積まない `location.replace`)。
 //
 // head の差し替え(0.11.15):今の head と来た head で同じ要素(outerHTML が同じ)は残し、順を保って差分だけ
@@ -33,6 +34,15 @@
 // 書いた後の取り直し:`reload()` は今の頁が route 表に当たれば `navigation.reload()` を起こし、それを取って今の URL
 // を同じ道で取り直す(履歴を積まず、scroll は `manual` で今の位置のまま)。当たらない・`start` が走っていない時は
 // 頁の読み込み。
+//
+// 取得の最中の競合(0.12 段 C、Y4 柏木 P1):取っている最中に同じ document の中の移動(# の click・
+// `history.pushState` / `replaceState`)が起きると、取りは signal で止まり URL だけが替わる。止まった後に新しく
+// 取った遷移も document を離れる遷移も無ければ、今の URL を頁の読み込みで開き直して URL と中身を揃える。
+//
+// 同じ document の中で積まれた履歴(0.12 段 C):逃げ道の JS が `pushState` した entry へ戻る / 進むのは、中身が
+// 今の document のままなので取らない(取り直すと interactive Component の状態が消え、送り手が spa を数える)。
+// どの entry がどの差し替えの中身かを entry の key で覚え、行き先が今の中身と同じなら browser に任せる。
+// interactive Component の runtime は pushState を使わない(`reloads` の一覧は `go` の replace で移る)。
 
 const clientSrc = "/_yumemi/client.mjs";
 /// 門に「client 遷移の fetch」と知らせる header。門はこれを見て pageview の script の代わりに印を差す。
@@ -79,6 +89,8 @@ export function samePolicy(headers, csp) {
 
 /// `reload()` が起こす reload の印(`navigation.reload` の info)。印の無い reload(`location.reload()`)は取らない。
 const refreshInfo = { yumemi: "reload" };
+/// runtime の移動(After の GoTo・`reloads` の一覧)の印。利用者の起こした移動と同じく取る。
+const goInfo = "go";
 
 /// navigate イベントを client 遷移で取るか。取るなら行き先の URL、取らないなら null。取るのは利用者が起こした
 /// push / replace、traverse、印の付いた reload で、ブラウザが取れると言い(`canIntercept`)、同じ頁の中の # でも
@@ -88,7 +100,7 @@ export function accept(event, routes, location, loaded = policy(routes, location
   if (!event.canIntercept || event.defaultPrevented || event.hashChange) return null;
   if (event.downloadRequest != null || event.formData != null) return null;
   const type = event.navigationType;
-  if (type === "reload" ? event.info?.yumemi !== refreshInfo.yumemi : type !== "traverse" && !event.userInitiated) return null;
+  if (type === "reload" ? event.info?.yumemi !== refreshInfo.yumemi : type !== "traverse" && !event.userInitiated && event.info?.yumemi !== goInfo) return null;
   let url;
   try { url = new URL(event.destination.url); } catch (_error) { return null; }
   if (url.origin !== location.origin) return null;
@@ -104,14 +116,12 @@ export function stale(event) {
   return event.canIntercept && event.navigationType === "traverse" && event.destination?.sameDocument === true && !event.hashChange;
 }
 
-/// 取った頁の文書を差し替えてよいか(同じ面の client を持ち、head の他の script も body の script も持たず、
-/// 既に登録した given の島を持たない)。
-export function swappable(doc, defined) {
+/// 取った頁の文書を差し替えてよいか(同じ面の client を持ち、head の他の script も body の script も持たない)。
+export function swappable(doc) {
   const scripts = [...doc.querySelectorAll("script")];
   const client = scripts.filter((script) => script.getAttribute("src") === clientSrc && script.getAttribute("type") === "module");
   if (client.length !== 1 || scripts.length !== 1 || client[0].parentElement !== doc.head) return false;
-  if (!doc.body) return false;
-  return ![...doc.body.querySelectorAll("[data-yumemi-given]")].some((element) => defined(element.localName));
+  return Boolean(doc.body);
 }
 
 /// 今の head の並びと来た head の並び(要素の鍵)の最長の共通部分。来た側の各位置に、残す今の位置か -1 を返す。
@@ -257,7 +267,17 @@ export function stage(target, doc, keep, limit = holdLimit) {
 // `start` が走った面の取り直し(書いた後の読み直し)。走っていなければ null
 let refresh = null;
 
-/// 島の Done の後の読み直し。今の頁が route 表に当たれば client 遷移で取り直し、当たらなければ頁の読み込み。
+/// runtime の移動(After の GoTo・`reloads` の一覧)。route 表に当たれば client の遷移で、当たらなければ頁の読み込み。
+/// `replace` は履歴を積まない、`keep` は scroll を保ち focus を同じタグの同じ name の control へ戻す(`{tag, name}`)。
+export function go(href, { replace = false, keep = null } = {}) {
+  if (going !== null) return going(href, replace, keep);
+  if (replace) globalThis.location.replace(href);
+  else globalThis.location.assign(href);
+}
+
+let going = null;
+
+/// 書いた後の読み直し。今の頁が route 表に当たれば client 遷移で取り直し、当たらなければ頁の読み込み。
 export function reload() {
   if (refresh !== null) return refresh();
   globalThis.location.assign(globalThis.location.href);
@@ -273,7 +293,7 @@ export function supported(scope = globalThis) {
   return typeof scope.navigation?.addEventListener === "function" && typeof scope.NavigateEvent?.prototype?.intercept === "function";
 }
 
-export function start({ routes: paths, csp = {}, boot }) {
+export function start({ routes: paths, csp = {} }) {
   if (typeof window === "undefined" || !supported()) return;
   const navigation = globalThis.navigation;
   const routes = table(paths, csp);
@@ -282,7 +302,20 @@ export function start({ routes: paths, csp = {}, boot }) {
   const loaded = policy(routes, globalThis.location.pathname);
   // 取れない時は行き先を頁の読み込みで開き直す(URL は既に行き先。利用者の起こした遷移でないので取られない)
   const load = (url) => globalThis.location.replace(url.href);
-  const swap = async (url, signal) => {
+  // 取った遷移と document を離れる遷移の番号。止まった取りは、自分の後に番号が進んでいなければ開き直す
+  let latest = 0;
+  // entry の key → その entry の中身(差し替えの番号)。0 は読み込んだ document
+  let shown = 0;
+  let shownSeq = 0;
+  const contents = new Map();
+  if (navigation.currentEntry) contents.set(navigation.currentEntry.key, shown);
+  // 開き直しは `location.reload()`(今の URL が # を持つと、同じ URL への replace は # の移動になり読み込まない)
+  const stopped = (id) => {
+    setTimeout(() => {
+      if (latest === id) globalThis.location.reload();
+    }, 0);
+  };
+  const swap = async (url, signal, id, focus) => {
     const csp = policy(routes, url.pathname);
     let response;
     try {
@@ -294,7 +327,7 @@ export function start({ routes: paths, csp = {}, boot }) {
         signal,
       });
     } catch (_error) {
-      if (signal.aborted) return;
+      if (signal.aborted) return stopped(id);
       return load(url);
     }
     const type = response.headers.get("content-type") ?? "";
@@ -302,25 +335,53 @@ export function start({ routes: paths, csp = {}, boot }) {
       return load(url);
     }
     let html;
-    try { html = await response.text(); } catch (_error) { if (signal.aborted) return; return load(url); }
-    if (signal.aborted) return;
+    try { html = await response.text(); } catch (_error) { if (signal.aborted) return stopped(id); return load(url); }
+    if (signal.aborted) return stopped(id);
     const doc = new DOMParser().parseFromString(html, "text/html");
-    if (!swappable(doc, (tag) => globalThis.customElements.get(tag) !== undefined)) return load(url);
+    if (!swappable(doc)) return load(url);
     const staged = stage(document, doc, keep);
     await staged.ready;
-    if (signal.aborted) return staged.cancel();
+    if (signal.aborted) { staged.cancel(); return stopped(id); }
     void staged.commit();
-    boot();
+    shown = ++shownSeq;
+    if (focus !== null) {
+      const control = document.querySelector(`${focus.tag} [name="${CSS.escape(focus.name)}"]`);
+      control?.focus({ preventScroll: true });
+    }
   };
   refresh = () => {
     if (!routed(routes, globalThis.location.pathname)) return globalThis.location.assign(globalThis.location.href);
     navigation.reload({ info: refreshInfo });
   };
+  going = (href, replace, keepFocus) => {
+    const url = new URL(href, globalThis.location.href);
+    if (!routed(routes, url.pathname)) return replace ? globalThis.location.replace(url.href) : globalThis.location.assign(url.href);
+    navigation.navigate(url.href, { history: replace ? "replace" : "push", info: { yumemi: goInfo, keep: keepFocus } });
+  };
+  navigation.addEventListener("navigatesuccess", () => {
+    if (navigation.currentEntry) contents.set(navigation.currentEntry.key, shown);
+  });
   navigation.addEventListener("navigate", (event) => {
+    // 同じ document の中で積まれた entry(中身が今の document のまま)へ戻る / 進むのは browser に任せる
+    if (event.navigationType === "traverse" && event.destination?.sameDocument && contents.get(event.destination.key) === shown) return;
     const url = accept(event, routes, globalThis.location, loaded);
     // reload の既定の scroll は、離れる時にしか取らない位置(取り直しでは頁の頭)へ戻すので、reload だけ触らせない
     // (差し替えの前後で同じ位置のまま)。push と traverse は既定(# の先か頭へ、戻る / 進むは離れた時の位置へ)
-    if (url !== null) event.intercept({ handler: () => swap(url, event.signal), scroll: event.navigationType === "reload" ? "manual" : "after-transition" });
-    else if (stale(event)) event.intercept({ handler: () => load(new URL(event.destination.url)) });
+    if (url !== null) {
+      const id = ++latest;
+      const keepFocus = event.info?.yumemi === goInfo ? event.info.keep ?? null : null;
+      const manual = event.navigationType === "reload" || keepFocus !== null;
+      event.intercept({
+        handler: () => swap(url, event.signal, id, keepFocus),
+        scroll: manual ? "manual" : "after-transition",
+        ...(keepFocus !== null ? { focusReset: "manual" } : {}),
+      });
+    } else if (stale(event)) {
+      latest += 1;
+      event.intercept({ handler: () => load(new URL(event.destination.url)) });
+    } else if (!event.destination?.sameDocument) {
+      // document を離れる遷移(取らないもの)。止まった取りを開き直さない
+      latest += 1;
+    }
   });
 }

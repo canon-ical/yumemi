@@ -1,6 +1,8 @@
 //// ArticleSummary Block ── article_read の Out だけを描く純粋な view。
 
 import yumemi/front/css
+import gen/interactive
+import gen/live/article_publish
 import yumemi/front/el
 import gen/out/article_read
 import gleam/option.{None}
@@ -52,7 +54,7 @@ pub fn view(it: In, arg: Arg) -> el.Element {
     [
       html.h1(css.class(title), [], [el.text(it.category.name)]),
       el.closer("article-dialog", [el.text("Close article options")]),
-      el.legacy_island("like-button", [#("slug", it.article.slug)]),
+      interactive.like_button(article_publish.Args(slug: it.article.slug)),
     ],
   )
 }

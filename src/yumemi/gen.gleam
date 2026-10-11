@@ -73,6 +73,39 @@ pub fn main() {
   }
 }
 
+@external(javascript, "./gen_ffi.mjs", "locked_yumemi")
+fn locked_yumemi(dir: String) -> String
+
+@external(javascript, "./gen_ffi.mjs", "running_yumemi")
+fn running_yumemi() -> String
+
+/// 第 41 条:生成器が読み書きする package(app と面)の yumemi の lock が、走っている生成器の版と違えば名指して
+/// 止める。lock(manifest.toml)の無い package は照合しない。生成器の触らない package(musearch の auth の類)は
+/// 見ない(Y1 鷹野の裁き 2、段 D まで照合の外)。
+pub fn lock_notes(running: String, packages: List(String)) -> List(Note) {
+  case running {
+    "" -> []
+    _ ->
+      packages
+      |> list.filter_map(fn(dir) {
+        case locked_yumemi(dir) {
+          "" -> Error(Nil)
+          locked if locked == running -> Error(Nil)
+          locked ->
+            Ok(Note(
+              class: stop.Conflict,
+              text: dir
+                <> "/manifest.toml: yumemi の lock "
+                <> locked
+                <> " が走っている生成器の版 "
+                <> running
+                <> " と違う(第 41 条、版は app の lock 1 つで揃える。その package で gleam update yumemi)",
+            ))
+        }
+      })
+  }
+}
+
 @external(javascript, "./gen_ffi.mjs", "halt")
 fn halt(code: Int) -> Nil
 
@@ -169,16 +202,21 @@ fn generate_with_faces(
   let hashes = hash.of(units)
   let allow_usages = allow_reader.read(units)
   let entry_output = entry.emit(app, hashes)
+  let lock =
+    lock_notes(running_yumemi(), [
+      app_dir,
+      ..list.map(discovered.packages, fn(package) { package.path })
+    ])
   let front_notes =
     list.append(
-      discovered.notes,
+      list.append(lock, discovered.notes),
       list.flat_map(front_models, fn(item) {
         let #(package, model) = item
         list.flatten([
           front.notes(model, app.services),
           front_emit.route_notes(app, package.name, model, hashes),
           front_emit.gate_notes(app, units, package, model),
-          front_emit.client_notes(package, model),
+          front_emit.interactive_notes(app, units, package, model, hashes),
           front_emit.surface_notes(app, units, package, model),
         ])
       }),

@@ -5,6 +5,7 @@ import gleam/list
 import gleam/string
 import gleam/uri
 import yumemi/blob.{type Blob}
+import yumemi/front/el
 
 pub type Variant {
   /// 400×400、cover
@@ -24,6 +25,11 @@ pub fn name(variant: Variant) -> String {
     W800 -> "w800"
     W1600 -> "w1600"
   }
+}
+
+/// `el.img` の src(0.12 段 C、51 v6「media の variant」)。
+pub fn src(blob: Blob, variant: Variant) -> el.Src {
+  el.media_src(url(blob, variant))
 }
 
 /// blob の key を `/` で割り、各節を百分率符号化する(`+` も `%2B`)。

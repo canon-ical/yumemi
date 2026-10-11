@@ -58,25 +58,8 @@ pub fn emit(
       string.starts_with(unit.path, "service/")
     })
   let type_units = back_type_units(app, back_units, hashes)
-  let live = live_targets(model_.components, app.services)
-  let attached_service_live = attached_service_live_targets(model_, app, live)
-  let blob_entries = blob_entry_targets(model_.components, app.attached)
-  let live_decoder_services =
-    list.append(live, attached_service_live)
-    |> list.flat_map(fn(target) {
-      let #(service, component) = target
-      let given =
-        component.reloads
-        |> list.first
-        |> option.from_result
-        |> option.then(fn(reload) { service_for(app.services, reload.1) })
-      [service.module]
-      |> list.append(case given {
-        Some(value) -> [value.module]
-        None -> []
-      })
-    })
-    |> list.unique
+  let live = live_targets(app, back_units, package, model_, hashes)
+  let live_decoder_services = []
   let page_decoder_services =
     model_.pages
     |> list.flat_map(fn(page) {
@@ -118,7 +101,15 @@ pub fn emit(
     ),
     File(
       path: face_name <> "/src/gen/shell.mjs",
-      text: shell_text(app, type_units, package, model_, hashes),
+      text: shell_text(
+        app,
+        type_units,
+        package,
+        model_,
+        hashes,
+        interactive_state_css(model_, live),
+        escape_names(package) != [],
+      ),
     ),
     gate_file(app, back_units, package, model_, hashes),
     File(
@@ -134,7 +125,7 @@ pub fn emit(
     ),
     File(
       path: face_name <> "/priv/static/_yumemi/style.css",
-      text: style_text(package, model_),
+      text: style_text(package, model_) <> interactive_state_css(model_, live),
     ),
   ]
   let out_files =
@@ -151,92 +142,53 @@ pub fn emit(
       )
     })
   let live_files =
-    live
-    |> list.map(fn(target) {
-      let #(service, component) = target
-      live_file(app, back_units, package, service, component, hashes, face_name)
-    })
-  let attached_service_files =
-    attached_service_live
-    |> list.map(fn(target) {
-      let #(service, component) = target
-      attached_service_live_file(
-        app,
-        back_units,
-        package,
-        service,
-        component,
-        hashes,
-        face_name,
-      )
-    })
-  let attached_live =
-    attached_live_targets(model_, app)
-    |> list.map(fn(target) {
-      let #(route, component) = target
-      attached_live_file(app, route, package, component, hashes, face_name)
-    })
-  let blob_entry_files =
-    blob_entries
-    |> list.map(fn(target) {
-      let #(route, _component) = target
+    list.map(live, fn(target) {
       File(
-        path: face_name
-          <> "/src/gen/live/"
-          <> naming.snake(route.name)
-          <> ".gleam",
-        text: blob_entry_live_text(route, hashes),
+        path: face_name <> "/src/gen/live/" <> target.name <> ".gleam",
+        text: live_module_text(target),
       )
     })
-  let all_live_files =
-    list.append(
-      live_files,
-      list.append(
-        attached_service_files,
-        list.append(attached_live, blob_entry_files),
+  let interactive_files = case placeable_components(model_, live) {
+    [] -> []
+    _ -> [
+      File(
+        path: face_name <> "/src/gen/interactive.gleam",
+        text: interactive_text(package, model_, live),
       ),
-    )
-  // 0.12:数える口の送り手。門が `pageview` を宣言した面は、島が無くても client.mjs を出す
+    ]
+  }
+  let all_live_files = list.append(live_files, interactive_files)
+  // 0.12:数える口の送り手。門が `pageview` を宣言した面は、Component が無くても client.mjs を出す
   let pageview_client = pageview_client_text(app, back_units, package, model_)
+  let escapes = escape_names(package)
   let island_files = case
-    all_live_files,
+    placeable_components(model_, live),
+    escapes,
     model_.shell.head.service_worker,
     pageview_client
   {
-    [], None, "" -> []
-    // 0.11.12:島が無くても shell の service_worker があれば、登録だけの client.mjs を出す
-    [], service_worker, _ -> [
-      File(
-        path: face_name <> "/priv/static/_yumemi/client.mjs",
-        text: js_header(
-          face_name <> "/src/{shell,gate}.gleam",
-          digest.short(
-            hash.entry(hashes)
-            <> option.unwrap(service_worker, "")
-            <> pageview_client,
-          ),
-        )
-          <> "\n\n"
-          <> pageview_client
-          <> service_worker_text(service_worker),
-      ),
-    ]
-    _, _, _ -> [
-      File(
-        path: face_name <> "/src/gen/live/transport_ffi.mjs",
-        text: transport_text(face_name, model_, hashes),
-      ),
+    [], [], None, "" -> []
+    _, _, _, _ -> [
       File(
         path: face_name <> "/priv/static/_yumemi/client.mjs",
         text: client_text(
           face_name,
           model_,
-          package.units,
-          app,
+          live,
+          escapes,
           hashes,
           navigation(app, back_units, package, model_),
         )
           <> pageview_client,
+      ),
+    ]
+  }
+  let escape_files = case escapes {
+    [] -> []
+    _ -> [
+      File(
+        path: face_name <> "/src/gen/escapes.gleam",
+        text: escapes_text(package, escapes),
       ),
     ]
   }
@@ -251,7 +203,10 @@ pub fn emit(
   list.append(
     list.append(
       files,
-      list.append(out_files, list.append(all_live_files, island_files)),
+      list.append(
+        out_files,
+        list.append(all_live_files, list.append(island_files, escape_files)),
+      ),
     ),
     list.append(load_files, media_files),
   )
@@ -1415,138 +1370,6 @@ fn default_named_value(
   }
 }
 
-fn live_targets(
-  components: List(reader_front.Component),
-  services: List(model.Service),
-) -> List(#(model.Service, reader_front.Component)) {
-  let empty: List(#(model.Service, reader_front.Component)) = []
-  components
-  |> list.fold(empty, fn(targets, component) {
-    component.calls
-    |> list.fold(targets, fn(acc, target) {
-      case target {
-        reader_front.ServiceCall(variant) ->
-          case service_for(services, variant) {
-            Some(service) ->
-              case
-                list.any(acc, fn(found) { found.0.module == service.module })
-              {
-                True -> acc
-                False -> list.append(acc, [#(service, component)])
-              }
-            None -> acc
-          }
-        reader_front.AttachedCall(_) -> acc
-      }
-    })
-  })
-  |> list.sort(fn(left, right) { string.compare(left.0.module, right.0.module) })
-}
-
-fn attached_service_live_targets(
-  front: reader_front.Front,
-  app: model.App,
-  live: List(#(model.Service, reader_front.Component)),
-) -> List(#(model.Service, reader_front.Component)) {
-  let targets =
-    front.components
-    |> list.flat_map(fn(component) {
-      component.calls
-      |> list.filter_map(fn(target) {
-        case target {
-          reader_front.AttachedCall(name) ->
-            case service_for(app.services, name) {
-              Some(service) ->
-                case
-                  list.any(live, fn(found) { found.0.module == service.module })
-                {
-                  True -> Error(Nil)
-                  False -> Ok(#(service, component))
-                }
-              None -> Error(Nil)
-            }
-          reader_front.ServiceCall(_) -> Error(Nil)
-        }
-      })
-    })
-  let empty: List(#(model.Service, reader_front.Component)) = []
-  list.fold(targets, empty, fn(acc, target) {
-    let #(service, _) = target
-    case list.any(acc, fn(found) { found.0.module == service.module }) {
-      True -> acc
-      False -> list.append(acc, [target])
-    }
-  })
-  |> list.sort(fn(left, right) { string.compare(left.0.module, right.0.module) })
-}
-
-fn attached_live_targets(
-  front: reader_front.Front,
-  app: model.App,
-) -> List(#(model.AttachedRoute, reader_front.Component)) {
-  let targets =
-    front.components
-    |> list.flat_map(fn(component) {
-      component.calls
-      |> list.filter_map(fn(target) {
-        case target {
-          reader_front.AttachedCall(name) ->
-            case service_for(app.services, name) {
-              Some(_) -> Error(Nil)
-              None ->
-                case
-                  app.attached |> list.find(fn(route) { route.name == name })
-                {
-                  Ok(route) ->
-                    case
-                      route.name == "BlobCopy"
-                      && route.method == "POST"
-                      && route.path == "/api/blobs"
-                    {
-                      True -> Error(Nil)
-                      False -> Ok(#(route, component))
-                    }
-                  Error(_) -> Error(Nil)
-                }
-            }
-          reader_front.ServiceCall(_) -> Error(Nil)
-        }
-      })
-    })
-  let empty: List(#(model.AttachedRoute, reader_front.Component)) = []
-  list.fold(targets, empty, fn(acc, target) {
-    let #(route, _) = target
-    case list.any(acc, fn(found) { found.0.name == route.name }) {
-      True -> acc
-      False -> list.append(acc, [target])
-    }
-  })
-  |> list.sort(fn(left, right) { string.compare(left.0.name, right.0.name) })
-}
-
-fn attached_live_file(
-  app: model.App,
-  route: model.AttachedRoute,
-  package: face.Package,
-  component: reader_front.Component,
-  hashes: hash.Hashes,
-  face_name: String,
-) -> File {
-  let component_hash =
-    source_hash(package.units, fn(unit) { unit.path == component.module })
-  let input_hash = digest.short(hash.entry(hashes) <> component_hash)
-  let module = naming.snake(route.name)
-  File(
-    path: face_name <> "/src/gen/live/" <> module <> ".gleam",
-    text: attached_live_text(
-      route,
-      component,
-      attached_body_fields(app, route),
-      header("src/" <> component.module <> ".gleam", input_hash),
-    ),
-  )
-}
-
 /// attached の口が body に載せる欄(0.11.4、H6)。framework の役が本文の形を決める口だけが持つ:
 /// `SwitchSubject` は `{kind, id}`(`server/http.mjs` の switch_subject が `s.args.kind` / `s.args.id` を読む)。
 /// 役の無い口・本文を読まない役の口は空(body は今までどおり null)。
@@ -1564,295 +1387,6 @@ fn attached_body_fields(
   }
 }
 
-fn attached_live_text(
-  route: model.AttachedRoute,
-  component: reader_front.Component,
-  fields: List(String),
-  generated_header: String,
-) -> String {
-  let field_type = case fields {
-    [] -> "pub type Field\n\n"
-    _ ->
-      "pub type Field {\n"
-      <> string.concat(
-        list.map(fields, fn(field) { "  " <> naming.pascal(field) <> "\n" }),
-      )
-      <> "}\n\n"
-  }
-  let args_type = case fields {
-    [] -> "pub type Args {\n  Args\n}\n\n"
-    _ ->
-      "pub type Args {\n  Args("
-      <> string.join(list.map(fields, fn(field) { field <> ": String" }), ", ")
-      <> ")\n}\n\n"
-  }
-  let args_init = case fields {
-    [] -> "Args"
-    _ ->
-      "Args("
-      <> string.join(list.map(fields, fn(field) { field <> ": \"\"" }), ", ")
-      <> ")"
-  }
-  let set_branches = case fields {
-    [] -> "    live.Set(_, _) -> #(model, effect.none())\n"
-    _ ->
-      string.concat(
-        list.map(fields, fn(field) {
-          "    live.Set("
-          <> naming.pascal(field)
-          <> ", value) -> #(live.State(..model, args: Args(..model.args, "
-          <> field
-          <> ": value)), effect.none())\n"
-        }),
-      )
-  }
-  let #(request_call, request_head, body) = case fields {
-    [] -> #("request()", "fn request() -> Effect(Event) {\n", "json.null()")
-    _ -> #(
-      "request(model.args)",
-      "fn request(args: Args) -> Effect(Event) {\n",
-      "json.object(["
-        <> string.join(
-        list.map(fields, fn(field) {
-          "#(" <> quoted(field) <> ", json.string(args." <> field <> "))"
-        }),
-        ", ",
-      )
-        <> "])",
-    )
-  }
-  let reload = component.after_send == Some("ReloadPage")
-  let reload_imports = case reload {
-    True -> "import lustre/event\n"
-    False -> ""
-  }
-  generated_header
-  <> "\n"
-  <> "import yumemi/front/live\n"
-  <> "import gleam/dynamic.{type Dynamic}\n"
-  <> "import gleam/dynamic/decode\n"
-  <> "import gleam/json\n"
-  <> "import gleam/option.{None, Some}\n"
-  <> "import lustre/effect.{type Effect}\n"
-  <> reload_imports
-  <> "\n"
-  <> field_type
-  <> args_type
-  <> "pub type Error\n\n"
-  <> "pub type Failure {\n  Refused(Error)\n  Broke(String)\n}\n\n"
-  <> "pub type State = live.State(Args, Nil, Dynamic, Failure)\n\n"
-  <> "pub type Event = live.Event(Field, Nil, Dynamic, Failure)\n\n"
-  <> "pub fn init(_args: Nil) -> #(State, Effect(Event)) {\n"
-  <> "  #(live.State(args: "
-  <> args_init
-  <> ", given: Nil, last: None, waiting: False), effect.none())\n}\n\n"
-  <> "pub fn update(model: State, msg: Event, after: live.After) -> #(State, Effect(Event)) {\n"
-  <> "  case msg {\n"
-  <> set_branches
-  <> "    live.Send ->\n"
-  <> "      case model.waiting {\n"
-  <> "        True -> #(model, effect.none())\n"
-  <> "        False -> #(live.State(..model, waiting: True), "
-  <> request_call
-  <> ")\n"
-  <> "      }\n"
-  <> "    live.Given(_) -> #(model, effect.none())\n"
-  <> "    live.Done(result) -> {\n"
-  <> "      let next = live.State(..model, last: Some(result), waiting: False)\n"
-  <> "      case result, after {\n"
-  <> "        Ok(_), live.ReloadPage -> "
-  <> case reload {
-    True -> "#(next, event.emit(\"yumemi-done\", json.null()))\n"
-    False -> "#(next, effect.none())\n"
-  }
-  <> "        _, _ -> #(next, effect.none())\n"
-  <> "      }\n"
-  <> "    }\n"
-  <> "  }\n}\n\n"
-  <> "@external(javascript, \"./transport_ffi.mjs\", \"send\")\n"
-  <> "fn transport_send(method: String, path: String, body: json.Json, blob_fields: List(String), on_ok: fn(Dynamic) -> Nil, on_error: fn(Dynamic) -> Nil) -> Nil\n\n"
-  <> request_head
-  <> "  use dispatch <- effect.from\n"
-  <> "  transport_send(\n"
-  <> "    "
-  <> quoted(route.method)
-  <> ",\n"
-  <> "    "
-  <> quoted(route.path)
-  <> ",\n"
-  <> "    "
-  <> body
-  <> ",\n"
-  <> "    [],\n"
-  <> "    fn(value) { dispatch(live.Done(Ok(value))) },\n"
-  <> "    fn(value) { dispatch(live.Done(Error(Broke(error_text(value))))) },\n"
-  <> "  )\n  Nil\n}\n\n"
-  <> "fn error_text(value: Dynamic) -> String {\n"
-  <> "  case decode.run(value, error_field_decoder(\"code\")) {\n"
-  <> "    Ok(code) if code != \"\" -> code\n"
-  <> "    _ ->\n"
-  <> "      case decode.run(value, error_field_decoder(\"message\")) {\n"
-  <> "        Ok(message) if message != \"\" -> message\n"
-  <> "        _ -> \"request failed\"\n"
-  <> "      }\n"
-  <> "  }\n}\n\n"
-  <> "fn error_field_decoder(field: String) -> decode.Decoder(String) {\n"
-  <> "  decode.optional_field(field, \"\", decode.string, fn(value) {\n"
-  <> "    decode.success(value)\n"
-  <> "  })\n}\n"
-}
-
-fn blob_entry_targets(
-  components: List(reader_front.Component),
-  attached: List(model.AttachedRoute),
-) -> List(#(model.AttachedRoute, reader_front.Component)) {
-  let empty: List(#(model.AttachedRoute, reader_front.Component)) = []
-  components
-  |> list.fold(empty, fn(targets, component) {
-    component.calls
-    |> list.fold(targets, fn(acc, target) {
-      case target {
-        reader_front.ServiceCall(_) -> acc
-        reader_front.AttachedCall(name) ->
-          case list.find(attached, fn(route) { route.name == name }) {
-            Ok(route)
-              if route.name == "BlobCopy"
-              && route.method == "POST"
-              && route.path == "/api/blobs"
-            ->
-              case list.any(acc, fn(found) { found.0.name == route.name }) {
-                True -> acc
-                False -> list.append(acc, [#(route, component)])
-              }
-            _ -> acc
-          }
-      }
-    })
-  })
-}
-
-fn blob_entry_live_text(
-  route: model.AttachedRoute,
-  hashes: hash.Hashes,
-) -> String {
-  let input_hash = digest.short(hash.entry(hashes) <> string.inspect(route))
-  "//// GENERATED from src/server.gleam [sha256:"
-  <> input_hash
-  <> "] — 手で編集しない\n\n"
-  <> "import yumemi/front/live\n"
-  <> "import gleam/dynamic.{type Dynamic}\n"
-  <> "import gleam/dynamic/decode\n"
-  <> "import gleam/json\n"
-  <> "import gleam/option.{None, Some}\n"
-  <> "import lustre/attribute\n"
-  <> "import lustre/effect.{type Effect}\n"
-  <> "import lustre/event\n\n"
-  <> "pub type Args {\n  Args(file: String)\n}\n\n"
-  <> "pub type Field {\n  File\n}\n\n"
-  <> "pub type State = live.State(Args, Nil, String, String)\n\n"
-  <> "pub type Event = live.Event(Field, Nil, String, String)\n\n"
-  <> "pub fn init(_given: Nil) -> #(State, Effect(Event)) {\n"
-  <> "  #(\n"
-  <> "    live.State(args: Args(file: \"\"), given: Nil, last: None, waiting: False),\n"
-  <> "    effect.none(),\n"
-  <> "  )\n}\n\n"
-  <> "pub fn update(model: State, msg: Event) -> #(State, Effect(Event)) {\n"
-  <> "  case msg {\n"
-  <> "    live.Set(File, value) -> #(\n"
-  <> "      live.State(..model, args: Args(file: value)),\n"
-  <> "      effect.none(),\n"
-  <> "    )\n"
-  <> "    live.Send ->\n"
-  <> "      case model.waiting {\n"
-  <> "        True -> #(model, effect.none())\n"
-  <> "        False -> #(live.State(..model, waiting: True), send(model.args))\n"
-  <> "      }\n"
-  <> "    live.Given(_) -> #(model, effect.none())\n"
-  <> "    live.Done(result) -> #(\n"
-  <> "      live.State(..model, last: Some(result), waiting: False),\n"
-  <> "      effect.none(),\n"
-  <> "    )\n"
-  <> "  }\n}\n\n"
-  <> "pub fn file_input() -> List(attribute.Attribute(Event)) {\n"
-  <> "  [\n"
-  <> "    attribute.attribute(\"type\", \"file\"),\n"
-  <> "    attribute.attribute(\"data-yumemi-file-input\", \"\"),\n"
-  <> "    event.on(\"change\", file_input_event()),\n"
-  <> "  ]\n}\n\n"
-  <> "fn file_input_event() -> decode.Decoder(Event) {\n"
-  <> "  decode.map(\n"
-  <> "    decode.dynamic,\n"
-  <> "    fn(event) { live.Set(File, file_token(event)) },\n"
-  <> "  )\n}\n\n"
-  <> "@external(javascript, \"./transport_ffi.mjs\", \"file_token\")\n"
-  <> "fn file_token(event: Dynamic) -> String\n\n"
-  <> "@external(javascript, \"./transport_ffi.mjs\", \"upload_file\")\n"
-  <> "fn transport_upload(\n"
-  <> "  method: String,\n"
-  <> "  path: String,\n"
-  <> "  token: String,\n"
-  <> "  on_ok: fn(String) -> Nil,\n"
-  <> "  on_error: fn(Nil) -> Nil,\n"
-  <> ") -> Nil\n\n"
-  <> "fn send(args: Args) -> Effect(Event) {\n"
-  <> "  effect.from(fn(dispatch) {\n"
-  <> "    transport_upload(\n"
-  <> "      "
-  <> quoted(route.method)
-  <> ",\n"
-  <> "      "
-  <> quoted(route.path)
-  <> ",\n"
-  <> "      args.file,\n"
-  <> "      fn(key) { dispatch(live.Done(Ok(key))) },\n"
-  <> "      fn(_unit) { dispatch(live.Done(Error(\"file upload failed\"))) },\n"
-  <> "    )\n"
-  <> "    Nil\n"
-  <> "  })\n}\n\n"
-  // 0.11.4(H5):URL の写し。framework の blob の口は JSON の `{from: url}` を受けて写した key を返す
-  <> "/// URL の写し(`{from: url}` を JSON で送る)。成功は写した key、失敗は本文の `code`(無ければ `url copy failed`)。\n"
-  <> "/// `Send`(file の upload)と同じ State を使い、送りの間は `waiting`。\n"
-  <> "pub fn copy_from(model: State, url: String) -> #(State, Effect(Event)) {\n"
-  <> "  case model.waiting || url == \"\" {\n"
-  <> "    True -> #(model, effect.none())\n"
-  <> "    False -> #(live.State(..model, waiting: True), send_from(url))\n"
-  <> "  }\n}\n\n"
-  <> "@external(javascript, \"./transport_ffi.mjs\", \"send\")\n"
-  <> "fn transport_send(\n"
-  <> "  method: String,\n"
-  <> "  path: String,\n"
-  <> "  body: json.Json,\n"
-  <> "  blob_fields: List(String),\n"
-  <> "  on_ok: fn(Dynamic) -> Nil,\n"
-  <> "  on_error: fn(Dynamic) -> Nil,\n"
-  <> ") -> Nil\n\n"
-  <> "fn send_from(url: String) -> Effect(Event) {\n"
-  <> "  effect.from(fn(dispatch) {\n"
-  <> "    transport_send(\n"
-  <> "      "
-  <> quoted(route.method)
-  <> ",\n"
-  <> "      "
-  <> quoted(route.path)
-  <> ",\n"
-  <> "      json.object([#(\"from\", json.string(url))]),\n"
-  <> "      [],\n"
-  <> "      fn(value) {\n"
-  <> "        case decode.run(value, decode.at([\"key\"], decode.string)) {\n"
-  <> "          Ok(key) if key != \"\" -> dispatch(live.Done(Ok(key)))\n"
-  <> "          _ -> dispatch(live.Done(Error(\"invalid response\")))\n"
-  <> "        }\n"
-  <> "      },\n"
-  <> "      fn(value) {\n"
-  <> "        case decode.run(value, decode.at([\"code\"], decode.string)) {\n"
-  <> "          Ok(code) if code != \"\" -> dispatch(live.Done(Error(code)))\n"
-  <> "          _ -> dispatch(live.Done(Error(\"url copy failed\")))\n"
-  <> "        }\n"
-  <> "      },\n"
-  <> "    )\n"
-  <> "  })\n}\n"
-}
-
 fn service_for(
   services: List(model.Service),
   variant: String,
@@ -1865,158 +1399,6 @@ fn service_for(
     Ok(service) -> Some(service)
     Error(_) -> None
   }
-}
-
-fn component_services(component: reader_front.Component) -> List(String) {
-  component.calls
-  |> list.filter_map(fn(target) {
-    case target {
-      reader_front.ServiceCall(service) -> Ok(service)
-      reader_front.AttachedCall(attached) -> Ok(attached)
-    }
-  })
-}
-
-fn transport_text(
-  face_name: String,
-  front: reader_front.Front,
-  hashes: hash.Hashes,
-) -> String {
-  let service_worker_input = case front.shell.head.service_worker {
-    Some(service_worker) -> service_worker
-    None -> ""
-  }
-  js_header(
-    face_name <> "/src/components/*.gleam and src/entry.gleam",
-    digest.short(
-      hash.entry(hashes)
-      <> string.inspect(front.components)
-      <> service_worker_input,
-    ),
-  )
-  <> "\n"
-  <> "const selectedFiles = new Map();\n"
-  <> "const uploadedFiles = new Map();\n"
-  <> "const pendingUploads = new Map();\n\n"
-  <> "export function file_token(event) {\n"
-  <> "  const input = event.currentTarget ?? event.target;\n"
-  <> "  if (!(input instanceof HTMLInputElement)) return \"\";\n"
-  <> "  const previous = input.dataset.yumemiFileToken;\n"
-  <> "  if (previous) { selectedFiles.delete(previous); uploadedFiles.delete(previous); }\n"
-  <> "  const file = input.files?.[0];\n"
-  <> "  if (!file) { delete input.dataset.yumemiFileToken; return \"\"; }\n"
-  <> "  const token = `~yumemi-file:${crypto.randomUUID()}`;\n"
-  <> "  selectedFiles.set(token, file);\n"
-  <> "  input.dataset.yumemiFileToken = token;\n"
-  <> "  return token;\n"
-  <> "}\n\n"
-  <> "async function uploadToken(token, method = \"POST\", path = \"/api/blobs\") {\n"
-  <> "  if (uploadedFiles.has(token)) return uploadedFiles.get(token);\n"
-  <> "  const file = selectedFiles.get(token);\n"
-  <> "  if (!file) throw new Error(\"unknown file token\");\n"
-  <> "  if (pendingUploads.has(token)) return pendingUploads.get(token);\n"
-  <> "  const upload = fetch(path, {\n"
-  <> "    method,\n"
-  <> "    headers: { \"content-type\": file.type || \"application/octet-stream\" },\n"
-  <> "    body: file,\n"
-  <> "  }).then(async (response) => {\n"
-  <> "    if (!response.ok) throw new Error(\"blob upload failed\");\n"
-  <> "    const result = await response.json();\n"
-  <> "    if (typeof result?.key !== \"string\" || result.key === \"\") throw new Error(\"blob response has no key\");\n"
-  <> "    selectedFiles.delete(token);\n"
-  <> "    uploadedFiles.set(token, result.key);\n"
-  <> "    return result.key;\n"
-  <> "  }).catch(() => { throw new Error(\"file upload failed\"); })\n"
-  <> "    .finally(() => pendingUploads.delete(token));\n"
-  <> "  pendingUploads.set(token, upload);\n"
-  <> "  return upload;\n"
-  <> "}\n\n"
-  <> "export function send(method, path, body, blobFields, onOk, onError) {\n"
-  <> "  Promise.resolve().then(async () => {\n"
-  <> "    const nextBody = { ...body };\n"
-  <> "    for (const field of blobFields) {\n"
-  <> "      const value = nextBody[field];\n"
-  <> "      if (typeof value !== \"string\") continue;\n"
-  <> "      if (selectedFiles.has(value) || uploadedFiles.has(value)) nextBody[field] = await uploadToken(value);\n"
-  <> "    }\n"
-  <> "    const response = await fetch(path, {\n"
-  <> "      method,\n"
-  <> "      headers: { \"content-type\": \"application/json\" },\n"
-  <> "      body: method === \"GET\" ? undefined : JSON.stringify(nextBody),\n"
-  <> "    });\n"
-  <> "    return response;\n"
-  <> "  }).then((response) => {\n"
-  <> "    if (response.ok) {\n"
-  <> "      response.json().then(onOk).catch(() => onError({ code: \"invalid_response\" }));\n"
-  <> "    } else {\n"
-  <> "      response.json().then(onError).catch(() => onError({ code: \"request_failed\" }));\n"
-  <> "    }\n"
-  <> "  }).catch((error) => onError({ code: error?.message ?? \"network_error\" }));\n"
-  <> "  return undefined;\n"
-  <> "}\n\n"
-  <> "export function upload_file(method, path, token, onOk, onError) {\n"
-  <> "  if (!selectedFiles.has(token) && !uploadedFiles.has(token)) { onError(undefined); return undefined; }\n"
-  <> "  uploadToken(token, method, path)\n"
-  <> "    .then(onOk)\n"
-  <> "    .catch(() => onError(undefined));\n"
-  <> "  return undefined;\n"
-  <> "}\n"
-}
-
-/// client の入口に登録する島 ── `components/` のうち `pub fn app()` を持つもの全部
-/// (`calls` の無い島も登録する。島の登録の源は component の `app()`)。
-fn client_components(
-  front: reader_front.Front,
-  units: List(Unit),
-) -> List(reader_front.Component) {
-  let empty: List(reader_front.Component) = []
-  front.components
-  |> list.filter(fn(component) { component_has_app(units, component) })
-  |> list.fold(empty, fn(acc, component) {
-    case list.any(acc, fn(found) { found.module == component.module }) {
-      True -> acc
-      False -> list.append(acc, [component])
-    }
-  })
-  |> list.sort(fn(left, right) { string.compare(left.module, right.module) })
-}
-
-fn component_has_app(
-  units: List(Unit),
-  component: reader_front.Component,
-) -> Bool {
-  case list.find(units, fn(unit) { unit.path == component.module }) {
-    Ok(unit) ->
-      case g.find_function(g.in_order(unit.module), "app") {
-        Some(function) -> function.publicity == glance.Public
-        None -> False
-      }
-    Error(_) -> False
-  }
-}
-
-/// `calls` / `target` を持つ島(送る先がある component)に `pub fn app()` が無ければ exit 3。
-/// client の入口は `app()` を登録するだけで、島の組み立て(init / update / view / 属性)は component が持つ。
-pub fn client_notes(
-  package: face.Package,
-  front: reader_front.Front,
-) -> List(stop.Note) {
-  front.components
-  |> list.filter(fn(component) {
-    component.calls != [] && !component_has_app(package.units, component)
-  })
-  |> list.map(fn(component) { component.module })
-  |> list.unique
-  |> list.sort(string.compare)
-  |> list.map(fn(module) {
-    stop.Note(
-      stop.Missing,
-      package.name
-        <> "/"
-        <> module
-        <> ": `pub fn app()` が無い(client の入口は島を `app()` で登録する)",
-    )
-  })
 }
 
 /// client で差し替えてよい Page の route(0.11.4、H9)。面の Page の route を全部出し、門の `csp` の当たる Page は
@@ -2049,113 +1431,63 @@ fn navigation(
 fn client_text(
   face_name: String,
   front: reader_front.Front,
-  units: List(Unit),
-  app: model.App,
+  targets: List(LiveTarget),
+  escapes: List(String),
   hashes: hash.Hashes,
   navigation: #(List(String), String),
 ) -> String {
   let #(routes, options) = navigation
-  // 書いた後の読み直し(r2):route 表があれば navigate の `reload`(当たる頁は client 遷移で取り直す)
-  let #(navigation, reload) = case routes {
-    [] -> #(#("", ""), "globalThis.location.assign(globalThis.location.href)")
+  // 書いた後の読み直しと GoTo・reloads の一覧:route 表があれば navigate の `reload` / `go`(client 遷移)
+  let #(navigate_import, navigate_start, hooks) = case routes {
+    [] -> #("", "", "go: null, reload: null")
     _ -> #(
-      #(
-        "import { reload as reloadPage, start as startNavigation } from \"__YUMEMI_BUILD__/yumemi/yumemi/front/navigate.mjs\";\n",
-        "startNavigation({ routes: ["
-          <> string.join(list.map(routes, fn(route) { quoted(route) }), ", ")
-          <> "], boot"
-          <> options
-          <> " });\n",
-      ),
-      "reloadPage()",
+      "import { go as navigateGo, reload as reloadPage, start as startNavigation } from \"__YUMEMI_BUILD__/yumemi/yumemi/front/navigate.mjs\";\n",
+      "startNavigation({ routes: ["
+        <> string.join(list.map(routes, fn(route) { quoted(route) }), ", ")
+        <> "]"
+        <> options
+        <> " });\n",
+      "go: navigateGo, reload: reloadPage",
     )
   }
-  let components = client_components(front, units)
-  let imports =
-    string.concat([
-      "import { register as lustreRegister } from \"__YUMEMI_BUILD__/lustre/lustre.mjs\";\n",
-      "import { run as decodeRun } from \"__YUMEMI_BUILD__/gleam_stdlib/gleam/dynamic/decode.mjs\";\n",
-      "import { Result$isOk, Result$Ok$0 } from \"__YUMEMI_BUILD__/__YUMEMI_FACE__/gleam.mjs\";\n",
-      // 0.11.4(H8):島は sketch の stylesheet の下で描く(class 付きの要素が panic しない)
-      "import { styled } from \"__YUMEMI_BUILD__/yumemi/yumemi/front/island_style.mjs\";\n",
-      navigation.0,
-      string.concat(list.map(components, client_component_import)),
-      string.concat(
-        list.filter_map(components, fn(component) {
-          case component.reloads |> list.first |> option.from_result {
-            Some(reload) ->
-              case service_for(app.services, reload.1) {
-                Some(service) ->
-                  Ok(
-                    "import * as "
-                    <> service.module
-                    <> "Out from \"__YUMEMI_BUILD__/__YUMEMI_FACE__/gen/out/"
-                    <> service.module
-                    <> ".mjs\";\n",
-                  )
-                None -> Error(Nil)
-              }
-            None -> Error(Nil)
-          }
-        }),
-      ),
-    ])
-  let registrations =
-    string.concat(
-      list.map(components, fn(component) {
-        client_registration(component, app.services)
-      }),
-    )
-  let reloads =
-    string.concat(
-      components
-      |> list.filter(fn(component) {
-        component.after_send == Some("ReloadPage")
-      })
-      |> list.map(fn(component) {
-        "listenReload(\"" <> component_tag(component) <> "\");\n"
-      }),
-    )
   js_header(
-    face_name <> "/src/components/*.gleam and src/entry.gleam",
-    digest.short(hash.entry(hashes) <> string.inspect(front.components)),
+    face_name
+      <> "/src/components/*.gleam, src/escapes/*.mjs and src/entry.gleam",
+    digest.short(
+      hash.entry(hashes)
+      <> string.inspect(front.components)
+      <> string.join(escapes, ",")
+      <> string.inspect(targets),
+    ),
   )
   <> "\n"
-  <> imports
+  <> "import { start as startInteractive } from \"__YUMEMI_BUILD__/yumemi/yumemi/front/interactive.mjs\";\n"
+  <> navigate_import
+  <> string.concat(
+    list.map(escapes, fn(name) {
+      "import { mount as escape_"
+      <> name
+      <> " } from \"__YUMEMI_BUILD__/__YUMEMI_FACE__/escapes/"
+      <> name
+      <> ".mjs\";\n"
+    }),
+  )
   <> "\n"
-  <> "function registerWithGiven(app, decoder, tag) {\n"
-  <> "  const element = document.querySelector(tag);\n"
-  <> "  const raw = element?.getAttribute(\"data-yumemi-given\");\n"
-  <> "  if (raw === null) return;\n"
-  <> "  let given;\n"
-  <> "  try {\n"
-  <> "    const decoded = decodeRun(JSON.parse(raw), decoder());\n"
-  <> "    if (!Result$isOk(decoded)) return;\n"
-  <> "    given = Result$Ok$0(decoded);\n"
-  <> "  } catch (_error) {\n"
-  <> "    return;\n"
-  <> "  }\n"
-  <> "  lustreRegister({ ...app, init: () => app.init(given) }, tag);\n"
-  <> "}\n\n"
-  <> "function defined(tag) {\n"
-  <> "  return globalThis.customElements?.get(tag) !== undefined;\n"
-  <> "}\n\n"
-  <> "function listenReload(tag) {\n"
-  <> "  document.querySelectorAll(tag).forEach((element) => {\n"
-  <> "    element.addEventListener(\"yumemi-done\", () => {\n"
-  <> "      "
-  <> reload
-  <> ";\n"
-  <> "    });\n"
-  <> "  });\n"
-  <> "}\n\n"
-  // 0.11.4(H9):島の登録は client 遷移で body を差し替えた後にも走らせ直す
-  <> "function boot() {\n"
-  <> registrations
-  <> reloads
-  <> "}\n\n"
-  <> "boot();\n"
-  <> navigation.1
+  <> "startInteractive({\n"
+  <> "  components: "
+  <> interactive_table(front, targets)
+  <> ",\n"
+  <> "  escapes: { "
+  <> string.join(
+    list.map(escapes, fn(name) { name <> ": escape_" <> name }),
+    ", ",
+  )
+  <> " },\n"
+  <> "  "
+  <> hooks
+  <> ",\n"
+  <> "});\n"
+  <> navigate_start
   <> service_worker_text(front.shell.head.service_worker)
 }
 
@@ -2177,199 +1509,6 @@ fn service_worker_text(service_worker: Option(String)) -> String {
   }
 }
 
-fn client_component_import(component: reader_front.Component) -> String {
-  "import * as "
-  <> component_js_name(component)
-  <> " from \"__YUMEMI_BUILD__/__YUMEMI_FACE__/"
-  <> component.module
-  <> ".mjs\";\n"
-}
-
-fn client_registration(
-  component: reader_front.Component,
-  services: List(model.Service),
-) -> String {
-  let name = component_js_name(component)
-  let tag = component_tag(component)
-  case component.reloads |> list.first |> option.from_result {
-    Some(reload) ->
-      case service_for(services, reload.1) {
-        Some(service) ->
-          "if (!defined(\""
-          <> tag
-          <> "\")) registerWithGiven(styled("
-          <> name
-          <> ".app()), "
-          <> service.module
-          <> "Out.decoder, \""
-          <> tag
-          <> "\");\n"
-        None -> ""
-      }
-    None ->
-      "if (!defined(\""
-      <> tag
-      <> "\")) lustreRegister(styled("
-      <> name
-      <> ".app()), \""
-      <> tag
-      <> "\");\n"
-  }
-}
-
-fn component_js_name(component: reader_front.Component) -> String {
-  naming.snake(last_segment(component.module))
-}
-
-fn component_tag(component: reader_front.Component) -> String {
-  string.replace(component_js_name(component), "_", "-")
-}
-
-fn live_file(
-  app: model.App,
-  units: List(Unit),
-  package: face.Package,
-  service: model.Service,
-  component: reader_front.Component,
-  hashes: hash.Hashes,
-  face_name: String,
-) -> File {
-  live_file_with_error_mode(
-    app,
-    units,
-    package,
-    service,
-    component,
-    hashes,
-    face_name,
-    True,
-  )
-}
-
-fn attached_service_live_file(
-  app: model.App,
-  units: List(Unit),
-  package: face.Package,
-  service: model.Service,
-  component: reader_front.Component,
-  hashes: hash.Hashes,
-  face_name: String,
-) -> File {
-  live_file_with_error_mode(
-    app,
-    units,
-    package,
-    service,
-    component,
-    hashes,
-    face_name,
-    False,
-  )
-}
-
-fn live_file_with_error_mode(
-  app: model.App,
-  units: List(Unit),
-  package: face.Package,
-  service: model.Service,
-  component: reader_front.Component,
-  hashes: hash.Hashes,
-  face_name: String,
-  structured_errors: Bool,
-) -> File {
-  let given_service =
-    component.reloads
-    |> list.first
-    |> option.from_result
-    |> option.then(fn(reload) { service_for(app.services, reload.1) })
-  let component_hash =
-    source_hash(package.units, fn(unit) { unit.path == component.module })
-  let input_hash =
-    digest.short(hash.service(hashes, service.module) <> component_hash)
-  let route = api_route_for(app, hashes, face_name, service.module)
-  File(
-    path: face_name <> "/src/gen/live/" <> service.module <> ".gleam",
-    text: live_text(
-      app,
-      units,
-      service,
-      component,
-      given_service,
-      route,
-      structured_errors,
-      header("src/" <> component.module <> ".gleam", input_hash),
-    ),
-  )
-}
-
-fn live_text(
-  app: model.App,
-  units: List(Unit),
-  service: model.Service,
-  component: reader_front.Component,
-  given_service: Option(model.Service),
-  route: Option(ApiRoute),
-  structured_errors: Bool,
-  generated_header: String,
-) -> String {
-  let validations = validation_specs(app, units, service.args)
-  let service_errors = case structured_errors {
-    True -> service_error_variants(units, service)
-    False -> []
-  }
-  let error_handling = case route {
-    Some(_) -> error_failure_text(service_errors)
-    None -> ""
-  }
-  let blob_args = blob_args(service.args)
-  let wires = arg_wires(units, service)
-  let accepting = accepted.accepts(app, units, service)
-  generated_header
-  <> "\n"
-  <> live_imports(
-    service,
-    given_service,
-    validations != [],
-    component.after_send == Some("ReloadPage"),
-    blob_args != [],
-    list.append(
-      send_imports(wires, route),
-      reply_imports(accepting && option.is_some(route)),
-    ),
-  )
-  <> "\n\n"
-  <> args_type_text(service.args)
-  <> "\n"
-  <> field_type_text(service.args)
-  <> "\n"
-  <> service_error_type_text(service_errors)
-  <> failure_type_text(service_errors)
-  <> reply_type_text(service, accepting)
-  <> state_type_text(service, given_service, accepting)
-  <> "\n"
-  <> init_text(service, given_service)
-  <> "\n"
-  <> update_text(service, component, validations != [])
-  <> "\n"
-  <> file_input_text(blob_args)
-  <> validate_text(validations)
-  <> validation_error_text(validations)
-  <> error_handling
-  <> send_text(service, wires, route, component.after_send, accepting)
-}
-
-fn validation_error_text(
-  validations: List(#(String, String, String)),
-) -> String {
-  case validations {
-    [] -> ""
-    _ ->
-      "fn validation_error_text(errors: List(#(Field, String))) -> String {\n"
-      <> "  errors |> list.map(fn(error) { error.1 }) |> string.join(\"; \")\n"
-      <> "}\n\n"
-  }
-}
-
 fn service_error_variants(
   units: List(Unit),
   service: model.Service,
@@ -2383,16 +1522,6 @@ fn service_error_variants(
       }
     }
     None -> []
-  }
-}
-
-fn service_error_type_text(variants: List(glance.Variant)) -> String {
-  case variants {
-    [] -> "pub type Error\n\n"
-    _ ->
-      "pub type Error {\n"
-      <> string.concat(list.map(variants, error_variant_text))
-      <> "}\n\n"
   }
 }
 
@@ -2415,122 +1544,14 @@ fn error_field_text(field: glance.VariantField) -> String {
   }
 }
 
-fn failure_type_text(variants: List(glance.Variant)) -> String {
+fn service_error_type_text(variants: List(glance.Variant)) -> String {
   case variants {
-    [] -> "pub type Failure {\n  Broke(String)\n}\n\n"
+    [] -> "pub type Error\n\n"
     _ ->
-      "pub type Failure {\n"
-      <> "  Refused(Error)\n"
-      <> "  Broke(String)\n"
+      "pub type Error {\n"
+      <> string.concat(list.map(variants, error_variant_text))
       <> "}\n\n"
   }
-}
-
-fn error_failure_text(variants: List(glance.Variant)) -> String {
-  let branches =
-    variants
-    |> list.filter(fn(variant) { variant.fields == [] })
-    |> list.map(fn(variant) {
-      "    "
-      <> string.inspect(naming.snake(variant.name))
-      <> " -> Refused("
-      <> variant.name
-      <> ")\n"
-    })
-    |> string.concat
-  "fn error_failure(value: Dynamic) -> Failure {\n"
-  <> "  case error_text(value) {\n"
-  <> branches
-  <> "    code -> Broke(code)\n"
-  <> "  }\n"
-  <> "}\n\n"
-  <> "fn error_text(value: Dynamic) -> String {\n"
-  <> "  case decode.run(value, error_field_decoder(\"code\")) {\n"
-  <> "    Ok(code) if code != \"\" -> code\n"
-  <> "    _ ->\n"
-  <> "      case decode.run(value, error_field_decoder(\"message\")) {\n"
-  <> "        Ok(message) if message != \"\" -> message\n"
-  <> "        _ -> \"invalid error payload\"\n"
-  <> "      }\n"
-  <> "  }\n"
-  <> "}\n\n"
-  <> "fn error_field_decoder(field: String) -> decode.Decoder(String) {\n"
-  <> "  decode.optional_field(field, \"\", decode.string, fn(value) {\n"
-  <> "    decode.success(value)\n"
-  <> "  })\n"
-  <> "}\n\n"
-}
-
-fn live_imports(
-  service: model.Service,
-  given_service: Option(model.Service),
-  has_validation: Bool,
-  reloads_page: Bool,
-  has_blob_fields: Bool,
-  send: List(String),
-) -> String {
-  let validation = case has_validation {
-    True -> ["yumemi/spec", "gleam/list", "gleam/string"]
-    False -> []
-  }
-  let given = case given_service {
-    Some(value) -> ["gen/out/" <> value.module]
-    None -> []
-  }
-  let reload = case reloads_page {
-    True -> ["gleam/json", "lustre/event"]
-    False -> []
-  }
-  let file_input = case has_blob_fields {
-    True -> ["lustre/attribute", "lustre/event"]
-    False -> []
-  }
-  let base = [
-    "yumemi/front/live",
-    "gleam/dynamic.{type Dynamic}",
-    "gleam/dynamic/decode",
-    "gen/out/" <> service.module,
-    "gleam/json",
-    "gleam/option.{None, Some}",
-    "lustre/effect.{type Effect}",
-  ]
-  base
-  |> list.append(validation)
-  |> list.append(reload)
-  |> list.append(file_input)
-  |> list.append(given)
-  |> list.append(send)
-  |> list.unique
-  |> list.sort(string.compare)
-  |> list.map(fn(path) { "import " <> path })
-  |> string.join("\n")
-}
-
-fn args_type_text(args: List(model.Arg)) -> String {
-  case args {
-    [] -> "pub type Args {\n  Args\n}\n"
-    _ ->
-      "pub type Args {\n  Args(\n"
-      <> string.concat(
-        list.map(args, fn(arg) { "    " <> arg.name <> ": String,\n" }),
-      )
-      <> "  )\n}\n"
-  }
-}
-
-fn field_type_text(args: List(model.Arg)) -> String {
-  let variants =
-    args
-    |> list.map(fn(arg) { "  " <> naming.pascal(arg.name) })
-    |> string.join("\n")
-  case variants {
-    "" -> "pub type Field\n"
-    _ -> "pub type Field {\n" <> variants <> "\n}\n"
-  }
-}
-
-fn blob_args(args: List(model.Arg)) -> List(model.Arg) {
-  list.filter(args, fn(arg) { blob_shape(arg.type_) })
 }
 
 fn blob_shape(shape: model.TypeShape) -> Bool {
@@ -2546,375 +1567,6 @@ fn blob_shape(shape: model.TypeShape) -> Bool {
   }
 }
 
-fn file_input_text(args: List(model.Arg)) -> String {
-  case args {
-    [] -> ""
-    _ ->
-      string.concat(
-        list.map(args, fn(arg) {
-          "pub fn "
-          <> arg.name
-          <> "_file_input() -> List(attribute.Attribute(Event)) {\n"
-          <> "  file_input("
-          <> naming.pascal(arg.name)
-          <> ")\n"
-          <> "}\n\n"
-        }),
-      )
-      <> "fn file_input(field: Field) -> List(attribute.Attribute(Event)) {\n"
-      <> "  [\n"
-      <> "    attribute.attribute(\"type\", \"file\"),\n"
-      <> "    attribute.attribute(\"data-yumemi-file-input\", \"\"),\n"
-      <> "    event.on(\"change\", file_input_event(field)),\n"
-      <> "  ]\n}\n\n"
-      <> "fn file_input_event(field: Field) -> decode.Decoder(Event) {\n"
-      <> "  decode.map(\n"
-      <> "    decode.dynamic,\n"
-      <> "    fn(event) { live.Set(field, file_token(event)) },\n"
-      <> "  )\n}\n\n"
-      <> "@external(javascript, \"./transport_ffi.mjs\", \"file_token\")\n"
-      <> "fn file_token(event: Dynamic) -> String\n\n"
-  }
-}
-
-fn state_type_text(
-  service: model.Service,
-  given_service: Option(model.Service),
-  accepting: Bool,
-) -> String {
-  let given = given_type(given_service)
-  let out = case accepting {
-    True -> "Reply"
-    False -> service.module <> ".Out"
-  }
-  "pub type State = live.State(Args, "
-  <> given
-  <> ", "
-  <> out
-  <> ", Failure)\n\n"
-  <> "pub type Event = live.Event(Field, "
-  <> given
-  <> ", "
-  <> out
-  <> ", Failure)\n"
-}
-
-/// 0.11.3(H4)── commit の後に続きを持つ Service(`accepted.accepts`)の live は、Out の代わりに
-/// `Reply` を持つ。HTTP は 202 Accepted と 1 欄の本文(`{<root>: id}`、欄の名は ★ `respond` が替えてよい)を
-/// 返すので、send はそれを `Accepted(id)` に読み、`Done(Ok(_))` として after_send へ進む。
-/// commit の前に `step.done` で終わる道の 200 は、今までどおり Out を読んで `Replied(out)`。
-fn reply_type_text(service: model.Service, accepting: Bool) -> String {
-  case accepting {
-    False -> ""
-    True ->
-      "/// commit の後に続きを持つ Service。HTTP は 202 Accepted と `{<root>: id}` で応える\n"
-      <> "pub type Reply {\n"
-      <> "  Replied("
-      <> service.module
-      <> ".Out)\n"
-      <> "  Accepted(id: String)\n"
-      <> "}\n\n"
-  }
-}
-
-fn reply_imports(accepting: Bool) -> List(String) {
-  case accepting {
-    True -> ["gleam/dict"]
-    False -> []
-  }
-}
-
-fn reply_decoder_text(service: model.Service) -> String {
-  "\nfn reply_decoder() -> decode.Decoder(Reply) {\n"
-  <> "  decode.one_of(decode.map("
-  <> service.module
-  <> ".decoder(), Replied), [\n"
-  <> "    accepted_decoder(),\n"
-  <> "  ])\n}\n\n"
-  <> "fn accepted_decoder() -> decode.Decoder(Reply) {\n"
-  <> "  use fields <- decode.then(decode.dict(decode.string, decode.string))\n"
-  <> "  case dict.to_list(fields) {\n"
-  <> "    [#(_, id)] -> decode.success(Accepted(id))\n"
-  <> "    _ -> decode.failure(Accepted(\"\"), \"Accepted\")\n"
-  <> "  }\n}\n"
-}
-
-fn given_type(given_service: Option(model.Service)) -> String {
-  case given_service {
-    Some(service) -> service.module <> ".Out"
-    None -> "Nil"
-  }
-}
-
-fn init_text(
-  service: model.Service,
-  given_service: Option(model.Service),
-) -> String {
-  "pub fn init(given: "
-  <> given_type(given_service)
-  <> ") -> #(State, Effect(Event)) {\n"
-  <> "  #(\n"
-  <> "    live.State(\n"
-  <> "      args: "
-  <> args_constructor(service.args)
-  <> ",\n"
-  <> "      given: given,\n"
-  <> "      last: None,\n"
-  <> "      waiting: False,\n"
-  <> "    ),\n"
-  <> "    effect.none(),\n"
-  <> "  )\n}\n"
-}
-
-fn args_constructor(args: List(model.Arg)) -> String {
-  case args {
-    [] -> "Args"
-    _ ->
-      "Args(\n"
-      <> string.concat(
-        list.map(args, fn(arg) { "        " <> arg.name <> ": \"\",\n" }),
-      )
-      <> "      )"
-  }
-}
-
-fn update_text(
-  service: model.Service,
-  component: reader_front.Component,
-  has_validation: Bool,
-) -> String {
-  let invalid_input = case has_validation {
-    True -> "validation_error_text(errors)"
-    False -> "\"invalid input\""
-  }
-  "pub fn update(model: State, msg: Event) -> #(State, Effect(Event)) {\n"
-  <> "  case msg {\n"
-  <> case service.args {
-    [] -> "    live.Set(_, _) -> #(model, effect.none())\n"
-    _ -> set_branches(service.args)
-  }
-  <> "    live.Send ->\n"
-  <> "      case model.waiting {\n"
-  <> "        True -> #(model, effect.none())\n"
-  <> "        False ->\n"
-  <> "          case validate(model) {\n"
-  <> "            Error(errors) -> #(\n"
-  <> "              live.State(..model, last: Some(Error(Broke("
-  <> invalid_input
-  <> ")))),\n"
-  <> "              effect.none(),\n"
-  <> "            )\n"
-  <> "            Ok(args) -> #(live.State(..model, waiting: True), send(args))\n"
-  <> "          }\n"
-  <> "      }\n"
-  <> "    live.Given(given) -> #(\n"
-  <> "      live.State(..model, given: given),\n"
-  <> "      effect.none(),\n"
-  <> "    )\n"
-  <> "    live.Done(result) -> {\n"
-  <> "      let next = live.State(..model, last: Some(result), waiting: False)\n"
-  <> "      case result {\n"
-  <> "        Ok(_) -> "
-  <> done_success(component)
-  <> "        Error(_) -> #(next, effect.none())\n"
-  <> "      }\n    }\n"
-  <> "  }\n}\n"
-}
-
-fn set_branches(args: List(model.Arg)) -> String {
-  args
-  |> list.map(fn(arg) {
-    let updated = case list.length(args) {
-      1 -> "Args(" <> arg.name <> ": value)"
-      _ -> "Args(..model.args, " <> arg.name <> ": value)"
-    }
-    "    live.Set("
-    <> naming.pascal(arg.name)
-    <> ", value) -> #(\n"
-    <> "      live.State(..model, args: "
-    <> updated
-    <> "),\n"
-    <> "      effect.none(),\n"
-    <> "    )\n"
-  })
-  |> string.concat
-}
-
-fn done_success(component: reader_front.Component) -> String {
-  case component.after_send {
-    Some("ReloadPage") -> "#(next, reload_page())\n"
-    _ -> "#(next, effect.none())\n"
-  }
-}
-
-fn validate_text(validations: List(#(String, String, String))) -> String {
-  case validations {
-    [] ->
-      "pub fn validate(model: State) -> Result(Args, List(#(Field, String))) {\n"
-      <> "  Ok(model.args)\n}\n\n"
-    _ ->
-      "pub fn validate(model: State) -> Result(Args, List(#(Field, String))) {\n"
-      <> "  let errors = list.flatten([\n"
-      <> string.concat(
-        list.map(validations, fn(validation) {
-          let #(field, spec, message) = validation
-          "    validate_field("
-          <> field
-          <> ", model.args."
-          <> field_name(field)
-          <> ", "
-          <> spec
-          <> ", "
-          <> quoted(message)
-          <> "),\n"
-        }),
-      )
-      <> "  ])\n"
-      <> "  case errors {\n"
-      <> "    [] -> Ok(model.args)\n"
-      <> "    _ -> Error(errors)\n"
-      <> "  }\n}\n\n"
-      <> "fn validate_field(\n"
-      <> "  field: Field,\n"
-      <> "  raw: String,\n"
-      <> "  constraint: spec.Spec,\n"
-      <> "  message: String,\n"
-      <> ") -> List(#(Field, String)) {\n"
-      <> "  case spec.validate(raw, constraint) {\n"
-      <> "    Ok(_) -> []\n"
-      <> "    Error(_) -> [#(field, message)]\n"
-      <> "  }\n}\n\n"
-  }
-}
-
-fn field_name(field: String) -> String {
-  naming.snake(field)
-}
-
-fn send_text(
-  service: model.Service,
-  wires: List(#(model.Arg, Wire)),
-  route: Option(ApiRoute),
-  after_send: Option(String),
-  accepting: Bool,
-) -> String {
-  let #(response_decoder, reply) = case accepting {
-    True -> #("reply_decoder()", "reply")
-    False -> #(service.module <> ".decoder()", "out")
-  }
-  let blob_fields =
-    blob_args(service.args)
-    |> list.map(fn(arg) { quoted(arg.name) })
-    |> string.join(", ")
-  let blob_fields = "[" <> blob_fields <> "]"
-  let reload = case after_send {
-    Some("ReloadPage") ->
-      "\nfn reload_page() -> Effect(Event) {\n  event.emit(\"yumemi-done\", json.null())\n}\n"
-    _ -> ""
-  }
-  let send = case route {
-    None -> "fn send(_args: Args) -> Effect(Event) {\n  effect.none()\n}\n"
-    Some(route) ->
-      "@external(javascript, \"./transport_ffi.mjs\", \"send\")\n"
-      <> "fn transport_send(\n"
-      <> "  method: String,\n"
-      <> "  path: String,\n"
-      <> "  body: json.Json,\n"
-      <> "  blob_fields: List(String),\n"
-      <> "  on_ok: fn(Dynamic) -> Nil,\n"
-      <> "  on_error: fn(Dynamic) -> Nil,\n"
-      <> ") -> Nil\n\n"
-      <> "fn send(args: Args) -> Effect(Event) {\n"
-      <> "  effect.from(fn(dispatch) {\n"
-      <> "    transport_send(\n"
-      <> "      "
-      <> quoted(route.method)
-      <> ",\n"
-      <> "      "
-      <> case route.method {
-        "GET" -> query_path_expression(route.path, service.args)
-        _ -> path_expression(route.path)
-      }
-      <> ",\n"
-      <> "      "
-      <> case route.method {
-        "GET" -> "json.object([])"
-        _ -> body_expression(wires)
-      }
-      <> ",\n"
-      <> "      "
-      <> blob_fields
-      <> ",\n"
-      <> "      fn(value) {\n"
-      <> "        case decode.run(value, "
-      <> response_decoder
-      <> ") {\n"
-      <> "          Ok("
-      <> reply
-      <> ") -> dispatch(live.Done(Ok("
-      <> reply
-      <> ")))\n"
-      <> "          Error(_) -> dispatch(live.Done(Error(Broke(\"invalid response\"))))\n"
-      <> "        }\n"
-      <> "      },\n"
-      <> "      fn(value) { dispatch(live.Done(Error(error_failure(value)))) },\n"
-      <> "    )\n"
-      <> "  })\n}\n"
-      <> case route.method, send_imports(wires, Some(route)) {
-        "GET", [_, ..] ->
-          "\nfn with_query(path: String, pairs: List(#(String, String))) -> String {\n"
-          <> "  case pairs {\n"
-          <> "    [] -> path\n"
-          <> "    _ -> path <> \"?\" <> uri.query_to_string(pairs)\n"
-          <> "  }\n}\n"
-        "GET", _ -> ""
-        _, _ -> wire_helpers_text(wires)
-      }
-      <> case accepting {
-        True -> reply_decoder_text(service)
-        False -> ""
-      }
-  }
-  send <> reload
-}
-
-fn path_expression(path: String) -> String {
-  case string.split(path, ":") {
-    [] -> quoted(path)
-    [first, ..rest] ->
-      quoted(first)
-      <> string.concat(
-        list.map(rest, fn(part) {
-          let #(name, suffix) = path_part(part)
-          " <> args." <> name <> " <> " <> quoted(suffix)
-        }),
-      )
-  }
-}
-
-fn path_part(part: String) -> #(String, String) {
-  case string.split(part, "/") {
-    [name, suffix, ..rest] -> #(name, "/" <> string.join([suffix, ..rest], "/"))
-    [name] -> #(name, "")
-    [] -> #("", "")
-  }
-}
-
-fn body_expression(wires: List(#(model.Arg, Wire))) -> String {
-  "json.object([\n"
-  <> string.concat(
-    list.map(wires, fn(pair) {
-      let #(arg, wire) = pair
-      "    #(\""
-      <> arg.name
-      <> "\", "
-      <> wire_value_expression(wire, "args." <> arg.name)
-      <> "),\n"
-    }),
-  )
-  <> "  ])"
-}
-
 /// Args の欄の送り方(0.11.2)。live は欄を文字列で持ち、send で Args の型の JSON にする。
 type Wire {
   /// Bool / Int / Float は H1 の規則で真偽・数に、それ以外(値型・Id・列挙・日付…)は文字列
@@ -2926,13 +1578,6 @@ type Wire {
   /// record・組・Dict・スカラでない要素の List ── 欄の文字列を JSON の本文として読み、そのまま送る
   /// (形は back の decoder が決める。読めない綴りは文字列のまま送り、back が `invalid_argument` で返す)
   JsonWire
-}
-
-fn arg_wires(
-  units: List(Unit),
-  service: model.Service,
-) -> List(#(model.Arg, Wire)) {
-  list.map(service.args, fn(arg) { #(arg, arg_wire(units, service, arg.type_)) })
 }
 
 fn arg_wire(
@@ -2993,194 +1638,16 @@ fn record_type(
   }
 }
 
-/// Args の欄の値(live は文字列で持つ)を Args の型で JSON に(0.11.2 H1・r2)。Bool は真偽、
-/// Int / Float は数(読めない綴りは文字列のまま送り、back が `invalid_argument` で返す)。
-fn wire_value_expression(wire: Wire, value: String) -> String {
-  case wire {
-    OptionWire(inner) ->
-      "case "
-      <> value
-      <> " {\n"
-      <> "  \"\" -> json.null()\n"
-      <> "  value -> "
-      <> wire_value_expression(inner, "value")
-      <> "\n"
-      <> "}"
-    ScalarWire(kind) -> json_value_expression(kind, value)
-    ListWire(kind) ->
-      "case list_items("
-      <> value
-      <> ") {\n"
-      <> "  Ok(items) -> json.array(items, fn(value) { "
-      <> json_value_expression(kind, "value")
-      <> " })\n"
-      <> "  Error(_) -> json.string("
-      <> value
-      <> ")\n"
-      <> "}"
-    JsonWire -> "json_text(" <> value <> ")"
-  }
-}
-
-fn wire_helpers_text(wires: List(#(model.Arg, Wire))) -> String {
-  let flat = list.map(wires, fn(pair) { inner_wire(pair.1) })
-  let lists = case list.any(flat, fn(wire) { is_list_wire(wire) }) {
-    True ->
-      "\n/// List の欄は JSON の文字列の配列(`[\"a\",\"b\"]`、空の欄は `[]`)。\n"
-      <> "fn list_items(text: String) -> Result(List(String), Nil) {\n"
-      <> "  case text {\n"
-      <> "    \"\" -> Ok([])\n"
-      <> "    _ ->\n"
-      <> "      case json.parse(text, decode.list(decode.string)) {\n"
-      <> "        Ok(items) -> Ok(items)\n"
-      <> "        Error(_) -> Error(Nil)\n"
-      <> "      }\n"
-      <> "  }\n}\n"
-    False -> ""
-  }
-  let texts = case list.contains(flat, JsonWire) {
-    True ->
-      "\n/// record・組・Dict の欄は JSON の本文。読めなければ文字列のまま送る。\n"
-      <> "fn json_text(text: String) -> json.Json {\n"
-      <> "  case json.parse(text, json_value()) {\n"
-      <> "    Ok(value) -> value\n"
-      <> "    Error(_) -> json.string(text)\n"
-      <> "  }\n}\n\n"
-      <> "fn json_value() -> decode.Decoder(json.Json) {\n"
-      <> "  use <- decode.recursive\n"
-      <> "  decode.one_of(decode.map(decode.string, json.string), [\n"
-      <> "    decode.map(decode.bool, json.bool),\n"
-      <> "    decode.map(decode.int, json.int),\n"
-      <> "    decode.map(decode.float, json.float),\n"
-      <> "    decode.map(decode.list(json_value()), json.preprocessed_array),\n"
-      <> "    decode.map(decode.dict(decode.string, json_value()), fn(entries) {\n"
-      <> "      json.object(dict.to_list(entries))\n"
-      <> "    }),\n"
-      <> "    decode.success(json.null()),\n"
-      <> "  ])\n}\n"
-    False -> ""
-  }
-  lists <> texts
-}
-
-fn inner_wire(wire: Wire) -> Wire {
-  case wire {
-    OptionWire(inner) -> inner_wire(inner)
-    _ -> wire
-  }
-}
-
-fn is_list_wire(wire: Wire) -> Bool {
-  case wire {
-    ListWire(_) -> True
-    _ -> False
-  }
-}
-
-fn wire_kinds(wire: Wire) -> List(ScalarKind) {
-  case wire {
-    OptionWire(inner) -> wire_kinds(inner)
-    ScalarWire(kind) | ListWire(kind) -> [kind]
-    JsonWire -> []
-  }
-}
-
-fn json_value_expression(kind: ScalarKind, value: String) -> String {
-  case kind {
-    BoolArg ->
-      "case "
-      <> value
-      <> " {\n"
-      <> "  \"true\" | \"True\" | \"on\" -> json.bool(True)\n"
-      <> "  \"false\" | \"False\" | \"\" -> json.bool(False)\n"
-      <> "  other -> json.string(other)\n"
-      <> "}"
-    IntArg ->
-      "case int.parse("
-      <> value
-      <> ") {\n"
-      <> "  Ok(number) -> json.int(number)\n"
-      <> "  Error(_) -> json.string("
-      <> value
-      <> ")\n"
-      <> "}"
-    FloatArg ->
-      "case float.parse("
-      <> value
-      <> "), int.parse("
-      <> value
-      <> ") {\n"
-      <> "  Ok(number), _ -> json.float(number)\n"
-      <> "  _, Ok(number) -> json.float(int.to_float(number))\n"
-      <> "  _, _ -> json.string("
-      <> value
-      <> ")\n"
-      <> "}"
-    TextArg -> "json.string(" <> value <> ")"
-  }
-}
-
-/// GET の path(0.11.2 H2)── path の穴に入らない Args を query に載せる。Option の空は載せない、
-/// Bool は `true` / `false` の綴りに揃える(back の query の読みと同じ綴り)。
-fn query_path_expression(path: String, args: List(model.Arg)) -> String {
-  let holes = path_holes(path)
-  let pairs =
-    args
-    |> list.filter(fn(arg) { !list.contains(holes, arg.name) })
-    |> list.map(query_pair_expression)
-  case pairs {
-    [] -> path_expression(path)
-    _ ->
-      "with_query(\n"
-      <> "        "
-      <> path_expression(path)
-      <> ",\n"
-      <> "        list.flatten([\n"
-      <> string.concat(
-        list.map(pairs, fn(pair) { "          " <> pair <> ",\n" }),
-      )
-      <> "        ]),\n"
-      <> "      )"
-  }
-}
-
-fn query_pair_expression(arg: model.Arg) -> String {
-  case arg.type_ {
-    model.NamedShape(
-      module: Some("gleam/option"),
-      name: "Option",
-      parameters: [inner],
-    ) ->
-      "case args."
-      <> arg.name
-      <> " { \"\" -> [] value -> [#("
-      <> quoted(arg.name)
-      <> ", "
-      <> query_value_expression(inner, "value")
-      <> ")] }"
-    shape ->
-      "[#("
-      <> quoted(arg.name)
-      <> ", "
-      <> query_value_expression(shape, "args." <> arg.name)
-      <> ")]"
-  }
-}
-
-fn query_value_expression(shape: model.TypeShape, value: String) -> String {
-  case scalar_kind(shape) {
-    BoolArg ->
-      "case "
-      <> value
-      <> " { \"true\" | \"True\" | \"on\" -> \"true\" \"false\" | \"False\" | \"\" -> \"false\" other -> other }"
-    _ -> value
-  }
-}
-
 fn path_holes(path: String) -> List(String) {
   case string.split(path, ":") {
     [] | [_] -> []
-    [_, ..rest] -> list.map(rest, fn(part) { path_part(part).0 })
+    [_, ..rest] ->
+      list.map(rest, fn(part) {
+        case string.split_once(part, "/") {
+          Ok(#(name, _)) -> name
+          Error(_) -> part
+        }
+      })
   }
 }
 
@@ -3200,135 +1667,6 @@ fn scalar_kind(shape: model.TypeShape) -> ScalarKind {
   }
 }
 
-/// live の send が使う import(Args の型の encode と GET の query)。
-fn send_imports(
-  wires: List(#(model.Arg, Wire)),
-  route: Option(ApiRoute),
-) -> List(String) {
-  case route {
-    None -> []
-    Some(route) -> {
-      let holes = path_holes(route.path)
-      let kinds = list.flat_map(wires, fn(pair) { wire_kinds(pair.1) })
-      case route.method {
-        "GET" ->
-          case
-            list.any(wires, fn(pair) { !list.contains(holes, { pair.0 }.name) })
-          {
-            True -> ["gleam/list", "gleam/uri"]
-            False -> []
-          }
-        _ ->
-          list.flatten([
-            case
-              list.contains(kinds, IntArg) || list.contains(kinds, FloatArg)
-            {
-              True -> ["gleam/int"]
-              False -> []
-            },
-            case list.contains(kinds, FloatArg) {
-              True -> ["gleam/float"]
-              False -> []
-            },
-            case list.any(wires, fn(pair) { inner_wire(pair.1) == JsonWire }) {
-              True -> ["gleam/dict"]
-              False -> []
-            },
-          ])
-      }
-    }
-  }
-}
-
-fn validation_specs(
-  app: model.App,
-  units: List(Unit),
-  args: List(model.Arg),
-) -> List(#(String, String, String)) {
-  args
-  |> list.filter_map(fn(arg) {
-    case value_type_for_arg(app.value_types, arg.type_) {
-      Some(value) ->
-        Ok(#(
-          naming.pascal(arg.name),
-          spec_expression(units, value),
-          spec_error_message(units, value),
-        ))
-      None -> Error(Nil)
-    }
-  })
-}
-
-fn spec_error_message(units: List(Unit), value: model.ValueType) -> String {
-  case list.find(units, fn(unit) { unit.path == "types" }) {
-    Ok(unit) -> {
-      let module = g.in_order(unit.module)
-      case g.find_constant(module, value.name) {
-        Some(constant) -> spec_error_message_text(constant.value, value)
-        None -> fallback_validation_message(value)
-      }
-    }
-    Error(_) -> fallback_validation_message(value)
-  }
-}
-
-fn spec_error_message_text(
-  expression: glance.Expression,
-  value: model.ValueType,
-) -> String {
-  case g.ctor_name(expression) {
-    Some("Pattern") ->
-      case
-        spec_bounds(expression),
-        g.labelled(expression, "regex") |> option.then(g.string_value)
-      {
-        Some(#(min, max)), Some(regex) ->
-          "must contain "
-          <> min
-          <> " to "
-          <> max
-          <> " characters and match /"
-          <> regex
-          <> "/"
-        _, _ -> fallback_validation_message(value)
-      }
-    Some("Text") | Some("MarkdownText") ->
-      case spec_bounds(expression) {
-        Some(#(min, max)) ->
-          "must contain " <> min <> " to " <> max <> " characters"
-        None -> fallback_validation_message(value)
-      }
-    Some("Range") ->
-      case spec_bounds(expression) {
-        Some(#(min, max)) ->
-          "must be an integer from " <> min <> " through " <> max
-        None -> fallback_validation_message(value)
-      }
-    Some("Uuid") -> "must be a UUID"
-    Some("Markdown") -> "must be valid Markdown"
-    Some("Url") -> "must be a valid URL"
-    Some(_) | None -> fallback_validation_message(value)
-  }
-}
-
-fn fallback_validation_message(value: model.ValueType) -> String {
-  case value.spec, value.range {
-    "Pattern", _ -> "must match the configured pattern"
-    "Text", _ -> "must satisfy the configured length"
-    "MarkdownText", _ -> "must satisfy the configured Markdown length"
-    "Range", Some(#(min, max)) ->
-      "must be an integer from "
-      <> int.to_string(min)
-      <> " through "
-      <> int.to_string(max)
-    "Range", None -> "must satisfy the configured integer range"
-    "Uuid", _ -> "must be a UUID"
-    "Markdown", _ -> "must be valid Markdown"
-    "Url", _ -> "must be a valid URL"
-    _, _ -> "does not satisfy the configured constraint"
-  }
-}
-
 fn value_type_for_arg(
   value_types: List(model.ValueType),
   shape: model.TypeShape,
@@ -3345,51 +1683,6 @@ fn value_type_for_arg(
   }
 }
 
-fn spec_expression(units: List(Unit), value: model.ValueType) -> String {
-  case list.find(units, fn(unit) { unit.path == "types" }) {
-    Ok(unit) -> {
-      let module = g.in_order(unit.module)
-      case g.find_constant(module, value.name) {
-        Some(constant) -> spec_constructor_text(constant.value, value)
-        None -> fallback_spec(value)
-      }
-    }
-    Error(_) -> fallback_spec(value)
-  }
-}
-
-fn spec_constructor_text(
-  expression: glance.Expression,
-  value: model.ValueType,
-) -> String {
-  case g.ctor_name(expression) {
-    Some("Pattern") ->
-      case spec_bounds(expression), g.labelled(expression, "regex") {
-        Some(#(min, max)), Some(regex) ->
-          case g.string_value(regex) {
-            Some(raw) ->
-              "spec.Pattern(min: "
-              <> min
-              <> ", max: "
-              <> max
-              <> ", regex: "
-              <> quoted(raw)
-              <> ")"
-            None -> fallback_spec(value)
-          }
-        _, _ -> fallback_spec(value)
-      }
-    Some("Text") -> bounded_spec("spec.Text", expression, value)
-    Some("MarkdownText") -> bounded_spec("spec.MarkdownText", expression, value)
-    Some("Range") -> bounded_spec("spec.Range", expression, value)
-    Some("Uuid") -> "spec.Uuid"
-    Some("Markdown") -> "spec.Markdown"
-    Some("Url") -> "spec.Url"
-    Some(_) -> fallback_spec(value)
-    None -> fallback_spec(value)
-  }
-}
-
 fn spec_bounds(expression: glance.Expression) -> Option(#(String, String)) {
   case
     g.labelled(expression, "min") |> option.then(g.int_value),
@@ -3397,32 +1690,6 @@ fn spec_bounds(expression: glance.Expression) -> Option(#(String, String)) {
   {
     Some(min), Some(max) -> Some(#(min, max))
     _, _ -> None
-  }
-}
-
-fn bounded_spec(
-  name: String,
-  expression: glance.Expression,
-  value: model.ValueType,
-) -> String {
-  case spec_bounds(expression) {
-    Some(#(min, max)) -> name <> "(min: " <> min <> ", max: " <> max <> ")"
-    None -> fallback_spec(value)
-  }
-}
-
-fn fallback_spec(value: model.ValueType) -> String {
-  case value.spec, value.range {
-    "Range", Some(#(min, max)) ->
-      "spec.Range(min: "
-      <> int.to_string(min)
-      <> ", max: "
-      <> int.to_string(max)
-      <> ")"
-    "Uuid", _ -> "spec.Uuid"
-    "Markdown", _ -> "spec.Markdown"
-    "Url", _ -> "spec.Url"
-    _, _ -> "spec.Markdown"
   }
 }
 
@@ -3889,7 +2156,7 @@ fn load_page_text(
   input_hash: String,
 ) -> String {
   let theme = theme_source(page_sources)
-  let theme_background_blob = theme_background_is_blob(units, theme)
+  let theme_background_blob = theme_background_is_blob(app, theme)
   let vars = list.append(page.vars, front.layout.vars)
   let data_fields =
     ["    layout: layout.Data,\n", "    vars: Vars,\n"]
@@ -4006,13 +2273,11 @@ fn theme_source(sources: List(LoadSource)) -> Option(LoadSource) {
   |> option.from_result
 }
 
-/// 頁の色の地の画像は `theme.PageTheme` の `Option(Blob)`。theme を取る頁は app の media の
-/// variant(`media.W1600`)で URL を組む(今の形のまま、`gen/media` へつなぐのは段 C)。
-fn theme_background_is_blob(
-  _units: List(Unit),
-  theme: Option(LoadSource),
-) -> Bool {
-  option.is_some(theme)
+/// 頁の色の地の画像は `theme.PageTheme` の `Option(Blob)`。theme を取る頁は生成物 `gen/media` の
+/// `theme_background` の variant で URL を組む(0.12 段 C、app の module の名を生成器が焼かない)。back に media の
+/// 宣言が無い app は key のまま(地の画像の URL を組めない)。
+fn theme_background_is_blob(app: model.App, theme: Option(LoadSource)) -> Bool {
+  option.is_some(theme) && option.is_some(app.server.media)
 }
 
 fn theme_global_text(
@@ -4048,7 +2313,7 @@ fn theme_global_text(
   <> case theme_background_blob {
     True ->
       "fn theme_image_url(value: Blob) -> String {\n"
-      <> "  media.url(value, media.W1600)\n"
+      <> "  media.url(value, media.theme_background)\n"
       <> "}\n"
     False ->
       "fn theme_image_url(value: Blob) -> String {\n"
@@ -4110,7 +2375,7 @@ fn load_imports(
     theme_background_blob,
     string.contains(body, "fn theme_image_url")
   {
-    True, _ -> ["yumemi/blob.{type Blob}", "media"]
+    True, _ -> ["yumemi/blob.{type Blob}", "gen/media"]
     False, True -> ["yumemi/blob.{type Blob}"]
     False, False -> []
   }
@@ -5209,17 +3474,56 @@ fn route_text(
   pages: List(reader_front.Page),
   input_hash: String,
 ) -> String {
-  let rows =
+  let sorted =
     pages
-    |> list.map(fn(page) { reader_front.route_path(page.path) })
-    |> list.sort(route_order)
-    |> list.map(fn(path) { "  PageRoute(path: \"" <> path <> "\")," })
+    |> list.map(fn(page) {
+      #(route_variant(page), reader_front.route_path(page.path))
+    })
+    |> list.sort(fn(left, right) { route_order(left.1, right.1) })
+  let variants =
+    sorted
+    |> list.map(fn(pair) { pair.0 })
+    |> list.unique
+  let rows =
+    sorted
+    |> list.map(fn(pair) {
+      "  PageRoute(route: " <> pair.0 <> ", path: \"" <> pair.1 <> "\"),"
+    })
     |> string.join("\n")
   header(face_name <> "/src/pages/**/page.gleam", input_hash)
-  <> "\npub type PageRoute {\n  PageRoute(path: String)\n}\n\n"
+  <> "\n/// 面の Page の閉じた enum(interactive Component の `live.GoTo` の行き先)。\n"
+  <> case variants {
+    [] -> "pub type Route\n"
+    _ ->
+      "pub type Route {\n"
+      <> string.concat(
+        list.map(variants, fn(variant) { "  " <> variant <> "\n" }),
+      )
+      <> "}\n"
+  }
+  <> "\npub type PageRoute {\n  PageRoute(route: Route, path: String)\n}\n\n"
   <> "pub const routes: List(PageRoute) = [\n"
   <> rows
   <> "\n]\n"
+}
+
+/// 第 18 条:2 つの Page の `Route` の variant 名が重なる。
+fn route_variant_notes(
+  package: face.Package,
+  front: reader_front.Front,
+) -> List(stop.Note) {
+  let names = list.map(front.pages, route_variant)
+  names
+  |> list.filter(fn(name) { list.count(names, fn(other) { other == name }) > 1 })
+  |> list.unique
+  |> list.map(fn(name) {
+    stop.Note(
+      class: stop.Conflict,
+      text: package.name
+        <> ": 2 つの Page の生成名が重なる(第 18 条、gen/route の Route): "
+        <> name,
+    )
+  })
 }
 
 /// route 表の順 ── 段ごとに比べ、同じ位置で literal の段を param の段より先に置く
@@ -5353,8 +3657,11 @@ fn face_service_names(front: reader_front.Front) -> List(String) {
     front.services,
     list.flat_map(front.components, fn(component) {
       list.append(
-        component_services(component),
-        list.map(component.reloads, fn(reload) { reload.1 }),
+        list.map(component.calls, reader_front.call_target_name),
+        case component.reloads {
+          Some(reloads) -> [reloads.read]
+          None -> []
+        },
       )
     }),
   )
@@ -5409,6 +3716,8 @@ fn shell_text(
   package: face.Package,
   front: reader_front.Front,
   hashes: hash.Hashes,
+  state_css: String,
+  has_escapes: Bool,
 ) -> String {
   let decoder_services = shell_services(app, units, front)
   let source_hash =
@@ -5430,12 +3739,17 @@ fn shell_text(
   <> shell_decoder_text(decoder_services)
   <> "\n"
   <> shell_runtime_text(
-    front.components != [] || option.is_some(front.shell.head.service_worker),
+    // 0.12 段 C:逃げ道だけの面も client を読む(`yumemi-escape` の mount)
+    front.components != []
+      || option.is_some(front.shell.head.service_worker)
+      || has_escapes,
     uses_current_route(front),
     uses_page_theme(app, units, front),
     static_grid_css(front.layout)
       <> static_pages_grid_css(front.pages)
-      <> generated_front_css(front),
+      <> generated_front_css(front)
+      // 0.12 段 C:interactive Component の `when` の枝を隠す規則(SSR の頁の `<style>` にも出す)
+      <> state_css,
   )
 }
 
@@ -5639,8 +3953,11 @@ fn shell_services(
     front.components
     |> list.flat_map(fn(component) {
       list.append(
-        component_services(component),
-        list.map(component.reloads, fn(reload) { reload.1 }),
+        list.map(component.calls, reader_front.call_target_name),
+        case component.reloads {
+          Some(reloads) -> [reloads.read]
+          None -> []
+        },
       )
       |> list.filter_map(fn(variant) {
         case service_for(app.services, variant) {
@@ -5707,34 +4024,14 @@ fn shell_page_tables(
   <> "\n]);\n"
 }
 
+/// 0.12 段 C:given は無くなった(`reloads` の戻りは out の span か頁の取り直し)。殻の runtime の givens の
+/// 表は空のまま(`shell_runtime_text` は Y6 の持ち場なので、空の表を読む形を残す)。
 fn shell_given_rows(
-  app: model.App,
-  front: reader_front.Front,
-  page: reader_front.Page,
+  _app: model.App,
+  _front: reader_front.Front,
+  _page: reader_front.Page,
 ) -> String {
-  front.components
-  |> list.filter_map(fn(component) {
-    case component.reloads |> list.first |> option.from_result {
-      Some(reload) ->
-        case service_for(app.services, reload.1) {
-          Some(service) ->
-            Ok(
-              "      { tag: "
-              <> quoted(component_tag(component))
-              <> ", service: service.Service$"
-              <> naming.pascal(service.module)
-              <> "$const, "
-              <> shell_service_args(app, front, page, service.module)
-              <> ", decoder: decode"
-              <> naming.pascal(service.module)
-              <> " },\n",
-            )
-          None -> Error(Nil)
-        }
-      None -> Error(Nil)
-    }
-  })
-  |> string.concat
+  ""
 }
 
 fn shell_var_rows(
@@ -6832,8 +5129,11 @@ pub fn route_notes(
   front.components
   |> list.flat_map(fn(component) {
     list.append(
-      component_services(component),
-      list.map(component.reloads, fn(reload) { reload.1 }),
+      list.map(component.calls, reader_front.call_target_name),
+      case component.reloads {
+        Some(reloads) -> [reloads.read]
+        None -> []
+      },
     )
     |> list.unique
     |> list.filter_map(fn(variant) {
@@ -9605,16 +7905,202 @@ pub fn surface_notes(
   package: face.Package,
   front: reader_front.Front,
 ) -> List(stop.Note) {
+  let #(raw_notes, raw_files, raw_rules) = raw_css_notes(package, front)
+  let #(escape_notes, escapes) = escape_notes(package)
+  let all_calls =
+    list.fold(package.units, 0, fn(total, unit) {
+      total
+      + list.count(unit_references(unit), fn(found) { found == "gen/escapes" })
+    })
+  let component_calls =
+    list.fold(front.components, 0, fn(total, component) {
+      total + component.escape_calls
+    })
+  let to_service =
+    list.count(app.server.counted, fn(counted) {
+      counted.face == package.name
+      && case counted.sink {
+        model.ServiceSink(_) -> True
+        _ -> False
+      }
+    })
+  let line = case escapes, raw_files, to_service, all_calls {
+    [], 0, 0, 0 -> []
+    _, _, _, _ -> [
+      stop.Note(
+        class: stop.Warning,
+        text: package.name
+          <> ": 逃げ道 ── escape "
+          <> int.to_string(list.length(escapes))
+          <> " 種 "
+          <> int.to_string(all_calls)
+          <> " か所(うち interactive Component の中 "
+          <> int.to_string(component_calls)
+          <> ")、生の CSS "
+          <> int.to_string(raw_files)
+          <> " file "
+          <> int.to_string(raw_rules)
+          <> " 規則、数える口の送り先 ToService "
+          <> int.to_string(to_service),
+      ),
+    ]
+  }
   list.flatten([
     lustre_dependency_notes(package, front),
     shell_theme_notes(package, front),
     page_theme_notes(app, units, front),
-    raw_css_notes(package, front),
+    raw_notes,
+    escape_notes,
+    static_src_notes(package),
+    line,
   ])
 }
 
-/// 第 2 条:面の `gleam.toml` の直接の依存に lustre / sketch_lustre が無い。0.11 の形の
-/// interactive Component を持つ面だけが例外(段 C の Y3 で消す)。
+/// unit の中の `gen/escapes` ほかの関数の参照(module の道)。
+fn unit_references(unit: Unit) -> List(String) {
+  reader_front.module_references(unit)
+}
+
+/// 面の `src/escapes/*.mjs` の名(並べた順)。
+fn escape_names(package: face.Package) -> List(String) {
+  case simplifile.read_directory(package.path <> "/src/escapes") {
+    Ok(entries) ->
+      entries
+      |> list.filter(fn(entry) { string.ends_with(entry, ".mjs") })
+      |> list.map(fn(entry) { string.drop_end(entry, 4) })
+      |> list.filter(valid_escape_name)
+      |> list.sort(string.compare)
+    Error(_) -> []
+  }
+}
+
+fn valid_escape_name(name: String) -> Bool {
+  case string.to_graphemes(name) {
+    [first, ..rest] ->
+      string.contains("abcdefghijklmnopqrstuvwxyz", first)
+      && list.all(rest, fn(char) {
+        string.contains("abcdefghijklmnopqrstuvwxyz0123456789_", char)
+      })
+    [] -> False
+  }
+}
+
+/// 第 5・6 条:`src/escapes/` の外の `.mjs`、逃げ道の名の形、`mount` の export。
+fn escape_notes(package: face.Package) -> #(List(stop.Note), List(String)) {
+  let outside =
+    mjs_files(package.path <> "/src", "")
+    |> list.filter(fn(path) {
+      !string.starts_with(path, "escapes/") && !string.starts_with(path, "gen/")
+    })
+    |> list.map(fn(path) {
+      stop.Note(
+        class: stop.Conflict,
+        text: package.name
+          <> "/src/"
+          <> path
+          <> ": src/escapes/ の外に .mjs がある(第 5 条、JS は名前付きの逃げ道 src/escapes/<name>.mjs に置く)",
+      )
+    })
+  let entries = case simplifile.read_directory(package.path <> "/src/escapes") {
+    Ok(entries) ->
+      list.filter(entries, fn(entry) { string.ends_with(entry, ".mjs") })
+    Error(_) -> []
+  }
+  let names =
+    list.flat_map(entries, fn(entry) {
+      let name = string.drop_end(entry, 4)
+      let where = package.name <> "/src/escapes/" <> entry
+      case valid_escape_name(name) {
+        False -> [
+          stop.Note(
+            class: stop.Conflict,
+            text: where <> ": 逃げ道の名が [a-z][a-z0-9_]* でない(第 6 条)",
+          ),
+        ]
+        True ->
+          case simplifile.read(package.path <> "/src/escapes/" <> entry) {
+            Ok(text) ->
+              case exports_mount(text) {
+                True -> []
+                False -> [
+                  stop.Note(
+                    class: stop.Missing,
+                    text: where <> ": mount を export していない(第 6 条)",
+                  ),
+                ]
+              }
+            Error(_) -> []
+          }
+      }
+    })
+  #(list.append(outside, names), escape_names(package))
+}
+
+fn exports_mount(text: String) -> Bool {
+  string.contains(text, "export function mount")
+  || string.contains(text, "export async function mount")
+  || string.contains(text, "export const mount")
+  || string.contains(text, "export { mount")
+  || string.contains(text, "mount }")
+}
+
+fn mjs_files(root: String, prefix: String) -> List(String) {
+  case simplifile.read_directory(root <> "/" <> prefix) {
+    Ok(entries) ->
+      list.flat_map(entries, fn(entry) {
+        let path = case prefix {
+          "" -> entry
+          _ -> prefix <> "/" <> entry
+        }
+        case simplifile.is_directory(root <> "/" <> path) {
+          Ok(True) -> mjs_files(root, path)
+          _ ->
+            case string.ends_with(entry, ".mjs") {
+              True -> [path]
+              False -> []
+            }
+        }
+      })
+    Error(_) -> []
+  }
+}
+
+/// 第 43 条:`el.static_src` の path が `priv/static` に無い(literal でないのは reader が止める)。
+fn static_src_notes(package: face.Package) -> List(stop.Note) {
+  package.units
+  |> list.flat_map(reader_front.static_src_paths)
+  |> list.filter(fn(pair) { !static_file_exists(package, pair.1) })
+  |> list.map(fn(pair) {
+    stop.Note(
+      class: stop.Missing,
+      text: package.name
+        <> "/src/"
+        <> pair.0
+        <> ".gleam el.static_src "
+        <> pair.1
+        <> ": file が priv/static に無い(第 43 条)",
+    )
+  })
+}
+
+/// `src/gen/escapes.gleam`:逃げ道ごとに `<yumemi-escape name>` を出す関数。
+fn escapes_text(package: face.Package, names: List(String)) -> String {
+  header(
+    package.name <> "/src/escapes/*.mjs",
+    digest.short(string.join(names, ",")),
+  )
+  <> "
+import yumemi/front/el
+"
+  <> string.concat(list.map(names, fn(name) { "
+/// 逃げ道 src/escapes/" <> name <> ".mjs。子は JS が無いときに見える代わりの中身。
+" <> "pub fn " <> name <> "(attributes: List(el.Attribute), fallback: List(el.Element)) -> el.Element {
+" <> "  el.escape_point(" <> quoted(name) <> ", attributes, fallback)
+}
+" }))
+}
+
+/// 第 2 条:面の `gleam.toml` の直接の依存に lustre / sketch_lustre が無い(0.12 段 C で例外は無くなった)。
 fn lustre_dependency_notes(
   package: face.Package,
   front: reader_front.Front,
@@ -9624,10 +8110,10 @@ fn lustre_dependency_notes(
       let found =
         direct_dependencies(toml)
         |> list.filter(fn(name) { name == "lustre" || name == "sketch_lustre" })
-      case found, front.legacy_components {
-        [], _ -> []
-        _, [_, ..] -> []
-        names, [] -> [
+      let _ = front
+      case found {
+        [] -> []
+        names -> [
           stop.Note(
             class: stop.Conflict,
             text: package.name
@@ -9749,11 +8235,12 @@ fn page_theme_notes(
   })
 }
 
-/// 第 28〜30 条と規則の数え。数えは exit 0 の警告で、面ごとに 1 行。
+/// 第 28〜30 条と規則の数え。同じ file を 2 か所で読んでも 1 回と数え、検査も 1 回(0.12 段 C、Y2 柏木 P1-4)。
+/// 戻りは #(停止の Note, file の数, 規則の数)。数えは面ごとの逃げ道の 1 行に入る。
 fn raw_css_notes(
   package: face.Package,
   front: reader_front.Front,
-) -> List(stop.Note) {
+) -> #(List(stop.Note), Int, Int) {
   let shell_sheets =
     list.map(front.shell.head.stylesheets, fn(href) {
       #("src/shell.gleam stylesheets", href)
@@ -9762,7 +8249,18 @@ fn raw_css_notes(
     list.map(front.static_sheets, fn(pair) {
       #("src/" <> pair.0 <> ".gleam el.static_sheet", pair.1)
     })
-  let sheets = list.append(shell_sheets, block_sheets)
+  let sheets =
+    list.append(shell_sheets, block_sheets)
+    |> list.fold([], fn(acc: List(#(String, String)), sheet) {
+      case
+        list.any(acc, fn(found) {
+          normal_static(found.1) == normal_static(sheet.1)
+        })
+      {
+        True -> acc
+        False -> list.append(acc, [sheet])
+      }
+    })
   let checked =
     list.map(sheets, fn(sheet) {
       let #(where, path) = sheet
@@ -9797,24 +8295,14 @@ fn raw_css_notes(
       }
     })
   let rules = list.fold(checked, 0, fn(total, item) { total + item.0 })
-  let count = case sheets {
-    [] -> []
-    _ -> [
-      stop.Note(
-        class: stop.Warning,
-        text: package.name
-          <> ": 生の CSS の逃げ道 "
-          <> int.to_string(list.length(sheets))
-          <> " file(shell.stylesheets "
-          <> int.to_string(list.length(shell_sheets))
-          <> "・el.static_sheet "
-          <> int.to_string(list.length(block_sheets))
-          <> ")、規則 "
-          <> int.to_string(rules),
-      ),
-    ]
+  #(list.flat_map(checked, fn(item) { item.1 }), list.length(sheets), rules)
+}
+
+fn normal_static(path: String) -> String {
+  case string.starts_with(path, "/") {
+    True -> path
+    False -> "/" <> path
   }
-  list.append(list.flat_map(checked, fn(item) { item.1 }), count)
 }
 
 fn static_path(package: face.Package, path: String) -> String {
@@ -9829,4 +8317,1098 @@ fn static_file_exists(package: face.Package, path: String) -> Bool {
     Ok(True) -> True
     _ -> False
   }
+}
+
+// ── interactive Component の生成物(0.12 段 C、51 v6「interactive Component の生成物」)────────────
+//
+// Service ごとの live module(`src/gen/live/<name>.gleam`)は `Args`・`Field`・`Error`・`When`・`Slot` と
+// `bind`・`bind_check`・`bind_choice`・`bind_file`・`when`・`out`・`send` を出す。State・Event・update は無い。
+// `src/gen/interactive.gleam` は Component ごとに SSR の関数を出し、client.mjs は Component の表を runtime
+// (`yumemi/front/interactive.mjs`)に渡す。
+
+/// live module 1 つ(Component の `calls` の 1 要素)。
+type LiveTarget {
+  LiveTarget(
+    /// live module の名(snake)。送りの印 `data-yumemi-send` と control の name の前置きも同じ
+    name: String,
+    /// GENERATED の source
+    source: String,
+    input_hash: String,
+    method: String,
+    /// `:name` の穴を持つ path
+    path: String,
+    args: List(LiveArg),
+    errors: List(glance.Variant),
+    /// Slot の構成子の名 → Out の欄の道
+    slots: List(#(String, String)),
+    read: Bool,
+    /// Out の木に List がある(読みの戻りは頁の取り直し)
+    list_out: Bool,
+    /// file の上げ口そのもの(本文が file、戻りは `{key}`)
+    upload: Bool,
+    /// Out の欄の名(GoTo の穴の検査、第 15 条)。202 の Reply を返す Service は穴を検査しない
+    out_fields: List(String),
+    accepting: Bool,
+    /// attached の口(`Entry`)。Service でないので after_send の組を持てない(戻りの後は Stay)
+    entry: Bool,
+  )
+}
+
+type LiveArg {
+  LiveArg(name: String, wire: Wire, blob: Bool, constraints: List(String))
+}
+
+fn live_targets(
+  app: model.App,
+  units: List(Unit),
+  package: face.Package,
+  front: reader_front.Front,
+  hashes: hash.Hashes,
+) -> List(LiveTarget) {
+  let face_name = package.name
+  front.components
+  |> list.flat_map(fn(component) {
+    let component_hash =
+      source_hash(package.units, fn(unit) { unit.path == component.module })
+    list.filter_map(component.calls, fn(target) {
+      live_target(
+        app,
+        units,
+        face_name,
+        hashes,
+        component,
+        component_hash,
+        target,
+      )
+    })
+  })
+  |> list.fold([], fn(acc: List(LiveTarget), target) {
+    case list.any(acc, fn(found) { found.name == target.name }) {
+      True -> acc
+      False -> list.append(acc, [target])
+    }
+  })
+  |> list.sort(fn(left, right) { string.compare(left.name, right.name) })
+}
+
+fn live_target(
+  app: model.App,
+  units: List(Unit),
+  face_name: String,
+  hashes: hash.Hashes,
+  component: reader_front.Component,
+  component_hash: String,
+  target: reader_front.CallTarget,
+) -> Result(LiveTarget, Nil) {
+  let name = reader_front.live_module(target)
+  let source = "src/" <> component.module <> ".gleam"
+  case service_for(app.services, reader_front.call_target_name(target)) {
+    Some(service) ->
+      case api_route_for(app, hashes, face_name, service.module) {
+        Some(route) -> {
+          let fields = output_fields(units, service.module)
+          Ok(LiveTarget(
+            name: service.module,
+            source: source,
+            input_hash: digest.short(
+              hash.service(hashes, service.module) <> component_hash,
+            ),
+            method: route.method,
+            path: route.path,
+            args: list.map(service.args, fn(arg) {
+              LiveArg(
+                name: arg.name,
+                wire: arg_wire(units, service, arg.type_),
+                blob: blob_shape(arg.type_),
+                constraints: arg_constraints(app, units, arg),
+              )
+            }),
+            errors: service_error_variants(units, service),
+            slots: fields
+              |> list.filter(fn(field) { !gl_type_has_list(field.1) })
+              |> list.map(fn(field) {
+                #("Out" <> naming.pascal(field.0), field.0)
+              }),
+            read: service.effect == model.ReadEffect,
+            list_out: list.any(fields, fn(field) { gl_type_has_list(field.1) }),
+            upload: False,
+            out_fields: list.map(fields, fn(field) { field.0 }),
+            accepting: accepted.accepts(app, units, service),
+            entry: False,
+          ))
+        }
+        None -> Error(Nil)
+      }
+    None ->
+      case
+        list.find(app.attached, fn(route) {
+          route.name == reader_front.call_target_name(target)
+        })
+      {
+        Ok(route) -> {
+          let upload =
+            route.name == "BlobCopy"
+            && route.method == "POST"
+            && route.path == "/api/blobs"
+          let input_hash =
+            digest.short(
+              hash.entry(hashes) <> string.inspect(route) <> component_hash,
+            )
+          Ok(LiveTarget(
+            name: name,
+            source: source,
+            input_hash: input_hash,
+            method: route.method,
+            path: colon_path(route.path),
+            args: case upload {
+              // file を上げるか、file が無ければ `from` の URL を写す(0.11.4 H5 の copy_from)
+              True -> [
+                LiveArg(
+                  name: "file",
+                  wire: ScalarWire(TextArg),
+                  blob: True,
+                  constraints: [],
+                ),
+                LiveArg(
+                  name: "from",
+                  wire: ScalarWire(TextArg),
+                  blob: False,
+                  constraints: [],
+                ),
+              ]
+              False ->
+                list.map(attached_body_fields(app, route), fn(field) {
+                  LiveArg(
+                    name: field,
+                    wire: ScalarWire(TextArg),
+                    blob: False,
+                    constraints: [],
+                  )
+                })
+            },
+            errors: [],
+            slots: case upload {
+              True -> [#("OutKey", "key")]
+              False -> []
+            },
+            read: route.method == "GET",
+            list_out: False,
+            upload: upload,
+            out_fields: case upload {
+              True -> ["key"]
+              False -> []
+            },
+            accepting: False,
+            entry: True,
+          ))
+        }
+        Error(_) -> Error(Nil)
+      }
+  }
+}
+
+fn gl_type_has_list(type_: glance.Type) -> Bool {
+  case type_ {
+    glance.NamedType(name: "List", ..) -> True
+    glance.NamedType(parameters: parameters, ..) ->
+      list.any(parameters, gl_type_has_list)
+    glance.TupleType(elements: elements, ..) ->
+      list.any(elements, gl_type_has_list)
+    _ -> False
+  }
+}
+
+/// Spec から写せる制約検証(`live.Constraint` の構成子の字)。属性に写らない Spec は server に任せる。
+fn arg_constraints(
+  app: model.App,
+  units: List(Unit),
+  arg: model.Arg,
+) -> List(String) {
+  let optional = case arg.type_ {
+    model.NamedShape(module: Some("gleam/option"), name: "Option", ..) -> True
+    _ -> False
+  }
+  let inner = case arg.type_ {
+    model.NamedShape(
+      module: Some("gleam/option"),
+      name: "Option",
+      parameters: [inner],
+    ) -> inner
+    shape -> shape
+  }
+  case value_type_for_arg(app.value_types, inner) {
+    None -> []
+    Some(value) -> {
+      let expression =
+        list.find(units, fn(unit) { unit.path == "types" })
+        |> result.map(fn(unit) {
+          g.find_constant(g.in_order(unit.module), value.name)
+        })
+        |> result.unwrap(None)
+        |> option.map(fn(constant) { constant.value })
+      case expression {
+        None -> []
+        Some(expression) -> {
+          let bounds = case g.ctor_name(expression) {
+            Some("Pattern") | Some("Text") | Some("MarkdownText") ->
+              spec_bounds(expression)
+            _ -> None
+          }
+          let lengths = case bounds {
+            Some(#(min, max)) ->
+              list.flatten([
+                case int.parse(min) {
+                  Ok(number) if number > 0 && !optional -> [
+                    "live.MinLength(" <> min <> ")",
+                    "live.Required",
+                  ]
+                  Ok(number) if number > 0 -> ["live.MinLength(" <> min <> ")"]
+                  _ -> []
+                },
+                ["live.MaxLength(" <> max <> ")"],
+              ])
+            None -> []
+          }
+          let pattern = case g.ctor_name(expression) {
+            Some("Pattern") ->
+              case
+                g.labelled(expression, "regex") |> option.then(g.string_value)
+              {
+                Some(regex) -> [
+                  "live.Pattern(" <> quoted(html_pattern(regex)) <> ")",
+                ]
+                None -> []
+              }
+            _ -> []
+          }
+          list.append(lengths, pattern)
+        }
+      }
+    }
+  }
+}
+
+/// HTML の `pattern` は全体に暗に掛かるので、正規表現の頭と尾の `^` / `$` を落とす。
+fn html_pattern(regex: String) -> String {
+  let regex = case string.starts_with(regex, "^") {
+    True -> string.drop_start(regex, 1)
+    False -> regex
+  }
+  case string.ends_with(regex, "$") {
+    True -> string.drop_end(regex, 1)
+    False -> regex
+  }
+}
+
+fn kebab(name: String) -> String {
+  string.replace(naming.snake(name), "_", "-")
+}
+
+fn live_module_text(target: LiveTarget) -> String {
+  let svc = quoted(target.name)
+  let args_type = case target.args {
+    [] -> "pub type Args {\n  Args\n}\n"
+    args ->
+      "pub type Args {\n  Args("
+      <> string.join(list.map(args, fn(arg) { arg.name <> ": String" }), ", ")
+      <> ")\n}\n"
+  }
+  let field_type = case target.args {
+    [] -> "pub type Field\n"
+    args ->
+      "pub type Field {\n"
+      <> string.concat(
+        list.map(args, fn(arg) { "  " <> naming.pascal(arg.name) <> "\n" }),
+      )
+      <> "}\n"
+  }
+  let slot_type = case target.slots {
+    [] -> "pub type Slot\n"
+    slots ->
+      "pub type Slot {\n"
+      <> string.concat(list.map(slots, fn(slot) { "  " <> slot.0 <> "\n" }))
+      <> "}\n"
+  }
+  let field_case = fn(body: fn(LiveArg) -> String) {
+    case target.args {
+      [] ->
+        "  case field {\n    _ -> "
+        <> body(LiveArg("", ScalarWire(TextArg), False, []))
+        <> "\n  }\n"
+      args ->
+        "  case field {\n"
+        <> string.concat(
+          list.map(args, fn(arg) {
+            "    " <> naming.pascal(arg.name) <> " -> " <> body(arg) <> "\n"
+          }),
+        )
+        <> "  }\n"
+    }
+  }
+  let error_codes =
+    list.map(target.errors, fn(variant) {
+      #(
+        case variant.fields {
+          [] -> variant.name
+          _ -> variant.name <> "(..)"
+        },
+        kebab(variant.name),
+      )
+    })
+  header(target.source, target.input_hash)
+  <> "\n"
+  <> "import yumemi/front/css\n"
+  <> "import yumemi/front/el\n"
+  <> "import yumemi/front/live\n\n"
+  <> args_type
+  <> "\n"
+  <> field_type
+  <> "\n"
+  <> service_error_type_text(target.errors)
+  <> "pub type When {\n  Idle\n  Waiting\n  Succeeded\n  Failed\n  Refused(Error)\n}\n\n"
+  <> slot_type
+  <> "\n"
+  <> "/// name=\""
+  <> target.name
+  <> ".<field>\" と、Spec から写せる制約検証の属性と value。\n"
+  <> "pub fn bind(field: Field, value: String) -> el.Attribute {\n"
+  <> field_case(fn(arg) {
+    case arg.name {
+      "" -> "live.bind(" <> svc <> ", \"\", value, [])"
+      _ ->
+        "live.bind("
+        <> svc
+        <> ", "
+        <> quoted(arg.name)
+        <> ", value, ["
+        <> string.join(arg.constraints, ", ")
+        <> "])"
+    }
+  })
+  <> "}\n\n"
+  <> "/// checkbox。\n"
+  <> "pub fn bind_check(field: Field, checked: Bool) -> el.Attribute {\n"
+  <> "  live.bind_check("
+  <> svc
+  <> ", field_name(field), checked)\n}\n\n"
+  <> "/// select と radio の name(選択肢は attr.value / attr.selected)。\n"
+  <> "pub fn bind_choice(field: Field) -> el.Attribute {\n"
+  <> "  live.bind_choice("
+  <> svc
+  <> ", field_name(field))\n}\n\n"
+  <> "/// file の control(Blob の欄)。送る前に runtime が上げ、key を Args に入れる。\n"
+  <> "pub fn bind_file(field: Field) -> el.Attribute {\n"
+  <> "  live.bind_file("
+  <> svc
+  <> ", field_name(field))\n}\n\n"
+  <> "/// data-yumemi-when=\""
+  <> target.name
+  <> ".<state>\" の枝。\n"
+  <> "pub fn when(state: When, children: List(el.Element)) -> el.Element {\n"
+  <> "  live.when("
+  <> svc
+  <> ", state_name(state), children)\n}\n\n"
+  <> "/// data-yumemi-out=\""
+  <> target.name
+  <> ".<slot>\" の空の span。\n"
+  <> "pub fn out(slot: Slot) -> el.Element {\n"
+  <> "  live.out("
+  <> svc
+  <> ", slot_name(slot))\n}\n\n"
+  <> "/// 送りのボタン。叩くのはこの Service 1 本。\n"
+  <> "pub fn send(class: css.Class, children: List(el.Element)) -> el.Element {\n"
+  <> "  live.send("
+  <> svc
+  <> ", class, children)\n}\n\n"
+  <> "/// `data-yumemi-args` の JSON(生成物の `gen/interactive` が使う)。\n"
+  <> "@internal\n"
+  <> "pub fn args_json(args: Args) -> String {\n"
+  <> case target.args {
+    [] -> "  let _ = args\n  live.json_object([])\n"
+    args ->
+      "  live.json_object([\n"
+      <> string.concat(
+        list.map(args, fn(arg) {
+          "    #("
+          <> quoted(arg.name)
+          <> ", live.json_string(args."
+          <> arg.name
+          <> ")),\n"
+        }),
+      )
+      <> "  ])\n"
+  }
+  <> "}\n\n"
+  <> "fn field_name(field: Field) -> String {\n"
+  <> field_case(fn(arg) { quoted(arg.name) })
+  <> "}\n\n"
+  <> "fn state_name(state: When) -> String {\n"
+  <> "  case state {\n"
+  <> "    Idle -> \"idle\"\n    Waiting -> \"waiting\"\n    Succeeded -> \"succeeded\"\n    Failed -> \"failed\"\n"
+  <> "    Refused(error) -> \"refused-\" <> error_code(error)\n"
+  <> "  }\n}\n\n"
+  <> "fn error_code(error: Error) -> String {\n"
+  <> case error_codes {
+    [] -> "  case error {\n    _ -> \"\"\n  }\n"
+    codes ->
+      "  case error {\n"
+      <> string.concat(
+        list.map(codes, fn(code) {
+          "    " <> code.0 <> " -> " <> quoted(code.1) <> "\n"
+        }),
+      )
+      <> "  }\n"
+  }
+  <> "}\n\n"
+  <> "fn slot_name(slot: Slot) -> String {\n"
+  <> case target.slots {
+    [] -> "  case slot {\n    _ -> \"\"\n  }\n"
+    slots ->
+      "  case slot {\n"
+      <> string.concat(
+        list.map(slots, fn(slot) {
+          "    " <> slot.0 <> " -> " <> quoted(slot.1) <> "\n"
+        }),
+      )
+      <> "  }\n"
+  }
+  <> "}\n"
+}
+
+/// `src/gen/interactive.gleam`:Component ごとに、calls の順の Args(と view が受けるなら With)を受けて
+/// タグの中に form と view を描く関数。
+fn interactive_text(
+  package: face.Package,
+  front: reader_front.Front,
+  targets: List(LiveTarget),
+) -> String {
+  let components = placeable_components(front, targets)
+  let input_hash =
+    source_hash(package.units, fn(unit) {
+      string.starts_with(unit.path, "components/")
+    })
+  let lives =
+    components
+    |> list.flat_map(fn(component) {
+      list.map(component.calls, reader_front.live_module)
+    })
+    |> list.unique
+    |> list.sort(string.compare)
+  header(package.name <> "/src/components/*.gleam", input_hash)
+  <> "\n"
+  <> string.concat(
+    list.map(components, fn(component) {
+      "import "
+      <> component.module
+      <> " as "
+      <> naming.snake(last_segment(component.module))
+      <> "_component\n"
+    }),
+  )
+  <> string.concat(
+    list.map(lives, fn(live) {
+      "import gen/live/" <> live <> " as " <> live <> "_live\n"
+    }),
+  )
+  <> "import yumemi/front/el\n"
+  <> "import yumemi/front/live\n"
+  <> string.concat(
+    list.map(components, fn(component) {
+      let module = naming.snake(last_segment(component.module))
+      let lives = list.map(component.calls, reader_front.live_module)
+      let params =
+        list.map(lives, fn(live) { live <> ": " <> live <> "_live.Args" })
+        |> list.append(case component.with_fields {
+          Some(_) -> ["with: " <> module <> "_component.With"]
+          None -> []
+        })
+      let arguments =
+        lives
+        |> list.append(case component.with_fields {
+          Some(_) -> ["with"]
+          None -> []
+        })
+      "\npub fn "
+      <> module
+      <> "("
+      <> string.join(params, ", ")
+      <> ") -> el.Element {\n"
+      <> "  live.component(\n"
+      <> "    "
+      <> quoted(reader_front.component_tag(component))
+      <> ",\n"
+      <> "    live.json_object([\n"
+      <> string.concat(
+        list.map(lives, fn(live) {
+          "      #("
+          <> quoted(live)
+          <> ", "
+          <> live
+          <> "_live.args_json("
+          <> live
+          <> ")),\n"
+        }),
+      )
+      <> "    ]),\n"
+      <> "    "
+      <> module
+      <> "_component.view("
+      <> string.join(arguments, ", ")
+      <> "),\n"
+      <> "  )\n}\n"
+    }),
+  )
+}
+
+/// `gen/interactive` に関数を出す Component(view があり、calls の Service が全部 live を持つ)。
+fn placeable_components(
+  front: reader_front.Front,
+  targets: List(LiveTarget),
+) -> List(reader_front.Component) {
+  front.components
+  |> list.filter(fn(component) {
+    reader_front.view_ok(component)
+    && list.all(component.calls, fn(call) {
+      list.any(targets, fn(target) {
+        target.name == reader_front.live_module(call)
+      })
+    })
+  })
+  |> list.sort(fn(left, right) { string.compare(left.module, right.module) })
+}
+
+fn then_json(then: reader_front.Then, front: reader_front.Front) -> String {
+  let notice = fn(notice: Option(String)) {
+    case notice {
+      Some(text) -> ", \"notice\": " <> json_quoted(text)
+      None -> ""
+    }
+  }
+  case then {
+    reader_front.ThenStay -> "{ \"then\": \"stay\" }"
+    reader_front.ThenReload(notice: value) ->
+      "{ \"then\": \"reload\"" <> notice(value) <> " }"
+    reader_front.ThenGoTo(route: route, notice: value) ->
+      "{ \"then\": \"goto\", \"path\": "
+      <> json_quoted(route_path_for(front, route) |> option.unwrap("/"))
+      <> notice(value)
+      <> " }"
+  }
+}
+
+/// `Route` の variant 名(`gen/route.gleam`)→ Page の route の綴り。
+fn route_path_for(
+  front: reader_front.Front,
+  variant: String,
+) -> Option(String) {
+  front.pages
+  |> list.find(fn(page) { route_variant(page) == variant })
+  |> result.map(fn(page) { reader_front.route_path(page.path) })
+  |> option.from_result
+}
+
+/// Page の閉じた enum `Route` の variant 名(フォルダの道の各段を PascalCase にしてつなぐ、根は `Root`)。
+pub fn route_variant(page: reader_front.Page) -> String {
+  case page.path {
+    [] -> "Root"
+    parts -> string.concat(list.map(parts, naming.pascal))
+  }
+}
+
+fn json_quoted(value: String) -> String {
+  quoted(value)
+}
+
+fn wire_json(wire: Wire) -> String {
+  case wire {
+    OptionWire(inner) -> "{ \"option\": " <> wire_json(inner) <> " }"
+    ListWire(kind) -> "{ \"list\": " <> quoted(kind_name(kind)) <> " }"
+    ScalarWire(kind) -> quoted(kind_name(kind))
+    JsonWire -> "\"json\""
+  }
+}
+
+fn kind_name(kind: ScalarKind) -> String {
+  case kind {
+    BoolArg -> "bool"
+    IntArg -> "int"
+    FloatArg -> "float"
+    TextArg -> "text"
+  }
+}
+
+/// client.mjs に焼く Component の表(タグ → Service ごとの method・path・Args の型・After、reloads)。
+fn interactive_table(
+  front: reader_front.Front,
+  targets: List(LiveTarget),
+) -> String {
+  let components = placeable_components(front, targets)
+  "{\n"
+  <> string.concat(
+    list.map(components, fn(component) {
+      let services =
+        list.filter_map(component.calls, fn(call) {
+          list.find(targets, fn(target) {
+            target.name == reader_front.live_module(call)
+          })
+          |> result.map(fn(target) {
+            let after =
+              list.find(component.after_send, fn(row) {
+                naming.snake(row.service) == target.name
+              })
+            let #(ok, error) = case after {
+              Ok(row) -> #(
+                then_json(row.ok, front),
+                then_json(row.error, front),
+              )
+              Error(_) -> #("{ \"then\": \"stay\" }", "{ \"then\": \"stay\" }")
+            }
+            "      "
+            <> quoted(target.name)
+            <> ": { \"method\": "
+            <> quoted(target.method)
+            <> ", \"path\": "
+            <> quoted(target.path)
+            <> ", \"read\": "
+            <> bool_text(target.read)
+            <> ", \"upload\": "
+            <> bool_text(target.upload)
+            <> ", \"accepted\": "
+            <> bool_text(target.accepting)
+            <> ", \"entry\": "
+            <> bool_text(target.entry)
+            <> ", \"args\": ["
+            <> string.join(
+              list.map(target.args, fn(arg) {
+                "{ \"name\": "
+                <> quoted(arg.name)
+                <> ", \"wire\": "
+                <> wire_json(arg.wire)
+                <> ", \"blob\": "
+                <> bool_text(arg.blob)
+                <> " }"
+              }),
+              ", ",
+            )
+            <> "], \"refused\": ["
+            <> string.join(
+              list.map(target.errors, fn(variant) {
+                quoted(naming.snake(variant.name))
+              }),
+              ", ",
+            )
+            <> "], \"slots\": { "
+            <> string.join(
+              list.map(target.slots, fn(slot) {
+                quoted(slot.1) <> ": " <> quoted(slot.1)
+              }),
+              ", ",
+            )
+            <> " }, \"ok\": "
+            <> ok
+            <> ", \"error\": "
+            <> error
+            <> " },\n"
+          })
+        })
+      let reloads = case component.reloads {
+        Some(reloads) ->
+          case
+            list.find(targets, fn(target) {
+              target.name == naming.snake(reloads.read)
+            })
+          {
+            Ok(target) ->
+              "{ \"read\": "
+              <> quoted(target.name)
+              <> ", \"on\": ["
+              <> string.join(
+                list.map(reloads.on, fn(field) { quoted(naming.snake(field)) }),
+                ", ",
+              )
+              <> "], \"list\": "
+              <> bool_text(target.list_out)
+              <> " }"
+            Error(_) -> "null"
+          }
+        None -> "null"
+      }
+      "  "
+      <> quoted(reader_front.component_tag(component))
+      <> ": {\n    \"services\": {\n"
+      <> string.concat(services)
+      <> "    },\n    \"reloads\": "
+      <> reloads
+      <> ",\n  },\n"
+    }),
+  )
+  <> "}"
+}
+
+/// `when` の枝を隠す規則(51 v6「状態の写し」)。隠す側で書き、`:state()` の有る browser と無い browser の
+/// 2 通り(`@supports selector(:state(x))` の中と外の属性)。
+fn interactive_state_css(
+  front: reader_front.Front,
+  targets: List(LiveTarget),
+) -> String {
+  let components = placeable_components(front, targets)
+  case components {
+    [] -> ""
+    _ -> {
+      let rules =
+        list.flat_map(components, fn(component) {
+          let tag = reader_front.component_tag(component)
+          list.filter_map(component.calls, fn(call) {
+            list.find(targets, fn(target) {
+              target.name == reader_front.live_module(call)
+            })
+          })
+          |> list.flat_map(fn(target) {
+            let svc = target.name
+            let sent = "sent-" <> svc
+            [
+              #(svc <> ".idle", [sent], True),
+              #(svc <> ".waiting", ["waiting", sent], False),
+              #(svc <> ".succeeded", ["ok", sent], False),
+              #(svc <> ".failed", ["error", sent], False),
+              ..list.map(target.errors, fn(variant) {
+                let code = "refused-" <> kebab(variant.name)
+                #(svc <> "." <> code, [code, sent], False)
+              })
+            ]
+            |> list.map(fn(row) { #(tag, row.0, row.1, row.2) })
+          })
+        })
+      let state = fn(names: List(String)) {
+        string.concat(list.map(names, fn(name) { ":state(" <> name <> ")" }))
+      }
+      let attribute = fn(names: List(String)) {
+        string.concat(
+          list.map(names, fn(name) { "[data-yumemi-state~=\"" <> name <> "\"]" }),
+        )
+      }
+      let rule = fn(
+        row: #(String, String, List(String), Bool),
+        on: fn(List(String)) -> String,
+      ) {
+        let #(tag, when, names, shown_unless) = row
+        let selector = case shown_unless {
+          // Idle:その送りの sent が立てば隠す
+          True -> tag <> on(names)
+          False -> tag <> ":not(" <> on(names) <> ")"
+        }
+        "  "
+        <> selector
+        <> " [data-yumemi-when~=\""
+        <> when
+        <> "\"] { display: none; }\n"
+      }
+      "[data-yumemi-island] > form > fieldset { border: 0; margin: 0; padding: 0; min-inline-size: 0; }\n"
+      <> "[data-yumemi-when] { display: contents; }\n"
+      <> "@supports selector(:state(x)) {\n"
+      <> string.concat(list.map(rules, rule(_, state)))
+      <> "}\n"
+      <> "@supports not selector(:state(x)) {\n"
+      <> string.concat(list.map(rules, rule(_, attribute)))
+      <> "}\n"
+    }
+  }
+}
+
+/// emit の側で見る interactive Component の条文(Service の model と route の要るもの)。
+pub fn interactive_notes(
+  app: model.App,
+  back_units: List(Unit),
+  package: face.Package,
+  front: reader_front.Front,
+  hashes: hash.Hashes,
+) -> List(stop.Note) {
+  let targets = live_targets(app, back_units, package, front, hashes)
+  use <- with_notes(route_variant_notes(package, front))
+  list.flat_map(front.components, fn(component) {
+    let where = package.name <> "/" <> component.module <> ": "
+    let conflict = fn(text) {
+      stop.Note(class: stop.Conflict, text: where <> text)
+    }
+    let missing = fn(text) {
+      stop.Note(class: stop.Missing, text: where <> text)
+    }
+    let mine =
+      list.filter_map(component.calls, fn(call) {
+        list.find(targets, fn(target) {
+          target.name == reader_front.live_module(call)
+        })
+      })
+    let writes = list.filter(mine, fn(target) { !target.read && !target.entry })
+    let row_names =
+      list.map(component.after_send, fn(row) { naming.snake(row.service) })
+    // 第 12 条
+    let after_missing =
+      writes
+      |> list.filter(fn(target) { !list.contains(row_names, target.name) })
+      |> list.map(fn(target) {
+        missing("after_send に書きの Service " <> target.name <> " の組が無い(第 12 条)")
+      })
+    let after_extra =
+      row_names
+      |> list.filter(fn(name) {
+        !list.any(writes, fn(target) { target.name == name })
+      })
+      |> list.map(fn(name) {
+        conflict(
+          "after_send の "
+          <> name
+          <> " が calls の書きの Service でない(calls に無いか読みの Service、第 12 条)",
+        )
+      })
+    let after_twice =
+      row_names
+      |> list.filter(fn(name) {
+        list.count(row_names, fn(other) { other == name }) > 1
+      })
+      |> list.unique
+      |> list.map(fn(name) {
+        conflict("after_send に " <> name <> " の組が 2 つある(第 12 条)")
+      })
+    // 第 15 条:GoTo の path の穴は Out の同じ名の欄
+    let goto =
+      list.flat_map(component.after_send, fn(row) {
+        let target =
+          list.find(mine, fn(target) {
+            target.name == naming.snake(row.service)
+          })
+        [row.ok, row.error]
+        |> list.filter_map(fn(then) {
+          case then, target {
+            reader_front.ThenGoTo(route: route, ..), Ok(target) ->
+              case route_path_for(front, route) {
+                None ->
+                  Ok(conflict(
+                    "GoTo の行き先 route." <> route <> " がこの面の Page に無い(第 15 条)",
+                  ))
+                Some(path) -> {
+                  let holes = path_holes(path)
+                  case
+                    target.accepting
+                    || list.all(holes, list.contains(target.out_fields, _))
+                  {
+                    True -> Error(Nil)
+                    False ->
+                      Ok(conflict(
+                        "GoTo(route."
+                        <> route
+                        <> ") の path "
+                        <> path
+                        <> " の穴が "
+                        <> target.name
+                        <> " の Out の欄に無い(第 15 条、穴は送りの Out の同じ名の欄で埋める)",
+                      ))
+                  }
+                }
+              }
+            _, _ -> Error(Nil)
+          }
+        })
+      })
+    // 第 14 条:List でない Field の 2 回目の bind
+    let twice =
+      component.live_calls
+      |> list.filter(fn(call) {
+        list.contains(["bind", "bind_check", "bind_choice"], call.function)
+      })
+      |> list.filter_map(fn(call) {
+        case call.field {
+          Some(field) -> Ok(#(call.live, field))
+          None -> Error(Nil)
+        }
+      })
+      |> fn(pairs) {
+        pairs
+        |> list.filter(fn(pair) {
+          list.count(pairs, fn(other) { other == pair }) > 1
+        })
+        |> list.unique
+      }
+      |> list.filter(fn(pair) {
+        case list.find(mine, fn(target) { target.name == pair.0 }) {
+          Ok(target) ->
+            case
+              list.find(target.args, fn(arg) {
+                naming.pascal(arg.name) == pair.1
+              })
+            {
+              Ok(LiveArg(wire: ListWire(_), ..)) -> False
+              Ok(LiveArg(wire: OptionWire(ListWire(_)), ..)) -> False
+              _ -> True
+            }
+          Error(_) -> False
+        }
+      })
+      |> list.map(fn(pair) {
+        conflict(
+          pair.0
+          <> " の Field "
+          <> pair.1
+          <> "(List でない)を 2 回以上 bind している(第 14 条)",
+        )
+      })
+    // 第 20 条:書きに send が無い、読みに send も reloads も無い、一覧の読みに send がある
+    let sends =
+      component.live_calls
+      |> list.filter(fn(call) { call.function == "send" })
+      |> list.map(fn(call) { call.live })
+    let reload_read = case component.reloads {
+      Some(reloads) -> Some(naming.snake(reloads.read))
+      None -> None
+    }
+    let unsent =
+      mine
+      |> list.filter(fn(target) {
+        !list.contains(sends, target.name)
+        && { !target.read || reload_read != Some(target.name) }
+      })
+      |> list.map(fn(target) {
+        missing(
+          target.name
+          <> " を calls に書いたのに送れない(書きは view の send、読みは send か reloads が要る、第 20 条)",
+        )
+      })
+    let list_send =
+      mine
+      |> list.filter(fn(target) {
+        target.read && target.list_out && list.contains(sends, target.name)
+      })
+      |> list.map(fn(target) {
+        conflict(
+          target.name
+          <> " は Out が一覧の読みなのに send がある(第 20 条、一覧は reloads の頁の取り直しで描く)",
+        )
+      })
+    // 第 17 条
+    let reloads = case component.reloads {
+      None -> []
+      Some(reloads) ->
+        case
+          list.find(mine, fn(target) {
+            target.name == naming.snake(reloads.read)
+          })
+        {
+          Error(_) -> [
+            conflict(
+              "reloads の read " <> reloads.read <> " が calls に無い(第 17 条)",
+            ),
+          ]
+          Ok(target) ->
+            case target.read {
+              False -> [
+                conflict(
+                  "reloads の read "
+                  <> reloads.read
+                  <> " が読みの Service でない(第 17 条)",
+                ),
+              ]
+              True ->
+                reloads.on
+                |> list.filter(fn(field) {
+                  !list.any(target.args, fn(arg) {
+                    naming.pascal(arg.name) == field
+                  })
+                })
+                |> list.map(fn(field) {
+                  conflict(
+                    "reloads の on の "
+                    <> field
+                    <> " が "
+                    <> target.name
+                    <> " の Field でない(第 17 条)",
+                  )
+                })
+                |> list.append(case target.list_out {
+                  True ->
+                    list_reload_notes(
+                      front,
+                      component,
+                      target,
+                      reloads,
+                      conflict,
+                    )
+                  False -> []
+                })
+            }
+        }
+    }
+    list.flatten([
+      after_missing,
+      after_extra,
+      after_twice,
+      goto,
+      twice,
+      unsent,
+      list_send,
+      reloads,
+    ])
+  })
+}
+
+fn with_notes(
+  first: List(stop.Note),
+  rest: fn() -> List(stop.Note),
+) -> List(stop.Note) {
+  list.append(first, rest())
+}
+
+/// 第 17 条の一覧の形:Component を置いた Block の Service(`In`)が `read` で、Block の載る Page に
+/// `Var(<field>, Query(<field>))` がある(行は頁の loader が読み、Block が SSR で描く)。
+fn list_reload_notes(
+  front: reader_front.Front,
+  component: reader_front.Component,
+  target: LiveTarget,
+  reloads: reader_front.Reloads,
+  conflict: fn(String) -> stop.Note,
+) -> List(stop.Note) {
+  reader_front.placing_blocks(front, component)
+  |> list.flat_map(fn(block) {
+    let input = case block.input_kind {
+      reader_front.ServiceOut(service) -> service == target.name
+      _ -> False
+    }
+    let service = case input {
+      True -> []
+      False -> [
+        conflict(
+          "reloads の一覧の読み "
+          <> target.name
+          <> " を、別の Service の Block "
+          <> block.module
+          <> " に置いている(第 17 条、行は置いた Block が read の Out から描く)",
+        ),
+      ]
+    }
+    let vars =
+      reader_front.block_pages(front, block)
+      |> list.flat_map(fn(pair) {
+        let #(page, vars) = pair
+        reloads.on
+        |> list.map(naming.snake)
+        |> list.filter(fn(field) {
+          !list.any(vars, fn(var) {
+            var.name == field && var.from == reader_front.Query(field)
+          })
+        })
+        |> list.map(fn(field) {
+          conflict(
+            "reloads の一覧の読み "
+            <> target.name
+            <> " の Component を載せる "
+            <> page.module
+            <> " に Var(\""
+            <> field
+            <> "\", Query(\""
+            <> field
+            <> "\")) が無い(第 17 条)",
+          )
+        })
+      })
+    list.append(service, vars)
+  })
 }

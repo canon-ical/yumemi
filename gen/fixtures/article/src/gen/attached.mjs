@@ -1,4 +1,4 @@
-//// GENERATED from server.attached [sha256:5a7812900d2a] — 手で編集しない
+//// GENERATED from server.attached [sha256:73a68a69ea55] — 手で編集しない
 export const attached=[
  {name:'fixture_browser',method:'GET',path:'/fixture/browser',who:'anyone'},
  {name:'fixture_sync',method:'POST',path:'/fixture/sync',who:'party'},

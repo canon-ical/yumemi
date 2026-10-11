@@ -1,45 +1,32 @@
-//// Interactive Component ── the generated live module owns State / Event / update.
+//// interactive Component(0.12)── 送り 1 つ。view は Args を受けて要素を返すだけ。
 
-import yumemi/front
-import sketch/lustre/element as el
-import yumemi/front/live as front_live
-import gen/live/article_publish
+import gen/live/article_publish as publish
+import gen/route
 import gen/service
-import gleam/int
-import gleam/option.{None, Some}
-import lustre
-import lustre/attribute
-import lustre/component
-import lustre/event
-import sketch/lustre/element/html
+import yumemi/front/css
+import yumemi/front/el.{type Element}
+import yumemi/front/html
+import yumemi/front/live
 
-pub const calls: List(front.Target(service.Service, Nil)) = [
-  front.Of(service.ArticlePublish),
+pub const calls: List(service.Service) = [service.ArticlePublish]
+
+pub const after_send: List(#(service.Service, live.After(route.Route))) = [
+  #(service.ArticlePublish, live.After(ok: live.Stay, error: live.Stay)),
 ]
 
-pub const after_send: front_live.After = front_live.Stay
+const button: List(css.Style) = [
+  css.State(css.Waiting, [css.Background(css.Hex("#cccccc"))]),
+]
 
-pub fn view(it: article_publish.State) -> el.Element(article_publish.Event) {
-  html.button_(
-    [event.on_click(front_live.Send), attribute.disabled(it.waiting)],
-    [
-      el.text(label(it)),
-    ],
-  )
-}
-
-fn label(model: article_publish.State) -> String {
-  case model.last {
-    Some(Ok(article)) -> "❤ " <> int.to_string(article.version)
-    Some(Error(_)) -> "いいね"
-    None -> "いいね"
-  }
-}
-
-pub fn app() -> lustre.App(Nil, article_publish.State, article_publish.Event) {
-  lustre.component(article_publish.init, article_publish.update, view, [
-    component.on_attribute_change("slug", fn(value) {
-      Ok(front_live.Set(article_publish.Slug, value))
-    }),
+pub fn view(_publish: publish.Args) -> Element {
+  html.div_([], [
+    publish.send(css.class(button), [el.text("いいね")]),
+    publish.when(publish.Succeeded, [
+      html.span_([], [el.text("❤ "), publish.out(publish.OutVersion)]),
+    ]),
+    publish.when(publish.Refused(publish.AlreadyPublished), [
+      html.span_([], [el.text("公開済み")]),
+    ]),
+    publish.when(publish.Failed, [html.span_([], [el.text("送れませんでした")])]),
   ])
 }

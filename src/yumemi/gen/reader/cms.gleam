@@ -340,19 +340,8 @@ fn counted_notes(app: model.App, units: List(Unit)) -> List(Note) {
               ]
               _, _ -> []
             }
-            list.flatten([
-              mismatched,
-              mark,
-              [
-                Note(
-                  stop.Warning,
-                  counted.face
-                    <> ": 逃げ道 ToService を 1 つ使っている(数える口 → service."
-                    <> service
-                    <> "。framework の器 Store に移せば消える)",
-                ),
-              ],
-            ])
+            // 逃げ道 ToService の数は面ごとの逃げ道の 1 行に入る(0.12 段 C、emit/front の surface_notes)
+            list.flatten([mismatched, mark])
           }
         }
       model.StoreSink(

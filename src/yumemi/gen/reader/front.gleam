@@ -37,9 +37,6 @@ pub type Front {
     overlay_calls: List(OverlayCall),
     /// 記述面と Css の条文(第 1〜3・7・8・23〜25・31 条)の停止。
     surface_notes: List(stop.Note),
-    /// 第 1 条の例外にした module(0.11 の形の interactive Component、`pub fn app` を持つ)。
-    /// 段 C の Y3 で消す。
-    legacy_components: List(String),
     /// `el.static_sheet` の path(第 28〜30 条の file の検査と規則の数えは emit が持つ)。
     static_sheets: List(#(String, String)),
   )
@@ -281,16 +278,65 @@ pub type ResolvedArgSource {
   VariableSource(name: String, from: From)
 }
 
+/// interactive Component(0.12、51 v6「interactive Component」)。宣言は `calls`・`after_send`・任意の
+/// `reloads` と view だけ。検査(第 9〜22 条)は `component_notes` と、Service の model の要る分は
+/// emit の `interactive_notes` が持つ。
 pub type Component {
   Component(
     name: String,
     module: String,
     calls: List(CallTarget),
-    reloads: List(#(String, String)),
+    /// `calls` が const の List で、どの要素も構成子の literal(第 10 条)
+    calls_literal: Bool,
+    reloads: Option(Reloads),
+    /// `reloads` の const があるが形が読めない(第 17 条)
+    reloads_unreadable: Bool,
     has_view: Bool,
-    after_send: Option(String),
+    after_send: List(AfterRow),
+    /// `after_send` の const があるが形が読めない(第 12 条)
+    after_send_unreadable: Bool,
     nested_island: Bool,
+    /// `pub fn app` がある(第 9 条)
+    has_app: Bool,
+    /// view の引数(順に、型の module の道と型名、引数の名)
+    view_params: List(ViewParam),
+    /// 同じ module の `pub type With` の欄(view が `with` を受けるとき)
+    with_fields: Option(List(#(String, glance.Type))),
+    /// import した `gen/live/*` の module 名
+    live_imports: List(String),
+    /// import の別名 → module の道(第 22 条で With の欄の型を解く)
+    aliases: List(#(String, String)),
+    /// view の中の live の口の呼び出し
+    live_calls: List(LiveCall),
+    /// 逃げ道(`gen/escapes`)の呼び出しの数
+    escape_calls: Int,
+    /// 生成器が止める形(第 9・10・11・13・19・21・22 条)
+    notes: List(String),
   )
+}
+
+pub type ViewParam {
+  ViewParam(name: String, module: Option(String), type_name: Option(String))
+}
+
+/// `#(service.X, live.After(ok: .., error: ..))` の 1 組。
+pub type AfterRow {
+  AfterRow(service: String, ok: Then, error: Then)
+}
+
+pub type Then {
+  ThenStay
+  ThenReload(notice: Option(String))
+  ThenGoTo(route: String, notice: Option(String))
+}
+
+pub type Reloads {
+  Reloads(read: String, on: List(String))
+}
+
+/// `<live>.bind(..)` ほかの呼び出し。`field` は構成子の literal のときだけ。
+pub type LiveCall {
+  LiveCall(live: String, function: String, field: Option(String))
 }
 
 pub type CallTarget {
@@ -387,18 +433,7 @@ fn read_with_package_and_warning(
       list.map(units, fn(unit) { unit_violations(unit, components) }),
     )
   let overlay_calls = overlay_calls(units)
-  let legacy_components =
-    units
-    |> list.filter(is_legacy_component)
-    |> list.map(fn(unit) { unit.path })
-  let surface_notes =
-    list.flat_map(units, fn(unit) {
-      surface_unit_notes(
-        face,
-        unit,
-        list.contains(legacy_components, unit.path),
-      )
-    })
+  let surface_notes = list.flat_map(units, surface_unit_notes(face, _))
   let static_sheets = list.flat_map(units, static_sheet_paths)
   Ok(Front(
     face: face,
@@ -415,7 +450,6 @@ fn read_with_package_and_warning(
     violations: violations,
     overlay_calls: overlay_calls,
     surface_notes: surface_notes,
-    legacy_components: legacy_components,
     static_sheets: static_sheets,
   ))
 }
@@ -425,7 +459,7 @@ pub fn notes(front: Front, services: List(model.Service)) -> List(stop.Note) {
   list.flatten([
     shell_notes(front),
     front.surface_notes,
-    legacy_component_notes(front),
+    component_notes(front),
     violation_notes(front.face, front.violations),
     overlay_template_notes(front),
     overlay_call_notes(front),
@@ -959,13 +993,22 @@ fn constant_string(module: glance.Module, name: String) -> Option(String) {
   |> option.then(fn(constant) { g.string_value(constant.value) })
 }
 
+/// Shell の `theme` の色。欄があって文字列の literal でなければ、第 26 条で止まる印の字(`#` で始まらない)
+/// を返す(0.12 段 C、Y2 柏木 P1-9:欄の不足(exit 3)ではなく literal でない(exit 4))。
 fn theme_string(
   theme: Option(glance.Constant),
   label: String,
 ) -> Option(String) {
-  theme
-  |> option.then(fn(constant) { g.labelled(constant.value, label) })
-  |> option.then(g.string_value)
+  case
+    theme |> option.then(fn(constant) { g.labelled(constant.value, label) })
+  {
+    Some(value) ->
+      case g.string_value(value) {
+        Some(text) -> Some(text)
+        None -> Some("(文字列の literal でない)")
+      }
+    None -> None
+  }
 }
 
 /// Shell の `theme.background_image`。`theme.Defaults` の `None` / `Some("<priv/static の path>")`
@@ -1383,27 +1426,368 @@ fn parse_block(
 fn parse_component(unit: Unit) -> Result(Component, Nil) {
   let module = g.in_order(unit.module)
   let name = last_segment(unit.path) |> naming.pascal
-  let calls =
-    list.append(
-      call_target_list(module, "calls"),
-      option_to_list(call_target_constant(module, "target")),
-    )
-  let reloads = reload_list(module, "reloads")
+  let calls_constant = public_named_constant(module, "calls")
+  let calls = call_target_list(module, "calls")
+  let calls_literal = case calls_constant {
+    Some(glance.Constant(
+      value: glance.List(elements: elements, rest: None, ..),
+      ..,
+    )) -> elements != [] && list.length(elements) == list.length(calls)
+    _ -> False
+  }
+  let #(after_send, after_send_unreadable) = after_send_rows(module)
+  let #(reloads, reloads_unreadable) = reloads_of(module)
   let view = public_function(module, "view")
-  Ok(
-    Component(
-      name: name,
-      module: unit.path,
-      calls: calls,
-      reloads: reloads,
-      has_view: view != None,
-      after_send: after_send_of(module),
-      nested_island: case view {
-        Some(function) -> nested_island(function.body)
-        None -> False
-      },
-    ),
-  )
+  let view_params = case view {
+    Some(function) ->
+      list.map(function.parameters, fn(parameter) {
+        let name = case parameter.name {
+          glance.Named(name) -> name
+          glance.Discarded(name) -> "_" <> name
+        }
+        case parameter.type_ {
+          Some(glance.NamedType(name: type_name, module: alias, ..)) ->
+            ViewParam(
+              name: name,
+              module: case alias {
+                Some(alias) -> imported_module(module.imports, alias)
+                None -> None
+              },
+              type_name: Some(type_name),
+            )
+          _ -> ViewParam(name: name, module: None, type_name: None)
+        }
+      })
+    None -> []
+  }
+  let with_fields = case list.last(view_params) {
+    Ok(ViewParam(type_name: Some("With"), module: None, ..)) ->
+      case g.find_custom_type(module, "With") {
+        Some(definition) ->
+          case definition.variants {
+            [variant] ->
+              Some(
+                list.filter_map(variant.fields, fn(field) {
+                  case g.variant_field_label(field) {
+                    Some(label) -> Ok(#(label, g.variant_field_type(field)))
+                    None -> Error(Nil)
+                  }
+                }),
+              )
+            _ -> Some([])
+          }
+        None -> Some([])
+      }
+    _ -> None
+  }
+  let live_imports =
+    module.imports
+    |> list.filter_map(fn(definition) {
+      case string.split_once(definition.definition.module, "gen/live/") {
+        Ok(#("", live)) -> Ok(live)
+        _ -> Error(Nil)
+      }
+    })
+  let aliases =
+    module.imports
+    |> list.map(fn(definition) {
+      let import_ = definition.definition
+      let local = case import_.alias {
+        Some(glance.Named(name)) -> name
+        Some(glance.Discarded(name)) -> name
+        None -> last_segment(import_.module)
+      }
+      #(local, import_.module)
+    })
+  let live_calls = component_live_calls(module)
+  let escape_calls =
+    references(module)
+    |> list.count(fn(found) { found.0 == "gen/escapes" })
+  let has_app = public_function(module, "app") != None
+  let nested_island =
+    list.any(module.imports, fn(definition) {
+      definition.definition.module == "gen/interactive"
+      || definition.definition.module == "gen/islands"
+    })
+  Ok(Component(
+    name: name,
+    module: unit.path,
+    calls: calls,
+    calls_literal: calls_literal,
+    reloads: reloads,
+    reloads_unreadable: reloads_unreadable,
+    has_view: view != None,
+    after_send: after_send,
+    after_send_unreadable: after_send_unreadable,
+    nested_island: nested_island,
+    has_app: has_app,
+    view_params: view_params,
+    with_fields: with_fields,
+    live_imports: live_imports,
+    aliases: aliases,
+    live_calls: live_calls,
+    escape_calls: escape_calls,
+    notes: component_shape_notes(module, has_app, calls_literal, calls),
+  ))
+}
+
+/// `after_send` の組。const が無ければ空、読めない組があれば unreadable。
+fn after_send_rows(module: glance.Module) -> #(List(AfterRow), Bool) {
+  case public_named_constant(module, "after_send") {
+    None -> #([], False)
+    Some(constant) ->
+      case constant.value {
+        glance.List(elements: elements, rest: None, ..) -> {
+          let rows =
+            list.map(elements, fn(element) {
+              case element {
+                glance.Tuple(elements: [service, after], ..) ->
+                  case service_target(service), g.ctor_name(after) {
+                    Some(service), Some("After") ->
+                      case g.labelled(after, "ok"), g.labelled(after, "error") {
+                        Some(ok), Some(error) ->
+                          case then_of(ok), then_of(error) {
+                            Some(ok), Some(error) ->
+                              Ok(AfterRow(service:, ok:, error:))
+                            _, _ -> Error(Nil)
+                          }
+                        _, _ ->
+                          case g.args(after) {
+                            [ok, error] ->
+                              case then_of(ok), then_of(error) {
+                                Some(ok), Some(error) ->
+                                  Ok(AfterRow(service:, ok:, error:))
+                                _, _ -> Error(Nil)
+                              }
+                            _ -> Error(Nil)
+                          }
+                      }
+                    _, _ -> Error(Nil)
+                  }
+                _ -> Error(Nil)
+              }
+            })
+          #(result.values(rows), list.any(rows, result.is_error))
+        }
+        _ -> #([], True)
+      }
+  }
+}
+
+fn then_of(expression: glance.Expression) -> Option(Then) {
+  case g.ctor_name(expression) {
+    Some("Stay") -> Some(ThenStay)
+    Some("ReloadPage") -> notice_of(expression, 0) |> option.map(ThenReload)
+    Some("GoTo") -> {
+      let route = case g.labelled(expression, "route") {
+        Some(route) -> Some(route)
+        None -> list.first(g.args(expression)) |> option.from_result
+      }
+      case route |> option.then(g.ctor_name), notice_of(expression, 1) {
+        Some(route), Some(notice) -> Some(ThenGoTo(route:, notice:))
+        _, _ -> None
+      }
+    }
+    _ -> None
+  }
+}
+
+/// `notice: Some("..")` / `None`。読めなければ None(外側の Option)。
+fn notice_of(
+  expression: glance.Expression,
+  position: Int,
+) -> Option(Option(String)) {
+  let value = case g.labelled(expression, "notice") {
+    Some(value) -> Some(value)
+    None -> list_at(g.args(expression), position)
+  }
+  case value {
+    Some(value) ->
+      case g.ctor_name(value) {
+        Some("None") -> Some(None)
+        Some("Some") ->
+          case g.args(value) {
+            [text] -> g.string_value(text) |> option.map(Some)
+            _ -> None
+          }
+        _ -> None
+      }
+    None -> None
+  }
+}
+
+fn reloads_of(module: glance.Module) -> #(Option(Reloads), Bool) {
+  case public_named_constant(module, "reloads") {
+    None -> #(None, False)
+    Some(constant) ->
+      case g.ctor_name(constant.value) {
+        Some("Reloads") -> {
+          let read = case g.labelled(constant.value, "read") {
+            Some(read) -> Some(read)
+            None -> list.first(g.args(constant.value)) |> option.from_result
+          }
+          let on = case g.labelled(constant.value, "on") {
+            Some(on) -> Some(on)
+            None -> list_at(g.args(constant.value), 1)
+          }
+          case read |> option.then(service_target), on {
+            Some(read), Some(glance.List(elements: elements, rest: None, ..)) -> {
+              let fields =
+                list.filter_map(elements, fn(element) {
+                  case element {
+                    glance.FieldAccess(label: label, ..) -> Ok(label)
+                    _ -> Error(Nil)
+                  }
+                })
+              #(
+                Some(Reloads(read:, on: fields)),
+                fields == [] || list.length(fields) != list.length(elements),
+              )
+            }
+            _, _ -> #(None, True)
+          }
+        }
+        _ -> #(None, True)
+      }
+  }
+}
+
+/// view と module の関数の中の `<gen/live/x>.<口>(..)` の呼び出し。pipe(`v |> x.bind(F)`)の左は
+/// 第 1 引数に入るので、Field は残りの最初の引数で見る ── どちらでも Field の位置は同じ。
+fn component_live_calls(module: glance.Module) -> List(LiveCall) {
+  call_sites(module)
+  |> list.filter_map(fn(call) {
+    case string.split_once(call.module, "gen/live/") {
+      Ok(#("", live)) ->
+        case call.name {
+          "bind" | "bind_check" | "bind_choice" | "send" | "when" | "out" ->
+            Ok(
+              LiveCall(
+                live:,
+                function: call.name,
+                field: case call.name, call.arguments {
+                  "send", _ -> None
+                  _, [field, ..] ->
+                    case field {
+                      glance.FieldAccess(label: label, ..) -> Some(label)
+                      glance.Variable(name: name, ..) ->
+                        case is_upper_name(name) {
+                          True -> Some(name)
+                          False -> None
+                        }
+                      glance.Call(..) -> g.ctor_name(field)
+                      _ -> None
+                    }
+                  _, _ -> None
+                },
+              ),
+            )
+          _ -> Error(Nil)
+        }
+      _ -> Error(Nil)
+    }
+  })
+}
+
+fn is_upper_name(name: String) -> Bool {
+  case string.first(name) {
+    Ok(first) ->
+      string.uppercase(first) == first && string.lowercase(first) != first
+    Error(_) -> False
+  }
+}
+
+/// module だけで決まる形の検査(第 9・10・13・21 条)。
+fn component_shape_notes(
+  module: glance.Module,
+  has_app: Bool,
+  calls_literal: Bool,
+  calls: List(CallTarget),
+) -> List(String) {
+  let app = case has_app {
+    True -> [
+      "4|`pub fn app` がある(第 9 条、0.12 の interactive Component は update も lustre の app も書かない)",
+    ]
+    False -> []
+  }
+  let services = list.map(calls, call_target_name)
+  let calls_note = case calls_literal, duplicated(services) {
+    False, _ -> [
+      "4|`pub const calls` が Service の構成子の literal を 1 つ以上並べた const の List でない(第 10 条)",
+    ]
+    True, [] -> []
+    True, found -> [
+      "4|`calls` に同じ Service が 2 回ある(第 10 条): " <> string.join(found, ", "),
+    ]
+  }
+  // 第 13 条:1 つの要素の属性の列に bind が 2 つ
+  let double_bind =
+    unit_expressions(module)
+    |> list.flat_map(all_expressions)
+    |> list.filter_map(fn(expression) {
+      case expression {
+        glance.List(elements: elements, ..) ->
+          case
+            list.count(elements, fn(element) {
+              case element {
+                glance.Call(function: function, ..) ->
+                  case resolve_callee(function, module.imports) {
+                    Some(#(path, "bind"))
+                    | Some(#(path, "bind_check"))
+                    | Some(#(path, "bind_choice")) ->
+                      string.starts_with(path, "gen/live/")
+                    _ -> False
+                  }
+                _ -> False
+              }
+            })
+            > 1
+          {
+            True -> Ok("4|1 つの要素の属性の列に bind が 2 つある(第 13 条)")
+            False -> Error(Nil)
+          }
+        _ -> Error(Nil)
+      }
+    })
+    |> list.unique
+  // 第 21 条:out を textarea / select / option の中に置く
+  let out_in_control =
+    call_sites(module)
+    |> list.filter(fn(call) {
+      call.module == "yumemi/front/html"
+      && list.contains(
+        ["textarea", "textarea_", "select", "select_", "option", "option_"],
+        call.name,
+      )
+    })
+    |> list.any(fn(call) {
+      call.arguments
+      |> list.flat_map(all_expressions)
+      |> list.any(fn(expression) {
+        case expression {
+          glance.Call(function: function, ..) ->
+            case resolve_callee(function, module.imports) {
+              Some(#(path, "out")) -> string.starts_with(path, "gen/live/")
+              _ -> False
+            }
+          _ -> False
+        }
+      })
+    })
+  let out_note = case out_in_control {
+    True -> [
+      "4|`out` を textarea / select / option の中に置いている(第 21 条、Out の値が送りの Args に入る抜け道)",
+    ]
+    False -> []
+  }
+  list.flatten([app, calls_note, double_bind, out_note])
+}
+
+pub fn call_target_name(target: CallTarget) -> String {
+  case target {
+    ServiceCall(name) -> name
+    AttachedCall(name) -> name
+  }
 }
 
 fn parse_style(unit: Unit) -> Style {
@@ -1949,7 +2333,10 @@ fn service_references(
         list.filter_map(component.calls, fn(target) {
           call_service(target) |> option.to_result(Nil)
         }),
-        list.map(component.reloads, fn(reload) { reload.1 }),
+        case component.reloads {
+          Some(reloads) -> [reloads.read]
+          None -> []
+        },
       )
     })
   list.unique(list.flatten([from_layout, from_pages, from_components]))
@@ -2123,11 +2510,13 @@ fn variable_notes(
         duplicate_var_notes(front.face, page.module, page.vars, layout_scope),
         path_notes(front.face, page),
         origin_notes(front, page.module, page.vars),
+        // Layout の置き場(Widget)も Page の Var を受ける(resolve_page_service_args と同じ)。0.12 段 C:
+        // Layout の Block の Component の reloads の一覧が Page の `Query` を読むため、Layout の分も使った数に入れる
         unused_var_notes(
           front,
           page.module,
           page.vars,
-          page_frames(page),
+          list.append(page_frames(page), layout_frames(front.layout)),
           front.blocks,
           services,
           scope,
@@ -3236,14 +3625,6 @@ fn call_target_list(module: glance.Module, name: String) -> List(CallTarget) {
   }
 }
 
-fn call_target_constant(
-  module: glance.Module,
-  name: String,
-) -> Option(CallTarget) {
-  public_named_constant(module, name)
-  |> option.then(fn(constant) { target_of(constant.value) })
-}
-
 fn target_of(expression: glance.Expression) -> Option(CallTarget) {
   case g.ctor_name(expression) {
     Some("Of") ->
@@ -3271,47 +3652,6 @@ fn call_service(target: CallTarget) -> Option(String) {
   case target {
     ServiceCall(service) -> Some(service)
     AttachedCall(_) -> None
-  }
-}
-
-fn reload_list(module: glance.Module, name: String) -> List(#(String, String)) {
-  case public_named_constant(module, name) {
-    Some(constant) ->
-      case constant.value {
-        glance.List(elements: elements, ..) ->
-          list.filter_map(elements, fn(expression) {
-            case expression {
-              glance.Tuple(elements: [field, service], ..) ->
-                case
-                  g.ctor_name(field),
-                  g.ctor_name(service),
-                  g.ctor_module(service)
-                {
-                  Some(field), Some(service), Some("service") ->
-                    Ok(#(field, service))
-                  _, _, _ -> Error(Nil)
-                }
-              _ -> Error(Nil)
-            }
-          })
-        _ -> []
-      }
-    None -> []
-  }
-}
-
-fn after_send_of(module: glance.Module) -> Option(String) {
-  case public_named_constant(module, "after_send") {
-    Some(constant) ->
-      case constant.annotation, g.ctor_name(constant.value) {
-        Some(annotation), Some(value) ->
-          case g.type_name(annotation) == Some("After") {
-            True -> Some(value)
-            False -> None
-          }
-        _, _ -> None
-      }
-    None -> None
   }
 }
 
@@ -3628,26 +3968,6 @@ fn unqualified_module(
   }
 }
 
-fn nested_island(statements: List(glance.Statement)) -> Bool {
-  list.any(statements, fn(statement) {
-    list.any(statement_expressions(statement), fn(expression) {
-      island_inside(expression, False)
-    })
-  })
-}
-
-fn island_inside(expression: glance.Expression, inside: Bool) -> Bool {
-  let here = case g.ctor_name(expression) {
-    Some("island") | Some("legacy_island") -> True
-    _ -> False
-  }
-  let nested = here && inside
-  nested
-  || list.any(expression_children(expression), fn(child) {
-    island_inside(child, inside || here)
-  })
-}
-
 fn statement_expressions(
   statement: glance.Statement,
 ) -> List(glance.Expression) {
@@ -3757,33 +4077,6 @@ fn clause_expressions(clause: glance.Clause) -> List(glance.Expression) {
 
 // ── 記述面と Css の条文(0.12 段 B、51 v6「生成器が止めるもの」)──────────────
 
-/// 0.11 の形の interactive Component(`pub fn app` を持つ module)。第 1 条・第 2 条の例外で、
-/// 段 C の Y3 で消す一時の口。
-pub fn is_legacy_component(unit: Unit) -> Bool {
-  string.starts_with(unit.path, "components/")
-  && list.any(g.in_order(unit.module).functions, fn(definition) {
-    definition.definition.name == "app"
-    && definition.definition.publicity == glance.Public
-  })
-}
-
-fn legacy_component_notes(front: Front) -> List(stop.Note) {
-  case front.legacy_components {
-    [] -> []
-    modules -> [
-      stop.Note(
-        class: stop.Warning,
-        text: front.face
-          <> ": 第 1・2 条の例外(0.11 の lustre の interactive Component、段 C の Y3 で消す): "
-          <> int.to_string(list.length(modules))
-          <> " module ("
-          <> string.join(modules, ", ")
-          <> ")",
-      ),
-    ]
-  }
-}
-
 /// ★ の module の中の関数呼び出しと構成子の呼び出し(module は import から解いた道)。
 type CallSite {
   CallSite(module: String, name: String, arguments: List(glance.Expression))
@@ -3806,20 +4099,25 @@ fn all_expressions(expression: glance.Expression) -> List(glance.Expression) {
 }
 
 fn call_sites(module: glance.Module) -> List(CallSite) {
+  let site = fn(function, arguments) {
+    case resolve_callee(function, module.imports) {
+      Some(#(path, name)) ->
+        Ok(CallSite(module: path, name: name, arguments: arguments))
+      None -> Error(Nil)
+    }
+  }
   unit_expressions(module)
   |> list.flat_map(all_expressions)
   |> list.filter_map(fn(expression) {
     case expression {
-      glance.Call(function: function, arguments: arguments, ..) ->
-        case resolve_callee(function, module.imports) {
-          Some(#(path, name)) ->
-            Ok(CallSite(
-              module: path,
-              name: name,
-              arguments: list.flat_map(arguments, field_expressions),
-            ))
-          None -> Error(Nil)
+      // pipe の右が関数の参照なら、左を第 1 引数にした呼び出し(`x |> el.static_sheet`)
+      glance.BinaryOperator(name: glance.Pipe, left: left, right: right, ..) ->
+        case right {
+          glance.Call(..) -> Error(Nil)
+          _ -> site(right, [left])
         }
+      glance.Call(function: function, arguments: arguments, ..) ->
+        site(function, list.flat_map(arguments, field_expressions))
       _ -> Error(Nil)
     }
   })
@@ -3875,6 +4173,9 @@ fn is_internal_reference(path: String, name: String) -> Bool {
     | "yumemi/front/el", "styled"
     | "yumemi/front/el", "to_document_string"
     | "yumemi/front/el", "escape"
+    | "yumemi/front/el", "escape_point"
+    | "yumemi/front/el", "attributes"
+    | "yumemi/front/el", "media_src"
     | "yumemi/front/el", "Node"
     | "yumemi/front/el", "RawText"
     | "yumemi/front/el", "Attribute"
@@ -3886,6 +4187,21 @@ fn is_internal_reference(path: String, name: String) -> Bool {
     | "yumemi/front/html", "title"
     | "yumemi/front/css", "class_styles"
     | "yumemi/front/sketch_css", "class_name"
+    | "yumemi/front/sketch_css", "stable_hash"
+    | "yumemi/front/live", "bind"
+    | "yumemi/front/live", "bind_check"
+    | "yumemi/front/live", "bind_choice"
+    | "yumemi/front/live", "bind_file"
+    | "yumemi/front/live", "when"
+    | "yumemi/front/live", "out"
+    | "yumemi/front/live", "send"
+    | "yumemi/front/live", "component"
+    | "yumemi/front/live", "json_string"
+    | "yumemi/front/live", "json_object"
+    | "yumemi/front/live", "MinLength"
+    | "yumemi/front/live", "MaxLength"
+    | "yumemi/front/live", "Required"
+    | "yumemi/front/live", "Pattern"
     | "yumemi/front/sketch_css", "collect"
     | "yumemi/front/theme", "body_rule"
     | "yumemi/front/theme", "has_image"
@@ -3894,31 +4210,51 @@ fn is_internal_reference(path: String, name: String) -> Bool {
   }
 }
 
-fn surface_unit_notes(
-  face: String,
-  unit: Unit,
-  legacy: Bool,
-) -> List(stop.Note) {
+fn surface_unit_notes(face: String, unit: Unit) -> List(stop.Note) {
   let module = g.in_order(unit.module)
   let where = face <> "/" <> unit.path
   let conflict = fn(text) {
     stop.Note(class: stop.Conflict, text: where <> ": " <> text)
   }
-  // 第 1 条:lustre を import しない(0.11 の形の interactive Component だけが例外)
-  let lustre = case legacy {
-    True -> []
-    False ->
-      module.imports
-      |> list.filter(fn(definition) {
-        is_lustre_module(definition.definition.module)
-      })
-      |> list.map(fn(definition) {
-        conflict(
-          "★ が lustre を import している(第 1 条、0.12 の ★ は yumemi/front の el・html・attr で書く): "
-          <> definition.definition.module,
-        )
-      })
-  }
+  // 第 1 条:lustre を import しない(0.12 段 C で例外は無くなった。面の `src/gen/` に手で置いた
+  // file も ★ として読む ── `source.load` が生成の印の無い `gen/` の file を残す)
+  let lustre =
+    module.imports
+    |> list.filter(fn(definition) {
+      is_lustre_module(definition.definition.module)
+    })
+    |> list.map(fn(definition) {
+      conflict(
+        "★ が lustre を import している(第 1 条、0.12 の ★ は yumemi/front の el・html・attr で書く): "
+        <> definition.definition.module,
+      )
+    })
+  // 第 4 条:`@external` を書かない(FFI は `src/escapes/<name>.mjs` の名前付きの逃げ道だけ)
+  let external =
+    list.append(
+      list.flat_map(module.functions, fn(definition) {
+        list.filter_map(definition.attributes, fn(attribute) {
+          case attribute.name {
+            "external" -> Ok(definition.definition.name)
+            _ -> Error(Nil)
+          }
+        })
+      }),
+      list.flat_map(module.custom_types, fn(definition) {
+        list.filter_map(definition.attributes, fn(attribute) {
+          case attribute.name {
+            "external" -> Ok(definition.definition.name)
+            _ -> Error(Nil)
+          }
+        })
+      }),
+    )
+    |> list.map(fn(name) {
+      conflict(
+        "★ が `@external` を書いている(第 4 条、FFI は src/escapes/<name>.mjs の逃げ道で置く): "
+        <> name,
+      )
+    })
   // 第 3 条:yumemi の @internal を呼ばない
   let internal =
     references(module)
@@ -3943,6 +4279,17 @@ fn surface_unit_notes(
           case g.string_value(name) {
             Some(literal) ->
               case is_attribute_name(literal) {
+                True if call.name == "data" ->
+                  case string.starts_with(literal, "yumemi") {
+                    True -> [
+                      conflict(
+                        "attr.data の名 \""
+                        <> literal
+                        <> "\" が yumemi で始まる(第 7 条、data-yumemi-* は framework の印)",
+                      ),
+                    ]
+                    False -> []
+                  }
                 True -> []
                 False -> [
                   conflict(
@@ -3998,14 +4345,6 @@ fn surface_unit_notes(
             ]
             _ -> []
           }
-        // 第 31 条
-        "yumemi/front/el", "static_sheet", [path] ->
-          case g.string_value(path) {
-            Some(_) -> []
-            None -> [
-              conflict("el.static_sheet の path が文字列の literal でない(第 31 条)"),
-            ]
-          }
         _, _, _ -> []
       }
     })
@@ -4031,7 +4370,44 @@ fn surface_unit_notes(
         _ -> Error(Nil)
       }
     })
-  list.flatten([lustre, internal, literal_notes, duplicate_notes])
+  // 第 31・43 条:pipe・関数参照の static_sheet / static_src は literal の path として読めない
+  let refs = references(module)
+  let reference_notes =
+    [#("static_sheet", "第 31 条"), #("static_src", "第 43 条")]
+    |> list.filter_map(fn(pair) {
+      let referenced =
+        list.count(refs, fn(found) {
+          found.0 == "yumemi/front/el" && found.1 == pair.0
+        })
+      let literal =
+        list.count(calls, fn(call) {
+          call.module == "yumemi/front/el"
+          && call.name == pair.0
+          && case call.arguments {
+            [path] -> g.string_value(path) != None
+            _ -> False
+          }
+        })
+      case referenced > literal {
+        True ->
+          Ok(conflict(
+            "el."
+            <> pair.0
+            <> " の path が文字列の literal でない(pipe・関数参照・変数を含む、"
+            <> pair.1
+            <> ")",
+          ))
+        False -> Error(Nil)
+      }
+    })
+  list.flatten([
+    lustre,
+    external,
+    internal,
+    literal_notes,
+    list.unique(reference_notes),
+    duplicate_notes,
+  ])
 }
 
 /// 属性の列の要素が `attr.<名>(..)` なら、出る属性の名(`data` / `aria` は literal の名から)。
@@ -4122,4 +4498,301 @@ fn static_sheet_paths(unit: Unit) -> List(#(String, String)) {
       _, _, _ -> Error(Nil)
     }
   })
+}
+
+// ── interactive Component の条文(0.12 段 C、51 v6 第 9〜22 条のうち面の source だけで決まるもの)──
+
+/// Component の Service(`calls` の要素)の live module の名。
+pub fn live_module(target: CallTarget) -> String {
+  naming.snake(call_target_name(target))
+}
+
+/// Component のタグ名(module 名の `_` を `-`)。
+pub fn component_tag(component: Component) -> String {
+  string.replace(naming.snake(last_segment(component.module)), "_", "-")
+}
+
+/// view が `calls` の順の Args(と任意の末尾の `with: With`)を受ける(第 11 条)。生成器はこの形の Component に
+/// だけ置く関数と表を出す。
+pub fn view_ok(component: Component) -> Bool {
+  let lives = list.map(component.calls, live_module)
+  let params = case component.with_fields {
+    Some(_) ->
+      list.take(component.view_params, list.length(component.view_params) - 1)
+    None -> component.view_params
+  }
+  component.has_view
+  && lives != []
+  && list.length(params) == list.length(lives)
+  && list.all(list.zip(params, lives), fn(pair) {
+    let #(param, live) = pair
+    param.module == Some("gen/live/" <> live) && param.type_name == Some("Args")
+  })
+  && case component.with_fields, list.last(component.view_params) {
+    Some(_), Ok(param) -> param.name == "with" || param.name == "_with"
+    None, _ -> True
+    _, _ -> False
+  }
+}
+
+fn component_notes(front: Front) -> List(stop.Note) {
+  let note = fn(component: Component, coded: String) {
+    let #(class, text) = case string.split_once(coded, "|") {
+      Ok(#("3", text)) -> #(stop.Missing, text)
+      Ok(#(_, text)) -> #(stop.Conflict, text)
+      Error(_) -> #(stop.Conflict, coded)
+    }
+    stop.Note(
+      class:,
+      text: front.face <> "/" <> component.module <> ": " <> text,
+    )
+  }
+  let per_component =
+    list.flat_map(front.components, fn(component) {
+      let lives = list.map(component.calls, live_module)
+      // 第 11 条:view は calls の順の Args と、任意の末尾の `with: With`
+      let view_ok = view_ok(component)
+      let view = case view_ok || component.calls == [] {
+        True -> []
+        False -> [
+          "4|view が `pub fn view(<calls の順に各 Service の live の Args>) -> Element`(末尾に任意の `with: With`)でない(第 11 条): calls = "
+          <> string.join(lives, ", "),
+        ]
+      }
+      // 第 19 条:calls に無い Service の live を import しない
+      let foreign =
+        component.live_imports
+        |> list.filter(fn(live) { !list.contains(lives, live) })
+        |> list.map(fn(live) {
+          "4|calls に無い Service の gen/live/"
+          <> live
+          <> " を import している(第 19 条、client での連鎖の口)"
+        })
+      // 第 13・14 条:bind の Field は構成子の literal、List でない Field の 2 回目は emit が見る
+      let non_literal =
+        component.live_calls
+        |> list.filter(fn(call) {
+          list.contains(["bind", "bind_check", "bind_choice"], call.function)
+          && call.field == None
+        })
+        |> list.map(fn(call) {
+          "4|"
+          <> call.live
+          <> "."
+          <> call.function
+          <> " の Field が構成子の literal でない(第 13 条)"
+        })
+        |> list.unique
+      // 第 22 条:With の欄に live の型・el.Element・el.Attribute・関数を入れない
+      let with = case component.with_fields {
+        Some(fields) ->
+          fields
+          |> list.filter(fn(field) {
+            forbidden_with_type(front, component, field.1)
+          })
+          |> list.map(fn(field) {
+            "4|With の欄 "
+            <> field.0
+            <> " の型に live の型・el.Element・el.Attribute・関数がある(第 22 条)"
+          })
+        None -> []
+      }
+      let tag = component_tag(component)
+      let tag_note = case el_is_custom_element_name(tag) {
+        True -> []
+        False -> [
+          "4|タグ名 "
+          <> tag
+          <> " が custom element の名の形でない(第 18 条、module 名に _ を含める)",
+        ]
+      }
+      let nested = case component.nested_island {
+        True -> [
+          "4|interactive Component の中に interactive Component を置いている(gen/interactive の import)",
+        ]
+        False -> []
+      }
+      let reloads = case component.reloads_unreadable {
+        True -> [
+          "4|`reloads` が live.Reloads(read: <calls の読みの Service>, on: [<read の live の Field の literal>, ..]) でない(第 17 条)",
+        ]
+        False -> []
+      }
+      let after = case component.after_send_unreadable {
+        True -> [
+          "4|`after_send` の組が #(service.X, live.After(ok: <Then>, error: <Then>)) の literal でない(第 12 条)",
+        ]
+        False -> []
+      }
+      list.flatten([
+        component.notes,
+        view,
+        foreign,
+        non_literal,
+        with,
+        tag_note,
+        nested,
+        reloads,
+        after,
+      ])
+      |> list.map(note(component, _))
+    })
+  // 第 18 条:2 つの Component のタグ名が重なる
+  let tags = list.map(front.components, component_tag)
+  let collisions =
+    duplicated(tags)
+    |> list.map(fn(tag) {
+      stop.Note(
+        class: stop.Conflict,
+        text: front.face
+          <> ": 2 つの interactive Component のタグ名が重なる(第 18 条): "
+          <> tag,
+      )
+    })
+  // 第 16 条:notice を書いた Component があるのに Layout の Block に el.notice が無い
+  let uses_notice =
+    list.any(front.components, fn(component) {
+      list.any(component.after_send, fn(row) {
+        then_notice(row.ok) || then_notice(row.error)
+      })
+    })
+  let layout_blocks =
+    list.flatten([
+      frame_block_modules(front, front.layout.sp),
+      frame_block_modules(front, front.layout.pc),
+      frame_block_modules(front, front.layout.tablet),
+    ])
+  let has_notice =
+    front.blocks
+    |> list.filter(fn(block) { list.contains(layout_blocks, block.module) })
+    |> list.any(fn(block) {
+      list.any(call_sites(block.source), fn(call) {
+        call.module == "yumemi/front/el" && call.name == "notice"
+      })
+    })
+  let notice = case uses_notice && !has_notice {
+    True -> [
+      stop.Note(
+        class: stop.Missing,
+        text: front.face
+          <> ": notice を書いた interactive Component があるのに、Layout の Block に el.notice が無い(第 16 条)",
+      ),
+    ]
+    False -> []
+  }
+  list.flatten([per_component, collisions, notice])
+}
+
+fn then_notice(then: Then) -> Bool {
+  case then {
+    ThenStay -> False
+    ThenReload(notice:) | ThenGoTo(notice:, ..) -> notice != None
+  }
+}
+
+fn el_is_custom_element_name(tag: String) -> Bool {
+  is_attribute_name(tag)
+  && string.contains(tag, "-")
+  && !list.contains(
+    [
+      "annotation-xml", "color-profile", "font-face", "font-face-src",
+      "font-face-uri", "font-face-format", "font-face-name", "missing-glyph",
+    ],
+    tag,
+  )
+}
+
+/// With の欄の型(List・Option ほかの型引数を辿る)。同じ module の import で解き、別 module の
+/// record の中までは辿らない(51 v6 確認できなかったこと 16)。
+fn forbidden_with_type(
+  front: Front,
+  component: Component,
+  type_: glance.Type,
+) -> Bool {
+  let _ = front
+  case type_ {
+    glance.FunctionType(..) -> True
+    glance.NamedType(name: name, module: alias, parameters: parameters, ..) -> {
+      let path = case alias {
+        Some(alias) -> component_import(component, alias)
+        None -> None
+      }
+      let here = case path {
+        Some(path) ->
+          string.starts_with(path, "gen/live/")
+          || {
+            path == "yumemi/front/el"
+            && { name == "Element" || name == "Attribute" }
+          }
+        None -> False
+      }
+      here || list.any(parameters, forbidden_with_type(front, component, _))
+    }
+    glance.TupleType(elements: elements, ..) ->
+      list.any(elements, forbidden_with_type(front, component, _))
+    _ -> False
+  }
+}
+
+fn component_import(component: Component, alias: String) -> Option(String) {
+  list.key_find(component.aliases, alias) |> option.from_result
+}
+
+/// unit の中の関数・構成子の参照の module の道(逃げ道の呼び出しの数え)。
+pub fn module_references(unit: Unit) -> List(String) {
+  references(g.in_order(unit.module))
+  |> list.map(fn(found) { found.0 })
+}
+
+/// `el.static_src("..")` の literal の path(#(module, path))。
+pub fn static_src_paths(unit: Unit) -> List(#(String, String)) {
+  call_sites(g.in_order(unit.module))
+  |> list.filter_map(fn(call) {
+    case call.module, call.name, call.arguments {
+      "yumemi/front/el", "static_src", [path] ->
+        case g.string_value(path) {
+          Some(literal) -> Ok(#(unit.path, literal))
+          None -> Error(Nil)
+        }
+      _, _, _ -> Error(Nil)
+    }
+  })
+}
+
+/// Component を置く Block(`gen/interactive.<名>(..)` を呼ぶ Block)。第 17 条の一覧の読みの検査に使う。
+pub fn placing_blocks(front: Front, component: Component) -> List(Block) {
+  let name = naming.snake(last_segment(component.module))
+  front.blocks
+  |> list.filter(fn(block) {
+    list.any(call_sites(block.source), fn(call) {
+      { call.module == "gen/interactive" || call.module == "gen/islands" }
+      && call.name == name
+    })
+  })
+}
+
+/// Block を載せる Page と、その Page の Var(Layout の Block なら全 Page、Var は Layout の分も)。
+pub fn block_pages(front: Front, block: Block) -> List(#(Page, List(Var))) {
+  let in_layout =
+    list.contains(
+      list.flatten([
+        frame_block_modules(front, front.layout.sp),
+        frame_block_modules(front, front.layout.pc),
+        frame_block_modules(front, front.layout.tablet),
+      ]),
+      block.module,
+    )
+  front.pages
+  |> list.filter(fn(page) {
+    in_layout
+    || list.contains(
+      list.flatten([
+        frame_block_modules(front, page.sp),
+        frame_block_modules(front, page.pc),
+        frame_block_modules(front, page.tablet),
+      ]),
+      block.module,
+    )
+  })
+  |> list.map(fn(page) { #(page, list.append(page.vars, front.layout.vars)) })
 }

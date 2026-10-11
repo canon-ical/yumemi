@@ -35,6 +35,8 @@ gleam run -m yumemi/gen -- <app dir> <out dir>
 
 For example, in a repository with `api/` and faces beside it, `cd api && gleam run -m yumemi/gen -- . ..` writes the back under `api/` and each face's files under the face's package. It exits non-zero when the output is incomplete; the exit code says who fixes it (`yumemi/gen/stop`).
 
+**One version (0.12, article 41).** The generator reads the `manifest.toml` of the app package and of every face it writes, and stops (exit 4) naming the package whose locked `yumemi` differs from the version that is running (`<dir>/manifest.toml: yumemi の lock <locked> が走っている生成器の版 <running> と違う`); run `gleam update yumemi` there. A package without a `manifest.toml` is not checked, and packages the generator does not read or write (another app's auth service, say) are outside the check.
+
 A face's `priv/static/_yumemi/client.mjs` is bundled with the esbuild the face's lockfile installed (`<face>/node_modules/.bin/esbuild`). When it is missing the generator stops with exit 3 and names the path — add `esbuild` to the face's `devDependencies` and run `npm ci` in the face. It does not fall back to `npx`.
 
 ## Developing yumemi
@@ -44,13 +46,13 @@ npm ci        # the esbuild the generator tests bundle with
 gleam test    # the runtime checks and the generator tests (fixtures in gen/fixtures)
 ```
 
-`gen/fixtures` (sample apps) and `gen/scripts` (one-off verification scripts) are not part of the Hex package.
+`gen/fixtures` (sample apps) and `gen/scripts` (one-off verification scripts from earlier releases; the ones that ran the old `yumemi_gen` package were removed in 0.12) are not part of the Hex package.
 
 To generate a fixture in place, run the generator from the root (`gleam run -m yumemi/gen -- gen/fixtures/article gen/fixtures/article`). The fixture faces have no `package.json`, so first link the root's esbuild into each face that has a client (`public` in `article`: `mkdir -p gen/fixtures/article/public/node_modules/.bin && ln -s "$PWD/node_modules/.bin/esbuild" gen/fixtures/article/public/node_modules/.bin/esbuild`); without it the generator stops with exit 3. When yumemi's `[dependencies]` change, run `gleam update yumemi` in each fixture face, or its client build cannot see the new packages.
 
 ## `yumemi/front` ── Elements and attributes (0.12)
 
-A Block, a Layout's Block and the docs page are written with yumemi's own element tree; a ★ module imports `yumemi/front/el`, `yumemi/front/html`, `yumemi/front/attr` and `yumemi/front/css`, and never `lustre` or `sketch/lustre` (the generator stops on that import, exit 4, article 1; a face's `gleam.toml` listing `lustre` / `sketch_lustre` stops too, article 2). The only exception until stage C is a 0.11-shaped interactive Component (a `components/` module with `pub fn app`) — it still runs on lustre in its shadow root, and the generator prints how many such modules a face has (`[exit 0 警告] <face>: 第 1・2 条の例外 ..: N module`).
+A Block, a Layout's Block and the docs page are written with yumemi's own element tree; a ★ module imports `yumemi/front/el`, `yumemi/front/html`, `yumemi/front/attr` and `yumemi/front/css`, and never `lustre` or `sketch/lustre` (the generator stops on that import, exit 4, article 1; a face's `gleam.toml` listing `lustre` / `sketch_lustre` stops too, article 2). There is no exception: interactive Components are written with the same words (below). A `.gleam` file placed by hand under a face's `src/gen/` (one without the `//// GENERATED` first line) is read as ★ and checked the same way. A ★ module may not use `@external` (exit 4, article 4); JavaScript goes in a named escape (below).
 
 ```gleam
 import yumemi/front/attr
@@ -68,20 +70,87 @@ pub fn view(it: In) -> Element {
 }
 ```
 
-- `el.Element` and `el.Attribute` are opaque and take no type parameter. `el.text` / `el.each` / `el.none` / `el.fragment`, the framework words (`el.opener` / `el.closer` / `el.badge` / `el.each_modal` / `el.img`) and `el.to_string` (for tests) are public; the rest of `el` is `@internal` and a ★ calling it stops the generator (article 3).
+- `el.Element` and `el.Attribute` are opaque and take no type parameter. `el.text` / `el.each` / `el.none` / `el.fragment`, the framework words (`el.opener` / `el.closer` / `el.badge` / `el.each_modal` / `el.img` / `el.notice` / `el.dialog` / `el.dialog_opener` / `el.dialog_closer` / `el.stylesheet`) and `el.to_string` (for tests) are public; the rest of `el` is `@internal` and a ★ calling it stops the generator (article 3).
 - `html` has the 53 tags musearch uses plus `svg` / `path`, each as `tag(class, attributes, children)` and `tag_(attributes, children)`, with sketch_lustre's names and argument order. There is no `style`, `script` or `link`.
 - `attr` has typed attributes with lustre's names, `data(name, value)`, `aria(name, value)` and `role(attr.Status | ..)`. There is no free-name attribute, no `class` (a class is the tag's first argument, `css.class(styles)`), no `style` and no event.
 - Rendering never fails a page: a `data` / `aria` name that is not `[a-z][a-z0-9-]*` drops that attribute (a literal one stops the generator, article 7); `href` / `src` are dropped unless the scheme is `http`, `https`, `mailto`, `tel` or none (a relative URL); the same attribute written twice keeps the last one (written twice literally in one list stops the generator, article 8); `</` and `<!--` inside the generated `<style>` become `<\/` and `<\!--`. Fragments leave no comment markers, and a `textarea` / `pre` whose text starts with a newline keeps it.
-- Until stage C a Block places a 0.11 interactive Component with `el.legacy_island("like-button", [#("slug", it.slug)])` (a tag that is not a custom-element name renders nothing; an `on*` / `style` / `class` / `srcdoc` / non-`[a-z][a-z0-9-]*` argument is dropped).
+- `el.img(class, src, alt, attributes)` (0.12). `src` is an `el.Src`, made only by the generated `media.src(blob, media.W800)` (`src/gen/media.gleam`, from the app's media table) or `el.static_src("logo.png")` (a file under `priv/static/`: the path must be a string literal, exit 4, and the file must exist, exit 3; article 43). An `attr.src` in `attributes` does not override it.
+- `attr.data("yumemi-…", ..)` renders nothing and a literal one stops the generator (article 7): `data-yumemi-*` attributes are the framework's marks (where a button sends, a Component's state, an escape).
+- `el.dialog(key, class, attributes, children)` renders `<dialog id="yumemi-dialog-<key>">`; `el.dialog_opener(key, class, children)` / `el.dialog_closer(..)` render buttons with `command="show-modal"` / `command="close"` and `commandfor`. Where the browser has no invoker commands (`HTMLButtonElement.prototype.commandForElement` missing), the client calls `showModal()` / `close()` on their click. A dialog may sit inside an interactive Component's form and hold a send button (a confirmation step).
+- `el.notice(class)` is the place a Component's After message shows after a reload or a `GoTo` (put it in a Layout Block; article 16 stops when a Component declares a message and the Layout has none).
 
 ### The raw-CSS escape (0.12)
 
 `shell.stylesheets` (below) and `el.stylesheet(el.static_sheet("fonts/mincho.css"))` in a Block load a `.css` file from the face's `priv/static/`. Both are an escape hatch that the generator checks and counts:
 
-- the file must exist under `priv/static/` (exit 3, article 28) and the `static_sheet` path must be a string literal (exit 4, article 31);
-- no selector may name generated output — `[data-yumemi-…]`, a generated class `.css-<8 hex>`, or an element whose name starts with `yumemi-` (exit 4, article 29). An interactive Component's own tag (`like-button`) and its `:state()` are fine, and so is reading `var(--yumemi-theme-*)` in a declaration;
+- the file must exist under `priv/static/` (exit 3, article 28) and the `static_sheet` path must be a string literal (exit 4, article 31) — a variable piped in or `static_sheet` passed as a function value is not one; `"a.css" |> el.static_sheet` is. At run time a path holding `//`, `\`, `:` or a `..` segment points nowhere (`/`);
+- no selector may name generated output — `[data-yumemi-…]`, a generated class `.css-<8 hex>`, a `[class…]` selector whose value holds `css`, or an element whose name starts with `yumemi-` (exit 4, article 29). CSS escapes and spaces inside brackets are undone before the check, and at-rule preludes (`@scope (..)`) are checked too. An interactive Component's own tag (`like-button`) and its `:state()` are fine, and so is reading `var(--yumemi-theme-*)` in a declaration;
 - no `@import` (exit 4, article 30);
-- the rules are counted per face — each top-level block is one rule, an `@media` block is one — and printed as a warning (exit 0): `[exit 0 警告] <face>: 生の CSS の逃げ道 <n> file(..)、規則 <n>`, also in `_diagnostics.txt`.
+- the rules are counted per face — each top-level block is one rule, an `@media` block is one, and a file read from two places counts once — in the face's escape line (below).
+
+## `yumemi/front` ── Interactive Components (0.12)
+
+An interactive Component is a `src/components/<name>.gleam` module with a few constants and a view that takes Args and returns elements. There is no `update`, no State, no Event and no lustre: the state lives in the form's controls and in the element's custom state (`:state()`), and the generated client runtime (`yumemi/front/interactive.mjs`) moves it.
+
+```gleam
+import gen/live/article_publish as publish
+import gen/live/article_create as create
+import gen/route
+import gen/service
+import gleam/option.{None, Some}
+import yumemi/front/css
+import yumemi/front/el.{type Element}
+import yumemi/front/html
+import yumemi/front/live
+
+pub const calls: List(service.Service) = [service.ArticlePublish, service.ArticleCreate]
+
+pub const after_send: List(#(service.Service, live.After(route.Route))) = [
+  #(service.ArticlePublish,
+    live.After(ok: live.GoTo(route.ArticleArgSlug, notice: Some("Published")), error: live.Stay)),
+  #(service.ArticleCreate, live.After(ok: live.ReloadPage(notice: None), error: live.Stay)),
+]
+
+pub fn view(p: publish.Args, c: create.Args) -> Element {
+  html.div_([], [
+    html.input_([publish.bind(publish.Slug, p.slug)]),
+    publish.send(css.class([]), [el.text("Publish")]),
+    el.dialog_opener("copy", css.class([]), [el.text("Copy")]),
+    el.dialog("copy", css.class([]), [], [
+      html.input_([create.bind(create.Slug, c.slug)]),
+      create.send(css.class([]), [el.text("Create")]),
+    ]),
+    publish.when(publish.Refused(publish.AlreadyPublished), [el.text("Already published")]),
+    publish.when(publish.Succeeded, [el.text("Version "), publish.out(publish.OutVersion)]),
+  ])
+}
+```
+
+- **`calls`** lists one or more Services (constructor literals, no repeats; article 10). An attached upload route goes in the same list as `front.Entry(api.BlobCopy)` (the list's type is then `List(front.Target(service.Service, api.Attached))`); `pub const target` is gone.
+- **`view`** takes each Service's `Args` in `calls` order, plus an optional last `with: With` (article 11). `With` is a record in the same module: display values the placing Block passes once at render time (labels, choices). It is not state, never reaches the browser as data, and may not hold a live type, an `el.Element`, an `el.Attribute` or a function (article 22).
+- **`after_send`** has one `#(Service, live.After(ok:, error:))` per *write* Service in `calls` (missing: exit 3; for a read Service or twice: exit 4; article 12). `live.Then` is `Stay`, `ReloadPage(notice)` or `GoTo(route.<Page>, notice)`. `route` is the face's closed enum of Pages (`src/gen/route.gleam`). A `GoTo` path's holes are filled from the Service's Out fields of the same name (article 15). A `notice` shows once in the Layout's `el.notice`.
+- **`reloads`** (optional): `live.Reloads(read: service.<Read>, on: [<read>.<Field>, ..])` calls the read Service again when one of those controls changes (article 17). If the read's Out has no `List`, the runtime calls it and fills its `out` spans (an earlier call is aborted). If it has one, the runtime moves to the same Page with the field in the query (`?<field>=…`), replacing the history entry, keeping the scroll and the focus; the placing Block renders the rows.
+- **The generated live module** (`src/gen/live/<service>.gleam`) gives `Args` (all `String` fields), `Field`, `Error`, `When` (`Idle`, `Waiting`, `Succeeded`, `Failed`, `Refused(Error)`), `Slot` (`Out<Field>` for each non-list Out field) and `bind(field, value)` (name `<service>.<field>`, plus `minlength` / `maxlength` / `required` / `pattern` from the value type's Spec), `bind_check`, `bind_choice`, `bind_file` (a Blob field: the runtime uploads the chosen file to `/api/blobs` and puts its key in the Args), `when(state, children)`, `out(slot)` and `send(class, children)`.
+- **No chaining on the client.** One send button calls one Service; the runtime drops a submit without a send button and ignores Enter in a control of another Service. A Component may not import the live module of a Service outside `calls` (article 19), every Service in `calls` must be sendable (a write needs a `send`, a read a `send` or `reloads`; a list read may not have a `send`; article 20), and an `out` may not sit inside `textarea` / `select` / `option` (article 21). Combine Services on the server, in one Service.
+- **Placing it.** A Block calls the generated `src/gen/interactive.gleam`: `interactive.article_manage(publish.Args(slug: it.slug), create.Args(..))`. The Component renders on the server inside its tag (`<article-manage data-yumemi-island data-yumemi-args="…"><form><fieldset>…`), in light DOM, with the same generated class names and page `<style>` as a Block; JavaScript adds no style. The tag is the module name with `_` → `-` and must be a custom-element name (article 18); a Component may not place another one.
+- **State.** The runtime sets `waiting` and `sent-<service>` while a call runs (the fieldset is disabled and `aria-busy="true"` for a send, not for a single-value reload), then `ok` or `error` (+ `refused-<code>`). Where `ElementInternals.states` is missing it writes the same names to `data-yumemi-state`; the generated CSS hides `when` branches both ways (`@supports selector(:state(x))` and its negation). A Block's or Component's Style can react with `css.State(css.Waiting | css.Succeeded | css.Failed, ..)`.
+- `pub fn app` in a Component stops the generator (exit 4, article 9). The 0.11 shape (`app()`, `view(it: State)`, `after_send: live.After` with two values, `reloads: List(#(Field, Service))`) no longer compiles.
+
+## `yumemi/front` ── Named escapes (0.12)
+
+JavaScript a page needs and yumemi has no word for goes in `src/escapes/<name>.mjs` (`[a-z][a-z0-9_]*`, article 6) and nowhere else under `src/` (exit 4, article 5). The file exports `mount(element)` (exit 3 when it does not), which may return a function to call when the element leaves.
+
+```js
+// src/escapes/chat_socket.mjs
+export function mount(element) {
+  const socket = new WebSocket(element.dataset.url);
+  return () => socket.close();
+}
+```
+
+The generator writes `src/gen/escapes.gleam` with one function per file, `escapes.chat_socket(attributes, fallback)`, which renders `<yumemi-escape name="chat_socket" …>fallback</yumemi-escape>`; the fallback shows without JavaScript. The client bundles the files and mounts each element when it connects (also after client navigation) and unmounts it when it leaves. An escape may sit inside an interactive Component and write its controls.
+
+**The escape line.** Per face the generator prints one warning (exit 0, also in `_diagnostics.txt`) counting every escape hatch: `[exit 0 警告] <face>: 逃げ道 ── escape <kinds> 種 <calls> か所(うち interactive Component の中 <n>)、生の CSS <files> file <rules> 規則、数える口の送り先 ToService <n>`.
 
 ## `yumemi/front` ── Shell: the home screen, the service worker and the stylesheets (0.11.12, 0.11.15)
 
@@ -107,23 +176,26 @@ pub const stylesheets: List(String) = ["/brand/tokens.css", "/brand/site.css"]
 ```
 
 - The files themselves (the manifest, the icons, `sw.js`) are the face's static assets under `priv/static/`; the generator only links them.
-- The registration does nothing where `navigator.serviceWorker` is missing, and a failed registration is swallowed (the page keeps working). Client navigation does not reload `client.mjs`, so it registers once per page load. A face without islands gets a `client.mjs` that only registers the worker (and the page loads it); a face with neither gets no `client.mjs`, as before.
+- The registration does nothing where `navigator.serviceWorker` is missing, and a failed registration is swallowed (the page keeps working). Client navigation does not reload `client.mjs`, so it registers once per page load. A face without interactive Components or escapes gets a `client.mjs` that only registers the worker (and the page loads it); a face with none of them gets no `client.mjs`, as before.
 - Client navigation keeps the `<head>` elements the next page also has and swaps the rest, so each element stays exactly once after a navigation.
 - A constant that is present but is not a non-empty `String` constant (another type, or `""`) stops the generator like a missing `title`: exit 3, `<face>/src/shell.gleam: <name> は空でない String の定数で書く`. For `stylesheets` the same holds when it is not a list literal of non-empty strings: `<face>/src/shell.gleam: stylesheets は空でない String の List の定数で書く`.
 
 ## `yumemi/front` ── Client navigation (0.11.4, 0.11.15, 0.12)
 
-The generated client calls `yumemi/front/navigate.mjs`'s `start({routes, csp, boot})`. `routes` lists every Page route of the face; `csp` maps each route of a gate `frame_src` Page to the `content-security-policy` value the gate sends with it (`frame-src https://<host> ..` from the entry's `frame_src` hosts). A face without such Pages gets no `csp` key, exactly as in 0.11.14.
+The generated client calls `yumemi/front/navigate.mjs`'s `start({routes, csp})`. `routes` lists every Page route of the face; `csp` maps each route of a gate `frame_src` Page to the `content-security-policy` value the gate sends with it (`frame-src https://<host> ..` from the entry's `frame_src` hosts). A face without such Pages gets no `csp` key, exactly as in 0.11.14.
 
-Since 0.12 the browser's [Navigation API](https://developer.mozilla.org/en-US/docs/Web/API/Navigation_API) does the browser's part: it reports the navigation (`navigation`'s `navigate` event), keeps history, restores scroll, resets focus, aborts a superseded navigation and handles fragments. `navigate.mjs` takes a navigation with `event.intercept()` and does the rest: the fetch, the swap check, the head diff, the stylesheet wait, the body swap, re-running island registrations (`boot`), and the pageview mark.
+Since 0.12 the browser's [Navigation API](https://developer.mozilla.org/en-US/docs/Web/API/Navigation_API) does the browser's part: it reports the navigation (`navigation`'s `navigate` event), keeps history, restores scroll, resets focus, aborts a superseded navigation and handles fragments. `navigate.mjs` takes a navigation with `event.intercept()` and does the rest: the fetch, the swap check, the head diff, the stylesheet wait, the body swap, and the pageview mark. Interactive Components and escapes in the new body start by themselves: their custom elements are defined once, and each connects when the body is inserted (0.12 has no `boot`).
 
 - **Which navigations.** A push or replace the user started (a link, a GET form) and a back / forward within the document, from a routed Page to a routed Page, whose destination has the same CSP as the Page that loaded the current document (both none, or the same value). A CSP header only takes effect on a page load, so a link to a Page with another CSP — or from a Page without one to a Page with one — is a page load, and the destination's policy holds. The browser handles everything else as it would without `navigate.mjs`: modified clicks and `target` (another tab), `download`, POST forms, other origins, a fragment within the page, navigations a script starts (`location.assign`), a plain `location.reload()`, and links to unrouted paths. A back / forward within the document to an unrouted entry is taken and reloaded as a page load, so the URL and the page never disagree.
 - **Without the Navigation API** (Baseline 2026: Chrome 102, Firefox 147, Safari 26.2) `start` does nothing: every link is a page load, and so is reload after a write.
-- **Which responses.** One fetch with `x-yumemi-navigate: 1` (the gate, the adult declaration and the session go through the server as before), aborted with the navigation's `signal`. It falls back to a page load of the destination on a redirect (a gate's 302, e.g. to `/enter`), a non-200, a non-HTML body, a `content-security-policy` header that differs from the route table's value for that Page (or is present where the table has none, or missing where it has one), a page with scripts other than the client, or an already-registered given island. The URL has already changed by then, so the fallback is `location.replace` (no extra history entry); the server sees the same GET twice.
+- **Which responses.** One fetch with `x-yumemi-navigate: 1` (the gate, the adult declaration and the session go through the server as before), aborted with the navigation's `signal`. It falls back to a page load of the destination on a redirect (a gate's 302, e.g. to `/enter`), a non-200, a non-HTML body, a `content-security-policy` header that differs from the route table's value for that Page (or is present where the table has none, or missing where it has one), or a page with scripts other than the client. The URL has already changed by then, so the fallback is `location.replace` (no extra history entry); the server sees the same GET twice.
 - **The head.** Elements whose `outerHTML` is the same in the current and the next `<head>` stay where they are (a stylesheet is not re-requested); the others are removed or inserted at the next page's positions, so the order follows the next page. The client script stays.
 - **Stylesheets load before the body changes.** A stylesheet new to `<head>`, and a copy (in `<head>`, marked `data-yumemi-hold`) of each stylesheet that only the next page's `<body>` links (an article's font CSS, say), is inserted with `media="not all"` and awaited (load or error, at most 3 seconds); then its `media` is restored, the old head elements leave and the body is swapped. A copy is removed once the body's own `<link>` has loaded. The old page stays on screen meanwhile, so no unstyled page shows; the swap waits for those downloads.
 - **Scroll and focus** follow `intercept()`'s defaults once the new body is in: a push goes to the fragment or the top, back / forward return to the position the entry was left at; focus moves to the `autofocus` element or `<body>`. Reload after a write is taken with `scroll: "manual"` and keeps the current position (the reload default would go back to the top, since the entry's position is only saved when leaving it).
-- **Reload after a write.** An island's `yumemi-done` (After `ReloadPage`) calls `navigate.reload()`: on a routed Page it calls `navigation.reload()` with a mark and takes that reload, refetching the current URL the same way (no history entry, scroll kept); otherwise, or without the Navigation API, it reloads the page.
+- **A same-document change during a fetch.** If a fragment link or `history.pushState` / `replaceState` aborts the fetch of the next page, and no newer navigation was taken, the current URL is reloaded (`location.reload()`), so the URL and the page never disagree.
+- **History a script pushed.** Back / forward to an entry a script pushed on the current page (an escape's `history.pushState`) is left to the browser: the page is not refetched, a Component keeps its state, and no pageview is counted. 0.12's interactive Component runtime itself never pushes history (a list `reloads` replaces the entry).
+- **Runtime navigations.** A Component's `GoTo` and a list `reloads` call `navigate.go(href, {replace, keep})`, which `navigate.mjs` takes like a user's push (a list `reloads` replaces the entry, keeps the scroll and puts focus back on the same control).
+- **Reload after a write.** A Component's After `ReloadPage` calls `navigate.reload()`: on a routed Page it calls `navigation.reload()` with a mark and takes that reload, refetching the current URL the same way (no history entry, scroll kept); otherwise, or without the Navigation API, it reloads the page.
 - **Pageviews: the mark only.** For the navigation fetch the gate puts `<meta name="yumemi-pageview">` in `<head>`. `navigate.mjs` does not post pageviews (0.11.4 to 0.11.15 did); it replaces the mark on every swap, so when `navigation` fires `navigatesuccess` the document holds the next page's mark and never the previous page's. A pageview sender reads the mark there and the kind from `navigation.transition.navigationType` (`push`, `traverse`, `reload`). `navigatesuccess` also fires for a same-document navigation `navigate.mjs` does not take (a fragment within the page, `history.pushState` / `replaceState`); `navigation.transition` is then `null` and the current page's mark is still in the document, so a sender counts only when `navigation.transition` is not `null`. `start` no longer takes `pageview`.
 - **No `yumemi-navigated` event.** Listen to `navigation`'s `navigatesuccess` instead (0.11.4 to 0.11.15 dispatched `yumemi-navigated` on `document`).
 
@@ -145,7 +217,7 @@ pub type PageTheme {
 
 ## `yumemi/front` ── Style (0.11.10)
 
-`yumemi/front/css`'s `Style` is the typed vocabulary a Page / Area / component carries; `yumemi/front/sketch_css` maps it to CSS (sketch classes; a 0.11 island's Style still lands in the island's shadow `<style>`). `css.class(styles)` makes the `Class` a tag takes. Every word also works inside `State(Hover / Focus / FocusVisible / HoverCapable / Disabled / Current / Waiting / Succeeded / Failed / ThemeImage, ..)` and `Responsive(SP / PC / Tablet, ..)`.
+`yumemi/front/css`'s `Style` is the typed vocabulary a Page / Area / component carries; `yumemi/front/sketch_css` maps it to CSS (sketch classes; from 0.12 a class name is a hash of the rendered CSS, so the same Style gets the same name in node, the Worker and a minified bundle, and an interactive Component's Style lands in the page's `<style>` like a Block's). `css.class(styles)` makes the `Class` a tag takes. Every word also works inside `State(Hover / Focus / FocusVisible / HoverCapable / Disabled / Current / Waiting / Succeeded / Failed / ThemeImage, ..)` and `Responsive(SP / PC / Tablet, ..)`.
 
 Colours are a closed type, `css.Paint` (0.12; before, a string passed straight through):
 
@@ -230,12 +302,12 @@ A Service whose logic runs `step.commit` and continues after it (and is not a qu
 
 - **Reads time out and retry once.** `driver.mjs` cuts a read-only statement (one `SELECT` / `WITH` / `VALUES` / `TABLE` with no write keyword — `INTO` and row locks count as writes — and no call to a function outside the built-in allow list, read after one pass that strips strings, quoted identifiers and comments; see `yumemi/server/read_retry.mjs`) after `DATABASE_READ_TIMEOUT_MS` (default 10000) and retries it once when the failure is outside the database (timeout, fetch failure, HTTP 5xx; not an SQLSTATE). Writes and transactions are never retried and get no timeout. Every failure outside the database, read or write, is logged as one JSON line (`{"yumemi":"driver.failed",kind,key,attempt,ms,code,status,name,body}`, `kind` is `read` / `write` / `transaction`) with the response body.
 - **Attached routes with a framework role that reads a body** send it: the live for a `SwitchSubject` route has `Args(kind, id)` and sends `{kind, id}`. Other attached lives are unchanged (no Args, `null` body).
-- **The `BlobCopy` live copies a URL.** Besides the file upload (`Send`), `copy_from(state, url)` sends `{from: url}` to the same route and reads `{key}` into `Done(Ok(key))`.
+- **The `BlobCopy` live copies a URL.** Besides the file upload (`Send`), `copy_from(state, url)` sends `{from: url}` to the same route and reads `{key}` into `Done(Ok(key))`. (0.12: `blob_copy.Args(file, from)` — the runtime uploads the chosen file, or sends `{from}` when no file is chosen, and puts `key` in `OutKey`.)
 - **Split records decode.** A record Property stored with `Split` is rebuilt from its columns in `src/gen/codec.mjs`.
-- **Islands render sketch classes.** The generated client registers each island through `yumemi/front/island_style.mjs`'s `styled(app)`: the island gets its own sketch stylesheet while its view runs, and the CSS goes into a `<style>` inside the island (only when the island uses classes and does not render its own stylesheet).
-- **Client navigation between Pages.** The generated client calls `yumemi/front/navigate.mjs`'s `start({routes, boot, pageview})`. A plain left click on a same-origin link, from a Page to a Page that are both in the face's route table (minus the gate's `frame_src` Pages), fetches the next page with one request (the gate, the browser's declarations and the session go through the server as before), swaps `<head>` and `<body>`, re-runs the island registrations and pushes history; back / forward do the same. A redirect, a non-200, a `content-security-policy` header, a page with scripts other than the client, an already-registered given island, a modified click, `target` or `download` fall back to a page load.
+- **Islands render sketch classes.** The generated client registers each island through `yumemi/front/island_style.mjs`'s `styled(app)`: the island gets its own sketch stylesheet while its view runs, and the CSS goes into a `<style>` inside the island (only when the island uses classes and does not render its own stylesheet). (0.12 removes this: a Component renders in light DOM with the page's `<style>`, see "Interactive Components".)
+- **Client navigation between Pages.** The generated client calls `yumemi/front/navigate.mjs`'s `start({routes, boot, pageview})`. A plain left click on a same-origin link, from a Page to a Page that are both in the face's route table (minus the gate's `frame_src` Pages), fetches the next page with one request (the gate, the browser's declarations and the session go through the server as before), swaps `<head>` and `<body>`, re-runs the island registrations and pushes history; back / forward do the same. A redirect, a non-200, a `content-security-policy` header, a page with scripts other than the client, an already-registered given island, a modified click, `target` or `download` fall back to a page load. (0.12 replaces this with the Navigation API and drops `boot`, see "Client navigation".)
 - **Pageviews count once per navigation.** The navigation fetch carries `x-yumemi-navigate: 1`; for it the gate puts `<meta name="yumemi-pageview">` in `<head>` instead of the pageview script (same conditions as the script, 200 HTML, a `pageview` Page) and adds `vary: x-yumemi-navigate`. The client posts the pageview (`kind` `spa`) only after it swapped that page in; a fallback to a page load gets the script as before. (0.12 replaces this: see "The gate and the CMS features" below.)
-- **Reload after a write stays in the page.** An island's `yumemi-done` calls `navigate.reload()`: on a routed Page it refetches the current URL the same way (no history entry, scroll kept, pageview `kind` `reload`); otherwise it reloads the page.
+- **Reload after a write stays in the page.** An island's `yumemi-done` calls `navigate.reload()`: on a routed Page it refetches the current URL the same way (no history entry, scroll kept, pageview `kind` `reload`); otherwise it reloads the page. (0.12: a Component's After `ReloadPage`, see "Interactive Components".)
 
 0.11.5 adds, without changing or removing the existing public types:
 
@@ -379,6 +451,6 @@ pub const browser: BrowserCookie = BrowserCookie(
 - **The browser mark** is set by the receiver: the first event that passes `only` from a browser without a valid cookie gets a mark-only cookie (`{id}`), with the `browser` cookie's attributes (`HttpOnly; Secure; SameSite=Lax; Max-Age=<max_age_days>`, `Domain=COOKIE_DOMAIN`). A later declaration adds its field to the same mark.
 - `sink: Store(resolve: Option(String), rollup_by: List(String), exclude_when: List(String))` keeps events in framework tables (`framework.pageview_mark` / `_visit` / `_event` / `_rollup`); an event row keeps the mark and, when the request carries a signed-in session, its party (`party`). Same-id resends, the 61st event in a minute and two tabs at once are handled under the mark's row lock (`framework.pageview_record`). `resolve` names a Service with `Args(path: String)` whose `Out` carries the business dimensions; `rollup_by` names `Out` fields to roll up by, `exclude_when` names `Out` `Bool` fields whose true events are stored but not counted (the owner's and the operators' own views). The daily rollup (cron `0 1 * * *`) rebuilds the previous and the current UTC day and their months: page views, uniques (marks), visits and roaming visits (visits with 2+ views), per site, per path and per `rollup_by` field. A `Store` without `browser` stops with exit 3; an unknown `resolve` or field stops with exit 4 (rule 37).
 - **The DDL is generated, not applied.** A `Store` makes the generator write `db/framework/pageview.sql` (tables, indexes and the three functions). Applying it to a database is the app's DDL step.
-- `sink: ToService(service)` is a named escape hatch: the receiver runs its checks (fields, `only`, bots, prefetch, the mark) and calls the app's Service with Args built from the event fields (every Args field must be one of the event's field names; fields that may be absent must be `Option`) (rule 36). The mark, the party and the subject reach the root as usual (`Carried(.., name: "browser", ..)`). Resends, the per-minute limit and concurrent tabs are the Service's job. The generator prints one exit-0 warning per face that uses it, also in `_diagnostics.txt`.
+- `sink: ToService(service)` is a named escape hatch: the receiver runs its checks (fields, `only`, bots, prefetch, the mark) and calls the app's Service with Args built from the event fields (every Args field must be one of the event's field names; fields that may be absent must be `Option`) (rule 36). The mark, the party and the subject reach the root as usual (`Carried(.., name: "browser", ..)`). Resends, the per-minute limit and concurrent tabs are the Service's job. The generator counts it in the face's escape line (exit 0, also in `_diagnostics.txt`).
 
 **Image variants.** `pub const media: Media = Media(path:, variants: [ImageVariant(name:, width:, height: Option(Int), fit: ScaleDown | Cover | Contain)], theme_background:)` in `src/server.gleam` makes the generator write `<face>/src/gen/media.gleam` per face: a closed `Variant` type, `name(variant)`, `theme_background` and `url(blob, variant)` (`<path>/<key, each "/"-separated segment percent-encoded>?v=<name>`). Duplicate or badly spelled names, or a `theme_background` outside the table, stop with exit 4 (rule 39). Serving, caching and purging stay in the app.

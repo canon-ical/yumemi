@@ -25,24 +25,35 @@ pub type Error {
   ParseFailed(path: String, detail: String)
 }
 
-/// `<app>/src` の下を歩いて、生成物(`src/gen/`)以外の .gleam を全部読む。
+/// `<app>/src` の下を歩いて、生成物以外の .gleam を全部読む。`src/gen/` の file は生成の印(1 行目の
+/// `//// GENERATED`)を持つものだけを生成物として外す ── 手で置いた file は ★ として読み、記述面の条文
+/// (lustre の import ほか)に掛ける(0.12 段 C、Y2 柏木 P1-6)。
 pub fn load(app_dir: String) -> Result(List(Unit), Error) {
   let src = app_dir <> "/src"
   let files =
     gleam_files(src, "")
-    |> list.filter(fn(rel) { !string.starts_with(rel, "gen/") })
     |> list.sort(string.compare)
   list.try_map(files, fn(rel) {
     let full = src <> "/" <> rel
     use text <- result.try(
       simplifile.read(full) |> result.replace_error(ReadFailed(full)),
     )
-    let path = string.drop_end(rel, 6)
-    case glance.module(preprocess_spread_trailing_commas(text)) {
-      Ok(module) -> Ok(Unit(path: path, text: text, module: module))
-      Error(error) -> Error(ParseFailed(full, string.inspect(error)))
+    case string.starts_with(rel, "gen/") && generated(text) {
+      True -> Ok([])
+      False -> {
+        let path = string.drop_end(rel, 6)
+        case glance.module(preprocess_spread_trailing_commas(text)) {
+          Ok(module) -> Ok([Unit(path: path, text: text, module: module)])
+          Error(error) -> Error(ParseFailed(full, string.inspect(error)))
+        }
+      }
     }
   })
+  |> result.map(list.flatten)
+}
+
+fn generated(text: String) -> Bool {
+  string.starts_with(text, "//// GENERATED")
 }
 
 type Bracket {

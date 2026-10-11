@@ -8,11 +8,11 @@ import blocks/row_summary
 import blocks/site_header
 import blocks/summary
 import gen/load/layout
+import gen/media
 import gen/out/article_read
 import gen/out/widget_list
 import gleam/list
 import gleam/option.{type Option, None, Some}
-import media
 import style
 import yumemi/blob.{type Blob}
 import yumemi/front/css
@@ -97,7 +97,7 @@ fn theme_image_attribute(value: Option(theme.PageTheme)) -> el.Attribute {
 }
 
 fn theme_image_url(value: Blob) -> String {
-  media.url(value, media.W1600)
+  media.url(value, media.theme_background)
 }
 
 pub fn view(it: Data) -> el.Element {

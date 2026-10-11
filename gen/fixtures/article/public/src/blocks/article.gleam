@@ -2,6 +2,14 @@
 
 import yumemi/front/css
 import yumemi/front/el
+import components/pick_tag
+import gen/escapes
+import gen/interactive
+import gen/live/article_blob_save
+import gen/live/article_create
+import gen/live/article_publish
+import gen/live/article_title
+import gen/live/blob_copy
 import gen/out/article_read
 import gleam/option.{type Option, None, Some}
 import yumemi/front/attr
@@ -81,23 +89,38 @@ pub fn view(it: In, arg: Arg) -> el.Element {
       el.badge(Some(0), [el.text("zero")]),
       el.badge(Some(3), [el.text("three")]),
       html.div_([], [
-        el.legacy_island("like-button", [
-          #("slug", it.article.slug),
-        ]),
-        el.legacy_island("pick-tag", [
-          #("slug", "article"),
-          #("title", "本日の記事"),
-          #("body", "夜のシフトが得意な新人です。よろしくお願いします。"),
-          #("category", "news"),
-          #("tags", "fixture,gleam,cloudflare"),
-          #("selected", "fixture"),
-        ]),
-        el.legacy_island("blob-save", [
-          #("slug", it.article.slug),
-          #("blob", "stored-image-key"),
-          #("existing", "stored-optional-key"),
-        ]),
-        el.legacy_island("article-blob-copy", []),
+        interactive.like_button(article_publish.Args(slug: it.article.slug)),
+        interactive.pick_tag(
+          article_create.Args(
+            slug: "article",
+            title: "本日の記事",
+            body: "夜のシフトが得意な新人です。よろしくお願いします。",
+            category: "news",
+            tags: "[\"fixture\"]",
+          ),
+          pick_tag.With(
+            choices: ["fixture", "gleam", "cloudflare"],
+            selected: "fixture",
+          ),
+        ),
+        interactive.blob_save(article_blob_save.Args(
+          slug: it.article.slug,
+          blob: "stored-image-key",
+          existing: "stored-optional-key",
+        )),
+        interactive.article_blob_copy(blob_copy.Args(file: "", from: "")),
+        interactive.article_manage(
+          article_publish.Args(slug: it.article.slug),
+          article_create.Args(
+            slug: it.article.slug <> "-copy",
+            title: it.article.title,
+            body: it.article.body,
+            category: "news",
+            tags: "[]",
+          ),
+        ),
+        interactive.title_lookup(article_title.Args(slug: it.article.slug)),
+        escapes.clock([attr.data("zone", "jst")], [el.text("時計")]),
       ]),
     ],
   )

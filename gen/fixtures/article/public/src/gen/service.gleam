@@ -1,4 +1,4 @@
-//// GENERATED from src/service/*.gleam [sha256:0dee191f4b42] — 手で編集しない
+//// GENERATED from src/service/*.gleam [sha256:45af8f2ddaa9] — 手で編集しない
 
 pub type Service {
   ArticleBlobSave
@@ -7,5 +7,6 @@ pub type Service {
   ArticlePublish
   ArticleRead
   ArticleRetract
+  ArticleTitle
   WidgetList
 }
