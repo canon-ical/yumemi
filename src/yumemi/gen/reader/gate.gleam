@@ -1,7 +1,8 @@
 //// 面の門の宣言(`<face>/src/gate.gleam` の `pub const gate`、型は `yumemi/gate`)を読む。
 ////
 //// 宣言が無い面は、入口 `Http` の `admit` / `subject` から既定の門を組む(`Authenticated` の面だけ)。
-//// CSP の host は入口 `Http` の `frame_src` 欄から読む(`api/src/entry.gleam`)。
+//// CSP は門の `csp`(Page 群と閉じた指令の組、0.12)。host の綴りが外れれば exit 4(51 v6 第 38 条)。
+//// 数える口 `pageview` の欄の重なりと綴り(第 35 条)、`pages` の指し先(第 34 条)もここで見る。
 //// session を読む口は `api/src/server.gleam` の `attached_roles` の `ReadSession` が指す attached の path
 //// (framework は app の口の名を知らない)。門が session を読むのに `ReadSession` が無ければ exit 3。
 //// Page の指し先(`Exact` / `Prefix`)が面の route に無ければ exit 4。
@@ -26,8 +27,7 @@ pub type Gate {
     sign_in_fallback: String,
     rules: List(Rule),
     redirects: List(Redirect),
-    frame_src: List(Match),
-    frame_hosts: List(String),
+    csp: List(Csp),
     pageview: Option(Pageview),
     /// session を読む口の path(`ReadSession` の attached)。宣言が無ければ None。
     session_path: Option(String),
@@ -46,9 +46,9 @@ pub type Rule {
 
 pub type Check {
   SignedIn(fail: Fail)
-  Adult(fail: Fail)
+  Declared(kind: String, fail: Fail)
   SubjectKind(kinds: List(String), fail: Fail)
-  Consent(kind: String, fail: Fail)
+  Consented(kind: String, fail: Fail)
   /// 入口の `admit: Authenticated` からの既定。session の読みの失敗は生成 shell の読みの失敗と同じ本文で返す。
   Admitted(kinds: List(String))
 }
@@ -62,7 +62,7 @@ pub type Fail {
 }
 
 pub type Redirect {
-  Redirect(pages: List(Match), when_adult: Bool, to: To)
+  Redirect(pages: List(Match), when: model.GateWhen, to: To)
 }
 
 pub type To {
@@ -72,25 +72,34 @@ pub type To {
   FixedKeep(location: String)
 }
 
+pub type Csp {
+  Csp(pages: List(Match), directives: List(#(String, List(String))))
+}
+
 pub type Pageview {
   Pageview(
     pages: List(Match),
-    endpoint: String,
-    source_param: String,
-    storage_key: String,
+    only: List(model.GateWhen),
+    fields: List(model.PageviewField),
+    sink: model.PageviewSink,
   )
 }
 
-/// 門が session を読むか(rules・redirects・pageview のどれかを持つ)。
+/// 門が session を読むか(rules・redirects か、条件 `only` を持つ pageview のどれかを持つ)。
 pub fn reads_session(gate: Gate) -> Bool {
-  gate.rules != [] || gate.redirects != [] || gate.pageview != None
+  gate.rules != []
+  || gate.redirects != []
+  || case gate.pageview {
+    Some(pageview) -> pageview.only != []
+    None -> False
+  }
 }
 
 /// 門が何かを持つか。持たない面の `gate.mjs` は素通しになる。
 pub fn is_empty(gate: Gate) -> Bool {
   gate.rules == []
   && gate.redirects == []
-  && gate.frame_src == []
+  && gate.csp == []
   && gate.pageview == None
 }
 
@@ -125,12 +134,12 @@ fn read_gate(
   entries: List(model.Entry),
   route_paths: List(String),
 ) -> #(Gate, List(Note)) {
-  let hosts = frame_hosts(back_units, face_name)
+  let _ = back_units
   case list.find(face_units, fn(unit) { unit.path == "gate" }) {
-    Error(_) -> #(default_gate(face_name, entries, hosts), [])
+    Error(_) -> #(default_gate(face_name, entries), [])
     Ok(unit) ->
       case g.find_constant(g.in_order(unit.module), "gate") {
-        None -> #(default_gate(face_name, entries, hosts), [
+        None -> #(default_gate(face_name, entries), [
           Note(
             stop.Missing,
             face_name <> "/gate: `pub const gate` が無い(門の宣言は `gate` の 1 つ)",
@@ -138,81 +147,47 @@ fn read_gate(
         ])
         Some(constant) ->
           case gate_of(constant.value) {
-            Error(reason) -> #(empty(hosts), [
+            Error(reason) -> #(empty(), [
               Note(stop.Conflict, face_name <> "/gate: " <> reason),
             ])
-            Ok(gate) -> {
-              let gate = Gate(..gate, frame_hosts: hosts)
-              #(gate, match_notes(face_name, gate, route_paths))
-            }
+            Ok(gate) -> #(
+              gate,
+              list.flatten([
+                match_notes(face_name, gate, route_paths),
+                csp_notes(face_name, gate),
+                pageview_notes(face_name, gate),
+              ]),
+            )
           }
       }
   }
 }
 
-fn empty(hosts: List(String)) -> Gate {
+fn empty() -> Gate {
   Gate(
     declared: False,
     sign_in_path: "/auth/sign-in",
     sign_in_fallback: "",
     rules: [],
     redirects: [],
-    frame_src: [],
-    frame_hosts: hosts,
+    csp: [],
     pageview: None,
     session_path: None,
   )
 }
 
-fn default_gate(
-  face_name: String,
-  entries: List(model.Entry),
-  hosts: List(String),
-) -> Gate {
+fn default_gate(face_name: String, entries: List(model.Entry)) -> Gate {
   case list.find(entries, fn(entry) { entry.name == face_name }) {
     Ok(model.Entry(admit: model.AuthenticatedAdmit, subject: subject, ..)) -> {
       let kinds = case subject {
         model.AnyEntrySubject -> []
         model.NamedEntrySubjects(names) -> list.map(names, naming.snake)
       }
-      Gate(..empty(hosts), rules: [
+      Gate(..empty(), rules: [
         Rule(pages: [Every], except: [], checks: [Admitted(kinds)]),
       ])
     }
-    _ -> empty(hosts)
-  }
-}
-
-// ── 入口の frame_src ─────────────────────────────────────────────
-
-fn frame_hosts(units: List(Unit), face_name: String) -> List(String) {
-  case list.find(units, fn(unit) { unit.path == "entry" }) {
-    Error(_) -> []
-    Ok(unit) ->
-      case g.find_constant(g.in_order(unit.module), "entries") {
-        None -> []
-        Some(constant) ->
-          g.list_elements(constant.value)
-          |> list.find_map(fn(entry) {
-            case
-              option.then(g.labelled(entry, "name"), g.string_value)
-              == Some(face_name)
-            {
-              True ->
-                case g.labelled(entry, "frame_src") {
-                  Some(value) ->
-                    Ok(
-                      list.filter_map(g.list_elements(value), fn(item) {
-                        option.to_result(g.string_value(item), Nil)
-                      }),
-                    )
-                  None -> Ok([])
-                }
-              False -> Error(Nil)
-            }
-          })
-          |> result.unwrap([])
-      }
+    _ -> empty()
   }
 }
 
@@ -315,12 +290,7 @@ fn gate_of(expression: glance.Expression) -> Result(Gate, String) {
         2,
         redirect_of,
       ))
-      use frame_src <- result.try(list_field(
-        expression,
-        "frame_src",
-        3,
-        match_of,
-      ))
+      use csp <- result.try(list_field(expression, "csp", 3, csp_of))
       use pageview_expression <- result.try(field(expression, "pageview", 4))
       use pageview <- result.try(pageview_of(pageview_expression))
       Ok(Gate(
@@ -329,8 +299,7 @@ fn gate_of(expression: glance.Expression) -> Result(Gate, String) {
         sign_in_fallback: sign_in_fallback,
         rules: rules,
         redirects: redirects,
-        frame_src: frame_src,
-        frame_hosts: [],
+        csp: csp,
         pageview: pageview,
         session_path: None,
       ))
@@ -367,7 +336,11 @@ fn rule_of(expression: glance.Expression) -> Result(Rule, String) {
 fn check_of(expression: glance.Expression) -> Result(Check, String) {
   case g.ctor_name(expression) {
     Some("SignedIn") -> result.map(fail_field(expression, 0), SignedIn)
-    Some("Adult") -> result.map(fail_field(expression, 0), Adult)
+    Some("Declared") -> {
+      use kind <- result.try(string_field(expression, "kind", 0))
+      use fail <- result.try(fail_field(expression, 1))
+      Ok(Declared(kind, fail))
+    }
     Some("SubjectKind") -> {
       use kinds <- result.try(
         list_field(expression, "kinds", 0, fn(item) {
@@ -377,12 +350,12 @@ fn check_of(expression: glance.Expression) -> Result(Check, String) {
       use fail <- result.try(fail_field(expression, 1))
       Ok(SubjectKind(kinds, fail))
     }
-    Some("Consent") -> {
+    Some("Consented") -> {
       use kind <- result.try(string_field(expression, "kind", 0))
       use fail <- result.try(fail_field(expression, 1))
-      Ok(Consent(kind, fail))
+      Ok(Consented(kind, fail))
     }
-    _ -> Error("検査は SignedIn / Adult / SubjectKind / Consent")
+    _ -> Error("検査は SignedIn / Declared / SubjectKind / Consented")
   }
 }
 
@@ -459,11 +432,7 @@ fn redirect_of(expression: glance.Expression) -> Result(Redirect, String) {
     Some("Redirect") -> {
       use pages <- result.try(list_field(expression, "pages", 0, match_of))
       use when <- result.try(field(expression, "when", 1))
-      use when_adult <- result.try(case g.ctor_name(when) {
-        Some("WhenAdult") -> Ok(True)
-        Some("WhenSignedIn") -> Ok(False)
-        _ -> Error("`when` は WhenAdult / WhenSignedIn")
-      })
+      use when <- result.try(when_of(when))
       use to <- result.try(field(expression, "to", 2))
       use to <- result.try(case g.ctor_name(to) {
         Some("SafeParam") -> {
@@ -488,9 +457,48 @@ fn redirect_of(expression: glance.Expression) -> Result(Redirect, String) {
           })
         _ -> Error("`to` は SafeParam / Fixed / FixedKeep")
       })
-      Ok(Redirect(pages: pages, when_adult: when_adult, to: to))
+      Ok(Redirect(pages: pages, when: when, to: to))
     }
     _ -> Error("`redirects` の要素は `Redirect(..)`")
+  }
+}
+
+fn when_of(expression: glance.Expression) -> Result(model.GateWhen, String) {
+  case g.ctor_name(expression) {
+    Some("WhenDeclared") ->
+      result.map(string_field(expression, "kind", 0), model.WhenDeclared)
+    Some("WhenSignedIn") -> Ok(model.WhenSignedIn)
+    _ -> Error("条件は WhenDeclared / WhenSignedIn")
+  }
+}
+
+fn csp_of(expression: glance.Expression) -> Result(Csp, String) {
+  case g.ctor_name(expression) {
+    Some("Csp") -> {
+      use pages <- result.try(list_field(expression, "pages", 0, match_of))
+      use directives <- result.try(
+        list_field(expression, "directives", 1, fn(item) {
+          use name <- result.try(case g.ctor_name(item) {
+            Some("FrameSrc") -> Ok("frame-src")
+            Some("ImgSrc") -> Ok("img-src")
+            Some("ConnectSrc") -> Ok("connect-src")
+            Some("MediaSrc") -> Ok("media-src")
+            _ -> Error("CSP の指令は FrameSrc / ImgSrc / ConnectSrc / MediaSrc")
+          })
+          use hosts <- result.try(
+            list_field(item, "hosts", 0, fn(host) {
+              option.to_result(g.string_value(host), "`hosts` は文字列の literal")
+            }),
+          )
+          Ok(#(name, hosts))
+        }),
+      )
+      case pages {
+        [] -> Error("Csp の `pages` が空")
+        _ -> Ok(Csp(pages: pages, directives: directives))
+      }
+    }
+    _ -> Error("`csp` の要素は `Csp(..)`")
   }
 }
 
@@ -501,19 +509,209 @@ fn pageview_of(
     Some("NoPageview") -> Ok(None)
     Some("Pageview") -> {
       use pages <- result.try(list_field(expression, "pages", 0, match_of))
-      use endpoint <- result.try(string_field(expression, "endpoint", 1))
-      use source_param <- result.try(string_field(expression, "source_param", 2))
-      use storage_key <- result.try(string_field(expression, "storage_key", 3))
-      Ok(
-        Some(Pageview(
-          pages: pages,
-          endpoint: endpoint,
-          source_param: source_param,
-          storage_key: storage_key,
-        )),
-      )
+      use only <- result.try(list_field(expression, "only", 1, when_of))
+      use fields <- result.try(list_field(expression, "fields", 2, field_of))
+      use sink <- result.try(field(expression, "sink", 3))
+      use sink <- result.try(sink_of(sink))
+      case pages {
+        [] -> Error("Pageview の `pages` が空")
+        _ ->
+          Ok(
+            Some(Pageview(pages: pages, only: only, fields: fields, sink: sink)),
+          )
+      }
     }
-    _ -> Error("`pageview` は NoPageview / Pageview(..)")
+    _ ->
+      Error("`pageview` は NoPageview / Pageview(pages:, only:, fields:, sink:)")
+  }
+}
+
+fn field_of(
+  expression: glance.Expression,
+) -> Result(model.PageviewField, String) {
+  case g.ctor_name(expression) {
+    Some("NavKind") -> Ok(model.NavKindField)
+    Some("ClientAt") -> Ok(model.ClientAtField)
+    Some("Path") -> Ok(model.PathField)
+    Some("Previous") -> Ok(model.PreviousField)
+    Some("Referrer") -> Ok(model.ReferrerField)
+    Some("FromQuery") -> {
+      use name <- result.try(string_field(expression, "name", 0))
+      use param <- result.try(string_field(expression, "param", 1))
+      use pattern <- result.try(field(expression, "pattern", 2))
+      use max <- result.try(case g.ctor_name(pattern) {
+        Some("Slug") -> int_field(pattern, "max", 0)
+        _ -> Error("FromQuery の `pattern` は Slug(max:)")
+      })
+      Ok(model.FromQueryField(name: name, param: param, max: max))
+    }
+    _ ->
+      Error(
+        "欄は NavKind / ClientAt / Path / Previous / Referrer / FromQuery(閉じた語彙。正規表現の文字列は受けない)",
+      )
+  }
+}
+
+fn sink_of(
+  expression: glance.Expression,
+) -> Result(model.PageviewSink, String) {
+  case g.ctor_name(expression) {
+    Some("Store") -> {
+      use resolve <- result.try(field(expression, "resolve", 0))
+      use resolve <- result.try(case g.ctor_name(resolve) {
+        Some("None") -> Ok(None)
+        Some("Some") ->
+          case g.args(resolve) {
+            [inner] ->
+              option.to_result(
+                option.map(g.string_value(inner), Some),
+                "Store の `resolve` は Some(\"<Service>\") / None",
+              )
+            _ -> Error("Store の `resolve` は Some(\"<Service>\") / None")
+          }
+        _ -> Error("Store の `resolve` は Some(\"<Service>\") / None")
+      })
+      let text_item = fn(item) {
+        option.to_result(g.string_value(item), "欄の名は文字列の literal")
+      }
+      use rollup_by <- result.try(list_field(
+        expression,
+        "rollup_by",
+        1,
+        text_item,
+      ))
+      use exclude_when <- result.try(list_field(
+        expression,
+        "exclude_when",
+        2,
+        text_item,
+      ))
+      Ok(model.StoreSink(
+        resolve: resolve,
+        rollup_by: rollup_by,
+        exclude_when: exclude_when,
+      ))
+    }
+    Some("ToService") ->
+      result.map(string_field(expression, "service", 0), model.ServiceSink)
+    _ -> Error("`sink` は Store(..) / ToService(..)")
+  }
+}
+
+/// 欄の名(送る本文の鍵)。`Referrer` は `referrer_path` / `referrer_host` の 2 つ。
+pub fn field_names(field: model.PageviewField) -> List(String) {
+  case field {
+    model.NavKindField -> ["kind"]
+    model.ClientAtField -> ["client_at"]
+    model.PathField -> ["path"]
+    model.PreviousField -> ["prev"]
+    model.ReferrerField -> ["referrer_path", "referrer_host"]
+    model.FromQueryField(name: name, ..) -> [name]
+  }
+}
+
+// ── CSP と数える口の検査 ──────────────────────────────────────────
+
+/// host の綴り(`[a-z0-9.-]+`、先頭に `*.` を 1 つ許す)。51 v6 第 38 条。
+pub fn host_spelling(host: String) -> Bool {
+  let body = case string.starts_with(host, "*.") {
+    True -> string.drop_start(host, 2)
+    False -> host
+  }
+  body != ""
+  && !string.starts_with(body, ".")
+  && list.all(string.to_graphemes(body), fn(char) {
+    string.contains("abcdefghijklmnopqrstuvwxyz0123456789.-", char)
+  })
+}
+
+fn csp_notes(face_name: String, gate: Gate) -> List(Note) {
+  gate.csp
+  |> list.flat_map(fn(csp) { csp.directives })
+  |> list.flat_map(fn(directive) { directive.1 })
+  |> list.unique
+  |> list.filter(fn(host) { !host_spelling(host) })
+  |> list.map(fn(host) {
+    Note(
+      stop.Conflict,
+      face_name
+        <> "/gate: csp の host \""
+        <> host
+        <> "\" が host の綴りでない([a-z0-9.-]+、先頭に *. を 1 つ許す。https:// や path は書かない)",
+    )
+  })
+}
+
+fn pageview_notes(face_name: String, gate: Gate) -> List(Note) {
+  case gate.pageview {
+    None -> []
+    Some(pageview) -> {
+      let names = list.flat_map(pageview.fields, field_names)
+      let duplicated =
+        pageview.fields
+        |> list.filter(fn(field) {
+          list.count(pageview.fields, fn(other) { other == field }) > 1
+          || list.count(names, fn(name) {
+            list.contains(field_names(field), name)
+          })
+          > list.length(field_names(field))
+        })
+        |> list.flat_map(field_names)
+        |> list.unique
+        |> list.map(fn(name) {
+          Note(
+            stop.Conflict,
+            face_name <> "/gate: pageview の欄 `" <> name <> "` が 2 つある",
+          )
+        })
+      let reserved =
+        pageview.fields
+        |> list.filter_map(fn(field) {
+          case field {
+            model.FromQueryField(name: name, param: param, max: max) ->
+              case
+                name == "id" || !slug_name(name),
+                param_name(param)
+                && !string.contains(param, ".")
+                && !string.contains(param, "-"),
+                max >= 1 && max <= 64
+              {
+                False, True, True -> Error(Nil)
+                True, _, _ ->
+                  Ok(
+                    "FromQuery の name `"
+                    <> name
+                    <> "` は [a-z][a-z0-9_]* で、id でない",
+                  )
+                _, False, _ ->
+                  Ok("FromQuery の param `" <> param <> "` が [A-Za-z0-9_]+ でない")
+                _, _, False ->
+                  Ok(
+                    "FromQuery の Slug(max: "
+                    <> int.to_string(max)
+                    <> ") が 1〜64 の外",
+                  )
+              }
+            _ -> Error(Nil)
+          }
+        })
+        |> list.map(fn(text) {
+          Note(stop.Conflict, face_name <> "/gate: pageview の " <> text)
+        })
+      list.append(duplicated, reserved)
+    }
+  }
+}
+
+/// `[a-z][a-z0-9_]*`(申告の kind・欄の名・variant の名の綴り)。
+pub fn slug_name(name: String) -> Bool {
+  case string.to_graphemes(name) {
+    [first, ..rest] ->
+      string.contains("abcdefghijklmnopqrstuvwxyz", first)
+      && list.all(rest, fn(char) {
+        string.contains("abcdefghijklmnopqrstuvwxyz0123456789_", char)
+      })
+    [] -> False
   }
 }
 
@@ -523,7 +721,7 @@ fn gate_matches(gate: Gate) -> List(Match) {
   list.flatten([
     list.flat_map(gate.rules, fn(rule) { list.append(rule.pages, rule.except) }),
     list.flat_map(gate.redirects, fn(redirect) { redirect.pages }),
-    gate.frame_src,
+    list.flat_map(gate.csp, fn(csp) { csp.pages }),
     case gate.pageview {
       Some(pageview) -> pageview.pages
       None -> []

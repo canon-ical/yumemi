@@ -11,9 +11,11 @@
 // - `phaseGates`: root を持たず、主体の相で絞る Service -> 通す相の名
 // - `accepted`: Service -> Accepted の応答の欄の名(root の Entity)
 // - `attached`: 口の名 -> ★ の実装(framework の session の口は機関が持つ)
-// - `roles`: attached の口の名 -> 役の名の並び(`declare_browser` / `read_session` / `switch_subject` /
-//   `tail_path` / `needs_browser`)。app の `src/server.gleam` の `attached_roles` から。framework は口の名を知らない
-// - `browserCookie`: 成人の申告を焼く署名 cookie(`{cookie,binding,claim,maxAgeDays}`)か null。`browser` の宣言から
+// - `roles`: attached の口の名 -> 役の名の並び(`read_session` / `switch_subject` / `tail_path` と、種類を持つ
+//   `declare:<kind>` / `needs_declared:<kind>`)。app の `src/server.gleam` の `attached_roles` から。framework は口の名を知らない
+// - `browserCookie`: browser の署名 cookie(`{cookie,binding,maxAgeDays,declarations:[{kind,claim,maxAgeDays}]}`)か null。
+//   payload の `id` がユニークの印、申告は種類ごとの `claim` の欄(申告の時刻)。`browser` の宣言から
+// - `pageviews`: 入口の名 -> 数える口(`{only,fields,sink}`)。面の門の `pageview` から(0.12)。受け口は `<prefix>/_yumemi/pageviews`
 // - `subjectFree`: 入口の主体の集合の検査を外す Service の名(`subject_free` の宣言から。主体を切り替える前に読む口)
 // - `hooks`: ★ の業務の行(下の `hook(...)` の名)。どれも無くてよい
 import * as framework_entry from '../entry.mjs';
@@ -26,6 +28,8 @@ export function http(spec) {
  const bc=spec.browserCookie??null;
  const browserSeconds=(bc?.maxAgeDays??0)*86400;
  const roleOf=(name,role)=>(spec.roles?.[name]??[]).includes(role);
+ // `declare:<kind>` / `needs_declared:<kind>` の種類の並び
+ const roleKinds=(name,role)=>(spec.roles?.[name]??[]).filter(x=>x.startsWith(role+':')).map(x=>x.slice(role.length+1));
  const maxBlobBytes=20*1024*1024;
  function sessionCookie(id,env,clear=false) {
   return `session=${id}; Path=/; Domain=${env.COOKIE_DOMAIN}; HttpOnly; Secure; SameSite=Lax; Max-Age=${clear?0:cookieSeconds}`;
@@ -36,22 +40,36 @@ export function http(spec) {
  const base64=bytes=>btoa(String.fromCharCode(...bytes)).replaceAll('+','-').replaceAll('/','_').replace(/=+$/,'');
  const bytes=raw=>Uint8Array.from(atob(raw.replaceAll('-','+').replaceAll('_','/')),x=>x.charCodeAt(0));
  async function browserKey(env) { const value=await env[bc.binding].get(); return crypto.subtle.importKey('raw',encoder.encode(value),{name:'HMAC',hash:'SHA-256'},false,['sign','verify']); }
- async function signBrowser(env,id,at) {
+ // payload は `{id, <申告の claim>: 時刻, ..}`。`claims` は申告の claim の名 -> 時刻(印だけなら空)
+ async function signBrowser(env,id,claims={}) {
   if(!bc) throw new Error('browser の宣言が無い');
-  const payload=base64(encoder.encode(JSON.stringify({id,[bc.claim]:at})));
+  const payload=base64(encoder.encode(JSON.stringify({id,...claims})));
   return payload+'.'+base64(new Uint8Array(await crypto.subtle.sign('HMAC',await browserKey(env),encoder.encode(payload))));
  }
+ // 署名が合い印(`id`)の形が正しければ `{id, claims, declared}`。`declared` は申告の種類 -> true で、申告の時刻が
+ // その種類の `maxAgeDays` より古い・未来の申告は「申告なし」と読む(cookie が有効でも)。印は cookie の Max-Age が持つ
  async function verifyBrowser(env,raw,at) {
   if(!raw||!bc) return null;
   try {
    const [payload,signature,extra]=raw.split('.');
    if(extra!==undefined||!signature||!await crypto.subtle.verify('HMAC',await browserKey(env),bytes(signature),encoder.encode(payload))) return null;
    const value=JSON.parse(new TextDecoder().decode(bytes(payload)));
-   const declared=Date.parse(value[bc.claim]),now=Date.parse(at);
-   if(!/^[0-9a-f]{32}$/.test(value.id)||!Number.isFinite(declared)||declared>now||now-declared>browserSeconds*1000) return null;
-   return value;
+   if(!value||typeof value!=='object'||!/^[0-9a-f]{32}$/.test(value.id)) return null;
+   const now=Date.parse(at),claims={},declared={};
+   for(const d of bc.declarations??[]) {
+    const time=typeof value[d.claim]==='string'?Date.parse(value[d.claim]):NaN;
+    if(!Number.isFinite(time)||time>now) continue;
+    claims[d.claim]=value[d.claim];
+    if(now-time<=d.maxAgeDays*86400*1000) declared[d.kind]=true;
+   }
+   return {id:value.id,claims,declared};
   } catch { return null; }
  }
+ const newBrowserId=()=>Array.from(crypto.getRandomValues(new Uint8Array(16)),v=>v.toString(16).padStart(2,'0')).join('');
+ function browserSetCookie(s,signed) {
+  return `${bc.cookie}=${signed}; Path=/; Domain=${s.env.COOKIE_DOMAIN}; HttpOnly; Secure; SameSite=Lax; Max-Age=${browserSeconds}`;
+ }
+ const declaredOf=s=>s.browser?.declared??{};
  const credentialOf=entry=>entry?(spec.entryCredential??framework_entry.credential)(entry):null;
  function isApiKeyEntry(entry) {
   const value=credentialOf(entry);
@@ -61,7 +79,8 @@ export function http(spec) {
   const value=credentialOf(entry);
   return Number(value?.per_minute??value?.[0]??0);
  }
- const fail=(message,status,field)=>{throw Object.assign(new Error(message),{status,field});};
+ // `detail` は本文に足す欄(`declaration_missing` の `declaration`、`consent_missing` の `consent`)
+ const fail=(message,status,field,detail)=>{throw Object.assign(new Error(message),{status,field,detail});};
  const invalid=field=>fail('invalid_argument',400,field);
  async function applyApiRateLimit(s) {
   const limit=apiKeyLimit(s.entry);
@@ -156,8 +175,10 @@ export function http(spec) {
  function failureStatus(service,code) {
   return hook('failure_status')?.(service,code)??422;
  }
- const allowed=['not_found','forbidden','unauthorized','rate_limited','suspended','adult_declaration_missing','consent_missing','invalid_argument','conflict'];
+ const allowed=['not_found','forbidden','unauthorized','rate_limited','suspended','declaration_missing','consent_missing','invalid_argument','conflict'];
  function failure(s,error) {
+  // 数える口の受け口は、どの段で落ちても本体無しの 202(送り手に理由を返さない)
+  if(s.pageview) return emptyResponse(s,202);
   if(error.connector) return response(s,{code:'upstream_unavailable',connector:error.connector},503);
   const custom=hook('failure')?.(s,error,{response});
   if(custom) return custom;
@@ -165,7 +186,8 @@ export function http(spec) {
   // PostgreSQL の RAISE(P0001)の文言も業務の失敗の名
   const business=typeof error.message==='string'&&/^[a-z][a-z0-9_]*$/.test(error.message)&&(error.status===422||error.status===400||error.code==='P0001');
   const name=allowed.includes(error.message)||business?error.message:'unavailable';
-  return response(s,{code:name,...(name==='invalid_argument'?{field:error.field??'body'}:{})},error.status??(name==='unavailable'?503:422));
+  const detail=name==='declaration_missing'||name==='consent_missing'?(error.detail??{}):{};
+  return response(s,{code:name,...(name==='invalid_argument'?{field:error.field??'body'}:{}),...detail},error.status??(name==='unavailable'?503:422));
  }
  function failed(s,outcome) {
   const code=c.tag(outcome[0]);
@@ -199,6 +221,14 @@ export function http(spec) {
   })(s);
  }
  const route=check('entry',2,s=>{
+  // 数える口の受け口(0.12):入口の prefix + `/_yumemi/pageviews` の POST。面の門が `pageview` を宣言した入口だけ
+  const counted=spec.pageviews?.[s.entry.name];
+  if(counted&&s.request.method==='POST'&&s.url.pathname===s.entry.prefix+'/_yumemi/pageviews') {
+   s.pageview=counted;
+   s.record={name:'_yumemi_pageviews',method:'POST',path:s.url.pathname,who:'anyone'};
+   s.pathArgs={};
+   return;
+  }
   const candidates=[...registry.filter(r=>!r.module||![...r.module.service.allow].some(x=>c.tag(x.who)==='system')),...attached]
    .sort((a,b)=>b.path.split('/').filter(x=>x&&!x.startsWith(':')).length-a.path.split('/').filter(x=>x&&!x.startsWith(':')).length);
   const targets=new Map([...registry,...attached].map(r=>[r.name,r]));
@@ -266,6 +296,7 @@ export function http(spec) {
   if(s.record?.module&&!(spec.subjectFree??[]).includes(s.record.name)&&s.resolved?.subject_kind&&c.tag(s.entry.subject)==='subjects'&&![...s.entry.subject[0]].some(x=>c.tag(x)===s.resolved.subject_kind)) fail('forbidden',403);
  });
  const decode=check('decode',8,async s=>{
+  if(s.pageview) return;
   let body={};
   if(['POST','PUT','DELETE'].includes(s.request.method)) {
    const contentType=(s.request.headers.get('content-type')??'').split(';',1)[0].trim().toLowerCase();
@@ -304,6 +335,7 @@ export function http(spec) {
  });
  const judge=check('judge',9,s=>{
   const resolved=s.resolved,who=new Set(['anyone']);
+  if(s.pageview) return;
   hook('judge')?.(s,{fail});
   if(resolved) who.add('party');
   if(resolved?.subject_kind) { who.add('as_'+resolved.subject_kind); who.add(resolved.subject_kind); }
@@ -312,29 +344,42 @@ export function http(spec) {
   if(!matched.length) fail('forbidden',403);
   const gate=spec.phaseGates[s.record.name];
   if(gate&&!gate.includes(resolved?.phase)) fail('forbidden',403);
-  if(roleOf(s.record.name,'needs_browser')&&!s.browser) fail('adult_declaration_missing',403);
+  for(const kind of roleKinds(s.record.name,'needs_declared')) if(!declaredOf(s)[kind]) fail('declaration_missing',403,undefined,{declaration:kind});
   if(write&&resolved?.suspended) fail('suspended',403);
   if(write&&s.record.module&&hook('write_gate')?.(s,matched.map(x=>c.tag(x.who)))) fail('forbidden',403);
+  // 要件(0.12):申告は browser の署名 cookie、同意は session の party の同意。`ConsentedFor` は対象を Args と突き合わせる
   for(const req of s.record.module?.requires??[]) {
-   const kind=c.tag(req);
-   if(kind==='adult'&&!s.browser) fail('adult_declaration_missing',403);
-   if(kind!=='adult'&&!(resolved?.consents??[]).some(x=>x.kind===kind&&(kind!=='identity'||x.subject===req.from(s.args)))) fail('consent_missing',403);
+   const tag=c.tag(req);
+   if(tag==='declared') { if(!declaredOf(s)[req.kind]) fail('declaration_missing',403,undefined,{declaration:req.kind}); continue; }
+   const subject=tag==='consented_for'?req.subject(s.args):null;
+   if(!(resolved?.consents??[]).some(x=>x.kind===req.kind&&(subject===null||x.subject===subject))) fail('consent_missing',403,undefined,{consent:req.kind});
   }
   s.clauses=s.record.module?matched.map(x=>({phases:c.tag(x.at)==='any_phase'?null:[...x.at[0]].map(c.tag),owner:c.tag(x.owner)})):[];
  });
  async function execute(s) {
   s.trace.push('execute:10');
   try {
-   if(roleOf(s.record.name,'declare_browser')) {
-    const id=s.browser?.id??Array.from(crypto.getRandomValues(new Uint8Array(16)),v=>v.toString(16).padStart(2,'0')).join('');
-    const signed=await signBrowser(s.env,id,s.at);
-    await spec.runtime.run(s.db,'framework/browser',[id,s.at]);
-    s.setCookies.push(`${bc.cookie}=${signed}; Path=/; Domain=${s.env.COOKIE_DOMAIN}; HttpOnly; Secure; SameSite=Lax; Max-Age=${browserSeconds}`);
-    return response(s,{adult:true});
+   if(s.pageview) return await pageview(s);
+   const declares=roleKinds(s.record.name,'declare');
+   if(declares.length) {
+    // 申告を印の上の欄として焼く。印が無ければ作り、他の種類の申告の欄はそのまま残す
+    const id=s.browser?.id??newBrowserId();
+    const claims={...(s.browser?.claims??{})};
+    const declared={...declaredOf(s)};
+    for(const kind of declares) {
+     const d=(bc?.declarations??[]).find(x=>x.kind===kind);
+     if(!d) throw new Error('申告の種類が browser の宣言に無い: '+kind);
+     claims[d.claim]=s.at;
+     declared[kind]=true;
+     await spec.runtime.run(s.db,'framework/browser',[id,s.at,kind]);
+    }
+    s.setCookies.push(browserSetCookie(s,await signBrowser(s.env,id,claims)));
+    return response(s,{declared});
    }
    if(roleOf(s.record.name,'read_session')) {
-    const r=s.resolved;
-    return response(s,r?{party:r.party,subject:r.subject_kind?{kind:r.subject_kind,id:r.subject_id,handle:r.handle,phase:r.phase}:null,subjects:r.subjects,consents:{use:r.consents.some(x=>x.kind==='use'),handling:r.consents.some(x=>x.kind==='handling')},suspended:r.suspended,adult:!!s.browser}:{anonymous:true,adult:!!s.browser});
+    const r=s.resolved,declared=declaredOf(s);
+    // 同意は party が持つ種類を全部返す(種類の名を framework は知らない)
+    return response(s,r?{party:r.party,subject:r.subject_kind?{kind:r.subject_kind,id:r.subject_id,handle:r.handle,phase:r.phase}:null,subjects:r.subjects,consents:Object.fromEntries((r.consents??[]).map(x=>[x.kind,true])),suspended:r.suspended,declared}:{anonymous:true,declared});
    }
    if(roleOf(s.record.name,'switch_subject')) {
     const rows=await spec.runtime.run(s.db,'framework/session_subject_staff',[s.resolved.id,s.resolved.party,s.args.kind,s.args.id]);
@@ -351,6 +396,89 @@ export function http(spec) {
    if(recovered) return recovered;
    return failure(s,error);
   }
+ }
+ // ── 数える口の受け口(0.12)──────────────────────────────────────────────
+ // 二重計数の 1〜6 のうち、ここが持つのは bot と監視(3)・先読み(4)と、欄の検査・数える条件・印の発行。
+ // id の再送(2)・連打 60 件/分(5)・2 tab の同時(6)は器(`Store`)なら framework の SQL 関数が印の行ロックで持つ。
+ // `ToService` の逃げ道は検査を通した event を app の Service へ渡す(2・5・6 は Service の側)。応答は常に 202
+ const botAgent=/bot|crawl|spider|slurp|headless|lighthouse|monitor|uptime|pingdom|preview|facebookexternalhit|curl|wget|python-requests|go-http-client/i;
+ const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+ function automated(request) {
+  if(request.cf?.verifiedBotCategory) return true;
+  if(/prefetch|prerender/i.test(request.headers.get('sec-purpose')??request.headers.get('purpose')??'')) return true;
+  return botAgent.test(request.headers.get('user-agent')??'');
+ }
+ const textField=(value,max)=>typeof value==='string'&&value.length>0&&value.length<=max?value:null;
+ const pathField=value=>{const v=textField(value,2048);return v&&v.startsWith('/')&&!v.startsWith('//')&&!/[\\\u0000-\u001f]/.test(v)?v:null;};
+ // 宣言した欄だけを取り出す。id は常に。形の外れた欄は落とし、必須の欄(id・kind・path)が外れたら null
+ function pageviewEvent(config,raw) {
+  if(!raw||typeof raw!=='object'||Array.isArray(raw)||typeof raw.id!=='string'||!uuid.test(raw.id)) return null;
+  const event={id:raw.id};
+  for(const field of config.fields) {
+   switch(field.type) {
+    case 'kind': if(!['initial','reload','spa'].includes(raw.kind)) return null; event.kind=raw.kind; break;
+    case 'client_at': { const at=textField(raw.client_at,40); if(!at||!Number.isFinite(Date.parse(at))) return null; event.client_at=new Date(Date.parse(at)).toISOString(); break; }
+    case 'path': { const path=pathField(raw.path); if(!path) return null; event.path=path; break; }
+    case 'previous': if(typeof raw.prev==='string'&&uuid.test(raw.prev)) event.prev=raw.prev; break;
+    case 'referrer': {
+     if(event.prev||raw.prev) break;
+     const path=pathField(raw.referrer_path);
+     if(path) event.referrer_path=path;
+     else if(typeof raw.referrer_host==='string'&&/^[a-z0-9.-]{1,253}(:[0-9]{1,5})?$/i.test(raw.referrer_host)) event.referrer_host=raw.referrer_host.toLowerCase();
+     break;
+    }
+    case 'query': { const v=raw[field.name]; if(typeof v==='string'&&new RegExp('^[a-z0-9_]{1,'+field.max+'}$').test(v)) event[field.name]=v; break; }
+   }
+  }
+  return event;
+ }
+ function pageviewOnly(s,config) {
+  return config.only.every(when=>when.type==='declared'?declaredOf(s)[when.kind]===true:Boolean(s.resolved));
+ }
+ async function pageview(s) {
+  const config=s.pageview;
+  if(automated(s.request)) return emptyResponse(s,202);
+  let raw;
+  try { raw=JSON.parse(await s.request.text()); } catch { return emptyResponse(s,202); }
+  const event=pageviewEvent(config,raw);
+  if(!event||!pageviewOnly(s,config)) return emptyResponse(s,202);
+  // ユニークの印:数える条件を満たした最初の event で、印の無い browser に印だけの cookie を焼く
+  if(bc&&!s.browser) {
+   s.browser={id:newBrowserId(),claims:{},declared:{}};
+   s.setCookies.push(browserSetCookie(s,await signBrowser(s.env,s.browser.id)));
+  }
+  const sink=config.sink;
+  if(sink.type==='service') {
+   const record=registry.find(r=>r.name===sink.service);
+   if(!record) throw new Error('数える口の Service が無い: '+sink.service);
+   const passed={...s,record,queryKeys:null};
+   passed.args=new record.module.Args(...decodeArgs(record,event,passed));
+   passed.clauses=[...record.module.service.allow].filter(x=>['anyone','party'].includes(c.tag(x.who))&&(c.tag(x.who)==='anyone'||s.resolved))
+    .map(x=>({phases:c.tag(x.at)==='any_phase'?null:[...x.at[0]].map(c.tag),owner:c.tag(x.owner)}));
+   if(!passed.clauses.length) return emptyResponse(s,202);
+   await spec.runtime.invoke(passed);
+   return emptyResponse(s,202);
+  }
+  if(!s.browser) return emptyResponse(s,202);
+  let dims={},excluded=false;
+  if(sink.resolve) {
+   const record=registry.find(r=>r.name===sink.resolve);
+   if(!record) throw new Error('数える口の resolve の Service が無い: '+sink.resolve);
+   const passed={...s,record,queryKeys:null};
+   passed.args=new record.module.Args(...decodeArgs(record,{path:event.path},passed));
+   passed.clauses=[{phases:null,owner:'no_owner'}];
+   const outcome=await spec.runtime.invoke(passed);
+   if(outcome instanceof spec.runtime.step.Fail) return emptyResponse(s,202);
+   const out=c.encode(outcome[0])??{};
+   for(const name of sink.rollupBy) if(out[name]!==undefined&&out[name]!==null) dims[name]=String(out[name]);
+   excluded=sink.excludeWhen.some(name=>out[name]===true);
+  }
+  const extra=Object.fromEntries(config.fields.filter(f=>f.type==='query'&&event[f.name]!==undefined).map(f=>[f.name,event[f.name]]));
+  await spec.runtime.run(s.db,'framework/pageview_record',[
+   event.id,s.browser.id,s.entry.name,s.at,event.kind??'initial',event.path??'/',event.prev??null,event.referrer_path??null,
+   event.referrer_host??null,event.client_at??null,s.resolved?.party??null,JSON.stringify(extra),JSON.stringify(dims),excluded,
+  ]);
+  return emptyResponse(s,202);
  }
  return {sessionCookie,cookies,signBrowser,verifyBrowser,host,route,origin,browser,admit,resolve,subject,decode,judge,execute,apiEncode,
   logicFailureStatus:failureStatus,failure,response,emptyResponse,outcomeResponse};

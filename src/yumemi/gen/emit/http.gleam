@@ -6,10 +6,11 @@
 ////   型から導けない欄は ★ hook `arg_<service>_<key>` / `arg_<key>`(宣言した名がそのまま勝つ)
 //// - phaseGates:root を持たず、句が全部 `As<Entity>` で相を絞る Service(主体の相で門を閉じる)
 //// - accepted:Accepted の応答の欄(root の Entity の名)
-//// - ports:attached の口のうち、機関を framework が持つ役(`attached_roles` の `DeclareBrowser` /
+//// - ports:attached の口のうち、機関を framework が持つ役(`attached_roles` の `Declare` /
 ////   `ReadSession` / `SwitchSubject`)でないものは ★ hook `attached_<name>`
 //// - roles / browserCookie:`attached_roles` と `browser` の宣言をそのまま(framework は app の口の名も
-////   cookie の名も知らない ── WGy r4)
+////   cookie の名も申告の種類の名も知らない ── WGy r4、0.12)。種類を持つ役は `declare:<kind>` / `needs_declared:<kind>`
+//// - pageviews:面の門の数える口(0.12)。入口の名 -> `{only, fields, sink}`
 //// - hooks:業務の行(`args_before` / `api_encode` / `failure_status` / `failure` / `respond` / `route_skip` /
 ////   `origin` / `early` / `judge` / `raw_body` / `attached_args` / `external_id` / `db_error` / `write_gate`)
 
@@ -28,7 +29,7 @@ import yumemi/gen/stop
 const framework = "../../yumemi/yumemi/server/"
 
 /// 機関を framework の JS が持ち、★ hook `attached_<name>` の要らない役(`attached_roles` の宣言)。
-const framework_roles = ["declare_browser", "read_session", "switch_subject"]
+const framework_roles = ["declare", "read_session", "switch_subject"]
 
 const business_hooks = [
   "args_before", "api_encode", "failure_status", "failure", "respond",
@@ -235,7 +236,12 @@ pub fn text(
       <> string.join(
         app.server.attached_roles
           |> list.filter(fn(row) { row.attached == name })
-          |> list.map(fn(row) { quoted(row.role) }),
+          |> list.map(fn(row) {
+            case row.kind {
+              "" -> quoted(row.role)
+              kind -> quoted(row.role <> ":" <> kind)
+            }
+          }),
         ",",
       )
       <> "]"
@@ -247,12 +253,24 @@ pub fn text(
       <> quoted(declared.cookie)
       <> ",binding:"
       <> quoted(declared.key_binding)
-      <> ",claim:"
-      <> quoted(declared.claim)
       <> ",maxAgeDays:"
       <> int.to_string(declared.max_age_days)
-      <> "}"
+      <> ",declarations:["
+      <> string.join(
+        list.map(declared.declarations, fn(d) {
+          "{kind:"
+          <> quoted(d.kind)
+          <> ",claim:"
+          <> quoted(d.claim)
+          <> ",maxAgeDays:"
+          <> int.to_string(d.max_age_days)
+          <> "}"
+        }),
+        ",",
+      )
+      <> "]}"
   }
+  let pageviews = list.map(app.server.counted, pageview_js)
   let body =
     string.concat([
       "const hosts={",
@@ -285,6 +303,9 @@ pub fn text(
       "const browserCookie=",
       browser_cookie,
       ";\n",
+      "const pageviews={",
+      string.join(pageviews, ","),
+      "};\n",
       "const subjectFree=[",
       string.join(list.map(app.server.subject_free, quoted), ","),
       "];\n",
@@ -294,7 +315,7 @@ pub fn text(
         False -> "'[0-9a-f]{64}'"
       },
       ";\n",
-      "export const {sessionCookie,cookies,signBrowser,verifyBrowser,host,route,origin,browser,admit,resolve,subject,decode,judge,execute,apiEncode,logicFailureStatus}=http({Ok,Error,registry,attached,c,runtime,hosts,args,modules,phaseGates,accepted,ports,hooks,subjects,roles,browserCookie,subjectFree,apiKeyPattern:keyPattern});\n",
+      "export const {sessionCookie,cookies,signBrowser,verifyBrowser,host,route,origin,browser,admit,resolve,subject,decode,judge,execute,apiEncode,logicFailureStatus}=http({Ok,Error,registry,attached,c,runtime,hosts,args,modules,phaseGates,accepted,ports,hooks,subjects,roles,browserCookie,pageviews,subjectFree,apiKeyPattern:keyPattern});\n",
     ])
   #(header <> imports <> body, notes)
 }
@@ -492,4 +513,59 @@ fn enum_type(
         }
       }
   }
+}
+
+/// 数える口の 1 面(`<入口の名>:{only,fields,sink}`、0.12)。
+fn pageview_js(counted: model.Counted) -> String {
+  let only =
+    list.map(counted.only, fn(when) {
+      case when {
+        model.WhenDeclared(kind) ->
+          "{type:'declared',kind:" <> quoted(kind) <> "}"
+        model.WhenSignedIn -> "{type:'signed-in'}"
+      }
+    })
+  let fields =
+    list.map(counted.fields, fn(field) {
+      case field {
+        model.NavKindField -> "{type:'kind'}"
+        model.ClientAtField -> "{type:'client_at'}"
+        model.PathField -> "{type:'path'}"
+        model.PreviousField -> "{type:'previous'}"
+        model.ReferrerField -> "{type:'referrer'}"
+        model.FromQueryField(name: name, max: max, ..) ->
+          "{type:'query',name:"
+          <> quoted(name)
+          <> ",max:"
+          <> int.to_string(max)
+          <> "}"
+      }
+    })
+  let sink = case counted.sink {
+    model.ServiceSink(service) ->
+      "{type:'service',service:" <> quoted(service) <> "}"
+    model.StoreSink(
+      resolve: resolve,
+      rollup_by: rollup_by,
+      exclude_when: exclude,
+    ) ->
+      "{type:'store',resolve:"
+      <> case resolve {
+        Some(name) -> quoted(name)
+        None -> "null"
+      }
+      <> ",rollupBy:["
+      <> string.join(list.map(rollup_by, quoted), ",")
+      <> "],excludeWhen:["
+      <> string.join(list.map(exclude, quoted), ",")
+      <> "]}"
+  }
+  quoted(counted.face)
+  <> ":{only:["
+  <> string.join(only, ",")
+  <> "],fields:["
+  <> string.join(fields, ",")
+  <> "],sink:"
+  <> sink
+  <> "}"
 }

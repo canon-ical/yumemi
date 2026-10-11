@@ -15,6 +15,7 @@ import yumemi/gen/emit/root
 import yumemi/gen/emit/types
 import yumemi/gen/emit/verb
 import yumemi/gen/reader
+import yumemi/gen/reader/cms
 import yumemi/gen/reader/server as server_reader
 import yumemi/gen/source
 import yumemi/gen/stop
@@ -720,16 +721,16 @@ pub fn into_app_writes_only_existing_generated_queries_test() {
   |> should.equal(4)
 }
 
-/// 機関を framework が持つ attached の口の役と browser の署名 cookie は宣言から渡す(WGy r4)── framework の
-/// JS は口の名も cookie の名も知らない。framework の役の口は ★ hook `attached_<name>` を要らない。
+/// 機関を framework が持つ attached の口の役と browser の署名 cookie は宣言から渡す(WGy r4、0.12 で申告の種類)
+/// ── framework の JS は口の名も cookie の名も申告の種類の名も知らない。framework の役の口は ★ hook を要らない。
 pub fn attached_roles_and_browser_cookie_follow_the_declaration_test() {
   let units =
     units_with(article_fixture, [
       server(
         "pub const attached: List(server.Attached) = [Attached(name: \"adult\", method: Post, path: \"/api/adult\", who: Anyone), Attached(name: \"me\", method: Get, path: \"/api/me\", who: Anyone), Attached(name: \"asset\", method: Get, path: \"/asset/:key\", who: Anyone)]\n"
         <> "pub const hooks: List(server.Hook) = [Hook(name: \"attached_asset\", module: \"hooks\")]\n"
-        <> "pub const attached_roles: List(server.AttachedRole) = [DeclareBrowser(attached: \"adult\"), ReadSession(attached: \"me\"), TailPath(attached: \"asset\"), NeedsBrowser(attached: \"asset\")]\n"
-        <> "pub const browser: server.BrowserCookie = BrowserCookie(cookie: \"_fx\", key_binding: \"FX_KEY\", claim: \"declared_at\", max_age_days: 30)\n",
+        <> "pub const attached_roles: List(server.AttachedRole) = [Declare(attached: \"adult\", kind: \"adult\"), ReadSession(attached: \"me\"), TailPath(attached: \"asset\"), NeedsDeclared(attached: \"asset\", kind: \"adult\")]\n"
+        <> "pub const browser: server.BrowserCookie = BrowserCookie(cookie: \"_fx\", key_binding: \"FX_KEY\", max_age_days: 30, declarations: [Declaration(kind: \"adult\", claim: \"declared_at\", max_age_days: 30)])\n",
       ),
     ])
     |> list.filter(fn(item) { item.path != "noop" })
@@ -738,12 +739,12 @@ pub fn attached_roles_and_browser_cookie_follow_the_declaration_test() {
   let text = file(back_files(units), "src/gen/http_runtime.mjs")
   string.contains(
     text,
-    "const roles={adult:['declare_browser'],me:['read_session'],asset:['tail_path','needs_browser']};",
+    "const roles={adult:['declare:adult'],me:['read_session'],asset:['tail_path','needs_declared:adult']};",
   )
   |> should.be_true
   string.contains(
     text,
-    "const browserCookie={cookie:'_fx',binding:'FX_KEY',claim:'declared_at',maxAgeDays:30};",
+    "const browserCookie={cookie:'_fx',binding:'FX_KEY',maxAgeDays:30,declarations:[{kind:'adult',claim:'declared_at',maxAgeDays:30}]};",
   )
   |> should.be_true
   string.contains(text, "const ports={asset:h_attachedAsset};")
@@ -751,22 +752,25 @@ pub fn attached_roles_and_browser_cookie_follow_the_declaration_test() {
   string.contains(text, "roles,browserCookie,") |> should.be_true
 }
 
-/// 役の名が attached に無い行と、browser の宣言の無い `DeclareBrowser` は exit 4 で名指し。
+/// 役の名が attached に無い行と、browser の宣言の無い `Declare` は exit 4 で名指し(後者は 0.12 の第 32 条、`reader/cms`)。
 /// 宣言が無ければ browser は null(framework は申告を常に無いと見る)。
 pub fn attached_roles_without_their_attached_are_exit_four_test() {
   let units =
     units_with(article_fixture, [
       server(
         "pub const attached: List(server.Attached) = [Attached(name: \"adult\", method: Post, path: \"/api/adult\", who: Anyone)]\n"
-        <> "pub const attached_roles: List(server.AttachedRole) = [DeclareBrowser(attached: \"adult\"), ReadSession(attached: \"ghost\")]\n",
+        <> "pub const attached_roles: List(server.AttachedRole) = [Declare(attached: \"adult\", kind: \"adult\"), ReadSession(attached: \"ghost\")]\n",
       ),
     ])
   let assert Ok(app) = reader.read(units)
-  let notes = server_reader.notes(app)
+  let notes = list.append(server_reader.notes(app), cms.notes(app, units))
   list.length(notes) |> should.equal(2)
+  notes
+  |> list.all(fn(note) { note.class == stop.Conflict })
+  |> should.be_true
   [
     "attached_roles の attached が無い: ghost",
-    "attached_roles の DeclareBrowser に browser の宣言が無い: adult",
+    "attached_roles の adult の申告 \"adult\" に src/server.gleam の `browser` の宣言が無い",
   ]
   |> list.each(fn(text) {
     list.any(notes, fn(note) { string.contains(note.text, text) })
@@ -877,7 +881,7 @@ pub fn subject_free_follows_the_declaration_test() {
   let text = file(back_files(units), "src/gen/http_runtime.mjs")
   string.contains(text, "const subjectFree=['article_read','ghost'];")
   |> should.be_true
-  string.contains(text, "browserCookie,subjectFree,apiKeyPattern")
+  string.contains(text, "browserCookie,pageviews,subjectFree,apiKeyPattern")
   |> should.be_true
   let bare =
     file(

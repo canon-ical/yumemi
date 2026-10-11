@@ -19,7 +19,9 @@
 ////   列名、payload の無い sum は text、record と List は jsonb)と違う Entity の Property だけを書く
 //// - `pub const attached_roles: List(AttachedRole)` ── 機関を framework が持つ attached の口の役(session・
 ////   browser の申告・path の残りを取る口)。framework の JS は app の口の名を知らず、ここから受ける
-//// - `pub const browser: BrowserCookie` ── 成人の申告を焼く browser の署名 cookie の名・鍵の binding・期間
+//// - `pub const browser: BrowserCookie` ── browser の署名 cookie(ユニークの印と申告)の名・鍵の binding・期間と申告の種類
+//// - `pub const consents: List(String)` ── 同意の種類の名(要件と門の `Consented` / `ConsentedFor` の綴りを生成器が止める)
+//// - `pub const media: Media` ── 画像の variant の表。生成器が面ごとに `src/gen/media.gleam` を書く
 //// - `pub const subject_free: List(String)` ── 入口の主体の集合(`Subjects([..])`)に session の主体が入っていなくても
 ////   通す Service の名。主体を切り替える前に読む口(店の面の `/switch` が並べる、party の持つ店の主体)だけを書く
 ////   (gate-1 r2。framework の JS は Service の名を知らない)
@@ -29,6 +31,8 @@
 //// Service は名(module の名、`article_publish`)で指す ── Service の値は型引数が Service ごとに違い、
 //// 1 つの List に並ばないため。名が Service に無ければ生成器が exit 4 で名指しする。
 //// path の変数は `:name`(registry の綴り)。
+
+import gleam/option.{type Option}
 
 pub type Method {
   Get
@@ -190,32 +194,54 @@ pub type RootShape {
   QueueParty(service: String, party: String)
 }
 
-/// attached の口のうち、機関を framework の JS(`yumemi/server/http.mjs`)が持つものの役(WGy r4)。
+/// attached の口のうち、機関を framework の JS(`yumemi/server/http.mjs`)が持つものの役(WGy r4、0.12)。
 /// framework は app の口の名を知らない ── どの attached の名がどの役かを app がここで渡す
 /// (`pub const attached_roles: List(AttachedRole)`)。1 つの口に役を 2 つ以上書いてよい。
-/// 名が `attached` に無ければ生成器が exit 4 で名指しする。
+/// 名が `attached` に無ければ生成器が exit 4 で名指しする。申告の `kind` が `browser.declarations` に無ければ exit 4。
 pub type AttachedRole {
-  /// 成人の申告を browser の署名 cookie に焼く(`browser` の宣言が要る)。行は `framework/browser` の SQL
-  DeclareBrowser(attached: String)
-  /// session の中身(party・主体・同意・browser の申告)を返す
+  /// 申告 `kind` を browser の署名 cookie に焼く(印が無ければ作る)。行は `framework/browser` の SQL(引数に kind)
+  Declare(attached: String, kind: String)
+  /// 申告 `kind` が無ければ 403 `{"code": "declaration_missing", "declaration": kind}` で閉じる
+  NeedsDeclared(attached: String, kind: String)
+  /// session の中身(party・主体・同意 `consents`・申告 `declared`)を返す
   ReadSession(attached: String)
   /// session の主体を切り替える。行は `framework/session_subject_staff` の SQL
   SwitchSubject(attached: String)
   /// path の最後の穴(`:key`)が `/` を含む残り全部を取り、GET と HEAD で受ける
   TailPath(attached: String)
-  /// 署名した browser の申告が無ければ 403(`adult_declaration_missing`)で閉じる
-  NeedsBrowser(attached: String)
 }
 
-/// 成人の申告を焼く browser の署名 cookie(WGy r4、`pub const browser: BrowserCookie`)。`cookie` は cookie の名、
-/// `key_binding` は HMAC の鍵を持つ env の binding(`.get()` で文字列を返す Secret Store)、`claim` は payload で
-/// 申告の時刻を持つ欄の名、`max_age_days` は cookie の Max-Age と申告の有効期間。宣言が無ければ browser の
-/// 申告は常に無い(`DeclareBrowser` の口は書けない)。
+/// browser の署名 cookie(`pub const browser: BrowserCookie`、0.12)。`cookie` は cookie の名、`key_binding` は HMAC の鍵を
+/// 持つ env の binding(`.get()` で文字列を返す Secret Store)、`max_age_days` は cookie の Max-Age(印の寿命)。
+/// payload の `id`(32 桁の hex)がユニークの印で、申告は印の上の欄(`declarations`)になる。宣言が無ければ印も申告も無い。
 pub type BrowserCookie {
   BrowserCookie(
     cookie: String,
     key_binding: String,
-    claim: String,
     max_age_days: Int,
+    declarations: List(Declaration),
   )
+}
+
+/// 申告の種類。`kind` は app が名付ける(`[a-z][a-z0-9_]*`)、`claim` は payload で申告の時刻を持つ欄の名、
+/// `max_age_days` は申告の有効期間(cookie の `max_age_days` 以下)。cookie が有効でも申告が期間より古ければ「申告なし」。
+pub type Declaration {
+  Declaration(kind: String, claim: String, max_age_days: Int)
+}
+
+/// 画像の variant の表(`pub const media: Media`、0.12)。`path` は配る口の頭(`/media`)、`theme_background` は頁の色の
+/// 地の画像に使う variant の名。生成器は面ごとに `src/gen/media.gleam`(Variant の enum と `url`)を書く。
+pub type Media {
+  Media(path: String, variants: List(Variant), theme_background: String)
+}
+
+pub type Variant {
+  /// `name` は `[a-z][a-z0-9_]*`(URL の `?v=<name>`)。`height` が None なら幅だけで縮める
+  ImageVariant(name: String, width: Int, height: Option(Int), fit: Fit)
+}
+
+pub type Fit {
+  ScaleDown
+  Cover
+  Contain
 }

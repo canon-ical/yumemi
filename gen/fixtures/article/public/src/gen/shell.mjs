@@ -271,9 +271,9 @@ async function renderPage(request, env, matched, gateSession) {
     }
     const response = await readFromApp(env.APP, request, source.service, argsFor(vars, source.args));
     if (!response.ok) {
-      if (response.status === 403) return failure(403, "adult declaration required");
+      if (response.status === 403) return failure(403, "forbidden");
       if (response.status === 404 && !source.root) { values.push(Option$None$const); continue; }
-      if (response.status === 404) return failure(404, "muse not found");
+      if (response.status === 404) return failure(404, "not found");
       return failure(response.status, source.root ? "root read failed" : "widget read failed");
     }
     const decoded = source.decoder(await response.json());
@@ -343,7 +343,7 @@ export default gate.serve(async (request, env, before) => {
   const matched = matchPage(new URL(request.url).pathname);
   if (!matched) {
     if (env.SVELTE) return env.SVELTE.fetch(request);
-    return failure(404, "page not found");
+    return failure(404, "not found");
   }
   return renderPage(request, env, matched, before.session);
 });

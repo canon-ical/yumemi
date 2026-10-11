@@ -19,12 +19,14 @@ import yumemi/gen/emit/draft
 import yumemi/gen/emit/entry
 import yumemi/gen/emit/gate as gate_emit
 import yumemi/gen/emit/hash
+import yumemi/gen/emit/media as media_emit
 import yumemi/gen/emit/types.{type File, File}
 import yumemi/gen/face
 import yumemi/gen/glance_util as g
 import yumemi/gen/model
 import yumemi/gen/naming
 import yumemi/gen/raw_css
+import yumemi/gen/reader/cms
 import yumemi/gen/reader/front as reader_front
 import yumemi/gen/reader/gate as reader_gate
 import yumemi/gen/source.{type Unit, Unit}
@@ -194,21 +196,32 @@ pub fn emit(
         list.append(attached_live, blob_entry_files),
       ),
     )
-  let island_files = case all_live_files, model_.shell.head.service_worker {
-    [], None -> []
+  // 0.12:数える口の送り手。門が `pageview` を宣言した面は、島が無くても client.mjs を出す
+  let pageview_client = pageview_client_text(app, back_units, package, model_)
+  let island_files = case
+    all_live_files,
+    model_.shell.head.service_worker,
+    pageview_client
+  {
+    [], None, "" -> []
     // 0.11.12:島が無くても shell の service_worker があれば、登録だけの client.mjs を出す
-    [], Some(service_worker) -> [
+    [], service_worker, _ -> [
       File(
         path: face_name <> "/priv/static/_yumemi/client.mjs",
         text: js_header(
-          face_name <> "/src/shell.gleam",
-          digest.short(hash.entry(hashes) <> service_worker),
+          face_name <> "/src/{shell,gate}.gleam",
+          digest.short(
+            hash.entry(hashes)
+            <> option.unwrap(service_worker, "")
+            <> pageview_client,
+          ),
         )
           <> "\n\n"
-          <> service_worker_text(Some(service_worker)),
+          <> pageview_client
+          <> service_worker_text(service_worker),
       ),
     ]
-    _, _ -> [
+    _, _, _ -> [
       File(
         path: face_name <> "/src/gen/live/transport_ffi.mjs",
         text: transport_text(face_name, model_, hashes),
@@ -222,10 +235,12 @@ pub fn emit(
           app,
           hashes,
           navigation(app, back_units, package, model_),
-        ),
+        )
+          <> pageview_client,
       ),
     ]
   }
+  let media_files = media_emit.emit(app, face_name, hashes)
   let load_files =
     list.append(
       [load_layout_file(app, package, model_)],
@@ -238,7 +253,7 @@ pub fn emit(
       files,
       list.append(out_files, list.append(all_live_files, island_files)),
     ),
-    load_files,
+    list.append(load_files, media_files),
   )
   |> list.append(skeleton_files)
 }
@@ -2004,11 +2019,12 @@ pub fn client_notes(
   })
 }
 
-/// client で差し替えてよい Page の route(0.11.4、H9)。面の Page の route を全部出し、門の `frame_src` の Page は
-/// 応答に持つ CSP の header の値を `csp` に route ごとに出す(0.11.15)。client は今の document を読み込んだ Page と
-/// CSP が同じ行き先だけを取り、違えば頁の読み込み(CSP の header は頁の読み込みにしか効かない)。CSP を持つ Page の
-/// 無い面は 0.11.14 と同じ字。pageview の Page も入る ── 門が client 遷移の fetch に数える印を差し、navigate は
-/// 差し替えで印を来た頁のものに替えるだけ(0.12。送るのは client 側の送り手)。
+/// client で差し替えてよい Page の route(0.11.4、H9)。面の Page の route を全部出し、門の `csp` の当たる Page は
+/// 応答に持つ CSP の header の値を `csp` に route ごとに出す(0.11.15、0.12 で門の `csp` から)。
+/// client は今の document を読み込んだ Page と CSP が同じ行き先だけを取り、違えば頁の読み込み(CSP の header は
+/// 頁の読み込みにしか効かない)。CSP を持つ Page の無い面は 0.11.14 と同じ字。
+/// pageview の Page も入る ── 門が client 遷移の fetch に数える印を差し、navigate は差し替えで印を来た頁のものに
+/// 替えるだけ(0.12。送るのは client 側の送り手)。
 fn navigation(
   app: model.App,
   back_units: List(Unit),
@@ -2017,23 +2033,15 @@ fn navigation(
 ) -> #(List(String), String) {
   let #(gate, _) = read_gate(app, back_units, package, front)
   let routes = front_route_paths(front)
-  let csp = case gate_emit.csp(gate) {
-    Some(value) ->
-      case
-        list.filter(routes, fn(path) {
-          list.any(gate.frame_src, fn(match) { reader_gate.covers(match, path) })
-        })
-      {
-        [] -> ""
-        framed ->
-          ", csp: { "
-          <> string.join(
-            list.map(framed, fn(path) { quoted(path) <> ": " <> quoted(value) }),
-            ", ",
-          )
-          <> " }"
-      }
-    None -> ""
+  let csp = case gate_emit.csp_routes(gate, routes) {
+    [] -> ""
+    framed ->
+      ", csp: { "
+      <> string.join(
+        list.map(framed, fn(pair) { quoted(pair.0) <> ": " <> quoted(pair.1) }),
+        ", ",
+      )
+      <> " }"
   }
   #(routes, csp)
 }
@@ -5498,6 +5506,61 @@ fn front_route_paths(front: reader_front.Front) -> List(String) {
   |> list.sort(route_order)
 }
 
+/// 数える口の送り手を起こす client.mjs の行(0.12)。門が `pageview` を宣言していなければ "".
+/// 宛先は面の入口の prefix + `/_yumemi/pageviews`、前の event の鎖の鍵は `yumemi:pageview:<面の名>`。
+fn pageview_client_text(
+  app: model.App,
+  back_units: List(Unit),
+  package: face.Package,
+  front: reader_front.Front,
+) -> String {
+  case read_gate(app, back_units, package, front).0.pageview {
+    None -> ""
+    Some(pageview) -> {
+      let prefix =
+        list.find(app.entries, fn(entry) { entry.name == package.name })
+        |> result.map(fn(entry) { entry.prefix })
+        |> result.unwrap("")
+      let fields =
+        list.map(pageview.fields, fn(field) {
+          case field {
+            model.NavKindField -> "{ type: \"kind\" }"
+            model.ClientAtField -> "{ type: \"client_at\" }"
+            model.PathField -> "{ type: \"path\" }"
+            model.PreviousField -> "{ type: \"previous\" }"
+            model.ReferrerField -> "{ type: \"referrer\" }"
+            model.FromQueryField(name: name, param: param, max: max) ->
+              "{ type: \"query\", name: "
+              <> quoted(name)
+              <> ", param: "
+              <> quoted(param)
+              <> ", max: "
+              <> int.to_string(max)
+              <> " }"
+          }
+        })
+      "import { start as startPageview } from \"__YUMEMI_BUILD__/yumemi/yumemi/front/pageview.mjs\";\n"
+      <> "startPageview({ endpoint: "
+      <> quoted(prefix <> "/_yumemi/pageviews")
+      <> ", key: "
+      <> quoted("yumemi:pageview:" <> package.name)
+      <> ", fields: ["
+      <> string.join(fields, ", ")
+      <> "] });\n"
+    }
+  }
+}
+
+/// 面の門(数える口を back の入口へ渡すのに生成器の入口が読む、0.12)。
+pub fn gate(
+  app: model.App,
+  back_units: List(Unit),
+  package: face.Package,
+  front: reader_front.Front,
+) -> reader_gate.Gate {
+  read_gate(app, back_units, package, front).0
+}
+
 /// 門の宣言(`src/gate.gleam`)の診断。
 pub fn gate_notes(
   app: model.App,
@@ -5505,7 +5568,8 @@ pub fn gate_notes(
   package: face.Package,
   front: reader_front.Front,
 ) -> List(stop.Note) {
-  read_gate(app, back_units, package, front).1
+  let #(gate, notes) = read_gate(app, back_units, package, front)
+  list.append(notes, cms.gate_notes(app, package.name, gate))
 }
 
 fn shell_imports(
@@ -6649,9 +6713,9 @@ fn shell_runtime_text(
   }
   <> "    const response = await readFromApp(env.APP, request, source.service, argsFor(vars, source.args));\n"
   <> "    if (!response.ok) {\n"
-  <> "      if (response.status === 403) return failure(403, \"adult declaration required\");\n"
+  <> "      if (response.status === 403) return failure(403, \"forbidden\");\n"
   <> "      if (response.status === 404 && !source.root) { values.push(Option$None$const); continue; }\n"
-  <> "      if (response.status === 404) return failure(404, \"muse not found\");\n"
+  <> "      if (response.status === 404) return failure(404, \"not found\");\n"
   <> "      return failure(response.status, source.root ? \"root read failed\" : \"widget read failed\");\n"
   <> "    }\n"
   <> "    const decoded = source.decoder(await response.json());\n"
@@ -6722,7 +6786,7 @@ fn shell_runtime_text(
   <> "  const matched = matchPage(new URL(request.url).pathname);\n"
   <> "  if (!matched) {\n"
   <> "    if (env.SVELTE) return env.SVELTE.fetch(request);\n"
-  <> "    return failure(404, \"page not found\");\n"
+  <> "    return failure(404, \"not found\");\n"
   <> "  }\n"
   <> "  return renderPage(request, env, matched, before.session);\n"
   <> "});\n"

@@ -27,6 +27,7 @@ import yumemi/gen/emit/codec
 import yumemi/gen/emit/entry
 import yumemi/gen/emit/hash
 import yumemi/gen/emit/http
+import yumemi/gen/emit/pageview
 import yumemi/gen/emit/root
 import yumemi/gen/emit/runtime
 import yumemi/gen/emit/types.{type File, File}
@@ -64,7 +65,7 @@ pub fn emit(
     False -> Output(files: [], notes: [])
     True -> {
       let input = back_hash(units, hashes)
-      let queries = bundle(app_queries, generated)
+      let queries = bundle(app_queries, generated, pageview.queries(app))
       let kinds = queue_kinds(app, units)
       let #(queue_file, queue_notes) =
         queue_text(app, units, kinds, queries, input)
@@ -117,6 +118,7 @@ pub fn emit(
           sum_files(app, units, input),
           queue_file,
           cron_file,
+          pageview.files(app),
         ])
       Output(
         files: files,
@@ -525,6 +527,7 @@ fn registry_text(app: App, units: List(Unit), input: String) -> String {
 fn bundle(
   app_queries: List(#(String, String)),
   generated: List(File),
+  framework_queries: List(#(String, String)),
 ) -> List(#(String, String)) {
   let made =
     list.filter_map(generated, fn(file) {
@@ -541,6 +544,7 @@ fn bundle(
       }
     })
     |> list.append([#("framework/outbox_claim", outbox_claim_sql())])
+    |> list.append(framework_queries)
   // app の SQL が勝つのは ★(手書き)だけ。`-- GENERATED` を名乗る app の file は生成物の古い写しなので、
   // この回の生成物で置き換える(WGy r3、採用)
   let kept =
@@ -1207,6 +1211,10 @@ fn shell_text(app: App, input: String) -> String {
   <> "import { handlers, appSystem, durableObject } from '"
   <> framework
   <> "worker.mjs';\n"
+  <> case pageview.stored(app) {
+    True -> "import { rollupPageviews } from '" <> framework <> "cron.mjs';\n"
+    False -> ""
+  }
   <> "import { database } from '"
   <> framework
   <> "driver.mjs';\n"
@@ -1222,6 +1230,14 @@ fn shell_text(app: App, input: String) -> String {
   <> " queue: worker.queue,\n"
   <> " async scheduled(controller,env,execution) {\n"
   <> "  const db=database(env,observe);\n"
+  <> case pageview.stored(app) {
+    // 数える口の器の集計(0.12)。式は framework の決め打ち、app の cron の表とは別に回す
+    True ->
+      "  if(controller.cron==="
+      <> quoted(pageview.rollup_schedule)
+      <> ") execution.waitUntil(rollupPageviews({db,run}));\n"
+    False -> ""
+  }
   <> case branches {
     [] -> "  "
     _ -> string.concat(branches) <> " "

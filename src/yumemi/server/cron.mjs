@@ -34,3 +34,8 @@ export async function hooked({record,args,db,env,at,invoke}) {
  if(outcome?.constructor?.name!=='Done') throw new Error(record.name.replaceAll('_',' ')+' did not complete');
  return outcome;
 }
+
+/** 数える口の器の集計(0.12)。前の日と当日(UTC)の日と、その月を畳み直す(`framework.pageview_rollup`)。 */
+export async function rollupPageviews({db,run,at=new Date().toISOString()}) {
+ await run(db,'framework/pageview_rollup',[at]);
+}

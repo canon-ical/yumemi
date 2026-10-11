@@ -1,0 +1,18 @@
+//// GENERATED from public/src/blocks/article.gleam [sha256:59ce238397f0] — 手で編集しない
+
+import gen/out/article_read
+import gleam/string
+import yumemi/front/el
+import yumemi/front/html
+
+pub type In =
+  article_read.Out
+
+pub fn view(it: In) -> el.Element {
+  html.div_([], [
+    el.text("article" <> ": " <> string.inspect(it.article)),
+    el.text("category" <> ": " <> string.inspect(it.category)),
+    el.text("tags" <> ": " <> string.inspect(it.tags)),
+    el.text("theme" <> ": " <> string.inspect(it.theme)),
+  ])
+}

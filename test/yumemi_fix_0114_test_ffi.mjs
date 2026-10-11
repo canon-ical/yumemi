@@ -184,7 +184,8 @@ for (const [name, sql] of Object.entries(reads)) console.log((readOnly(sql) ? "o
 `);
 }
 
-// r2 ── 門の after_response:client 遷移の fetch(x-yumemi-navigate: 1)には script でなく meta を head に差す
+// r2 → 0.12 ── 門の after_response:頁の読み込みでも client 遷移の fetch でも、数える印の meta だけを head に差す
+// (inline の script は無い。送るのは client.mjs の送り手 1 つ)
 export function gate_marks_navigation_fetch(text) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "yumemi-gate-"));
   fs.writeFileSync(path.join(dir, "gate.mjs"), text);
@@ -192,20 +193,19 @@ export function gate_marks_navigation_fetch(text) {
   const out = node(`
 import { serve } from ${JSON.stringify(path.join(dir, "gate.mjs"))};
 const html = "<!doctype html><html><head><title>t</title></head><body><main>x</main></body></html>";
-const env = (adult) => ({ APP: { fetch: async () => new Response(JSON.stringify({ adult, anonymous: false, subject: null }), { status: 200 }) } });
+const env = (adult) => ({ APP: { fetch: async () => new Response(JSON.stringify({ declared: adult ? { adult: true } : {}, anonymous: false, subject: null }), { status: 200 }) } });
 const app = serve(async () => new Response(html, { status: 200, headers: { "content-type": "text/html; charset=utf-8" } }));
 const get = async (p, adult, nav) => {
   const r = await app.fetch(new Request("https://www.example" + p, { headers: nav ? { "x-yumemi-navigate": "1" } : {} }), env(adult));
-  return { body: await r.text(), vary: r.headers.get("vary") ?? "" };
+  return { body: await r.text(), csp: r.headers.get("content-security-policy") };
 };
 const check = (name, ok) => console.log((ok ? "ok " : "NG ") + name);
 const load = await get("/search", true, false);
-check("load gets script", load.body.includes("<script>") && !load.body.includes("<meta name="));
+check("load gets mark in head, no script", load.body.includes('<meta name="yumemi-pageview"></head>') && !load.body.includes("<script"));
 const nav = await get("/search", true, true);
-check("navigate gets mark in head", nav.body.includes('<meta name="yumemi-pageview"></head>') && !nav.body.includes("<script>"));
-check("vary", nav.vary.includes("x-yumemi-navigate") && load.vary.includes("x-yumemi-navigate"));
+check("navigate gets the same mark", nav.body === load.body);
 const minor = await get("/search", false, true);
-check("no adult no mark", !minor.body.includes("yumemi-pageview") && !minor.body.includes("<script>"));
+check("no declaration no mark", !minor.body.includes("yumemi-pageview") && !minor.body.includes("<script"));
 const other = await get("/me", true, true);
 check("not counted page no mark", !other.body.includes("yumemi-pageview"));
 `);
