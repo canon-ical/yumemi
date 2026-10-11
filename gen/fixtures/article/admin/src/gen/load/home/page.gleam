@@ -1,8 +1,6 @@
-//// GENERATED from admin/src/pages/home/page.gleam [sha256:38b74da7dca1] — 手で編集しない
+//// GENERATED from admin/src/pages/home/page.gleam [sha256:a2a327ea7269] — 手で編集しない
 
 import blocks/admin_header
-import yumemi/front/css
-import yumemi/front/sketch_css
 import gen/load/layout
 import gleam/list
 import lustre/attribute
@@ -13,6 +11,8 @@ import sketch/lustre as sketch_lustre
 import sketch/lustre/element
 import sketch/lustre/element/html
 import style
+import yumemi/front/css
+import yumemi/front/sketch_css
 
 pub type Vars {
   Vars(subject: String)

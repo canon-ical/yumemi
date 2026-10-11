@@ -1,4 +1,4 @@
-//// GENERATED from admin/src/layout.gleam [sha256:11a021a2b4e8] — 手で編集しない
+//// GENERATED from admin/src/layout.gleam [sha256:1b99fb3bffe0] — 手で編集しない
 
 pub type Data {
   Data

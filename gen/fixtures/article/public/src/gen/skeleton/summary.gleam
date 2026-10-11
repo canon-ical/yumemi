@@ -1,9 +1,9 @@
-//// GENERATED from public/src/blocks/summary.gleam [sha256:77ed97afa9da] — 手で編集しない
+//// GENERATED from public/src/blocks/summary.gleam [sha256:f47ab2a6d4f0] — 手で編集しない
 
-import yumemi/front/el
 import gen/out/article_read
 import gleam/string
 import sketch/lustre/element/html
+import yumemi/front/el
 
 pub type In =
   article_read.Out

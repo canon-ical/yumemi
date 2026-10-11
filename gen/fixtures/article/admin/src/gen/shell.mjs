@@ -1,4 +1,4 @@
-// GENERATED from admin/src/{gen/route.gleam,gen/load/**,pages/**,layout.gleam,shell.gleam} [sha256:34e3c63826f4] — 手で編集しない
+// GENERATED from admin/src/{gen/route.gleam,gen/load/**,pages/**,layout.gleam,shell.gleam} [sha256:6e0187780dde] — 手で編集しない
 
 import * as api from "./api.mjs";
 import * as blocksPreview from "./blocks_preview.mjs";
@@ -87,7 +87,7 @@ function mediaBlock(media, body) {
 }
 
 function gridCssFromLayout(_layout) {
-  return "\n[data-yumemi-grid=\"layout\"] {\n  display: grid;\n  grid-template-columns: minmax(0, 1fr);\n  grid-template-areas: \"page\";\n  gap: 0;\n}\n[data-yumemi-grid=\"layout\"] > [data-yumemi-area=\"page\"] {\n  grid-area: page;\n}\n\n[data-yumemi-grid=\"page:pages/home/page\"] {\n  display: grid;\n  grid-template-columns: minmax(0, 1fr);\n  grid-template-areas: \"page\";\n  gap: 0;\n}\n[data-yumemi-grid=\"page:pages/home/page\"] > [data-yumemi-area=\"page\"] {\n  grid-area: page;\n}\n[data-yumemi-badge] {\n  position: absolute;\n  inset-block-start: 0;\n  inset-inline-end: 0;\n  display: inline-flex;\n  align-items: center;\n  justify-content: center;\n  min-width: 1.25rem;\n  height: 1.25rem;\n  padding-inline: 0.25rem;\n  border-radius: 999px;\n  color: var(--bg);\n  background: var(--accent);\n  font: 600 0.75rem/1 system-ui, sans-serif;\n}\n[data-yumemi-badge][data-count=\"\"],\n[data-yumemi-badge][data-count=\"0\"] { display: none; }\n";
+  return "\n[data-yumemi-grid=\"layout\"] {\n  display: grid;\n  grid-template-columns: minmax(0, 1fr);\n  grid-template-areas: \"page\";\n  gap: 0;\n}\n[data-yumemi-grid=\"layout\"] > [data-yumemi-area=\"page\"] {\n  grid-area: page;\n  display: flex;\n  flex-direction: column;\n  align-items: stretch;\n  gap: 0.0px;\n}\n\n[data-yumemi-grid=\"page:pages/home/page\"] {\n  display: grid;\n  grid-template-columns: minmax(0, 1fr);\n  grid-template-areas: \"page\";\n  gap: 0;\n}\n[data-yumemi-grid=\"page:pages/home/page\"] > [data-yumemi-area=\"page\"] {\n  grid-area: page;\n  display: flex;\n  flex-direction: column;\n  align-items: stretch;\n  gap: 0.0px;\n}\n[data-yumemi-badge] {\n  position: absolute;\n  inset-block-start: 0;\n  inset-inline-end: 0;\n  display: inline-flex;\n  align-items: center;\n  justify-content: center;\n  min-width: 1.25rem;\n  height: 1.25rem;\n  padding-inline: 0.25rem;\n  border-radius: 999px;\n  color: var(--bg);\n  background: var(--accent);\n  font: 600 0.75rem/1 system-ui, sans-serif;\n}\n[data-yumemi-badge][data-count=\"\"],\n[data-yumemi-badge][data-count=\"0\"] { display: none; }\n";
 }
 
 function matchPage(pathname) {
@@ -203,9 +203,9 @@ async function renderPage(request, env, matched, gateSession) {
     }
     const response = await readFromApp(env.APP, request, source.service, argsFor(vars, source.args));
     if (!response.ok) {
-      if (response.status === 403) return failure(403, "adult declaration required");
+      if (response.status === 403) return failure(403, "forbidden");
       if (response.status === 404 && !source.root) { values.push(Option$None$const); continue; }
-      if (response.status === 404) return failure(404, "muse not found");
+      if (response.status === 404) return failure(404, "not found");
       return failure(response.status, source.root ? "root read failed" : "widget read failed");
     }
     const decoded = source.decoder(await response.json());
@@ -275,7 +275,7 @@ export default gate.serve(async (request, env, before) => {
   const matched = matchPage(new URL(request.url).pathname);
   if (!matched) {
     if (env.SVELTE) return env.SVELTE.fetch(request);
-    return failure(404, "page not found");
+    return failure(404, "not found");
   }
   return renderPage(request, env, matched, before.session);
 });

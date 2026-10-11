@@ -1,4 +1,4 @@
-/* GENERATED from admin/src/layout.gleam [sha256:8d8686b2e6eb] — 手で編集しない */
+/* GENERATED from admin/src/layout.gleam [sha256:36d4612816d1] — 手で編集しない */
 
 [data-yumemi-grid="layout"] {
   display: grid;
@@ -8,6 +8,10 @@
 }
 [data-yumemi-grid="layout"] > [data-yumemi-area="page"] {
   grid-area: page;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.0px;
 }
 
 [data-yumemi-grid="page:pages/home/page"] {
@@ -18,6 +22,10 @@
 }
 [data-yumemi-grid="page:pages/home/page"] > [data-yumemi-area="page"] {
   grid-area: page;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.0px;
 }
 [data-yumemi-badge] {
   position: absolute;

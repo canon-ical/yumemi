@@ -1,12 +1,12 @@
-//// GENERATED from entity declarations [sha256:bbf198d7f83a] — 手で編集しない
+//// GENERATED from entity declarations [sha256:cd190a929100] — 手で編集しない
 
 import entity/article
 import entity/category
 import entity/tag
-import yumemi/er.{type Key}
 import gen/types/category_name.{type CategoryName}
 import gen/types/slug.{type Slug}
 import gen/types/tag_name.{type TagName}
+import yumemi/er.{type Key}
 
 pub fn article(id: Slug) -> Key(article.Article) {
   er.key(slug.to_string(id))

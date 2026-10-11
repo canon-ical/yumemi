@@ -1,7 +1,7 @@
-//// GENERATED from admin/src/blocks/admin_header.gleam [sha256:6d476b26e4d7] — 手で編集しない
+//// GENERATED from admin/src/blocks/admin_header.gleam [sha256:ce670610deee] — 手で編集しない
 
-import yumemi/front/el
 import sketch/lustre/element/html
+import yumemi/front/el
 
 pub type In =
   Nil

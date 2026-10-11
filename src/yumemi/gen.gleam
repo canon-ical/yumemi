@@ -35,8 +35,10 @@ import yumemi/gen/emit/static as static_emit
 import yumemi/gen/emit/types
 import yumemi/gen/emit/verb
 import yumemi/gen/face
+import yumemi/gen/model
 import yumemi/gen/reader
 import yumemi/gen/reader/allow as allow_reader
+import yumemi/gen/reader/cms
 import yumemi/gen/reader/front
 import yumemi/gen/reader/server as server_reader
 import yumemi/gen/source
@@ -143,6 +145,27 @@ fn generate_with_faces(
       |> result.map_error(front_note)
     }),
   )
+  // 面の門の数える口を back の入口の表(`http_runtime.mjs` の `pageviews`)へ渡す(0.12)
+  let app =
+    model.App(
+      ..app,
+      server: model.Server(
+        ..app.server,
+        counted: list.filter_map(front_models, fn(item) {
+          let #(package, model_) = item
+          case front_emit.gate(app, units, package, model_).pageview {
+            Some(pageview) ->
+              Ok(model.Counted(
+                face: package.name,
+                only: pageview.only,
+                fields: pageview.fields,
+                sink: pageview.sink,
+              ))
+            None -> Error(Nil)
+          }
+        }),
+      ),
+    )
   let hashes = hash.of(units)
   let allow_usages = allow_reader.read(units)
   let entry_output = entry.emit(app, hashes)
@@ -176,6 +199,7 @@ fn generate_with_faces(
       reader.missing_key_notes(units),
       reader.entry_notes(app),
       server_reader.notes(app),
+      cms.notes(app, units),
       collision_notes,
       root.notes(app),
       allow_emit.notes(app, allow_usages),

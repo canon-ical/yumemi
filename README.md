@@ -158,7 +158,7 @@ An Area's `flow` in a Layout or a Page's Frame now reaches the generated grid CS
 
 ## `yumemi/server` ── what the app must provide (0.11.1)
 
-The back-end runtime (`yumemi/server/*.mjs`) is JavaScript that the generated `src/gen/*.mjs` imports. It knows no application names: route names, cookie names, key bindings and the party a queue consumer reads its borrowed root as come from the app's `src/server.gleam` (`attached_roles`, `browser`, `hooks`, `roots`' `QueueParty`). The generated face gate (`<face>/src/gen/gate.mjs`, declared in `<face>/src/gate.gleam` with `yumemi/gate`) reads the session through the `ReadSession` attached route. Gleam packages cannot declare npm dependencies, so the app supplies the following itself.
+The back-end runtime (`yumemi/server/*.mjs`) is JavaScript that the generated `src/gen/*.mjs` imports. It knows no application names: route names, cookie names, key bindings, declaration and consent kinds and the party a queue consumer reads its borrowed root as come from the app's `src/server.gleam` (`attached_roles`, `browser`, `consents`, `hooks`, `roots`' `QueueParty`). The generated face gate (`<face>/src/gen/gate.mjs`, declared in `<face>/src/gate.gleam` with `yumemi/gate`) reads the session through the `ReadSession` attached route. Gleam packages cannot declare npm dependencies, so the app supplies the following itself.
 
 Generated live modules (0.11.2) send Args by their declared type: `Bool` as a JSON boolean (the live field's `"true"` / `"false"`), `Int` / `Float` as numbers. On a `GET` route the Args that are not path holes go on the query string (an empty `Option` is left out), and the runtime reads `bool` (`true` / `false`) and `float` spellings from the query of `GET` / `HEAD` requests. `POST` / `PUT` / `DELETE` bodies are read as JSON as before.
 
@@ -173,8 +173,8 @@ A Service whose logic runs `step.commit` and continues after it (and is not a qu
 - **The `BlobCopy` live copies a URL.** Besides the file upload (`Send`), `copy_from(state, url)` sends `{from: url}` to the same route and reads `{key}` into `Done(Ok(key))`.
 - **Split records decode.** A record Property stored with `Split` is rebuilt from its columns in `src/gen/codec.mjs`.
 - **Islands render sketch classes.** The generated client registers each island through `yumemi/front/island_style.mjs`'s `styled(app)`: the island gets its own sketch stylesheet while its view runs, and the CSS goes into a `<style>` inside the island (only when the island uses classes and does not render its own stylesheet).
-- **Client navigation between Pages.** The generated client calls `yumemi/front/navigate.mjs`'s `start({routes, boot, pageview})`. A plain left click on a same-origin link, from a Page to a Page that are both in the face's route table (minus the gate's `frame_src` Pages), fetches the next page with one request (the gate, the adult declaration and the session go through the server as before), swaps `<head>` and `<body>`, re-runs the island registrations and pushes history; back / forward do the same. A redirect, a non-200, a `content-security-policy` header, a page with scripts other than the client, an already-registered given island, a modified click, `target` or `download` fall back to a page load.
-- **Pageviews count once per navigation.** The navigation fetch carries `x-yumemi-navigate: 1`; for it the gate puts `<meta name="yumemi-pageview">` in `<head>` instead of the pageview script (same conditions: adult session, 200 HTML, a `pageview` Page) and adds `vary: x-yumemi-navigate`. The client posts the pageview (`kind` `spa`) only after it swapped that page in; a fallback to a page load gets the script as before.
+- **Client navigation between Pages.** The generated client calls `yumemi/front/navigate.mjs`'s `start({routes, boot, pageview})`. A plain left click on a same-origin link, from a Page to a Page that are both in the face's route table (minus the gate's `frame_src` Pages), fetches the next page with one request (the gate, the browser's declarations and the session go through the server as before), swaps `<head>` and `<body>`, re-runs the island registrations and pushes history; back / forward do the same. A redirect, a non-200, a `content-security-policy` header, a page with scripts other than the client, an already-registered given island, a modified click, `target` or `download` fall back to a page load.
+- **Pageviews count once per navigation.** The navigation fetch carries `x-yumemi-navigate: 1`; for it the gate puts `<meta name="yumemi-pageview">` in `<head>` instead of the pageview script (same conditions as the script, 200 HTML, a `pageview` Page) and adds `vary: x-yumemi-navigate`. The client posts the pageview (`kind` `spa`) only after it swapped that page in; a fallback to a page load gets the script as before. (0.12 replaces this: see "The gate and the CMS features" below.)
 - **Reload after a write stays in the page.** An island's `yumemi-done` calls `navigate.reload()`: on a routed Page it refetches the current URL the same way (no history entry, scroll kept, pageview `kind` `reload`); otherwise it reloads the page.
 
 0.11.5 adds, without changing or removing the existing public types:
@@ -257,7 +257,7 @@ A Service whose logic runs `step.commit` and continues after it (and is not a qu
 | `framework/session_revoke` | session id | revoke one session (auth binding) |
 | `framework/session_onboard` | session id, party, subject id | bind a created subject to the session |
 | `framework/session_subject_staff` | session id, party, kind, subject id | the `SwitchSubject` attached route |
-| `framework/browser` | browser id, at | the `DeclareBrowser` attached route |
+| `framework/browser` | browser id, at, kind (0.12) | the `Declare(attached, kind)` attached route, once per declared kind |
 | `framework/audit` | seed, stage, service, party, outcome, at | one row per entrance stage |
 | `framework/outbox_parent` | id, dedupe key, payload (json), event id, at, folded | outbox parent row of a write |
 | `framework/outbox_child` | id, kind, payload (json), parent id, at | outbox child row (one queue message) |
@@ -266,5 +266,59 @@ A Service whose logic runs `step.commit` and continues after it (and is not a qu
 | `framework/outbox_sent` | id | mark a swept message sent (not called since 0.11.6) |
 | `framework/outbox_sweep` | kinds | list unsent messages to resend |
 | `framework/outbox_claim` | id | claim one swept row before sending it (0.11.6; generated by default, see above) |
+| `framework/pageview_record` | event id, mark, face, at, kind, path, prev, referrer path, referrer host, client at, party, extra (json), dims (json), excluded | one counted event into the `Store` (0.12; generated by default, calls `framework.pageview_record` from `db/framework/pageview.sql`) |
+| `framework/pageview_rollup` | at | the daily rollup of the `Store` (0.12; generated by default) |
+
+**Cron** — a face whose gate counts into the framework `Store` makes the generated `shell.mjs` run the rollup on the cron expression `0 1 * * *` (01:00 UTC, fixed by the framework). Add that expression to the Worker's `triggers.crons`.
 
 **Worker env** — `DATABASE_URL`, `COOKIE_DOMAIN`, `OUTBOX` (queue binding), `<ENTRY>_HOST` per entrance, the `key_binding` of `browser` (a Secret Store binding), the KEK bindings of `Sealed` properties, and optionally `ISOLATE_MARKER=1` (test header).
+
+## The gate and the CMS features (0.12)
+
+0.12 moves the features every business CMS needs into the framework: declarations, consents, counting pageviews (with uniques and visits), the CSP and image variants. The app only names kinds and values in closed vocabularies; nothing application-specific is spelled in the framework, the runtime or the generator. This is a breaking change.
+
+**The gate** (`<face>/src/gate.gleam`, `pub const gate: Gate`):
+
+```gleam
+Gate(
+  sign_in: SignIn(path:, fallback_origin:),
+  rules: List(Rule),            // Rule(pages, except, checks)
+  redirects: List(Redirect),    // Redirect(pages, when, to)
+  csp: List(Csp),               // was frame_src (the entry's frame_src is gone too)
+  pageview: Pageview,           // NoPageview | Pageview(pages, only, fields, sink)
+)
+Check = SignedIn(fail) | Declared(kind, fail) | SubjectKind(kinds, fail) | Consented(kind, fail)
+When  = WhenDeclared(kind) | WhenSignedIn
+```
+
+- **Failure texts.** The generated shell and gate answer only `403 forbidden` and `404 not found` on their own (a subject mismatch is `forbidden` too). Any guidance belongs in a check's `Fail` (`RedirectBack`, `ToSignIn`, or a `Deny` body the app wrote).
+
+**Declarations** (`Declared(kind)`) are browser-level statements such as an age declaration. The app names the kinds in `src/server.gleam`:
+
+```gleam
+pub const browser: BrowserCookie = BrowserCookie(
+  cookie: "_b", key_binding: "BROWSER_KEY", max_age_days: 400,
+  declarations: [Declaration(kind: "<kind>", claim: "<kind>_declared_at", max_age_days: 395)],
+)
+```
+
+- The same `Declared(kind)` shape is written in four places: the gate check, `When`, a Service's `requires`, and the attached roles `Declare(attached, kind)` (sets the declaration) / `NeedsDeclared(attached, kind)` (403 without it). A kind that is not in `browser.declarations`, or any declaration without `browser`, stops with exit 4 (rule 32); duplicated kinds or claims, a kind outside `[a-z][a-z0-9_]*` or a declaration longer than the cookie stop with exit 4 (rule 33).
+- The signed cookie's payload is `{id, <claim>: time, ..}`. `id` (32 hex) is the browser mark; each declaration is a field on it. A declaration older than its own `max_age_days` reads as absent even while the cookie is valid. A 0.11 cookie (`{id, <claim>}`) reads as that declaration without being rewritten.
+- A missing declaration answers `403 {"code": "declaration_missing", "declaration": "<kind>"}`. The `ReadSession` route returns `declared: {<kind>: true}` (and no other declaration field).
+
+**Consents** (`Consented(kind)`, `ConsentedFor(kind, subject: fn(args) -> String)`) are party-level. The app lists the kinds in `src/server.gleam` (`pub const consents: List(String)`); a kind outside it in a requirement or a gate check stops with exit 4 (rule 40). `ConsentedFor` matches the consent's subject against `subject(args)`. A missing consent answers `403 {"code": "consent_missing", "consent": "<kind>"}`. `ReadSession` returns every consent the party holds as `consents: {<kind>: true}`.
+
+**The CSP** is `csp: [Csp(pages: List(Match), directives: [FrameSrc(hosts) | ImgSrc(hosts) | ConnectSrc(hosts) | MediaSrc(hosts)])]`. The gate sets `content-security-policy` on HTML responses of the matched Pages (directives of every matching `Csp` merged in order, hosts as `https://<host>`). Hosts are `[a-z0-9.-]+` with one optional leading `*.`; a page outside the face's routes or a bad host stops with exit 4 (rule 38). There is no `script-src`. Client navigation still moves only between Pages whose CSP string equals the current document's.
+
+**Counting pageviews** (`Pageview(pages, only, fields, sink)`):
+
+- `only` uses the gate's `When`. The gate checks it when it marks a page, and the receiver checks it again when an event arrives; the app writes the condition once.
+- `fields` is closed: `NavKind` (`kind`: `initial` / `reload` / `spa`, back and forward are `spa`), `ClientAt`, `Path`, `Previous` (`prev`, the tab's previous event id), `Referrer` (`referrer_path` on the same origin, else `referrer_host`, only without a previous event) and `FromQuery(name, param, Slug(max))` (`[a-z0-9_]{1,max}`, max 1–64). No regular expression strings are accepted. The framework always adds the event `id`; the previous-event key is `yumemi:pageview:<face>`; the visit window (30 minutes) and the per-browser limit (60 per minute) are fixed. Duplicate field names, a `FromQuery` name that collides, a bad `param` or `max` stop with exit 4 (rule 35); a page outside the routes stops with exit 4 (rule 34).
+- **One sender.** The gate only adds `<meta name="yumemi-pageview">` to a counted page (200 HTML, a `pages` Page, `only` holds), on a page load and on a client navigation fetch alike; it emits no inline script. The sender is `yumemi/front/pageview.mjs`, started by the generated `client.mjs` (a face with a `pageview` gets a `client.mjs` even without islands). It posts once after a page load (after `requestIdleCallback`; a prerendered page waits for activation; a bfcache restore is not counted) and once per client navigation at the Navigation API's `navigatesuccess`, reading the mark in the current document (fragment-only navigations are not counted). `navigate.mjs` does not send.
+- **The receiver** is `<entry prefix>/_yumemi/pageviews` on the face's entry and always answers `202` with no body. It drops bots and monitors (`cf.verifiedBotCategory`, user agent) and prefetches (`Sec-Purpose: prefetch`) without a row, keeps only the declared fields, and drops malformed events.
+- **The browser mark** is set by the receiver: the first event that passes `only` from a browser without a valid cookie gets a mark-only cookie (`{id}`), with the `browser` cookie's attributes (`HttpOnly; Secure; SameSite=Lax; Max-Age=<max_age_days>`, `Domain=COOKIE_DOMAIN`). A later declaration adds its field to the same mark.
+- `sink: Store(resolve: Option(String), rollup_by: List(String), exclude_when: List(String))` keeps events in framework tables (`framework.pageview_mark` / `_visit` / `_event` / `_rollup`). Same-id resends, the 61st event in a minute and two tabs at once are handled under the mark's row lock (`framework.pageview_record`). `resolve` names a Service with `Args(path: String)` whose `Out` carries the business dimensions; `rollup_by` names `Out` fields to roll up by, `exclude_when` names `Out` `Bool` fields whose true events are stored but not counted (the owner's and the operators' own views). The daily rollup (cron `0 1 * * *`) rebuilds the previous and the current UTC day and their months: page views, uniques (marks), visits and roaming visits (visits with 2+ views), per site, per path and per `rollup_by` field. A `Store` without `browser` stops with exit 3; an unknown `resolve` or field stops with exit 4 (rule 37).
+- **The DDL is generated, not applied.** A `Store` makes the generator write `db/framework/pageview.sql` (tables, indexes and the three functions). Applying it to a database is the app's DDL step.
+- `sink: ToService(service)` is a named escape hatch: the receiver runs its checks (fields, `only`, bots, prefetch, the mark) and calls the app's Service with Args built from the event fields (every Args field must be one of the event's field names; fields that may be absent must be `Option`) (rule 36). The mark, the party and the subject reach the root as usual (`Carried(.., name: "browser", ..)`). Resends, the per-minute limit and concurrent tabs are the Service's job. The generator prints one exit-0 warning per face that uses it, also in `_diagnostics.txt`.
+
+**Image variants.** `pub const media: Media = Media(path:, variants: [ImageVariant(name:, width:, height: Option(Int), fit: ScaleDown | Cover | Contain)], theme_background:)` in `src/server.gleam` makes the generator write `<face>/src/gen/media.gleam` per face: a closed `Variant` type, `name(variant)`, `theme_background` and `url(blob, variant)` (`<path>/<key, each "/"-separated segment percent-encoded>?v=<name>`). Duplicate or badly spelled names, or a `theme_background` outside the table, stop with exit 4 (rule 39). Serving, caching and purging stay in the app.

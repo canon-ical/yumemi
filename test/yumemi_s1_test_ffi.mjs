@@ -22,9 +22,9 @@ export function gate_redirect_back(text) {
   const out = node(`
 import { serve } from ${JSON.stringify(path.join(dir, "gate.mjs"))};
 const sessions = {
-  anonymous: { anonymous: true, adult: false, subject: null },
-  minor: { anonymous: false, adult: false, subject: null },
-  adult: { anonymous: false, adult: true, subject: null },
+  anonymous: { anonymous: true, declared: {}, subject: null },
+  minor: { anonymous: false, declared: {}, subject: null },
+  adult: { anonymous: false, declared: { adult: true }, subject: null },
 };
 const env = (who) => ({ APP: { fetch: async () => new Response(JSON.stringify(sessions[who]), { status: 200 }) } });
 const app = serve(async () => new Response("<!doctype html><html><head></head><body>x</body></html>", { status: 200, headers: { "content-type": "text/html" } }));

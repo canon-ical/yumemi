@@ -1,4 +1,4 @@
-//// GENERATED from public/src/{layout.gleam,pages/**/page.gleam,blocks/*.gleam} [sha256:b5e213793c66] — 手で編集しない
+//// GENERATED from public/src/{layout.gleam,pages/**/page.gleam,blocks/*.gleam} [sha256:985bd5029306] — 手で編集しない
 
 import blocks/article
 import blocks/feed
@@ -7,13 +7,13 @@ import blocks/row_article
 import blocks/row_summary
 import blocks/site_header
 import blocks/summary
-import yumemi/front/el
 import gleam/option.{None}
 import lustre/attribute
 import lustre/element/html as raw_html
 import sketch/lustre as sketch_lustre
 import sketch/lustre/element
 import sketch/lustre/element/html
+import yumemi/front/el
 
 pub fn view() -> element.Element(Nil) {
   html.div_([attribute.attribute("data-yumemi-blocks-preview", "pc")], [

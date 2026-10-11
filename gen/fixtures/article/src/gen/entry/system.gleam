@@ -1,7 +1,7 @@
-//// GENERATED from framework session / credential_floor contract [sha256:bbf198d7f83a] — 手で編集しない
+//// GENERATED from framework session / credential_floor contract [sha256:cd190a929100] — 手で編集しない
 
-import yumemi/io.{type Promise}
 import gen/entry/auth.{type Database}
+import yumemi/io.{type Promise}
 
 pub type Issued
 

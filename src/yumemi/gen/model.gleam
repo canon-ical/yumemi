@@ -500,23 +500,77 @@ pub type Server {
     browser: Option(BrowserCookie),
     /// 入口の主体の集合の検査を外す Service の名(`subject_free`)
     subject_free: List(String),
+    /// 同意の種類の名(`consents`、0.12)
+    consents: List(String),
+    /// 画像の variant の表(`media`、0.12)
+    media: Option(Media),
+    /// 面の門の数える口(0.12)。`src/server.gleam` の宣言でなく、生成器が面の `src/gate.gleam` から足す
+    counted: List(Counted),
   )
 }
 
-/// `src/server.gleam` の `attached_roles` の 1 行(WGy r4)。`role` は framework の JS の綴り
-/// (`declare_browser` / `read_session` / `switch_subject` / `tail_path` / `needs_browser`)。
-pub type AttachedRole {
-  AttachedRole(attached: String, role: String)
+/// 面の門の `pageview`(0.12)。`face` は面(= 入口)の名。
+pub type Counted {
+  Counted(
+    face: String,
+    only: List(GateWhen),
+    fields: List(PageviewField),
+    sink: PageviewSink,
+  )
 }
 
-/// `src/server.gleam` の `browser`(WGy r4)。
+/// 門の条件(`WhenDeclared(kind)` / `WhenSignedIn`)。
+pub type GateWhen {
+  WhenDeclared(kind: String)
+  WhenSignedIn
+}
+
+pub type PageviewField {
+  NavKindField
+  ClientAtField
+  PathField
+  PreviousField
+  ReferrerField
+  /// `FromQuery(name, param, Slug(max))`
+  FromQueryField(name: String, param: String, max: Int)
+}
+
+pub type PageviewSink {
+  StoreSink(
+    resolve: Option(String),
+    rollup_by: List(String),
+    exclude_when: List(String),
+  )
+  ServiceSink(service: String)
+}
+
+/// `src/server.gleam` の `media`(0.12)。
+pub type Media {
+  Media(path: String, variants: List(MediaVariant), theme_background: String)
+}
+
+pub type MediaVariant {
+  MediaVariant(name: String, width: Int, height: Option(Int), fit: String)
+}
+
+/// `src/server.gleam` の `attached_roles` の 1 行(WGy r4、0.12)。`role` は framework の JS の綴り
+/// (`declare` / `needs_declared` / `read_session` / `switch_subject` / `tail_path`)、`kind` は申告の種類(他の役は "")。
+pub type AttachedRole {
+  AttachedRole(attached: String, role: String, kind: String)
+}
+
+/// `src/server.gleam` の `browser`(WGy r4、0.12)。
 pub type BrowserCookie {
   BrowserCookie(
     cookie: String,
     key_binding: String,
-    claim: String,
     max_age_days: Int,
+    declarations: List(Declaration),
   )
+}
+
+pub type Declaration {
+  Declaration(kind: String, claim: String, max_age_days: Int)
 }
 
 pub fn empty_server() -> Server {
@@ -534,6 +588,9 @@ pub fn empty_server() -> Server {
     attached_roles: [],
     browser: None,
     subject_free: [],
+    consents: [],
+    media: None,
+    counted: [],
   )
 }
 

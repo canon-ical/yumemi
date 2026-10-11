@@ -1,0 +1,76 @@
+//// Service create ── 記事を新規に作る。作られた記事は Lifecycle の先頭(Draft)から始まる。
+//// 個体を指さない集合レベルの Service なので、Root に root 個体は入らない。
+
+// ★ src/service/article_create.gleam
+import entity/article
+import entity/category
+import entity/staff
+import entity/tag
+import yumemi/effect.{type Effect, Write}
+import yumemi/require.{type Requirement, ConsentedFor}
+import yumemi/er.{type Key}
+import yumemi/step.{type Start, type Step}
+import gen/allow/article as allow
+import gen/draft/article.{type ArticleDraft, ArticleDraft}
+import gen/face.{type Face, Admin, Public}
+import gen/root/article_create.{type Root, type Service, Service}
+import gen/types/body.{type Body}
+import gen/types/slug.{type Slug}
+import gen/types/title.{type Title}
+import gen/verb
+
+pub const effect: Effect = Write
+
+pub const faces: List(Face) = [Public, Admin]
+
+/// 同意 identity の対象を Args の slug と突き合わせる(対象の突き合わせは種類の名でなく形で決まる)
+pub const requires: List(Requirement(Args)) = [
+  ConsentedFor("identity", subject: identity_subject),
+]
+
+fn identity_subject(args: Args) -> String {
+  slug.to_string(args.slug)
+}
+
+/// root の識別子と同じ Type のフィールドが無い ── パス変数0個 = 集合レベル。
+/// 関係は `Key(_)`(相手の識別子)で受ける。Entity の値そのものは引数に取れない。
+pub type Args {
+  Args(
+    slug: Slug,
+    title: Title,
+    body: Body,
+    category: Key(category.Category),
+    tags: List(Key(tag.Tag)),
+  )
+}
+
+pub type Out {
+  Out(slug: Slug, phase: article.Phase)
+}
+
+/// slug の重複と Category の不在は ER の規則(一意制約・RESTRICT)なので、ここには書かない ──
+/// writes が落とし、生成器が `article_slug_taken` / `article_category_missing` を付ける。
+pub type Error
+
+pub const service: Service(Args, Out, Error) = Service(
+  allow: [allow.staff],
+  logic: logic,
+)
+
+/// 手順書。基礎動詞を溜めて(apply)、末尾で確定する(done)。transaction は1つ。
+pub fn logic(
+  _by: staff.Staff,
+  _it: Root,
+  args: Args,
+) -> Step(Out, Error, Start) {
+  use article <- step.apply(
+    verb.create_article(ArticleDraft(
+      slug: args.slug,
+      title: args.title,
+      body: args.body,
+      category: args.category,
+      tags: args.tags,
+    )),
+  )
+  step.done(Out(slug: article.slug, phase: article.Draft))
+}

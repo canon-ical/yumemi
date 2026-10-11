@@ -1,4 +1,4 @@
-// GENERATED from admin/src/{gate.gleam,pages/**} and src/{entry,server}.gleam [sha256:f489ce4ec759] — 手で編集しない
+// GENERATED from admin/src/{gate.gleam,pages/**} and src/{entry,server}.gleam [sha256:5ecb6dff3869] — 手で編集しない
 
 import * as route from "./route.mjs";
 
@@ -9,13 +9,11 @@ const rules = [
   {pages: [{type: "every"}], except: [], checks: [{type: "admitted", kinds: ["staff"]}]},
 ];
 const redirects = [];
-const frameSrc = null;
-const framePages = [];
+const cspRoutes = {};
 const pageviewRoutes = [];
-const pageviewScript = null;
+const pageviewOnly = [];
 
 const contexts = new WeakMap();
-const navigateHeader = "x-yumemi-navigate";
 const pageviewMark = "<meta name=\"yumemi-pageview\">";
 
 function literalMatches(segment, value) {
@@ -89,28 +87,35 @@ async function readSession(request, env) {
 function checkFailure(check, read, request, env) {
   const session = read.session;
   if (check.type === "admitted") {
-    if (!read.ok) {
-      if (read.status === 403) return text(403, "adult declaration required");
-      if (read.status === 404) return text(404, "muse not found");
-      return text(read.status, "session read failed");
-    }
+    if (!read.ok) return readFailure(read);
     const subject = session?.subject;
     if (!subject || (check.kinds.length > 0 && !check.kinds.includes(subject.kind)) || typeof subject.handle !== "string") {
-      return text(403, "adult declaration required");
+      return text(403, "forbidden");
     }
     return null;
   }
   if (check.type === "signed-in") {
     if (read.status === 401 || read.status === 403) return failed(check.fail, request, env);
-    if (!read.ok) return text(read.status, "session read failed");
+    if (!read.ok) return readFailure(read);
     if (!session || session.anonymous) return failed(check.fail, request, env);
     return null;
   }
-  if (!read.ok) return text(read.status, "session read failed");
-  if (check.type === "adult") return session?.adult === true ? null : failed(check.fail, request, env);
+  if (!read.ok) return readFailure(read);
+  if (check.type === "declared") return passes({type: "declared", kind: check.kind}, session) ? null : failed(check.fail, request, env);
   if (check.type === "subject-kind") return check.kinds.includes(session?.subject?.kind) ? null : failed(check.fail, request, env);
-  if (check.type === "consent") return session?.consents?.[check.kind] ? null : failed(check.fail, request, env);
-  return text(500, "invalid gate check");
+  if (check.type === "consented") return session?.consents?.[check.kind] === true ? null : failed(check.fail, request, env);
+  return text(403, "forbidden");
+}
+
+// 門が自分で返す本文は 403 の forbidden と 404 の not found だけ(0.12)
+function readFailure(read) {
+  return read.status === 404 ? text(404, "not found") : text(403, "forbidden");
+}
+
+// 門の条件(`WhenDeclared(kind)` / `WhenSignedIn`)
+function passes(when, session) {
+  if (when.type === "declared") return session?.declared?.[when.kind] === true;
+  return Boolean(session) && !session.anonymous;
 }
 
 function safeParam(value, fallback) {
@@ -128,10 +133,7 @@ function safeParam(value, fallback) {
 }
 
 function redirectFor(redirect, session, url) {
-  const passes = redirect.when === "adult"
-    ? session?.adult === true
-    : Boolean(session) && !session.anonymous;
-  if (!passes) return null;
+  if (!passes(redirect.when, session)) return null;
   const location = redirect.to.type === "fixed"
     ? redirect.to.location
     : safeParam(url.searchParams.get(redirect.to.param), redirect.to.fallback);
@@ -175,33 +177,29 @@ function isHtml(response) {
 }
 
 function tracksPageview(context) {
-  return pageviewRoutes.includes(context.path) && Object.values(context.params).every((value) => value !== "");
+  return pageviewRoutes.includes(context.path) && Object.values(context.params).every((value) => value !== "")
+    && pageviewOnly.every((when) => passes(when, context.session));
 }
 
 export async function after_response(request, env, response) {
   const context = contexts.get(request);
   if (!context) return response;
   let output = response;
-  if (frameSrc !== null && anyCovers(framePages, context.path) && isHtml(output)) {
+  const csp = Object.hasOwn(cspRoutes, context.path) ? cspRoutes[context.path] : null;
+  if (csp !== null && isHtml(output)) {
     const headers = new Headers(output.headers);
-    headers.set("content-security-policy", frameSrc);
+    headers.set("content-security-policy", csp);
     output = new Response(output.body, {status: output.status, statusText: output.statusText, headers});
   }
-  if (pageviewScript === null || !tracksPageview(context) || output.status !== 200 || !isHtml(output)) return output;
-  if (context.session?.adult !== true) return output;
+  if (!tracksPageview(context) || output.status !== 200 || !isHtml(output)) return output;
+  // 数える印は頁の読み込みでも client 遷移の fetch でも同じ meta だけ。送るのは client.mjs の送り手 1 つ
   const html = await output.text();
-  const headers = new Headers(output.headers);
-  headers.append("vary", navigateHeader);
-  // client 遷移の fetch には script でなく数える印を差す(client が差し替えた後に 1 回送る)
-  const [marker, mark] = request.headers.get(navigateHeader) === "1"
-    ? ["</head>", pageviewMark]
-    : ["</body>", pageviewScript];
-  const offset = html.indexOf(marker);
-  if (offset < 0) throw new Error(marker === "</head>" ? "SSR head is missing" : "SSR body is missing");
-  return new Response(html.slice(0, offset) + mark + html.slice(offset), {
+  const offset = html.indexOf("</head>");
+  if (offset < 0) throw new Error("SSR head is missing");
+  return new Response(html.slice(0, offset) + pageviewMark + html.slice(offset), {
     status: output.status,
     statusText: output.statusText,
-    headers,
+    headers: new Headers(output.headers),
   });
 }
 

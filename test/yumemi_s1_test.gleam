@@ -24,13 +24,13 @@ const routes = [
 
 const entry_source = "
 pub const entries = [
-  Http(name: \"www\", hosts: [Www], prefix: \"/api\", admit: Anonymous, subject: AnySubject, services: All, pages: AllPages, frame_src: []),
+  Http(name: \"www\", hosts: [Www], prefix: \"/api\", admit: Anonymous, subject: AnySubject, services: All, pages: AllPages),
 ]
 "
 
 const back_gate = "
 import yumemi/gate.{
-  Adult, Exact, Fixed, FixedKeep, Gate, NoPageview, Prefix, Redirect, RedirectBack,
+  Declared, Exact, Fixed, FixedKeep, Gate, NoPageview, Prefix, Redirect, RedirectBack,
   Rule, SignIn, SignedIn, WhenSignedIn,
 }
 
@@ -39,7 +39,7 @@ pub const gate: gate.Gate = Gate(
   rules: [
     Rule(pages: [Prefix(\"/me\")], except: [], checks: [
       SignedIn(fail: RedirectBack(location: \"/\", param: \"returnTo\")),
-      Adult(fail: RedirectBack(location: \"/about/external?kind=adult\", param: \"next\")),
+      Declared(kind: \"adult\", fail: RedirectBack(location: \"/about/external?kind=adult\", param: \"next\")),
     ]),
     Rule(pages: [Exact(\"/:handle/:page\")], except: [], checks: [
       SignedIn(fail: RedirectBack(location: \"/\", param: \"returnTo\")),
@@ -49,7 +49,7 @@ pub const gate: gate.Gate = Gate(
     Redirect(pages: [Exact(\"/search\")], when: WhenSignedIn, to: FixedKeep(location: \"/me/chats\")),
     Redirect(pages: [Exact(\"/about/external\")], when: WhenSignedIn, to: Fixed(location: \"/search\")),
   ],
-  frame_src: [],
+  csp: [],
   pageview: NoPageview,
 )
 "
@@ -87,7 +87,10 @@ pub fn redirect_back_and_fixed_keep_are_read_test() {
   |> should.equal([
     gate.Rule(pages: [gate.Prefix("/me")], except: [], checks: [
       gate.SignedIn(gate.RedirectBack("/", "returnTo")),
-      gate.Adult(gate.RedirectBack("/about/external?kind=adult", "next")),
+      gate.Declared(
+        "adult",
+        gate.RedirectBack("/about/external?kind=adult", "next"),
+      ),
     ]),
     gate.Rule(pages: [gate.Exact("/:handle/:page")], except: [], checks: [
       gate.SignedIn(gate.RedirectBack("/", "returnTo")),
@@ -283,7 +286,7 @@ pub fn subset_faces_get_entries_test() {
     dir,
     "src/entry.gleam",
     "    services: All,\n  ),\n]",
-    "    services: All,\n  ),\n  Http(name: \"ops\", hosts: [OpsHost], prefix: \"/api\", admit: Authenticated, subject: Subjects([Staff]), services: ReadOnly, pages: NoPages, frame_src: []),\n  HttpApi(name: \"api\", hosts: [ApiHost], prefix: \"/api/v1\", admit: Authenticated, subject: Subjects([Staff]), services: All, credential: ApiKey(per_minute: 60), pages: NoPages, frame_src: []),\n]",
+    "    services: All,\n  ),\n  Http(name: \"ops\", hosts: [OpsHost], prefix: \"/api\", admit: Authenticated, subject: Subjects([Staff]), services: ReadOnly, pages: NoPages),\n  HttpApi(name: \"api\", hosts: [ApiHost], prefix: \"/api/v1\", admit: Authenticated, subject: Subjects([Staff]), services: All, credential: ApiKey(per_minute: 60), pages: NoPages),\n]",
   )
   |> should.be_true
   edit(

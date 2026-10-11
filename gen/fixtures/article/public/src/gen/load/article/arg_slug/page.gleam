@@ -1,4 +1,4 @@
-//// GENERATED from public/src/pages/article/arg_slug/page.gleam [sha256:4ced8cac33da] — 手で編集しない
+//// GENERATED from public/src/pages/article/arg_slug/page.gleam [sha256:1ffbb352c48f] — 手で編集しない
 
 import blocks/article
 import blocks/feed
@@ -7,9 +7,6 @@ import blocks/row_article
 import blocks/row_summary
 import blocks/site_header
 import blocks/summary
-import yumemi/front/css
-import yumemi/front/el
-import yumemi/front/sketch_css
 import gen/load/layout
 import gen/out/article_read
 import gen/out/widget_list
@@ -23,6 +20,9 @@ import sketch/lustre as sketch_lustre
 import sketch/lustre/element
 import sketch/lustre/element/html
 import style
+import yumemi/front/css
+import yumemi/front/el
+import yumemi/front/sketch_css
 
 pub type Vars {
   Vars(

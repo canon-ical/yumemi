@@ -259,11 +259,12 @@ pub fn island_renders_sketch_class_under_stylesheet_test() {
 fn counting_gate() -> source.Unit {
   unit(
     "gate",
-    "import yumemi/gate.{Exact, Gate, Pageview, SignIn}\n\n"
+    "import yumemi/gate.{Exact, Gate, NavKind, Pageview, Path, SignIn, Store}\n"
+      <> "import gleam/option.{None}\n\n"
       <> "pub const gate: gate.Gate = Gate(\n"
       <> "  sign_in: SignIn(path: \"/auth/sign-in\", fallback_origin: \"https://auth.example\"),\n"
-      <> "  rules: [],\n  redirects: [],\n  frame_src: [],\n"
-      <> "  pageview: Pageview(pages: [Exact(\"/status\")], endpoint: \"/api/pageviews\", source_param: \"r\", storage_key: \"k\"),\n"
+      <> "  rules: [],\n  redirects: [],\n  csp: [],\n"
+      <> "  pageview: Pageview(pages: [Exact(\"/status\")], only: [], fields: [NavKind, Path], sink: Store(resolve: None, rollup_by: [], exclude_when: [])),\n"
       <> ")\n",
   )
 }
@@ -297,7 +298,7 @@ pub fn navigation_keeps_counted_pages_and_passes_pageview_test() {
     face_file([], [counting_gate()], "public/priv/static/_yumemi/client.mjs")
   string.contains(
     text,
-    "startNavigation({ routes: [\"/article/:slug\", \"/status\"], boot, pageview: { endpoint: \"/api/pageviews\", source: \"r\", key: \"k\" } });",
+    "startNavigation({ routes: [\"/article/:slug\", \"/status\"], boot });",
   )
   |> should.be_true
 }
@@ -305,32 +306,19 @@ pub fn navigation_keeps_counted_pages_and_passes_pageview_test() {
 /// r2(柏木 P1-7)→ 0.11.15:門の `frame_src`(CSP)の Page も route 表に入れ、その CSP の値を持たせる
 /// (`csp` に route ごと。client は今の document の CSP と同じ行き先だけを取る)。
 pub fn navigation_carries_csp_pages_test() {
-  let assert Ok(back_units) = source.load(article_fixture)
-  let assert Ok(entry) =
-    list.find(back_units, fn(unit) { unit.path == "entry" })
-  let framed =
-    unit(
-      "entry",
-      string.replace(
-        entry.text,
-        "    services: All,\n  ),\n  Http(\n    name: \"admin\"",
-        "    services: All,\n    frame_src: [\"frames.example\"],\n  ),\n  Http(\n    name: \"admin\"",
-      ),
-    )
-  string.contains(framed.text, "frame_src: [\"frames.example\"]")
-  |> should.be_true
+  // 0.12:CSP は門の `csp`(入口の `frame_src` は消えた)
   let csp_gate =
     unit(
       "gate",
-      "import yumemi/gate.{Exact, Gate, NoPageview, SignIn}\n\n"
+      "import yumemi/gate.{Csp, Exact, FrameSrc, Gate, NoPageview, SignIn}\n\n"
         <> "pub const gate: gate.Gate = Gate(\n"
         <> "  sign_in: SignIn(path: \"/auth/sign-in\", fallback_origin: \"https://auth.example\"),\n"
-        <> "  rules: [],\n  redirects: [],\n  frame_src: [Exact(\"/status\")],\n"
+        <> "  rules: [],\n  redirects: [],\n  csp: [Csp(pages: [Exact(\"/status\")], directives: [FrameSrc([\"frames.example\"])])],\n"
         <> "  pageview: NoPageview,\n"
         <> ")\n",
     )
   let assert Ok(text) =
-    face_file([framed], [csp_gate], "public/priv/static/_yumemi/client.mjs")
+    face_file([], [csp_gate], "public/priv/static/_yumemi/client.mjs")
   string.contains(
     text,
     "startNavigation({ routes: [\"/article/:slug\", \"/status\"], boot, csp: { \"/status\": \"frame-src https://frames.example\" } });",

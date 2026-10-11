@@ -1,6 +1,5 @@
-//// GENERATED from src/server.gleam [sha256:91b6b08d9d7a] — 手で編集しない
+//// GENERATED from src/server.gleam [sha256:7472fc8bfe11] — 手で編集しない
 
-import yumemi/front/live
 import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
 import gleam/json
@@ -8,6 +7,7 @@ import gleam/option.{None, Some}
 import lustre/attribute
 import lustre/effect.{type Effect}
 import lustre/event
+import yumemi/front/live
 
 pub type Args {
   Args(file: String)

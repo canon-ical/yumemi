@@ -30,8 +30,9 @@ const www_routes = [
 
 const www_gate = "
 import yumemi/gate.{
-  Adult, Deny, Exact, Gate, Pageview, Prefix, Redirect, Rule, SafeParam,
-  SignIn, SignedIn, ToSignIn, WhenAdult,
+  ClientAt, Csp, Declared, Deny, Exact, FrameSrc, FromQuery, Gate, NavKind,
+  Pageview, Path, Prefix, Previous, Redirect, Referrer, Rule, SafeParam, SignIn,
+  SignedIn, Slug, ToService, ToSignIn, WhenDeclared,
 }
 
 pub const gate: gate.Gate = Gate(
@@ -39,29 +40,29 @@ pub const gate: gate.Gate = Gate(
   rules: [
     Rule(pages: [Prefix(\"/me\")], except: [], checks: [
       SignedIn(fail: ToSignIn(status: 302, back: False)),
-      Adult(fail: Deny(status: 403, body: \"adult declaration required\")),
+      Declared(kind: \"adult\", fail: Deny(status: 403, body: \"declaration required\")),
     ]),
     Rule(pages: [Exact(\"/claim/:code\")], except: [], checks: [
       SignedIn(fail: ToSignIn(status: 303, back: True)),
     ]),
   ],
   redirects: [
-    Redirect(pages: [Exact(\"/\")], when: WhenAdult, to: SafeParam(param: \"returnTo\", fallback: \"/search\")),
+    Redirect(pages: [Exact(\"/\")], when: WhenDeclared(\"adult\"), to: SafeParam(param: \"returnTo\", fallback: \"/search\")),
   ],
-  frame_src: [Exact(\"/\"), Exact(\"/about/external\")],
+  csp: [Csp(pages: [Exact(\"/\"), Exact(\"/about/external\")], directives: [FrameSrc([\"frames.example\"])])],
   pageview: Pageview(
     pages: [Exact(\"/search\"), Prefix(\"/muse\")],
-    endpoint: \"/api/pageviews\",
-    source_param: \"r\",
-    storage_key: \"app:last-pageview\",
+    only: [WhenDeclared(\"adult\")],
+    fields: [NavKind, ClientAt, Path, Previous, Referrer, FromQuery(name: \"source_key\", param: \"r\", pattern: Slug(max: 16))],
+    sink: ToService(\"pageview_record\"),
   ),
 )
 "
 
 const entry_source = "
 pub const entries = [
-  Http(name: \"www\", hosts: [Www], prefix: \"/api\", admit: Anonymous, subject: AnySubject, services: All, pages: AllPages, frame_src: [\"frames.example\"]),
-  Http(name: \"muses\", hosts: [Muses], prefix: \"/api\", admit: Authenticated, subject: Subjects([Muse]), services: All, pages: AllPages, frame_src: []),
+  Http(name: \"www\", hosts: [Www], prefix: \"/api\", admit: Anonymous, subject: AnySubject, services: All, pages: AllPages),
+  Http(name: \"muses\", hosts: [Muses], prefix: \"/api\", admit: Authenticated, subject: Subjects([Muse]), services: All, pages: AllPages),
 ]
 "
 
@@ -119,12 +120,20 @@ pub fn gate_declaration_reads_prefix_rules_and_redirects_test() {
   notes |> should.equal([])
   read.declared |> should.be_true
   read.sign_in_fallback |> should.equal("https://auth.example")
-  read.frame_hosts |> should.equal(["frames.example"])
+  read.csp
+  |> should.equal([
+    gate.Csp(
+      pages: [gate.Exact("/"), gate.Exact("/about/external")],
+      directives: [
+        #("frame-src", ["frames.example"]),
+      ],
+    ),
+  ])
   read.rules
   |> should.equal([
     gate.Rule(pages: [gate.Prefix("/me")], except: [], checks: [
       gate.SignedIn(gate.ToSignIn(302, False)),
-      gate.Adult(gate.Deny(403, "adult declaration required")),
+      gate.Declared("adult", gate.Deny(403, "declaration required")),
     ]),
     gate.Rule(pages: [gate.Exact("/claim/:code")], except: [], checks: [
       gate.SignedIn(gate.ToSignIn(303, True)),
@@ -134,7 +143,7 @@ pub fn gate_declaration_reads_prefix_rules_and_redirects_test() {
   |> should.equal([
     gate.Redirect(
       pages: [gate.Exact("/")],
-      when_adult: True,
+      when: model.WhenDeclared("adult"),
       to: gate.SafeParam("returnTo", "/search"),
     ),
   ])
@@ -200,7 +209,7 @@ pub fn anonymous_face_without_declaration_has_no_gate_test() {
     )
   notes |> should.equal([])
   gate.is_empty(read) |> should.be_true
-  read.frame_hosts |> should.equal(["frames.example"])
+  read.csp |> should.equal([])
 }
 
 // ── gate.mjs ───────────────────────────────────────────────────────────────
@@ -210,7 +219,9 @@ pub fn gate_mjs_carries_rules_csp_and_expanded_pageview_routes_test() {
   let text = gate_emit.text("// header", read, www_routes)
   text |> string.contains("{type: \"prefix\", path: \"/me\"}") |> should.be_true
   text
-  |> string.contains("const frameSrc = \"frame-src https://frames.example\";")
+  |> string.contains(
+    "  \"/about/external\": \"frame-src https://frames.example\",",
+  )
   |> should.be_true
   // Prefix("/muse") は生成時に route の表へ展開する(client の判定も同じ表)
   text
@@ -218,8 +229,14 @@ pub fn gate_mjs_carries_rules_csp_and_expanded_pageview_routes_test() {
     "const pageviewRoutes = [\"/muse/:handle\", \"/muse/:handle/article\", \"/search\"];",
   )
   |> should.be_true
-  text |> string.contains("\"app:last-pageview\"") |> should.be_true
-  text |> string.contains("searchParams.get(\"r\")") |> should.be_true
+  text
+  |> string.contains(
+    "const pageviewOnly = [{type: \"declared\", kind: \"adult\"}];",
+  )
+  |> should.be_true
+  // 0.12:送り手は client.mjs 1 つ。門は印の meta だけを差し、inline の script を持たない
+  text |> string.contains("<script") |> should.be_false
+  text |> string.contains("keepalive") |> should.be_false
   text
   |> string.contains("export async function before_route(request, env)")
   |> should.be_true
@@ -256,8 +273,8 @@ pub fn empty_gate_mjs_does_not_read_session_test() {
   let #(read, _) = gate.read("www", [], [], entries(), www_routes, None)
   let text = gate_emit.text("// header", read, www_routes)
   text |> string.contains("const readsSession = false;") |> should.be_true
-  text |> string.contains("const pageviewScript = null;") |> should.be_true
-  text |> string.contains("const frameSrc = null;") |> should.be_true
+  text |> string.contains("const pageviewRoutes = [];") |> should.be_true
+  text |> string.contains("const cspRoutes = {};") |> should.be_true
 }
 
 // ── fixture の生成物 ───────────────────────────────────────────────────────
@@ -426,13 +443,13 @@ pub fn attached_entry_live_sends_blob_fields_test() {
 @external(javascript, "./yumemi_fix_0114_test_ffi.mjs", "gate_marks_navigation_fetch")
 fn gate_marks_navigation_fetch(text: String) -> String
 
-/// 0.11.4 r2:client 遷移の fetch(`x-yumemi-navigate: 1`)には、pageview の script でなく数える印の meta を head に
-/// 差す(adult の session・200 の HTML・pageview の Page だけ)。頁の読み込みは今までどおり script。
+/// 0.12:門は頁の読み込みでも client 遷移の fetch でも数える印の meta だけを head に差す(申告 adult の session・
+/// 200 の HTML・pageview の Page だけ)。inline の script は出さない(期待を 0.11.4 r2 の「読み込みは script」から替えた)。
 pub fn gate_marks_navigation_fetch_instead_of_script_test() {
   let #(read, _) = read_www(www_gate)
   let out =
     gate_marks_navigation_fetch(gate_emit.text("// header", read, www_routes))
   string.contains(out, "NG ") |> should.be_false
   string.contains(out, "STDERR") |> should.be_false
-  string.split(out, "\n") |> list.length |> should.equal(5)
+  string.split(out, "\n") |> list.length |> should.equal(4)
 }

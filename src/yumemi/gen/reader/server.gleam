@@ -35,6 +35,12 @@ pub fn read(units: List(Unit)) -> Result(Read, String) {
       use roots <- result.try(items(module, "roots", root_shape_of))
       use roles <- result.try(items(module, "attached_roles", attached_role_of))
       use browser <- result.try(browser_of(module))
+      use consents <- result.try(
+        items(module, "consents", fn(item) {
+          g.string_value(item) |> option.to_result("String の literal でない")
+        }),
+      )
+      use media <- result.try(media_of(module))
       use subject_free <- result.try(
         items(module, "subject_free", fn(item) {
           g.string_value(item) |> option.to_result("String の literal でない")
@@ -55,6 +61,9 @@ pub fn read(units: List(Unit)) -> Result(Read, String) {
           attached_roles: roles,
           browser: browser,
           subject_free: subject_free,
+          consents: consents,
+          media: media,
+          counted: [],
         ),
         attached: attached,
       ))
@@ -181,18 +190,22 @@ fn attached_role_of(
   expression: glance.Expression,
 ) -> Result(model.AttachedRole, String) {
   use role <- result.try(case g.ctor_name(expression) {
-    Some("DeclareBrowser") -> Ok("declare_browser")
+    Some("Declare") -> Ok("declare")
+    Some("NeedsDeclared") -> Ok("needs_declared")
     Some("ReadSession") -> Ok("read_session")
     Some("SwitchSubject") -> Ok("switch_subject")
     Some("TailPath") -> Ok("tail_path")
-    Some("NeedsBrowser") -> Ok("needs_browser")
     _ ->
       Error(
-        "DeclareBrowser / ReadSession / SwitchSubject / TailPath / NeedsBrowser でない項",
+        "Declare / NeedsDeclared / ReadSession / SwitchSubject / TailPath でない項",
       )
   })
   use attached <- result.try(text(expression, "attached"))
-  Ok(model.AttachedRole(attached: attached, role: role))
+  use kind <- result.try(case role {
+    "declare" | "needs_declared" -> text(expression, "kind")
+    _ -> Ok("")
+  })
+  Ok(model.AttachedRole(attached: attached, role: role, kind: kind))
 }
 
 /// `pub const browser: BrowserCookie`(1 つ)。無ければ None。
@@ -210,23 +223,119 @@ fn browser_of(
           }
           use cookie <- result.try(named("cookie"))
           use key_binding <- result.try(named("key_binding"))
-          use claim <- result.try(named("claim"))
           use days <- result.try(
             integer(value, "max_age_days")
             |> result.map_error(fn(e) { "browser: " <> e }),
+          )
+          use declarations <- result.try(
+            case g.labelled(value, "declarations") {
+              Some(glance.List(elements: elements, rest: None, ..)) ->
+                list.try_map(elements, declaration_of)
+                |> result.map_error(fn(e) { "browser.declarations: " <> e })
+              _ -> Error("browser: declarations が List の literal でない")
+            },
           )
           Ok(
             Some(model.BrowserCookie(
               cookie: cookie,
               key_binding: key_binding,
-              claim: claim,
               max_age_days: days,
+              declarations: declarations,
             )),
           )
         }
         glance.Public, _ -> Error("browser が BrowserCookie でない")
         glance.Private, _ -> Error("browser が pub でない")
       }
+  }
+}
+
+fn declaration_of(
+  expression: glance.Expression,
+) -> Result(model.Declaration, String) {
+  case g.ctor_name(expression) {
+    Some("Declaration") -> {
+      use kind <- result.try(text(expression, "kind"))
+      use claim <- result.try(text(expression, "claim"))
+      use days <- result.try(integer(expression, "max_age_days"))
+      Ok(model.Declaration(kind: kind, claim: claim, max_age_days: days))
+    }
+    _ -> Error("Declaration でない項")
+  }
+}
+
+/// `pub const media: Media`(1 つ、0.12)。無ければ None。
+fn media_of(
+  module: glance.Module,
+) -> Result(option.Option(model.Media), String) {
+  case g.find_constant(module, "media") {
+    None -> Ok(None)
+    Some(constant) ->
+      case constant.publicity, g.ctor_name(constant.value) {
+        glance.Public, Some("Media") -> {
+          let value = constant.value
+          use path <- result.try(
+            text(value, "path") |> result.map_error(fn(e) { "media: " <> e }),
+          )
+          use background <- result.try(
+            text(value, "theme_background")
+            |> result.map_error(fn(e) { "media: " <> e }),
+          )
+          use variants <- result.try(case g.labelled(value, "variants") {
+            Some(glance.List(elements: elements, rest: None, ..)) ->
+              list.try_map(elements, variant_of)
+              |> result.map_error(fn(e) { "media.variants: " <> e })
+            _ -> Error("media: variants が List の literal でない")
+          })
+          Ok(
+            Some(model.Media(
+              path: path,
+              variants: variants,
+              theme_background: background,
+            )),
+          )
+        }
+        glance.Public, _ -> Error("media が Media でない")
+        glance.Private, _ -> Error("media が pub でない")
+      }
+  }
+}
+
+fn variant_of(
+  expression: glance.Expression,
+) -> Result(model.MediaVariant, String) {
+  case g.ctor_name(expression) {
+    Some("ImageVariant") -> {
+      use name <- result.try(text(expression, "name"))
+      use width <- result.try(integer(expression, "width"))
+      use height <- result.try(case g.labelled(expression, "height") {
+        Some(item) ->
+          case g.ctor_name(item) {
+            Some("None") -> Ok(None)
+            Some("Some") ->
+              case g.args(item) {
+                [inner] ->
+                  g.int_value(inner)
+                  |> option.then(fn(t) { option.from_result(int.parse(t)) })
+                  |> option.map(Some)
+                  |> option.to_result("height は Some(<整数>) / None")
+                _ -> Error("height は Some(<整数>) / None")
+              }
+            _ -> Error("height は Some(<整数>) / None")
+          }
+        None -> Error("height が無い")
+      })
+      use fit <- result.try(
+        case option.then(g.labelled(expression, "fit"), g.ctor_name) {
+          Some("ScaleDown") -> Ok("scale-down")
+          Some("Cover") -> Ok("cover")
+          Some("Contain") -> Ok("contain")
+          _ -> Error("fit は ScaleDown / Cover / Contain")
+        },
+      )
+      Ok(model.MediaVariant(name: name, width: width, height: height, fit: fit))
+    }
+    _ -> Error("ImageVariant でない項")
   }
 }
 
@@ -673,13 +782,9 @@ pub fn notes(app: model.App) -> List(stop.Note) {
     })
   let unknown_roles =
     list.filter_map(app.server.attached_roles, fn(row) {
-      case list.contains(attached, row.attached), row.role, app.server.browser {
-        False, _, _ -> Ok("attached_roles の attached が無い: " <> row.attached)
-        True, "declare_browser", None ->
-          Ok(
-            "attached_roles の DeclareBrowser に browser の宣言が無い: " <> row.attached,
-          )
-        True, _, _ -> Error(Nil)
+      case list.contains(attached, row.attached) {
+        False -> Ok("attached_roles の attached が無い: " <> row.attached)
+        True -> Error(Nil)
       }
     })
   let unknown_subject_free =

@@ -1,12 +1,12 @@
-//// GENERATED from admin/src/{layout.gleam,pages/**/page.gleam,blocks/*.gleam} [sha256:5eda0a4ec120] — 手で編集しない
+//// GENERATED from admin/src/{layout.gleam,pages/**/page.gleam,blocks/*.gleam} [sha256:7fd921475cd7] — 手で編集しない
 
 import blocks/admin_header
-import yumemi/front/el
 import lustre/attribute
 import lustre/element/html as raw_html
 import sketch/lustre as sketch_lustre
 import sketch/lustre/element
 import sketch/lustre/element/html
+import yumemi/front/el
 
 pub fn view() -> element.Element(Nil) {
   html.div_([attribute.attribute("data-yumemi-blocks-preview", "pc")], [

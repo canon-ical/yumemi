@@ -1,7 +1,5 @@
-//// GENERATED from src/components/blob_save.gleam [sha256:5f2785f02d66] — 手で編集しない
+//// GENERATED from src/components/blob_save.gleam [sha256:a5c81459cbb6] — 手で編集しない
 
-import yumemi/front/live
-import yumemi/spec
 import gen/out/article_blob_save
 import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
@@ -12,6 +10,8 @@ import gleam/string
 import lustre/attribute
 import lustre/effect.{type Effect}
 import lustre/event
+import yumemi/front/live
+import yumemi/spec
 
 pub type Args {
   Args(slug: String, blob: String, existing: String)

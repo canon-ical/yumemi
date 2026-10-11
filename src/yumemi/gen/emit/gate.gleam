@@ -3,8 +3,9 @@
 //// - `before_route(request, env)` ── route 表(literal-first)で Page を引き、URL の段の `-` をフォルダの `_` に
 ////   戻し、門(sign-in・主体・同意・既定の admit)と条件つきの redirect を当てる。
 ////   返り値は `{response}`(門で止めた)か `{request, route, session}`(通した。route は外れなら null)
-//// - `after_response(request, env, response)` ── CSP `frame-src` と pageview の script を足す(client 遷移の
-////   fetch ── header `x-yumemi-navigate: 1` ── には script でなく `<meta name="yumemi-pageview">` を head に差す)
+//// - `after_response(request, env, response)` ── Page ごとの CSP の header と、数える印 `<meta name="yumemi-pageview">`
+////   を足す(0.12)。印は頁の読み込みでも client 遷移の fetch でも同じ meta だけで、inline の script は出さない
+////   ── 送るのは client.mjs の送り手(`yumemi/front/pageview.mjs`)1 つ
 //// - `serve(dispatch)` ── 上の 2 本で dispatch を挟んだ Worker の `fetch`。生成 shell の export default
 ////
 //// 値の運び(route の値・session・query を読みへ渡すこと)はここに無い。
@@ -13,33 +14,65 @@ import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
+import yumemi/gen/model
 import yumemi/gen/reader/gate.{
   type Check, type Fail, type Gate, type Match, type Redirect, type Rule,
   reads_session,
 }
 
-/// 門が `frame_src` の Page の応答に付ける CSP の header の値。許す host が無ければ付けない。
-/// client 遷移の route 表(`emit/front` の `navigation`)も同じ値を Page ごとに持つ。
-pub fn csp(gate: Gate) -> option.Option(String) {
-  case gate.frame_hosts {
+/// Page の route の CSP の header の値(0.12)。`csp` の宣言のうち route に当たるものの指令を宣言順に足し合わせ、
+/// 同じ指令の host は 1 つにまとめる。当たる宣言が無ければ None。client 遷移の route 表(`emit/front` の
+/// `navigation`)も同じ値を Page ごとに持つ。
+pub fn csp_for(gate: Gate, path: String) -> option.Option(String) {
+  let directives =
+    gate.csp
+    |> list.filter(fn(csp) {
+      list.any(csp.pages, fn(match) { gate.covers(match, path) })
+    })
+    |> list.flat_map(fn(csp) { csp.directives })
+  let names = list.unique(list.map(directives, fn(directive) { directive.0 }))
+  case names {
     [] -> None
-    hosts ->
+    _ ->
       Some(
-        "frame-src "
-        <> string.join(list.map(hosts, fn(host) { "https://" <> host }), " "),
+        names
+        |> list.map(fn(name) {
+          let hosts =
+            directives
+            |> list.filter(fn(directive) { directive.0 == name })
+            |> list.flat_map(fn(directive) { directive.1 })
+            |> list.unique
+          string.join(
+            [name, ..list.map(hosts, fn(host) { "https://" <> host })],
+            " ",
+          )
+        })
+        |> string.join("; "),
       )
   }
 }
 
+/// route ごとの CSP(CSP を持つ route だけ)。
+pub fn csp_routes(
+  gate: Gate,
+  route_paths: List(String),
+) -> List(#(String, String)) {
+  list.filter_map(route_paths, fn(path) {
+    case csp_for(gate, path) {
+      Some(value) -> Ok(#(path, value))
+      None -> Error(Nil)
+    }
+  })
+}
+
 pub fn text(header: String, gate: Gate, route_paths: List(String)) -> String {
   let reads_session = reads_session(gate)
-  let pageview_routes = case gate.pageview {
-    Some(pageview) -> expand(pageview.pages, route_paths)
-    None -> []
-  }
-  let frame_src = case csp(gate) {
-    None -> "null"
-    Some(value) -> quoted(value)
+  let #(pageview_routes, pageview_only) = case gate.pageview {
+    Some(pageview) -> #(
+      expand(pageview.pages, route_paths),
+      list.map(pageview.only, when_js),
+    )
+    None -> #([], [])
   }
   header
   <> "\n\n"
@@ -64,29 +97,35 @@ pub fn text(header: String, gate: Gate, route_paths: List(String)) -> String {
   <> "const redirects = "
   <> js_list(list.map(gate.redirects, redirect_js), "\n  ")
   <> ";\n"
-  <> "const frameSrc = "
-  <> frame_src
-  <> ";\n"
-  <> "const framePages = "
-  <> js_list(list.map(gate.frame_src, match_js), " ")
+  <> "const cspRoutes = "
+  <> case csp_routes(gate, route_paths) {
+    [] -> "{}"
+    pairs ->
+      "{\n"
+      <> string.concat(
+        list.map(pairs, fn(pair) {
+          "  " <> quoted(pair.0) <> ": " <> quoted(pair.1) <> ",\n"
+        }),
+      )
+      <> "}"
+  }
   <> ";\n"
   <> "const pageviewRoutes = "
   <> js_list(list.map(pageview_routes, quoted), " ")
   <> ";\n"
-  <> case gate.pageview {
-    Some(pageview) ->
-      "const pageviewScript = String.raw`"
-      <> pageview_script(
-        pageview_routes,
-        pageview.endpoint,
-        pageview.source_param,
-        pageview.storage_key,
-      )
-      <> "`;\n"
-    None -> "const pageviewScript = null;\n"
-  }
+  <> "const pageviewOnly = "
+  <> js_list(pageview_only, " ")
+  <> ";\n"
   <> "\n"
   <> runtime_for(gate)
+}
+
+fn when_js(when: model.GateWhen) -> String {
+  case when {
+    model.WhenDeclared(kind) ->
+      "{type: \"declared\", kind: " <> quoted(kind) <> "}"
+    model.WhenSignedIn -> "{type: \"signed-in\"}"
+  }
 }
 
 /// 0.11.5 の語(`RedirectBack` / `FixedKeep`)を使う門だけ runtime に足す。使わない門の `gate.mjs` は 0.11.4 と同じ字。
@@ -96,9 +135,9 @@ fn runtime_for(gate: Gate) -> String {
       list.any(rule.checks, fn(check) {
         case check {
           gate.SignedIn(gate.RedirectBack(..))
-          | gate.Adult(gate.RedirectBack(..))
+          | gate.Declared(_, gate.RedirectBack(..))
           | gate.SubjectKind(_, gate.RedirectBack(..))
-          | gate.Consent(_, gate.RedirectBack(..)) -> True
+          | gate.Consented(_, gate.RedirectBack(..)) -> True
           _ -> False
         }
       })
@@ -176,15 +215,20 @@ fn check_js(check: Check) -> String {
   case check {
     gate.SignedIn(fail) ->
       "{type: \"signed-in\", fail: " <> fail_js(fail) <> "}"
-    gate.Adult(fail) -> "{type: \"adult\", fail: " <> fail_js(fail) <> "}"
+    gate.Declared(kind, fail) ->
+      "{type: \"declared\", kind: "
+      <> quoted(kind)
+      <> ", fail: "
+      <> fail_js(fail)
+      <> "}"
     gate.SubjectKind(kinds, fail) ->
       "{type: \"subject-kind\", kinds: "
       <> js_list(list.map(kinds, quoted), " ")
       <> ", fail: "
       <> fail_js(fail)
       <> "}"
-    gate.Consent(kind, fail) ->
-      "{type: \"consent\", kind: "
+    gate.Consented(kind, fail) ->
+      "{type: \"consented\", kind: "
       <> quoted(kind)
       <> ", fail: "
       <> fail_js(fail)
@@ -225,10 +269,7 @@ fn redirect_js(redirect: Redirect) -> String {
   "{pages: "
   <> js_list(list.map(redirect.pages, match_js), " ")
   <> ", when: "
-  <> case redirect.when_adult {
-    True -> "\"adult\""
-    False -> "\"signed-in\""
-  }
+  <> when_js(redirect.when)
   <> ", to: "
   <> case redirect.to {
     gate.SafeParam(param, fallback) ->
@@ -269,95 +310,7 @@ fn quoted(value: String) -> String {
   <> "\""
 }
 
-/// 成人 session の追跡 Page に差す script。対象の判定は server と同じ route の表で、
-/// param の段は空でないこと、URL の段の `-` はフォルダの `_` に対応する。
-fn pageview_script(
-  routes: List(String),
-  endpoint: String,
-  source_param: String,
-  storage_key: String,
-) -> String {
-  [
-    "<script>",
-    "(() => {",
-    "  const trackedRoutes = " <> js_list(list.map(routes, quoted), " ") <> ";",
-    "  const trackedPath = (pathname) => {",
-    "    const actual = pathname.split(\"/\");",
-    "    return trackedRoutes.some((route) => {",
-    "      const expected = route.split(\"/\");",
-    "      return expected.length === actual.length && expected.every((segment, index) => segment.startsWith(\":\")",
-    "        ? actual[index] !== \"\"",
-    "        : segment === actual[index] || segment.replaceAll(\"_\", \"-\") === actual[index]);",
-    "    });",
-    "  };",
-    "  if (!trackedPath(location.pathname)) return;",
-    "  // 送る時でなく走った時の頁(送る前に client 遷移で頁が替わっても、この頁を数える)",
-    "  const shown = new URL(location.href);",
-    "",
-    "  const previousEventKey = " <> quoted(storage_key) <> ";",
-    "  let previousEvent = null;",
-    "  try {",
-    "    const navigation = performance.getEntriesByType(\"navigation\")[0];",
-    "    if (window.opener && navigation?.type === \"navigate\") {",
-    "      sessionStorage.removeItem(previousEventKey);",
-    "    } else {",
-    "      const value = sessionStorage.getItem(previousEventKey);",
-    "      previousEvent = value && /^[0-9a-f-]{36}$/.test(value) ? value : null;",
-    "    }",
-    "  } catch (_) {}",
-    "",
-    "  const send = () => {",
-    "    const id = crypto.randomUUID();",
-    "    const navigation = performance.getEntriesByType(\"navigation\")[0];",
-    "    const payload = {",
-    "      id,",
-    "      client_at: new Date().toISOString(),",
-    "      kind: navigation?.type === \"reload\" ? \"reload\" : \"initial\",",
-    "      path: shown.pathname",
-    "    };",
-    "    if (!previousEvent && document.referrer) {",
-    "      try {",
-    "        const referrer = new URL(document.referrer);",
-    "        if (referrer.origin === location.origin) payload.referrer_path = referrer.pathname;",
-    "        else payload.referrer_host = referrer.host;",
-    "      } catch (_) {}",
-    "    }",
-    "    if (previousEvent) payload.prev = previousEvent;",
-    "    const sourceKey = shown.searchParams.get("
-      <> quoted(source_param)
-      <> ");",
-    "    if (sourceKey && /^[a-z0-9_]{1,16}$/.test(sourceKey)) payload.source_key = sourceKey;",
-    "    previousEvent = id;",
-    "    try { sessionStorage.setItem(previousEventKey, id); } catch (_) {}",
-    "",
-    "    const body = JSON.stringify(payload);",
-    "    void fetch(" <> quoted(endpoint) <> ", {",
-    "      method: \"POST\",",
-    "      headers: {\"content-type\": \"application/json\"},",
-    "      body,",
-    "      keepalive: true",
-    "    }).catch(() => fetch(" <> quoted(endpoint) <> ", {",
-    "      method: \"POST\",",
-    "      headers: {\"content-type\": \"application/json\"},",
-    "      body,",
-    "      keepalive: true",
-    "    }).catch(() => {}));",
-    "  };",
-    "",
-    "  const afterPaint = () => {",
-    "    if (\"requestIdleCallback\" in window) window.requestIdleCallback(send, {timeout: 1000});",
-    "    else requestAnimationFrame(send);",
-    "  };",
-    "  if (document.readyState === \"complete\") afterPaint();",
-    "  else window.addEventListener(\"load\", afterPaint, {once: true});",
-    "})();",
-    "</script>",
-  ]
-  |> string.join("\n")
-}
-
 const runtime = "const contexts = new WeakMap();
-const navigateHeader = \"x-yumemi-navigate\";
 const pageviewMark = \"<meta name=\\\"yumemi-pageview\\\">\";
 
 function literalMatches(segment, value) {
@@ -431,28 +384,35 @@ async function readSession(request, env) {
 function checkFailure(check, read, request, env) {
   const session = read.session;
   if (check.type === \"admitted\") {
-    if (!read.ok) {
-      if (read.status === 403) return text(403, \"adult declaration required\");
-      if (read.status === 404) return text(404, \"muse not found\");
-      return text(read.status, \"session read failed\");
-    }
+    if (!read.ok) return readFailure(read);
     const subject = session?.subject;
     if (!subject || (check.kinds.length > 0 && !check.kinds.includes(subject.kind)) || typeof subject.handle !== \"string\") {
-      return text(403, \"adult declaration required\");
+      return text(403, \"forbidden\");
     }
     return null;
   }
   if (check.type === \"signed-in\") {
     if (read.status === 401 || read.status === 403) return failed(check.fail, request, env);
-    if (!read.ok) return text(read.status, \"session read failed\");
+    if (!read.ok) return readFailure(read);
     if (!session || session.anonymous) return failed(check.fail, request, env);
     return null;
   }
-  if (!read.ok) return text(read.status, \"session read failed\");
-  if (check.type === \"adult\") return session?.adult === true ? null : failed(check.fail, request, env);
+  if (!read.ok) return readFailure(read);
+  if (check.type === \"declared\") return passes({type: \"declared\", kind: check.kind}, session) ? null : failed(check.fail, request, env);
   if (check.type === \"subject-kind\") return check.kinds.includes(session?.subject?.kind) ? null : failed(check.fail, request, env);
-  if (check.type === \"consent\") return session?.consents?.[check.kind] ? null : failed(check.fail, request, env);
-  return text(500, \"invalid gate check\");
+  if (check.type === \"consented\") return session?.consents?.[check.kind] === true ? null : failed(check.fail, request, env);
+  return text(403, \"forbidden\");
+}
+
+// 門が自分で返す本文は 403 の forbidden と 404 の not found だけ(0.12)
+function readFailure(read) {
+  return read.status === 404 ? text(404, \"not found\") : text(403, \"forbidden\");
+}
+
+// 門の条件(`WhenDeclared(kind)` / `WhenSignedIn`)
+function passes(when, session) {
+  if (when.type === \"declared\") return session?.declared?.[when.kind] === true;
+  return Boolean(session) && !session.anonymous;
 }
 
 function safeParam(value, fallback) {
@@ -470,10 +430,7 @@ function safeParam(value, fallback) {
 }
 
 function redirectFor(redirect, session, url) {
-  const passes = redirect.when === \"adult\"
-    ? session?.adult === true
-    : Boolean(session) && !session.anonymous;
-  if (!passes) return null;
+  if (!passes(redirect.when, session)) return null;
   const location = redirect.to.type === \"fixed\"
     ? redirect.to.location
     : safeParam(url.searchParams.get(redirect.to.param), redirect.to.fallback);
@@ -517,33 +474,29 @@ function isHtml(response) {
 }
 
 function tracksPageview(context) {
-  return pageviewRoutes.includes(context.path) && Object.values(context.params).every((value) => value !== \"\");
+  return pageviewRoutes.includes(context.path) && Object.values(context.params).every((value) => value !== \"\")
+    && pageviewOnly.every((when) => passes(when, context.session));
 }
 
 export async function after_response(request, env, response) {
   const context = contexts.get(request);
   if (!context) return response;
   let output = response;
-  if (frameSrc !== null && anyCovers(framePages, context.path) && isHtml(output)) {
+  const csp = Object.hasOwn(cspRoutes, context.path) ? cspRoutes[context.path] : null;
+  if (csp !== null && isHtml(output)) {
     const headers = new Headers(output.headers);
-    headers.set(\"content-security-policy\", frameSrc);
+    headers.set(\"content-security-policy\", csp);
     output = new Response(output.body, {status: output.status, statusText: output.statusText, headers});
   }
-  if (pageviewScript === null || !tracksPageview(context) || output.status !== 200 || !isHtml(output)) return output;
-  if (context.session?.adult !== true) return output;
+  if (!tracksPageview(context) || output.status !== 200 || !isHtml(output)) return output;
+  // 数える印は頁の読み込みでも client 遷移の fetch でも同じ meta だけ。送るのは client.mjs の送り手 1 つ
   const html = await output.text();
-  const headers = new Headers(output.headers);
-  headers.append(\"vary\", navigateHeader);
-  // client 遷移の fetch には script でなく数える印を差す(client が差し替えた後に 1 回送る)
-  const [marker, mark] = request.headers.get(navigateHeader) === \"1\"
-    ? [\"</head>\", pageviewMark]
-    : [\"</body>\", pageviewScript];
-  const offset = html.indexOf(marker);
-  if (offset < 0) throw new Error(marker === \"</head>\" ? \"SSR head is missing\" : \"SSR body is missing\");
-  return new Response(html.slice(0, offset) + mark + html.slice(offset), {
+  const offset = html.indexOf(\"</head>\");
+  if (offset < 0) throw new Error(\"SSR head is missing\");
+  return new Response(html.slice(0, offset) + pageviewMark + html.slice(offset), {
     status: output.status,
     statusText: output.statusText,
-    headers,
+    headers: new Headers(output.headers),
   });
 }
 

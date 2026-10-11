@@ -1,4 +1,4 @@
-//// GENERATED from framework session contract [sha256:bbf198d7f83a] — 手で編集しない
+//// GENERATED from framework session contract [sha256:cd190a929100] — 手で編集しない
 
 import yumemi/io.{type Promise}
 

@@ -1,9 +1,7 @@
-//// GENERATED from public/src/pages/status/page.gleam [sha256:4132bcde7cd7] — 手で編集しない
+//// GENERATED from public/src/pages/status/page.gleam [sha256:0dbff569d9d9] — 手で編集しない
 
 import blocks/feed
 import blocks/site_header
-import yumemi/front/css
-import yumemi/front/sketch_css
 import gen/load/layout
 import gen/out/widget_list
 import gleam/list
@@ -16,6 +14,8 @@ import sketch/lustre as sketch_lustre
 import sketch/lustre/element
 import sketch/lustre/element/html
 import style
+import yumemi/front/css
+import yumemi/front/sketch_css
 
 pub type Vars {
   Vars(www_origin: String, auth_origin: String)

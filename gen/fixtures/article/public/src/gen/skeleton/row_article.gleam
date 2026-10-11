@@ -1,9 +1,9 @@
-//// GENERATED from public/src/blocks/row_article.gleam [sha256:ace188936635] — 手で編集しない
+//// GENERATED from public/src/blocks/row_article.gleam [sha256:f43a7257e45a] — 手で編集しない
 
-import yumemi/front/el
 import gen/out/widget_list
 import gleam/string
 import sketch/lustre/element/html
+import yumemi/front/el
 
 pub type In =
   widget_list.Out

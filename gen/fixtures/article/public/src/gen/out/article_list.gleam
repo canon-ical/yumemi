@@ -1,7 +1,7 @@
-//// GENERATED from src/service/article_list.gleam [sha256:c641e915671e] — 手で編集しない
+//// GENERATED from src/service/article_list.gleam [sha256:c08ca5f2a540] — 手で編集しない
 
-import yumemi/page.{type Page, Page, cursor}
 import gleam/dynamic/decode
+import yumemi/page.{type Page, Page, cursor}
 
 pub type Slug =
   String
