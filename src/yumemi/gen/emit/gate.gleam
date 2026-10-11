@@ -21,7 +21,8 @@ import yumemi/gen/reader/gate.{
 }
 
 /// Page の route の CSP の header の値(0.12)。`csp` の宣言のうち route に当たるものの指令を宣言順に足し合わせ、
-/// 同じ指令の host は 1 つにまとめる。当たる宣言が無ければ None。client 遷移の route 表(`emit/front` の
+/// 同じ指令の host は 1 つにまとめる。各指令の先頭に `'self'` を 1 つ自動で足す(framework の受け口・遷移の取得・
+/// media は同じ origin にある。外す口は持たない)。当たる宣言が無ければ None。client 遷移の route 表(`emit/front` の
 /// `navigation`)も同じ値を Page ごとに持つ。
 pub fn csp_for(gate: Gate, path: String) -> option.Option(String) {
   let directives =
@@ -43,7 +44,7 @@ pub fn csp_for(gate: Gate, path: String) -> option.Option(String) {
             |> list.flat_map(fn(directive) { directive.1 })
             |> list.unique
           string.join(
-            [name, ..list.map(hosts, fn(host) { "https://" <> host })],
+            [name, "'self'", ..list.map(hosts, fn(host) { "https://" <> host })],
             " ",
           )
         })
@@ -370,14 +371,14 @@ function failed(fail, request, env) {
 }
 
 async function readSession(request, env) {
-  if (sessionPath === null) return {status: 502, ok: false, session: null};
+  if (sessionPath === null) return {status: 502, ok: false, session: null, cause: \"session path is missing\"};
   try {
     const response = await env.APP.fetch(new Request(new URL(sessionPath, request.url), request));
-    if (!response.ok) return {status: response.status, ok: false, session: null};
+    if (!response.ok) return {status: response.status, ok: false, session: null, cause: \"session read returned \" + response.status};
     const session = await response.json().catch(() => null);
     return {status: response.status, ok: true, session};
-  } catch (_) {
-    return {status: 502, ok: false, session: null};
+  } catch (error) {
+    return {status: 502, ok: false, session: null, cause: error};
   }
 }
 
@@ -404,9 +405,15 @@ function checkFailure(check, read, request, env) {
   return text(403, \"forbidden\");
 }
 
-// 門が自分で返す本文は 403 の forbidden と 404 の not found だけ(0.12)
+// 門が自分で返す本文は 403 の forbidden・404 の not found・503 の unavailable の 3 つ(0.12)。
+// 読みの 5xx(APP binding の例外・session の path が無いときを含む)は権限の拒否に畳まず、元の status と原因を log に出す
 function readFailure(read) {
-  return read.status === 404 ? text(404, \"not found\") : text(403, \"forbidden\");
+  if (read.status === 404) return text(404, \"not found\");
+  if (read.status >= 500) {
+    console.error(\"yumemi gate: session read error\", read.status, read.cause);
+    return text(503, \"unavailable\");
+  }
+  return text(403, \"forbidden\");
 }
 
 // 門の条件(`WhenDeclared(kind)` / `WhenSignedIn`)

@@ -220,7 +220,7 @@ pub fn gate_mjs_carries_rules_csp_and_expanded_pageview_routes_test() {
   text |> string.contains("{type: \"prefix\", path: \"/me\"}") |> should.be_true
   text
   |> string.contains(
-    "  \"/about/external\": \"frame-src https://frames.example\",",
+    "  \"/about/external\": \"frame-src 'self' https://frames.example\",",
   )
   |> should.be_true
   // Prefix("/muse") は生成時に route の表へ展開する(client の判定も同じ表)

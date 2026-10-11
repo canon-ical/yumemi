@@ -441,13 +441,72 @@ fn safe_area(edge: css.SafeArea) -> String {
   }
 }
 
-fn font_family(value: css.FontFamily) -> String {
+/// 書体の並びを CSS の値の字にする。`Named` の字は `valid_font_family` の柵を通る。
+pub fn font_family(value: css.FontFamily) -> String {
   case value {
     css.System -> "system-ui"
     css.SansSerif -> "sans-serif"
     css.Serif -> "serif"
     css.Monospace -> "monospace"
-    css.Named(value) -> value
+    css.Named(value) ->
+      case valid_font_family(value) {
+        True -> value
+        False -> "unset"
+      }
+  }
+}
+
+/// `Named` の書体の名の並び(`,` 区切り)が、項ごとに `var(--<name>)`・引用符で囲んだ名・引用符の無い名
+/// (`[A-Za-z0-9_-]` の語を空白 1 つで繋いだもの)のどれかか。合わなければ `unset`(`Hex`・`Token` と同じ扱い。
+/// DB の値が流れても宣言の外へ出る字を書かない)。
+pub fn valid_font_family(value: String) -> Bool {
+  value
+  |> string.split(",")
+  |> list.all(fn(item) { font_family_item(string.trim(item)) })
+}
+
+fn font_family_item(item: String) -> Bool {
+  case item {
+    "var(--" <> rest ->
+      case string.ends_with(rest, ")") {
+        True -> valid_var_name(string.drop_end(rest, 1))
+        False -> False
+      }
+    "\"" <> rest -> quoted_font_name(rest, "\"")
+    "'" <> rest -> quoted_font_name(rest, "'")
+    _ ->
+      item != ""
+      && list.all(string.split(item, " "), fn(word) {
+        word != ""
+        && list.all(string.to_utf_codepoints(word), fn(codepoint) {
+          let code = string.utf_codepoint_to_int(codepoint)
+          { code >= 97 && code <= 122 }
+          || { code >= 65 && code <= 90 }
+          || { code >= 48 && code <= 57 }
+          || code == 45
+          || code == 95
+        })
+      })
+  }
+}
+
+/// 引用符の中の名。空でなく、引用符・`\\`・`;`・`{`・`}`・`<`・`>`・`(`・`)`・`/`・`*`・制御文字を持たない。
+fn quoted_font_name(rest: String, quote: String) -> Bool {
+  case string.ends_with(rest, quote) {
+    False -> False
+    True -> {
+      let name = string.drop_end(rest, 1)
+      name != ""
+      && list.all(string.to_utf_codepoints(name), fn(codepoint) {
+        let code = string.utf_codepoint_to_int(codepoint)
+        code >= 32
+        && code != 127
+        && !list.contains(
+          [34, 39, 92, 59, 123, 125, 60, 62, 40, 41, 47, 42],
+          code,
+        )
+      })
+    }
   }
 }
 

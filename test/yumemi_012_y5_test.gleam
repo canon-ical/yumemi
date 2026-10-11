@@ -215,7 +215,7 @@ pub fn to_service_is_counted_as_escape_with_warning_test() {
       #(
         "src/service/page_resolve.gleam",
         "Args(path: String)",
-        "Args(path: String, kind: String, source_key: option.Option(String))",
+        "Args(id: String, path: String, kind: String, source_key: option.Option(String))",
       ),
       #(
         "src/service/page_resolve.gleam",
@@ -358,10 +358,17 @@ pub fn generated_gate_has_no_inline_script_and_two_texts_test() {
   gate_mjs |> string.contains("adult declaration") |> should.be_false
   gate_mjs |> string.contains("muse not found") |> should.be_false
   gate_mjs |> string.contains("session read failed") |> should.be_false
+  // 0.12 段 C(Y6):読みの 5xx は 403 に畳まず 503 の unavailable(本文は 3 つ)
   gate_mjs
   |> string.contains(
-    "return read.status === 404 ? text(404, \"not found\") : text(403, \"forbidden\");",
+    "if (read.status === 404) return text(404, \"not found\");",
   )
+  |> should.be_true
+  gate_mjs
+  |> string.contains("return text(503, \"unavailable\");")
+  |> should.be_true
+  gate_mjs
+  |> string.contains("return text(403, \"forbidden\");")
   |> should.be_true
   let assert Ok(shell) = simplifile.read(fixture <> "/public/src/gen/shell.mjs")
   shell |> string.contains("failure(403, \"forbidden\")") |> should.be_true

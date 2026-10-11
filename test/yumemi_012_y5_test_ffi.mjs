@@ -315,21 +315,24 @@ const get = async (p, session, status) => {
 };
 const check = (name, ok, detail) => console.log((ok ? "ok " : "NG ") + name + (ok ? "" : " " + JSON.stringify(detail)));
 let r = await get("/article/a", { anonymous: false, consents: { use: true }, declared: { adult: true } });
-check("declared consent passes, csp, mark", r.status === 200 && r.csp === "frame-src https://frames.example https://*.video.example; img-src https://img.example"
+check("declared consent passes, csp, mark", r.status === 200 && r.csp === "frame-src 'self' https://frames.example https://*.video.example; img-src 'self' https://img.example"
   && r.body.includes('<meta name="yumemi-pageview"></head>') && !r.body.includes("<script"), r);
 r = await get("/article/a", { anonymous: false, consents: { handling: true }, declared: {} });
 check("missing consent fails", r.status === 302 && r.location.startsWith("https://auth.example/auth/sign-in?redirect_uri="), r);
 r = await get("/status", { anonymous: true, declared: {} });
 check("missing declaration redirects back", r.status === 302 && r.location === "/?next=%2Fstatus", r);
 r = await get("/status", { anonymous: true, declared: { adult: true } });
-check("declared passes, other csp, mark", r.status === 200 && r.csp === "connect-src https://api.example; media-src https://media.example"
+check("declared passes, other csp, mark", r.status === 200 && r.csp === "connect-src 'self' https://api.example; media-src 'self' https://media.example"
   && r.body.includes("yumemi-pageview"), r);
 r = await get("/status?returnTo=%2Farticle%2Fb", { anonymous: true, declared: { adult: true, region: true } });
 check("WhenDeclared redirect", r.status === 302 && r.location === "/article/b", r);
 r = await get("/status", null, 404);
 check("read 404 is not found", r.status === 404 && r.body === "not found", r);
+// 0.12 段 C(Y6):読みの 5xx は 403 に畳まず 503 の unavailable、元の status は console.error へ
+const logged = [];
+console.error = (...args) => logged.push(args.join(" "));
 r = await get("/status", null, 500);
-check("read failure is forbidden", r.status === 403 && r.body === "forbidden", r);
+check("read failure is unavailable", r.status === 503 && r.body === "unavailable" && logged.length === 1, r);
 `);
   fs.rmSync(dir, { recursive: true, force: true });
   return out;

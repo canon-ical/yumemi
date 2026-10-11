@@ -321,7 +321,7 @@ pub fn navigation_carries_csp_pages_test() {
     face_file([], [csp_gate], "public/priv/static/_yumemi/client.mjs")
   string.contains(
     text,
-    "startNavigation({ routes: [\"/article/:slug\", \"/status\"], boot, csp: { \"/status\": \"frame-src https://frames.example\" } });",
+    "startNavigation({ routes: [\"/article/:slug\", \"/status\"], boot, csp: { \"/status\": \"frame-src 'self' https://frames.example\" } });",
   )
   |> should.be_true
 }

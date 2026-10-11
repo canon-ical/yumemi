@@ -2,7 +2,7 @@
 //// `yumemi/server/http.mjs`(`http(spec)`)で、ここは宣言から導いた表だけを書く。
 ////
 //// - hosts:入口(`src/entry.gleam`)の名 -> env の `<NAME>_HOST`
-//// - args:Service の `Args` の欄の型から decode の語彙(値型・整数・日付・blob・cursor・列挙・Option・List)。
+//// - args:Service の `Args` の欄の型から decode の語彙(値型・整数・日付・blob・cursor・色・列挙・Option・List)。
 ////   型から導けない欄は ★ hook `arg_<service>_<key>` / `arg_<key>`(宣言した名がそのまま勝つ)
 //// - phaseGates:root を持たず、句が全部 `As<Entity>` で相を絞る Service(主体の相で門を閉じる)
 //// - accepted:Accepted の応答の欄(root の Entity の名)
@@ -10,7 +10,8 @@
 ////   `ReadSession` / `SwitchSubject`)でないものは ★ hook `attached_<name>`
 //// - roles / browserCookie:`attached_roles` と `browser` の宣言をそのまま(framework は app の口の名も
 ////   cookie の名も申告の種類の名も知らない ── WGy r4、0.12)。種類を持つ役は `declare:<kind>` / `needs_declared:<kind>`
-//// - pageviews:面の門の数える口(0.12)。入口の名 -> `{only, fields, sink}`
+//// - pageviews:面の門の数える口(0.12)。入口の名 -> `{only, fields, sink}`。`ToService` の sink は Service が
+////   印を root に運ぶか(`Carried(.., "browser", ..)`)を `browser` に持つ ── 運ばない Service では印の cookie を焼かない
 //// - hooks:業務の行(`args_before` / `api_encode` / `failure_status` / `failure` / `respond` / `route_skip` /
 ////   `origin` / `early` / `judge` / `raw_body` / `attached_args` / `external_id` / `db_error` / `write_gate`)
 
@@ -270,7 +271,8 @@ pub fn text(
       )
       <> "]}"
   }
-  let pageviews = list.map(app.server.counted, pageview_js)
+  let pageviews =
+    list.map(app.server.counted, fn(counted) { pageview_js(app, counted) })
   let body =
     string.concat([
       "const hosts={",
@@ -438,6 +440,8 @@ fn shape_type(
       Ok(#("['integer']", []))
     model.NamedShape(module: Some("yumemi/er"), name: "Key", ..) ->
       Ok(#("['key']", []))
+    model.NamedShape(module: Some("yumemi/front/color"), name: "Color", ..) ->
+      Ok(#("['color']", []))
     model.NamedShape(module: Some(path), name: name, ..) ->
       case string.starts_with(path, "gen/types/") {
         True -> value_type(app, string.drop_start(path, 10))
@@ -516,7 +520,7 @@ fn enum_type(
 }
 
 /// 数える口の 1 面(`<入口の名>:{only,fields,sink}`、0.12)。
-fn pageview_js(counted: model.Counted) -> String {
+fn pageview_js(app: App, counted: model.Counted) -> String {
   let only =
     list.map(counted.only, fn(when) {
       case when {
@@ -543,7 +547,14 @@ fn pageview_js(counted: model.Counted) -> String {
     })
   let sink = case counted.sink {
     model.ServiceSink(service) ->
-      "{type:'service',service:" <> quoted(service) <> "}"
+      "{type:'service',service:"
+      <> quoted(service)
+      <> ",browser:"
+      <> case carries_browser(app, service) {
+        True -> "true"
+        False -> "false"
+      }
+      <> "}"
     model.StoreSink(
       resolve: resolve,
       rollup_by: rollup_by,
@@ -568,4 +579,50 @@ fn pageview_js(counted: model.Counted) -> String {
   <> "],sink:"
   <> sink
   <> "}"
+}
+
+/// Service が印(`Carried(.., "browser", ..)`)を root に運ぶか。
+pub fn carries_browser(app: App, service: String) -> Bool {
+  list.any(app.server.roots, fn(shape) {
+    case shape {
+      model.Carried(service: name, name: "browser", ..) -> name == service
+      _ -> False
+    }
+  })
+}
+
+/// 数える口の event の欄 `field` の値から、Args の欄 `arg` の型を decode できるか(51 v6 第 36 条)。
+/// event の欄の値は文字列で、`kind` は `initial` / `reload` / `spa` の 3 値。文字列から読む語彙(文字列・値型・hook)は
+/// どの欄でも通し、`client_at` は日時も、`kind` は 3 値を全部持つ列挙も通す。`Option` は中身を見る。
+/// 型から decode を導けない欄は Error(`decode を導けない` の検査が止める)。
+pub fn decodes_from_event(
+  app: App,
+  units: List(Unit),
+  service: Service,
+  arg: model.Arg,
+  field: String,
+) -> Result(Bool, Nil) {
+  let hook_names = list.map(app.server.hooks, fn(hook) { hook.name })
+  case arg_type(app, units, hook_names, service, arg) {
+    Error(_) -> Error(Nil)
+    Ok(#(text, _)) -> {
+      let inner = case string.starts_with(text, "['option',") {
+        True -> text |> string.drop_start(10) |> string.drop_end(1)
+        False -> text
+      }
+      Ok(
+        inner == "['text']"
+        || string.starts_with(inner, "['scalar',")
+        || string.starts_with(inner, "['hook',")
+        || { field == "client_at" && inner == "['datetime']" }
+        || {
+          field == "kind"
+          && string.starts_with(inner, "['enum',")
+          && list.all(["initial", "reload", "spa"], fn(value) {
+            string.contains(inner, quoted(value))
+          })
+        },
+      )
+    }
+  }
 }

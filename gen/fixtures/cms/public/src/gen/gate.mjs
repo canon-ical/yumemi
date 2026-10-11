@@ -13,8 +13,8 @@ const redirects = [
   {pages: [{type: "exact", path: "/status"}], when: {type: "declared", kind: "region"}, to: {type: "safe-param", param: "returnTo", fallback: "/status"}},
 ];
 const cspRoutes = {
-  "/article/:slug": "frame-src https://frames.example https://*.video.example; img-src https://img.example",
-  "/status": "connect-src https://api.example; media-src https://media.example",
+  "/article/:slug": "frame-src 'self' https://frames.example https://*.video.example; img-src 'self' https://img.example",
+  "/status": "connect-src 'self' https://api.example; media-src 'self' https://media.example",
 };
 const pageviewRoutes = ["/article/:slug", "/status"];
 const pageviewOnly = [{type: "declared", kind: "adult"}];
@@ -80,14 +80,14 @@ function failed(fail, request, env) {
 }
 
 async function readSession(request, env) {
-  if (sessionPath === null) return {status: 502, ok: false, session: null};
+  if (sessionPath === null) return {status: 502, ok: false, session: null, cause: "session path is missing"};
   try {
     const response = await env.APP.fetch(new Request(new URL(sessionPath, request.url), request));
-    if (!response.ok) return {status: response.status, ok: false, session: null};
+    if (!response.ok) return {status: response.status, ok: false, session: null, cause: "session read returned " + response.status};
     const session = await response.json().catch(() => null);
     return {status: response.status, ok: true, session};
-  } catch (_) {
-    return {status: 502, ok: false, session: null};
+  } catch (error) {
+    return {status: 502, ok: false, session: null, cause: error};
   }
 }
 
@@ -114,9 +114,15 @@ function checkFailure(check, read, request, env) {
   return text(403, "forbidden");
 }
 
-// 門が自分で返す本文は 403 の forbidden と 404 の not found だけ(0.12)
+// 門が自分で返す本文は 403 の forbidden・404 の not found・503 の unavailable の 3 つ(0.12)。
+// 読みの 5xx(APP binding の例外・session の path が無いときを含む)は権限の拒否に畳まず、元の status と原因を log に出す
 function readFailure(read) {
-  return read.status === 404 ? text(404, "not found") : text(403, "forbidden");
+  if (read.status === 404) return text(404, "not found");
+  if (read.status >= 500) {
+    console.error("yumemi gate: session read error", read.status, read.cause);
+    return text(503, "unavailable");
+  }
+  return text(403, "forbidden");
 }
 
 // 門の条件(`WhenDeclared(kind)` / `WhenSignedIn`)
