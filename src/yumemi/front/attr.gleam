@@ -140,8 +140,9 @@ pub fn method(value: String) -> Attribute {
   string("method", value)
 }
 
+/// `action`。`href` と同じ柵(送信で `javascript:` の URL が走るため)。
 pub fn action(value: String) -> Attribute {
-  string("action", value)
+  url("action", value)
 }
 
 pub fn for(value: String) -> Attribute {

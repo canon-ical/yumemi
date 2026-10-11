@@ -13,8 +13,8 @@ const redirects = [
   {pages: [{type: "exact", path: "/status"}], when: {type: "declared", kind: "region"}, to: {type: "safe-param", param: "returnTo", fallback: "/status"}},
 ];
 const cspRoutes = {
-  "/article/:slug": "frame-src https://frames.example https://*.video.example; img-src https://img.example",
-  "/status": "connect-src https://api.example; media-src https://media.example",
+  "/article/:slug": "frame-src 'self' https://frames.example https://*.video.example; img-src 'self' https://img.example",
+  "/status": "connect-src 'self' https://api.example; media-src 'self' https://media.example",
 };
 const pageviewRoutes = ["/article/:slug", "/status"];
 const pageviewOnly = [{type: "declared", kind: "adult"}];
@@ -80,14 +80,15 @@ function failed(fail, request, env) {
 }
 
 async function readSession(request, env) {
-  if (sessionPath === null) return {status: 502, ok: false, session: null};
+  if (sessionPath === null) return {status: 502, ok: false, session: null, cause: "session path is missing"};
   try {
     const response = await env.APP.fetch(new Request(new URL(sessionPath, request.url), request));
-    if (!response.ok) return {status: response.status, ok: false, session: null};
-    const session = await response.json().catch(() => null);
+    if (!response.ok) return {status: response.status, ok: false, session: null, cause: "session read returned " + response.status};
+    // 本文が JSON でないのも読めなかった方(匿名に畳まない)
+    const session = await response.json();
     return {status: response.status, ok: true, session};
-  } catch (_) {
-    return {status: 502, ok: false, session: null};
+  } catch (error) {
+    return {status: 502, ok: false, session: null, cause: error};
   }
 }
 
@@ -114,9 +115,15 @@ function checkFailure(check, read, request, env) {
   return text(403, "forbidden");
 }
 
-// 門が自分で返す本文は 403 の forbidden と 404 の not found だけ(0.12)
+// 門が自分で返す本文は 403 の forbidden・404 の not found・503 の unavailable の 3 つ(0.12)。
+// 読みの 5xx(APP binding の例外・session の path が無いときを含む)は権限の拒否に畳まず、元の status と原因を log に出す
 function readFailure(read) {
-  return read.status === 404 ? text(404, "not found") : text(403, "forbidden");
+  if (read.status === 404) return text(404, "not found");
+  if (read.status >= 500) {
+    console.error("yumemi gate: session read error", read.status, read.cause);
+    return text(503, "unavailable");
+  }
+  return text(403, "forbidden");
 }
 
 // 門の条件(`WhenDeclared(kind)` / `WhenSignedIn`)
@@ -169,7 +176,10 @@ export async function before_route(request, env) {
   let session = undefined;
   if (readsSession) {
     const read = await readSession(request, env);
-    session = read.session;
+    // 読みの 5xx は「読めなかった」で匿名(null)ではない。shell へは読んでいない(undefined)として渡し、
+    // session を要る頁では shell が読み直して 503 にする(0.12)
+    const unreadable = !read.ok && read.status >= 500;
+    session = unreadable ? undefined : read.session;
     for (const rule of rules) {
       if (!anyCovers(rule.pages, matched.path) || anyCovers(rule.except, matched.path)) continue;
       for (const check of rule.checks) {
@@ -179,6 +189,7 @@ export async function before_route(request, env) {
     }
     for (const redirect of redirects) {
       if (!anyCovers(redirect.pages, matched.path)) continue;
+      if (unreadable) return {response: readFailure(read)};
       const response = redirectFor(redirect, session, url);
       if (response) return {response};
     }

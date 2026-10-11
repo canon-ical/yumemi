@@ -670,7 +670,7 @@ fn pageview_notes(face_name: String, gate: Gate) -> List(Note) {
           case field {
             model.FromQueryField(name: name, param: param, max: max) ->
               case
-                name == "id" || !slug_name(name),
+                list.contains(event_names, name) || !slug_name(name),
                 param_name(param)
                 && !string.contains(param, ".")
                 && !string.contains(param, "-"),
@@ -681,7 +681,9 @@ fn pageview_notes(face_name: String, gate: Gate) -> List(Note) {
                   Ok(
                     "FromQuery の name `"
                     <> name
-                    <> "` は [a-z][a-z0-9_]* で、id でない",
+                    <> "` は [a-z][a-z0-9_]* で、受け口の event の欄の名("
+                    <> string.join(event_names, "・")
+                    <> ")でない",
                   )
                 _, False, _ ->
                   Ok("FromQuery の param `" <> param <> "` が [A-Za-z0-9_]+ でない")
@@ -702,6 +704,11 @@ fn pageview_notes(face_name: String, gate: Gate) -> List(Note) {
     }
   }
 }
+
+/// 受け口の event の欄の名(framework の `id` と `fields` の欄)。`FromQuery` の name には使えない(51 v6 第 35 条)。
+pub const event_names = [
+  "id", "kind", "client_at", "path", "prev", "referrer_path", "referrer_host",
+]
 
 /// `[a-z][a-z0-9_]*`(申告の kind・欄の名・variant の名の綴り)。
 pub fn slug_name(name: String) -> Bool {

@@ -19,6 +19,7 @@
 // - `subjectFree`: 入口の主体の集合の検査を外す Service の名(`subject_free` の宣言から。主体を切り替える前に読む口)
 // - `hooks`: ★ の業務の行(下の `hook(...)` の名)。どれも無くてよい
 import * as framework_entry from '../entry.mjs';
+import * as color from '../front/color.mjs';
 
 export function http(spec) {
  const { c, registry, attached } = spec;
@@ -128,6 +129,7 @@ export function http(spec) {
    case 'blob': if(typeof raw!=='string') invalid(field); return c.checked(c.blob.parse(raw),field);
    case 'cursor': if(typeof raw!=='string') invalid(field); return c.checked(c.page.cursor(raw),field);
    case 'key': if(typeof raw!=='string'||!raw) invalid(field); return c.er.key(raw);
+   case 'color': if(typeof raw!=='string') invalid(field); return c.checked(color.parse(raw),field);
    case 'enum': {
     if(typeof raw!=='string'||!b.includes(raw)) invalid(field);
     const name=raw.split('_').map(x=>x.slice(0,1).toUpperCase()+x.slice(1)).join('');
@@ -177,8 +179,8 @@ export function http(spec) {
  }
  const allowed=['not_found','forbidden','unauthorized','rate_limited','suspended','declaration_missing','consent_missing','invalid_argument','conflict'];
  function failure(s,error) {
-  // 数える口の受け口は、どの段で落ちても本体無しの 202(送り手に理由を返さない)
-  if(s.pageview) return emptyResponse(s,202);
+  // 数える口の受け口は、どの段で落ちても本体無しの 202(送り手に理由を返さない)。想定外の失敗だけ log へ
+  if(s.pageview) { pageviewLog(s,error); return emptyResponse(s,202); }
   if(error.connector) return response(s,{code:'upstream_unavailable',connector:error.connector},503);
   const custom=hook('failure')?.(s,error,{response});
   if(custom) return custom;
@@ -333,6 +335,17 @@ export function http(spec) {
   if(s.record.externalId) await hook('external_id')(s,raw,{c,fail,run:spec.runtime.run});
   s.args=new s.record.module.Args(...decodeArgs(s.record,raw,s));
  });
+ // 要件(0.12):申告は browser の署名 cookie、同意は session の party の同意。`ConsentedFor` は対象を Args と突き合わせる。
+ // 満たさない最初の要件を返す(全部満たせば null)。数える口の `ToService` も同じ関数で Service の要件を見る
+ function unmetRequirement(s,module,args) {
+  for(const req of module?.requires??[]) {
+   const tag=c.tag(req);
+   if(tag==='declared') { if(!declaredOf(s)[req.kind]) return {code:'declaration_missing',detail:{declaration:req.kind}}; continue; }
+   const subject=tag==='consented_for'?req.subject(args):null;
+   if(!(s.resolved?.consents??[]).some(x=>x.kind===req.kind&&(subject===null||x.subject===subject))) return {code:'consent_missing',detail:{consent:req.kind}};
+  }
+  return null;
+ }
  const judge=check('judge',9,s=>{
   const resolved=s.resolved,who=new Set(['anyone']);
   if(s.pageview) return;
@@ -347,13 +360,8 @@ export function http(spec) {
   for(const kind of roleKinds(s.record.name,'needs_declared')) if(!declaredOf(s)[kind]) fail('declaration_missing',403,undefined,{declaration:kind});
   if(write&&resolved?.suspended) fail('suspended',403);
   if(write&&s.record.module&&hook('write_gate')?.(s,matched.map(x=>c.tag(x.who)))) fail('forbidden',403);
-  // 要件(0.12):申告は browser の署名 cookie、同意は session の party の同意。`ConsentedFor` は対象を Args と突き合わせる
-  for(const req of s.record.module?.requires??[]) {
-   const tag=c.tag(req);
-   if(tag==='declared') { if(!declaredOf(s)[req.kind]) fail('declaration_missing',403,undefined,{declaration:req.kind}); continue; }
-   const subject=tag==='consented_for'?req.subject(s.args):null;
-   if(!(resolved?.consents??[]).some(x=>x.kind===req.kind&&(subject===null||x.subject===subject))) fail('consent_missing',403,undefined,{consent:req.kind});
-  }
+  const unmet=unmetRequirement(s,s.record.module,s.args);
+  if(unmet) fail(unmet.code,403,undefined,unmet.detail);
   s.clauses=s.record.module?matched.map(x=>({phases:c.tag(x.at)==='any_phase'?null:[...x.at[0]].map(c.tag),owner:c.tag(x.owner)})):[];
  });
  async function execute(s) {
@@ -400,13 +408,21 @@ export function http(spec) {
  // ── 数える口の受け口(0.12)──────────────────────────────────────────────
  // 二重計数の 1〜6 のうち、ここが持つのは bot と監視(3)・先読み(4)と、欄の検査・数える条件・印の発行。
  // id の再送(2)・連打 60 件/分(5)・2 tab の同時(6)は器(`Store`)なら framework の SQL 関数が印の行ロックで持つ。
- // `ToService` の逃げ道は検査を通した event を app の Service へ渡す(2・5・6 は Service の側)。応答は常に 202
+ // `ToService` の逃げ道は検査を通した event を app の Service へ渡す(2・5・6 は Service の側)。Service の `requires` は
+ // ここで評価し、満たさない event は Service に届かない。句(`anyone` / `party`)の外も同じ。`phaseGates`・`suspended`・
+ // hook の `judge` / `write_gate` は見ない。応答は常に 202
  const botAgent=/bot|crawl|spider|slurp|headless|lighthouse|monitor|uptime|pingdom|preview|facebookexternalhit|curl|wget|python-requests|go-http-client/i;
  const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
  function automated(request) {
   if(request.cf?.verifiedBotCategory) return true;
   if(/prefetch|prerender/i.test(request.headers.get('sec-purpose')??request.headers.get('purpose')??'')) return true;
   return botAgent.test(request.headers.get('user-agent')??'');
+ }
+ // 想定外の失敗(SQL・Service の例外・設定の不足)だけを log に出す。検査の段の拒否(`fail` の status を持つ)と、
+ // Service の業務の失敗(PostgreSQL の RAISE、P0001)は数えない event として黙って落とす
+ function pageviewLog(s,error) {
+  if(error?.status!==undefined||error?.code==='P0001') return;
+  console.error('yumemi pageview: event dropped',s.entry?.name??null,error);
  }
  const textField=(value,max)=>typeof value==='string'&&value.length>0&&value.length<=max?value:null;
  const pathField=value=>{const v=textField(value,2048);return v&&v.startsWith('/')&&!v.startsWith('//')&&!/[\\\u0000-\u001f]/.test(v)?v:null;};
@@ -435,6 +451,10 @@ export function http(spec) {
  function pageviewOnly(s,config) {
   return config.only.every(when=>when.type==='declared'?declaredOf(s)[when.kind]===true:Boolean(s.resolved));
  }
+ async function mintBrowser(s) {
+  s.browser={id:newBrowserId(),claims:{},declared:{}};
+  s.setCookies.push(browserSetCookie(s,await signBrowser(s.env,s.browser.id)));
+ }
  async function pageview(s) {
   const config=s.pageview;
   if(automated(s.request)) return emptyResponse(s,202);
@@ -442,24 +462,30 @@ export function http(spec) {
   try { raw=JSON.parse(await s.request.text()); } catch { return emptyResponse(s,202); }
   const event=pageviewEvent(config,raw);
   if(!event||!pageviewOnly(s,config)) return emptyResponse(s,202);
-  // ユニークの印:数える条件を満たした最初の event で、印の無い browser に印だけの cookie を焼く
-  if(bc&&!s.browser) {
-   s.browser={id:newBrowserId(),claims:{},declared:{}};
-   s.setCookies.push(browserSetCookie(s,await signBrowser(s.env,s.browser.id)));
-  }
+  try {
+   if(config.sink.type==='service') await pageviewService(s,config.sink,event);
+   else await pageviewStore(s,config,event);
+  } catch(error) { pageviewLog(s,error); }
+  return emptyResponse(s,202);
+ }
+ // 逃げ道 `ToService`:句と Service の `requires` を通った event だけを Service へ。印の cookie は Service が印を root に
+ // 運ぶ(`Carried(.., "browser", ..)`)ときだけ、Service に届く event で焼く
+ async function pageviewService(s,sink,event) {
+  const record=registry.find(r=>r.name===sink.service);
+  if(!record) throw new Error('数える口の Service が無い: '+sink.service);
+  const passed={...s,record,queryKeys:null};
+  passed.args=new record.module.Args(...decodeArgs(record,event,passed));
+  passed.clauses=[...record.module.service.allow].filter(x=>['anyone','party'].includes(c.tag(x.who))&&(c.tag(x.who)==='anyone'||s.resolved))
+   .map(x=>({phases:c.tag(x.at)==='any_phase'?null:[...x.at[0]].map(c.tag),owner:c.tag(x.owner)}));
+  if(!passed.clauses.length||unmetRequirement(s,record.module,passed.args)) return;
+  if(sink.browser&&bc&&!s.browser) { await mintBrowser(s); passed.browser=s.browser; }
+  await spec.runtime.invoke(passed);
+ }
+ // 器 `Store`:印は器の行の単位なので、数える条件を満たした最初の event で印の無い browser に印だけの cookie を焼く
+ async function pageviewStore(s,config,event) {
   const sink=config.sink;
-  if(sink.type==='service') {
-   const record=registry.find(r=>r.name===sink.service);
-   if(!record) throw new Error('数える口の Service が無い: '+sink.service);
-   const passed={...s,record,queryKeys:null};
-   passed.args=new record.module.Args(...decodeArgs(record,event,passed));
-   passed.clauses=[...record.module.service.allow].filter(x=>['anyone','party'].includes(c.tag(x.who))&&(c.tag(x.who)==='anyone'||s.resolved))
-    .map(x=>({phases:c.tag(x.at)==='any_phase'?null:[...x.at[0]].map(c.tag),owner:c.tag(x.owner)}));
-   if(!passed.clauses.length) return emptyResponse(s,202);
-   await spec.runtime.invoke(passed);
-   return emptyResponse(s,202);
-  }
-  if(!s.browser) return emptyResponse(s,202);
+  if(bc&&!s.browser) await mintBrowser(s);
+  if(!s.browser) throw new Error('数える口の器 Store に browser の宣言が無い');
   let dims={},excluded=false;
   if(sink.resolve) {
    const record=registry.find(r=>r.name===sink.resolve);
@@ -468,17 +494,17 @@ export function http(spec) {
    passed.args=new record.module.Args(...decodeArgs(record,{path:event.path},passed));
    passed.clauses=[{phases:null,owner:'no_owner'}];
    const outcome=await spec.runtime.invoke(passed);
-   if(outcome instanceof spec.runtime.step.Fail) return emptyResponse(s,202);
+   if(outcome instanceof spec.runtime.step.Fail) return;
    const out=c.encode(outcome[0])??{};
    for(const name of sink.rollupBy) if(out[name]!==undefined&&out[name]!==null) dims[name]=String(out[name]);
    excluded=sink.excludeWhen.some(name=>out[name]===true);
   }
   const extra=Object.fromEntries(config.fields.filter(f=>f.type==='query'&&event[f.name]!==undefined).map(f=>[f.name,event[f.name]]));
+  // 器の fields は Path を必ず持つ(第 37 条)ので path は event に在る
   await spec.runtime.run(s.db,'framework/pageview_record',[
-   event.id,s.browser.id,s.entry.name,s.at,event.kind??'initial',event.path??'/',event.prev??null,event.referrer_path??null,
+   event.id,s.browser.id,s.entry.name,s.at,event.kind??'initial',event.path,event.prev??null,event.referrer_path??null,
    event.referrer_host??null,event.client_at??null,s.resolved?.party??null,JSON.stringify(extra),JSON.stringify(dims),excluded,
   ]);
-  return emptyResponse(s,202);
  }
  return {sessionCookie,cookies,signBrowser,verifyBrowser,host,route,origin,browser,admit,resolve,subject,decode,judge,execute,apiEncode,
   logicFailureStatus:failureStatus,failure,response,emptyResponse,outcomeResponse};

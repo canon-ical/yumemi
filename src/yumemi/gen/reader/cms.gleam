@@ -13,6 +13,7 @@ import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
+import yumemi/gen/emit/http as http_emit
 import yumemi/gen/glance_util as g
 import yumemi/gen/model
 import yumemi/gen/reader/gate
@@ -276,15 +277,6 @@ fn record_fields(unit: Unit, name: String) -> List(#(String, glance.Type)) {
   }
 }
 
-fn carries_browser(app: model.App, service: String) -> Bool {
-  list.any(app.server.roots, fn(shape) {
-    case shape {
-      model.Carried(service: name, name: "browser", ..) -> name == service
-      _ -> False
-    }
-  })
-}
-
 fn counted_notes(app: model.App, units: List(Unit)) -> List(Note) {
   app.server.counted
   |> list.flat_map(fn(counted) {
@@ -328,7 +320,94 @@ fn counted_notes(app: model.App, units: List(Unit)) -> List(Note) {
                   where <> " の ToService(\"" <> service <> "\"): " <> text,
                 )
               })
-            let mark = case carries_browser(app, service), app.server.browser {
+            // 第 36 条:event の id は必ず受ける(id の再送の検出は Service の側)。欄の型は event の値から decode できる型
+            let id = case list.key_find(args, "id") {
+              Ok(_) -> []
+              Error(_) -> [
+                Note(
+                  stop.Missing,
+                  where
+                    <> " の ToService(\""
+                    <> service
+                    <> "\"): Args に欄 `id` が無い(event の id で再送を見分ける)",
+                ),
+              ]
+            }
+            // 第 36 条:受け口は句を `anyone` / `party` に絞るので、どちらも無い Service には event が届かない
+            // (`As(..)` だけ・`system` の Service は記録が黙って全部消える)
+            let clause = case list.key_find(app.clauses, service) {
+              Error(_) -> []
+              Ok(clauses) ->
+                case
+                  list.any(clauses, fn(item) {
+                    case item {
+                      model.Clause(who: "Anyone", ..)
+                      | model.Clause(who: "Party", ..)
+                      | model.UnreadClause(..) -> True
+                      model.Clause(..) -> False
+                    }
+                  })
+                {
+                  True -> []
+                  False -> [
+                    Note(
+                      stop.Missing,
+                      where
+                        <> " の ToService(\""
+                        <> service
+                        <> "\"): Service の allow に `Anyone` か `Party` の句が無い(受け口はこの 2 つの句で event を通す)",
+                    ),
+                  ]
+                }
+            }
+            let typed = case
+              list.find(app.services, fn(row) { row.module == service })
+            {
+              Error(_) -> []
+              Ok(row) ->
+                list.filter_map(row.args, fn(arg) {
+                  case list.key_find(fields, arg.name) {
+                    Error(_) -> Error(Nil)
+                    Ok(_) ->
+                      case
+                        http_emit.decodes_from_event(
+                          app,
+                          units,
+                          row,
+                          arg,
+                          arg.name,
+                        )
+                      {
+                        Ok(False) ->
+                          Ok(Note(
+                            stop.Conflict,
+                            where
+                              <> " の ToService(\""
+                              <> service
+                              <> "\"): Args の欄 `"
+                              <> arg.name
+                              <> "` の型を event の値から decode できない(event の欄は文字列"
+                              <> case arg.name {
+                              "kind" -> "、initial / reload / spa の 3 値"
+                              _ -> ""
+                            }
+                              <> "。String・値型・hook"
+                              <> case arg.name {
+                              "client_at" -> "・Datetime"
+                              "kind" -> "・3 値を持つ列挙"
+                              _ -> ""
+                            }
+                              <> " で受ける)",
+                          ))
+                        _ -> Error(Nil)
+                      }
+                  }
+                })
+            }
+            let mark = case
+              http_emit.carries_browser(app, service),
+              app.server.browser
+            {
               True, None -> [
                 Note(
                   stop.Missing,
@@ -341,7 +420,10 @@ fn counted_notes(app: model.App, units: List(Unit)) -> List(Note) {
               _, _ -> []
             }
             list.flatten([
+              id,
+              clause,
               mismatched,
+              typed,
               mark,
               [
                 Note(
@@ -369,6 +451,17 @@ fn counted_notes(app: model.App, units: List(Unit)) -> List(Note) {
             ),
           ]
           Some(_) -> []
+        }
+        // 第 37 条:器は path で数える(訪問の入口・path の次元)。fields に `Path` が無い Store は止める
+        let browser = case list.contains(counted.fields, model.PathField) {
+          True -> browser
+          False ->
+            list.append(browser, [
+              Note(
+                stop.Missing,
+                where <> " の Store の fields に Path が無い(器は path ごとに数える)",
+              ),
+            ])
         }
         let dims = case resolve {
           None ->
