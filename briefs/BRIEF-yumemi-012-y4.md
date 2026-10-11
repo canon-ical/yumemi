@@ -2,7 +2,7 @@
 
 便: yumemi-012-y4(yumemi リポ、Opus 真壁の直書き、終端で柏木のゲートを便に 1 回 ── `KASHIWAGI_ROUTE=opus`)
 
-**1 session で直に書く。細かい設計は真壁さんが決める(役員 人見 2026-10-12)。**作業木 `~/yumemism_repo/yumemi-012-y4`(branch `impl/012-y4`、基点は本 BRIEF の commit = 段 A の merge 後の forgejo main `087b2d8(段 A の merge 後の forgejo main)` の上)。記録は `briefs/results-yumemi-012-y4.md`、証跡は `build/012-y4-*`(git の外)。commit は `git-as makabe`、main に触らない。push・tag・Hex の publish は鷹野。**版の行(`0.12.0-dev`)に触らない。止め線は経過 1 時間 30 分。**
+**1 session で直に書く。細かい設計は真壁さんが決める(役員 人見 2026-10-12)。**作業木 `~/yumemism_repo/yumemi-012-y4`(branch `impl/012-y4`、基点は本 BRIEF の commit = 段 A の merge 後の forgejo main `087b2d8` の上)。記録は `briefs/results-yumemi-012-y4.md`、証跡は `build/012-y4-*`(git の外)。commit は `git-as makabe`、main に触らない。push・tag・Hex の publish は鷹野。**版の行(`0.12.0-dev`)に触らない。止め線は経過 1 時間 30 分。**
 
 **並行の便:**同じ基点から Y2(`briefs/BRIEF-yumemi-012-y2.md`、要素の木と Css)と Y5(`briefs/BRIEF-yumemi-012-y5.md`、門と CMS の機能)が別の作業木で走る。file の持ち場は下の「持ち場」と tech `_drafts/gleam-framework/81-stage-b-ownership.v0.md`。merge は Y2 → Y4 → Y5 の順で、本便は 2 番目(Y2 が遅れれば先でもよい)。
 
