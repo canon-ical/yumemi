@@ -114,6 +114,31 @@ pub fn to_service_args_need_id_test() {
   |> should.be_true
 }
 
+pub fn to_service_needs_anyone_or_party_clause_test() {
+  let args = "Args(id: String, path: String)"
+  let #(code, lines) =
+    broken(
+      list.append(to_service(args), [
+        #(resolve, "who: allow.Anyone,", "who: allow.Staff,"),
+      ]),
+    )
+  code |> should.equal(3)
+  names(
+    lines,
+    "ToService(\"page_resolve\"): Service の allow に `Anyone` か `Party` の句が無い",
+  )
+  |> should.be_true
+  // 句が Party なら通る(Anyone は上の Args の test が通している)
+  let #(code, lines) =
+    broken(
+      list.append(to_service(args), [
+        #(resolve, "who: allow.Anyone,", "who: allow.Party,"),
+      ]),
+    )
+  code |> should.equal(0)
+  names(lines, "の句が無い") |> should.be_false
+}
+
 pub fn to_service_args_take_app_types_test() {
   // musearch の pageview_record の形:値型・Datetime・3 値の列挙・Option の値型
   let #(code, lines) =
@@ -211,6 +236,9 @@ fn gate_checks() -> String
 @external(javascript, "./yumemi_012_y6_test_ffi.mjs", "receiver_checks")
 fn receiver_checks() -> String
 
+@external(javascript, "./yumemi_012_y6_test_ffi.mjs", "shell_checks")
+fn shell_checks() -> String
+
 fn count(text: String, part: String) -> Int {
   list.length(string.split(text, part)) - 1
 }
@@ -219,7 +247,14 @@ pub fn gate_read_failures_are_not_found_forbidden_or_unavailable_test() {
   let out = gate_checks()
   string.contains(out, "NG ") |> should.be_false
   string.contains(out, "STDERR") |> should.be_false
-  count(out, "ok ") |> should.equal(8)
+  count(out, "ok ") |> should.equal(12)
+}
+
+pub fn shell_session_read_5xx_is_unavailable_test() {
+  let out = shell_checks()
+  string.contains(out, "NG ") |> should.be_false
+  string.contains(out, "STDERR") |> should.be_false
+  count(out, "ok ") |> should.equal(11)
 }
 
 pub fn receiver_to_service_requires_cookie_and_logs_test() {

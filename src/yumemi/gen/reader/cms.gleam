@@ -333,6 +333,33 @@ fn counted_notes(app: model.App, units: List(Unit)) -> List(Note) {
                 ),
               ]
             }
+            // 第 36 条:受け口は句を `anyone` / `party` に絞るので、どちらも無い Service には event が届かない
+            // (`As(..)` だけ・`system` の Service は記録が黙って全部消える)
+            let clause = case list.key_find(app.clauses, service) {
+              Error(_) -> []
+              Ok(clauses) ->
+                case
+                  list.any(clauses, fn(item) {
+                    case item {
+                      model.Clause(who: "Anyone", ..)
+                      | model.Clause(who: "Party", ..)
+                      | model.UnreadClause(..) -> True
+                      model.Clause(..) -> False
+                    }
+                  })
+                {
+                  True -> []
+                  False -> [
+                    Note(
+                      stop.Missing,
+                      where
+                        <> " の ToService(\""
+                        <> service
+                        <> "\"): Service の allow に `Anyone` か `Party` の句が無い(受け口はこの 2 つの句で event を通す)",
+                    ),
+                  ]
+                }
+            }
             let typed = case
               list.find(app.services, fn(row) { row.module == service })
             {
@@ -394,6 +421,7 @@ fn counted_notes(app: model.App, units: List(Unit)) -> List(Note) {
             }
             list.flatten([
               id,
+              clause,
               mismatched,
               typed,
               mark,

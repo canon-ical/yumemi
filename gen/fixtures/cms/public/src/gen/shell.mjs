@@ -218,12 +218,19 @@ async function renderPage(request, env, matched, gateSession) {
     } else if (source.type === "session") {
       if (!sessionLoaded) {
         sessionLoaded = true;
+        // 読みの 5xx と例外は匿名に畳まず 503 の unavailable、元の status と原因は log へ(0.12)
+        let response;
         try {
           const target = new URL("/api/session", request.url);
-          const response = await env.APP.fetch(new Request(target, request));
+          response = await env.APP.fetch(new Request(target, request));
           if (response.ok) session = await response.json();
-        } catch (_) {
-          session = null;
+        } catch (error) {
+          console.error("yumemi shell: session read error", 502, error);
+          return failure(503, "unavailable");
+        }
+        if (response.status >= 500) {
+          console.error("yumemi shell: session read error", response.status, await response.text().catch(() => ""));
+          return failure(503, "unavailable");
         }
       }
       const subject = session?.anonymous === true ? undefined : session?.subject;

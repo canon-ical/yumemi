@@ -28,14 +28,21 @@ export function gate_checks() {
   const source = fs.readFileSync("gen/fixtures/cms/public/src/gen/gate.mjs", "utf8");
   fs.writeFileSync(path.join(dir, "gate.mjs"), source);
   fs.writeFileSync(path.join(dir, "pathless.mjs"), source.replace(/const sessionPath = "[^"]*";/, "const sessionPath = null;"));
-  fs.writeFileSync(path.join(dir, "route.mjs"), 'export const routes = [{path: "/article/:slug"}, {path: "/status"}];\n');
+  // rule の無い形:/status には redirect だけが当たる
+  fs.writeFileSync(path.join(dir, "ruleless.mjs"), source.replace(/const rules = \[[\s\S]*?\n\];/, "const rules = [];"));
+  fs.writeFileSync(path.join(dir, "route.mjs"), 'export const routes = [{path: "/article/:slug"}, {path: "/status"}, {path: "/free"}];\n');
   const out = node(`
 import { serve } from ${JSON.stringify(path.join(dir, "gate.mjs"))};
 import { serve as servePathless } from ${JSON.stringify(path.join(dir, "pathless.mjs"))};
+import { serve as serveRuleless } from ${JSON.stringify(path.join(dir, "ruleless.mjs"))};
 ${capture}
 const html = "<!doctype html><html><head><title>t</title></head><body>x</body></html>";
-const dispatch = async () => new Response(html, { status: 200, headers: { "content-type": "text/html; charset=utf-8" } });
-const app = serve(dispatch), pathless = servePathless(dispatch);
+let handed = "none";
+const dispatch = async (_request, _env, before) => {
+  handed = before.session === undefined ? "undefined" : JSON.stringify(before.session);
+  return new Response(html, { status: 200, headers: { "content-type": "text/html; charset=utf-8" } });
+};
+const app = serve(dispatch), pathless = servePathless(dispatch), ruleless = serveRuleless(dispatch);
 const env = (fetch) => ({ APP: { fetch } });
 const reply = (session, status = 200) => async () => new Response(JSON.stringify(session), { status });
 const get = async (p, fetch, worker = app) => {
@@ -58,6 +65,16 @@ check("APP binding exception is unavailable with the cause", r.status === 503 &&
 r = await get("/status", reply({ anonymous: true, declared: {} }), pathless);
 check("missing session path is unavailable", r.status === 503 && r.body === "unavailable"
   && r.logged.length === 1 && r.logged[0].includes("session path is missing"), r);
+// rule の当たらない頁:読みの 5xx は「読めなかった」(undefined)として shell へ渡し、匿名(null)にしない。4xx は今どおり null
+r = await get("/free", reply({ error: "boom" }, 500));
+check("read 5xx on a page without rules hands no session", r.status === 200 && handed === "undefined" && r.logged.length === 0, { ...r, handed });
+r = await get("/free", reply(null, 401));
+check("read 401 on a page without rules hands null", r.status === 200 && handed === "null" && r.logged.length === 0, { ...r, handed });
+r = await get("/status", async () => new Response("not json", { status: 200 }));
+check("session read with a broken body is unavailable", r.status === 503 && r.body === "unavailable" && r.logged.length === 1, r);
+r = await get("/status", reply({ error: "boom" }, 500), ruleless);
+check("read 5xx on a redirect is unavailable", r.status === 503 && r.body === "unavailable"
+  && r.logged.length === 1 && r.logged[0].includes("session read error 500"), r);
 r = await get("/article/a", reply({ anonymous: false, consents: { use: true }, declared: { adult: true } }));
 check("article csp has 'self' on each directive", r.status === 200
   && r.csp === "frame-src 'self' https://frames.example https://*.video.example; img-src 'self' https://img.example", r);
@@ -199,4 +216,61 @@ n = invoked.length;
 r = await call("GET", "b", "/api/paint?accent=red");
 check("broken Color is invalid_argument", r.status === 400 && r.json?.code === "invalid_argument" && r.json?.field === "accent" && invoked.length === n, r);
 `);
+}
+
+// shell が自分で session を読む道(fixture cms の生成 `shell.mjs` の renderPage を取り出して起こす):
+// 5xx と例外は 503 unavailable と console.error、匿名と 4xx は今どおり(必須の主体は 401 unauthorized、任意は匿名の頁)
+export function shell_checks() {
+  const shell = fs.readFileSync("gen/fixtures/cms/public/src/gen/shell.mjs", "utf8");
+  const failure = shell.match(/function failure\(status, body\) \{[\s\S]*?\n\}\n/);
+  const render = shell.match(/async function renderPage\(request, env, matched, gateSession\) \{[\s\S]*?\n\}\n/);
+  if (!failure || !render) return "NG missing renderPage";
+  const dir = fs.mkdtempSync(path.join(process.env.TMPDIR ?? "/tmp", "yumemi-y6-shell-"));
+  const file = path.join(dir, "render.mjs");
+  fs.writeFileSync(file, `import {Some, Option$None$const} from ${built("../../gleam_stdlib/gleam/option.mjs")};
+const to_document_string = () => "<html><head><style></style></head><body></body></html>";
+const addGivenAttributes = (html) => html;
+const htmlWithGridCss = (html) => html;
+${failure[0]}
+export ${render[0]}`);
+  const out = node(`
+import { renderPage } from ${JSON.stringify(file)};
+${capture}
+const spec = (optional) => ({ vars: [{ name: "me", optional, from: { type: "session", name: "SubjectId" } }], sources: [], givens: [],
+  loader: { load: () => null, render: () => null }, layout: null });
+const env = (fetch) => ({ APP: { fetch } });
+const reply = (session, status = 200) => async () => new Response(JSON.stringify(session), { status });
+const signed = { subject: { kind: "member", id: "s1", handle: "h" }, declared: {} };
+const run = async (fetch, optional, gateSession) => {
+  const before = logged.length;
+  const r = await renderPage(new Request("https://www.example/p"), env(fetch), { params: {}, spec: spec(optional) }, gateSession);
+  return { status: r.status, body: await r.text(), logged: logged.slice(before) };
+};
+let r = await run(reply({ error: "boom" }, 500), false);
+check("session read 500 is unavailable", r.status === 503 && r.body === "unavailable"
+  && r.logged.length === 1 && r.logged[0].includes("session read error 500"), r);
+r = await run(reply({ error: "boom" }, 502), true);
+check("session read 502 on an optional field is unavailable", r.status === 503 && r.body === "unavailable" && r.logged.length === 1, r);
+r = await run(async () => { throw new Error("binding exploded"); }, true);
+check("session read exception is unavailable with the cause", r.status === 503 && r.body === "unavailable"
+  && r.logged.length === 1 && r.logged[0].includes(" 502 ") && r.logged[0].includes("binding exploded"), r);
+r = await run(async () => new Response("not json", { status: 200 }), true);
+check("session read with a broken body is unavailable", r.status === 503 && r.logged.length === 1, r);
+r = await run(reply({ anonymous: true, declared: {} }), false);
+check("anonymous on a required field is unauthorized", r.status === 401 && r.body === "unauthorized" && r.logged.length === 0, r);
+r = await run(reply({ anonymous: true, declared: {} }), true);
+check("anonymous on an optional field renders", r.status === 200 && r.logged.length === 0, r);
+r = await run(reply(null, 401), false);
+check("session read 401 on a required field is unauthorized", r.status === 401 && r.body === "unauthorized" && r.logged.length === 0, r);
+r = await run(reply(null, 404), true);
+check("session read 404 on an optional field renders", r.status === 200 && r.logged.length === 0, r);
+r = await run(reply(signed), false);
+check("signed in renders", r.status === 200 && r.logged.length === 0, r);
+r = await run(async () => { throw new Error("must not read"); }, false, null);
+check("gate null is anonymous without a read", r.status === 401 && r.body === "unauthorized" && r.logged.length === 0, r);
+r = await run(async () => { throw new Error("must not read"); }, false, signed);
+check("gate session is used without a read", r.status === 200 && r.logged.length === 0, r);
+`);
+  fs.rmSync(dir, { recursive: true, force: true });
+  return out;
 }

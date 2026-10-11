@@ -375,7 +375,8 @@ async function readSession(request, env) {
   try {
     const response = await env.APP.fetch(new Request(new URL(sessionPath, request.url), request));
     if (!response.ok) return {status: response.status, ok: false, session: null, cause: \"session read returned \" + response.status};
-    const session = await response.json().catch(() => null);
+    // 本文が JSON でないのも読めなかった方(匿名に畳まない)
+    const session = await response.json();
     return {status: response.status, ok: true, session};
   } catch (error) {
     return {status: 502, ok: false, session: null, cause: error};
@@ -457,7 +458,10 @@ export async function before_route(request, env) {
   let session = undefined;
   if (readsSession) {
     const read = await readSession(request, env);
-    session = read.session;
+    // 読みの 5xx は「読めなかった」で匿名(null)ではない。shell へは読んでいない(undefined)として渡し、
+    // session を要る頁では shell が読み直して 503 にする(0.12)
+    const unreadable = !read.ok && read.status >= 500;
+    session = unreadable ? undefined : read.session;
     for (const rule of rules) {
       if (!anyCovers(rule.pages, matched.path) || anyCovers(rule.except, matched.path)) continue;
       for (const check of rule.checks) {
@@ -467,6 +471,7 @@ export async function before_route(request, env) {
     }
     for (const redirect of redirects) {
       if (!anyCovers(redirect.pages, matched.path)) continue;
+      if (unreadable) return {response: readFailure(read)};
       const response = redirectFor(redirect, session, url);
       if (response) return {response};
     }

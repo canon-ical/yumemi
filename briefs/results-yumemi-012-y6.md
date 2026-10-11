@@ -63,10 +63,17 @@
 
 ## 51 v6 に足す行
 
-- **失敗の文言**:門と生成の shell が自分で返す本文は `forbidden`(403)・`not found`(404)・`unavailable`(503)の 3 つ。門の session の読みの 5xx(APP binding の例外・session の path が無いときを含む)と shell の Page の読みの 5xx・例外は 503 `unavailable` で、403 に畳まない。元の status と原因は `console.error`
+- **失敗の文言**(r2 で全部並べる形に直した):門と生成の shell が自分で返す本文はこれで全部(`Fail` の `RedirectBack`・`ToSignIn`・`Deny` の本文は app の字)
+  - 503 `unavailable`:session の読み(門・shell)と Page の読み(shell)の 5xx・APP binding の例外・session の本文が JSON でない・門に session の path が無い。401・403・匿名の頁に畳まない。元の status と原因は `console.error`。門は rule も redirect も当たらない頁で読めなかったら「読んでいない」として渡し、session を要る頁では shell が読み直す
+  - 401 `unauthorized`(shell):`Option` でない session の欄に主体が無い(匿名、または読みが 4xx)。`Option` の欄は `None` で頁を返す
+  - 403 `forbidden`:門の権限の拒否(主体の不一致、check の上で読みが 404 以外の 4xx。`signed-in` の 401・403 は `Fail` へ)、Page の読みの 403
+  - 404 `not found`:check の上で門の読みが 404、root の Page の読みの 404、頁が当たらず `SVELTE` も無い(widget の 404 は `None`)
+  - `<status>` `root read failed` / `widget read failed`(shell):Page の読みのほかの 4xx。status は読みの status
+  - 500 `PUBLIC_<NAME>_ORIGIN` / `PUBLIC_IDP_ORIGIN`(shell):頁が読む origin の変数が無いか空。本文は変数の名
+  - 500 `invalid variable source`(shell):shell の知らない変数の出どころ(生成器の誤り)
 - **CSP の宣言**:生成器が宣言した各指令(`FrameSrc`・`ImgSrc`・`ConnectSrc`・`MediaSrc`)の先頭に `'self'` を 1 つ足す。外す口は 0.12 で持たない。client の遷移の表も同じ字
 - **数える口(`ToService`)**:受け口の検査は 1(欄)・3(bot と監視)・4(先読み)と `only`、句(`anyone` / `party`)、**Service の `requires`**。`phaseGates`・`suspended`・hook の `judge` / `write_gate` は見ない。印の cookie は Service が `Carried(.., "browser", ..)` を持ち、event が句と `requires` を通って Service に届くときだけ
-- **第 36 条**:`ToService` の Args は `id` を持つ(無ければ 3)。欄の型は event の値から decode できる(`String`・値型・`arg_*` hook、`client_at` は `Datetime` も、`kind` は 3 値を全部持つ列挙も。`Option` は中身。外れれば 4)
+- **第 36 条**:`ToService` の Args は `id` を持つ(無ければ 3)。欄の型は event の値から decode できる(`String`・値型・`arg_*` hook、`client_at` は `Datetime` も、`kind` は 3 値を全部持つ列挙も。`Option` は中身。外れれば 4)。Service の `allow` に `Anyone` か `Party` の句が要る(無ければ 3。受け口はこの 2 つの句でしか event を通さない、r2)
 - **第 35 条**:`FromQuery` の name は受け口の event の欄の名(`id`・`kind`・`client_at`・`path`・`prev`・`referrer_path`・`referrer_host`)でない(外れれば 4)
 - **第 37 条**:`Store` の `fields` は `Path` を持つ(無ければ 3)
 - **受け口の失敗**:応答は常に 202。想定外の失敗(SQL・Service の例外・設定の不足)は `console.error`、bot・先読み・形の外れ・条件の外・`fail` の拒否・Service の RAISE(P0001)は黙る
@@ -96,3 +103,41 @@
 ## DDL
 
 無し。器の表と関数(`db/framework/pageview.sql`)の字は変えていない(fixture cms の生成物に差 0)。確かめに使い捨ての PG(port 55591)へ当てただけで、staging・production には当てていない。
+
+## r2(柏木の P1 2 件、真壁 Opus 直書き)
+
+### やったこと
+
+1. **P1-1 shell が自分で session を読む道**(`emit/front.gleam` の shell の読みの行):5xx は 503 `unavailable` と `console.error("yumemi shell: session read error", <status>, <本文>)`、APP binding の例外と本文が JSON でないのは 503 と `console.error(.., 502, <原因>)`。4xx と匿名は今どおり(必須の欄は 401 `unauthorized`、`Option` の欄は匿名の頁)
+2. **P1-1 門の受け渡し**(`emit/gate.gleam`):読みの 5xx(例外・path 無しを含む)は shell へ `session: undefined`(読んでいない)で渡し、`null`(匿名)にしない。session を要る頁では shell が読み直し、それも読めなければ 503。redirect の当たる頁で読めなかったら門が 503(redirect の判断ができないので、匿名として redirect を飛ばさない)。読みの本文が JSON でないのも読めなかった方へ(`.catch(() => null)` を外した)
+3. **P1-2 第 36 条**(`reader/cms.gleam`):`ToService` の Service の `allow` に `Anyone` か `Party` の句が無ければ exit 3。停止コードは第 36 条の `id` 無し(3、宣言の不足)に揃えた。読めない句(`UnreadClause`、別に exit 4)があるときは足さない
+4. README:「Failure texts」を本文の一覧(503・401・403・404・`<status> root/widget read failed`・500 `PUBLIC_*_ORIGIN`・500 `invalid variable source`)に。第 36 条の文に句の 1 行。results の「51 v6 に足す行」も同じ形に
+5. fixture cms・article を生成し直した(門と shell の 8 file)
+
+### 503 に替えた道(生成物 `gen/fixtures/cms/public/src/gen/` の行)
+
+| 道 | 生成器 | 生成物 |
+|---|---|---|
+| shell の session 読みの例外・本文が JSON でない(前は匿名) | `src/yumemi/gen/emit/front.gleam:6686` | `shell.mjs:228` |
+| shell の session 読みの 5xx(前は匿名、必須の欄なら 401) | `src/yumemi/gen/emit/front.gleam:6690` | `shell.mjs:232` |
+| 門の読みの 5xx を rule の無い頁へ渡すとき(前は `null` = 匿名) | `src/yumemi/gen/emit/gate.gleam:463` | `gate.mjs:181-182` |
+| 門の redirect の当たる頁で読みの 5xx(前は redirect を飛ばして頁) | `src/yumemi/gen/emit/gate.gleam:474` | `gate.mjs:192` |
+| 門の読みの本文が JSON でない(前は匿名で check、403 や `Fail`) | `src/yumemi/gen/emit/gate.gleam:379` | `gate.mjs:88` |
+
+### 検収
+
+- root `gleam test`:before 400 passed(柏木の `build/kashiwagi-gate2-test.txt`)→ after **402 passed, no failures**(`build/r2-test-final.txt`)。足したのは `shell_session_read_5xx_is_unavailable_test`(11 項)と `to_service_needs_anyone_or_party_clause_test`(`Staff` だけの句で exit 3、`Party` で exit 0)
+- **期待値を書き換えた test**:`gate_read_failures_are_not_found_forbidden_or_unavailable_test` の ok の数 8 → 12。足した 4 項(rule の無い頁の 5xx は `undefined` を渡す、4xx は `null` を渡す、本文が JSON でないのは 503、redirect だけの頁の 5xx は 503)の分。既存 8 項の判定の字は変えていない
+- `gleam format --check src test`:exit 0
+- fixture cms・article の生成を 4 回(r2 の 1・2 回目で門と shell の 8 file が替わり、checkpoint の後の 3・4 回目は停止コード 0、`git status` の差 0)。`build/r2-gen-*-{1..4}.txt`
+- musearch の `pageview_record` の句は `allow.Anyone`(`musearch-3-8g/api/src/service/pageview_record.gleam:225`)なので新しい第 36 条には当たらない(字で見ただけ、生成はしていない)
+
+### 判断したこと
+
+- 門の読みの 5xx を rule も redirect も当たらない頁で 503 にはしなかった。その頁が session を要らなければ頁は返せる。要るなら shell が読み直して 503 になるので、「読めなかった」が匿名や 401 に化ける道は無い。読み直しで 1 回余分に APP を叩くのは失敗のときだけ
+- 本文が JSON でない session の読み(200)は 5xx でも例外の外でもない形だが、shell は try の中で例外になるので 503 にし、門も同じに揃えた(匿名に畳まない)。門のこの 1 行は `readSession` の中で、BRIEF の「受け渡しの行だけ」を少し越える
+- 句の検査の停止コードは 3。Service の Args に `id` が無いのと同じく「受け口が要る物を Service が持たない」の不足と読んだ
+
+### しなかったこと
+
+- 柏木の P2 の「後でよい」5 件、Y3 の file、README の「Who is responsible.」の段落の移動
