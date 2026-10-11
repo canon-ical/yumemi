@@ -8615,9 +8615,16 @@ fn live_module_text(target: LiveTarget) -> String {
     [] -> "pub type Args {\n  Args\n}\n"
     args ->
       "pub type Args {\n  Args("
-      <> string.join(list.map(args, fn(arg) { arg.name <> ": String" }), ", ")
+      <> string.join(
+        list.map(args, fn(arg) { arg.name <> ": " <> wire_gleam_type(arg.wire) }),
+        ", ",
+      )
       <> ")\n}\n"
   }
+  let uses_option =
+    list.any(target.args, fn(arg) {
+      string.contains(wire_gleam_type(arg.wire), "Option(")
+    })
   let field_type = case target.args {
     [] -> "pub type Field\n"
     args ->
@@ -8662,6 +8669,10 @@ fn live_module_text(target: LiveTarget) -> String {
     })
   header(target.source, target.input_hash)
   <> "\n"
+  <> case uses_option {
+    True -> "import gleam/option.{type Option}\n"
+    False -> ""
+  }
   <> "import yumemi/front/css\n"
   <> "import yumemi/front/el\n"
   <> "import yumemi/front/live\n\n"
@@ -8736,9 +8747,9 @@ fn live_module_text(target: LiveTarget) -> String {
         list.map(args, fn(arg) {
           "    #("
           <> quoted(arg.name)
-          <> ", live.json_string(args."
-          <> arg.name
-          <> ")),\n"
+          <> ", "
+          <> wire_encode(arg.wire, "args." <> arg.name)
+          <> "),\n"
         }),
       )
       <> "  ])\n"
@@ -8922,6 +8933,62 @@ pub fn route_variant(page: reader_front.Page) -> String {
 
 fn json_quoted(value: String) -> String {
   quoted(value)
+}
+
+/// live module の Args の欄の型(Block が初期値を型で書く、51 v6「interactive Component の生成物」)。
+/// 値型・Id・列挙・日付ほか、Bool / Int / Float でないスカラは back が文字列で読むので String。record・組・
+/// Dict は第 11 条で止める(型で書く形が無い)。
+fn wire_gleam_type(wire: Wire) -> String {
+  case wire {
+    ScalarWire(kind) -> kind_gleam_type(kind)
+    OptionWire(inner) -> "Option(" <> wire_gleam_type(inner) <> ")"
+    ListWire(kind) -> "List(" <> kind_gleam_type(kind) <> ")"
+    JsonWire -> "String"
+  }
+}
+
+fn kind_gleam_type(kind: ScalarKind) -> String {
+  case kind {
+    BoolArg -> "Bool"
+    IntArg -> "Int"
+    FloatArg -> "Float"
+    TextArg -> "String"
+  }
+}
+
+/// Args の欄の値 `value`(Gleam の式)を `data-yumemi-args` の JSON の字に写す式(`live.json_*`)。
+fn wire_encode(wire: Wire, value: String) -> String {
+  case wire {
+    ScalarWire(kind) -> kind_encoder(kind) <> "(" <> value <> ")"
+    OptionWire(ScalarWire(kind)) ->
+      "live.json_option(" <> value <> ", " <> kind_encoder(kind) <> ")"
+    OptionWire(inner) ->
+      "live.json_option("
+      <> value
+      <> ", fn(item) { "
+      <> wire_encode(inner, "item")
+      <> " })"
+    ListWire(kind) ->
+      "live.json_list(" <> value <> ", " <> kind_encoder(kind) <> ")"
+    JsonWire -> "live.json_string(" <> value <> ")"
+  }
+}
+
+fn wire_has_json(wire: Wire) -> Bool {
+  case wire {
+    JsonWire -> True
+    OptionWire(inner) -> wire_has_json(inner)
+    _ -> False
+  }
+}
+
+fn kind_encoder(kind: ScalarKind) -> String {
+  case kind {
+    BoolArg -> "live.json_bool"
+    IntArg -> "live.json_int"
+    FloatArg -> "live.json_float"
+    TextArg -> "live.json_string"
+  }
 }
 
 fn wire_json(wire: Wire) -> String {
@@ -9175,6 +9242,21 @@ pub fn interactive_notes(
       |> list.map(fn(name) {
         conflict("after_send に " <> name <> " の組が 2 つある(第 12 条)")
       })
+    // 第 11 条:Args の欄の初期値は型で書く。record・組・Dict・スカラでない要素の List の欄は型で書く形が
+    // 無いので止める(JSON の字を Block に書かせない)
+    let json_args =
+      list.flat_map(mine, fn(target) {
+        target.args
+        |> list.filter(fn(arg) { wire_has_json(arg.wire) })
+        |> list.map(fn(arg) {
+          conflict(
+            target.name
+            <> " の Args の欄 "
+            <> arg.name
+            <> " が record・組・Dict(JSON で送る形)で、interactive Component の初期値を型で書けない(第 11 条)",
+          )
+        })
+      })
     // 第 15 条:GoTo の path の穴は Out の同じ名の欄
     let goto =
       list.flat_map(component.after_send, fn(row) {
@@ -9182,8 +9264,9 @@ pub fn interactive_notes(
           list.find(mine, fn(target) {
             target.name == naming.snake(row.service)
           })
-        [row.ok, row.error]
-        |> list.filter_map(fn(then) {
+        [#(row.ok, False), #(row.error, True)]
+        |> list.filter_map(fn(pair) {
+          let #(then, failed) = pair
           case then, target {
             reader_front.ThenGoTo(route: route, ..), Ok(target) ->
               case route_path_for(front, route) {
@@ -9191,6 +9274,19 @@ pub fn interactive_notes(
                   Ok(conflict(
                     "GoTo の行き先 route." <> route <> " がこの面の Page に無い(第 15 条)",
                   ))
+                // 失敗の本文(`{code, ..}`)は Out でないので、error 側の穴は埋められない
+                Some(path) if failed ->
+                  case path_holes(path) {
+                    [] -> Error(Nil)
+                    _ ->
+                      Ok(conflict(
+                        "after_send の error 側の GoTo(route."
+                        <> route
+                        <> ") の path "
+                        <> path
+                        <> " に穴がある(第 15 条、error 側の GoTo は穴の無い route に限る)",
+                      ))
+                  }
                 Some(path) -> {
                   let holes = path_holes(path)
                   case
@@ -9346,6 +9442,7 @@ pub fn interactive_notes(
       after_missing,
       after_extra,
       after_twice,
+      json_args,
       goto,
       twice,
       unsent,

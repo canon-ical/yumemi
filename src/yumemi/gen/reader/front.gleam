@@ -302,6 +302,9 @@ pub type Component {
     view_params: List(ViewParam),
     /// 同じ module の `pub type With` の欄(view が `with` を受けるとき)
     with_fields: Option(List(#(String, glance.Type))),
+    /// With の欄のうち、型に live の型・el.Element・el.Attribute・関数を含むもの(第 22 条。unqualified の
+    /// import・同じ module の型の欄・型の別名を辿る)
+    with_forbidden: List(String),
     /// import した `gen/live/*` の module 名
     live_imports: List(String),
     /// import の別名 → module の道(第 22 条で With の欄の型を解く)
@@ -1523,6 +1526,16 @@ fn parse_component(unit: Unit) -> Result(Component, Nil) {
     has_app: has_app,
     view_params: view_params,
     with_fields: with_fields,
+    with_forbidden: case with_fields {
+      Some(fields) ->
+        list.filter_map(fields, fn(field) {
+          case forbidden_with_type(module, [], field.1) {
+            True -> Ok(field.0)
+            False -> Error(Nil)
+          }
+        })
+      None -> []
+    },
     live_imports: live_imports,
     aliases: aliases,
     live_calls: live_calls,
@@ -1750,30 +1763,9 @@ fn component_shape_notes(
       }
     })
     |> list.unique
-  // 第 21 条:out を textarea / select / option の中に置く
-  let out_in_control =
-    call_sites(module)
-    |> list.filter(fn(call) {
-      call.module == "yumemi/front/html"
-      && list.contains(
-        ["textarea", "textarea_", "select", "select_", "option", "option_"],
-        call.name,
-      )
-    })
-    |> list.any(fn(call) {
-      call.arguments
-      |> list.flat_map(all_expressions)
-      |> list.any(fn(expression) {
-        case expression {
-          glance.Call(function: function, ..) ->
-            case resolve_callee(function, module.imports) {
-              Some(#(path, "out")) -> string.starts_with(path, "gen/live/")
-              _ -> False
-            }
-          _ -> False
-        }
-      })
-    })
+  // 第 21 条:out を textarea / select / option の中に置く(直に・pipe で・変数や同じ module の関数を
+  // 通して)
+  let out_in_control = out_in_control(module)
   let out_note = case out_in_control {
     True -> [
       "4|`out` を textarea / select / option の中に置いている(第 21 条、Out の値が送りの Args に入る抜け道)",
@@ -1781,6 +1773,172 @@ fn component_shape_notes(
     False -> []
   }
   list.flatten([app, calls_note, double_bind, out_note])
+}
+
+/// 第 21 条:`html.option` / `select` / `textarea`(と `_` 付き)の呼び出し・capture・pipe の中に、
+/// live の `out` の参照、`out` を含む値を束ねた変数、`out` に届く同じ module の関数が現れる。
+/// 変数は関数ごとに `let`・`use`・`case` の束ねを辿る(入れ子の Block と fn も)。
+fn out_in_control(module: glance.Module) -> Bool {
+  let is_out = fn(expression) {
+    case resolve_callee(expression, module.imports) {
+      Some(#(path, "out")) -> string.starts_with(path, "gen/live/")
+      _ -> False
+    }
+  }
+  let is_control = fn(expression) {
+    case resolve_callee(expression, module.imports) {
+      Some(#("yumemi/front/html", name)) ->
+        list.contains(
+          ["textarea", "textarea_", "select", "select_", "option", "option_"],
+          name,
+        )
+      _ -> False
+    }
+  }
+  let bodies =
+    list.map(module.functions, fn(definition) {
+      #(definition.definition.name, definition.definition.body)
+    })
+  // out に届く同じ module の関数(呼び合いを不動点まで)
+  let reaches = fn(expression, names) {
+    all_expressions(expression)
+    |> list.any(fn(found) {
+      is_out(found)
+      || case found {
+        glance.Variable(name: name, ..) -> list.contains(names, name)
+        _ -> False
+      }
+    })
+  }
+  let tainted_functions =
+    fixpoint([], fn(names) {
+      list.filter_map(bodies, fn(body) {
+        case
+          list.any(list.flat_map(body.1, statement_expressions), reaches(
+            _,
+            names,
+          ))
+        {
+          True -> Ok(body.0)
+          False -> Error(Nil)
+        }
+      })
+    })
+  list.any(bodies, fn(body) {
+    let statements = nested_statements(body.1)
+    let expressions =
+      list.flat_map(body.1, statement_expressions)
+      |> list.flat_map(all_expressions)
+    let cases =
+      list.filter_map(expressions, fn(expression) {
+        case expression {
+          glance.Case(subjects: subjects, clauses: clauses, ..) ->
+            Ok(#(subjects, clauses))
+          _ -> Error(Nil)
+        }
+      })
+    let tainted =
+      fixpoint(tainted_functions, fn(names) {
+        let from_statements =
+          list.flat_map(statements, fn(statement) {
+            case statement {
+              glance.Assignment(pattern: pattern, value: value, ..) ->
+                case reaches(value, names) {
+                  True -> pattern_names(pattern)
+                  False -> []
+                }
+              glance.Use(patterns: patterns, function: function, ..) ->
+                case reaches(function, names) {
+                  True ->
+                    list.flat_map(patterns, fn(pattern) {
+                      pattern_names(pattern.pattern)
+                    })
+                  False -> []
+                }
+              _ -> []
+            }
+          })
+        let from_cases =
+          list.flat_map(cases, fn(found) {
+            case list.any(found.0, reaches(_, names)) {
+              True ->
+                list.flat_map(found.1, fn(clause) {
+                  list.flat_map(clause.patterns, list.flat_map(_, pattern_names))
+                })
+              False -> []
+            }
+          })
+        list.unique(
+          list.flatten([tainted_functions, from_statements, from_cases]),
+        )
+      })
+    list.any(expressions, fn(expression) {
+      let control = case expression {
+        glance.Call(function: function, ..)
+        | glance.FnCapture(function: function, ..) -> is_control(function)
+        glance.BinaryOperator(name: glance.Pipe, right: right, ..) ->
+          case right {
+            glance.Call(function: function, ..)
+            | glance.FnCapture(function: function, ..) -> is_control(function)
+            _ -> is_control(right)
+          }
+        _ -> False
+      }
+      control && list.any(expression_children(expression), reaches(_, tainted))
+    })
+  })
+}
+
+/// 名の集まりを、足すものが無くなるまで広げる。
+fn fixpoint(names: List(String), step: fn(List(String)) -> List(String)) {
+  let next = list.unique(list.append(names, step(names)))
+  case list.length(next) == list.length(names) {
+    True -> names
+    False -> fixpoint(next, step)
+  }
+}
+
+/// 関数の本体の文と、その中の Block・fn の文(入れ子まで)。
+fn nested_statements(body: List(glance.Statement)) -> List(glance.Statement) {
+  list.append(
+    body,
+    list.flat_map(body, statement_expressions)
+      |> list.flat_map(all_expressions)
+      |> list.flat_map(fn(expression) {
+        case expression {
+          glance.Block(statements: statements, ..) -> statements
+          glance.Fn(body: statements, ..) -> statements
+          _ -> []
+        }
+      }),
+  )
+}
+
+/// pattern が束ねる変数の名。
+fn pattern_names(pattern: glance.Pattern) -> List(String) {
+  case pattern {
+    glance.PatternVariable(name: name, ..) -> [name]
+    glance.PatternAssignment(pattern: inner, name: name, ..) -> [
+      name,
+      ..pattern_names(inner)
+    ]
+    glance.PatternTuple(elements: elements, ..) ->
+      list.flat_map(elements, pattern_names)
+    glance.PatternList(elements: elements, tail: tail, ..) ->
+      list.append(
+        list.flat_map(elements, pattern_names),
+        option_to_list(tail) |> list.flat_map(pattern_names),
+      )
+    glance.PatternVariant(arguments: arguments, ..) ->
+      list.flat_map(arguments, fn(field) {
+        case field {
+          glance.LabelledField(item: item, ..) -> pattern_names(item)
+          glance.UnlabelledField(item: item) -> pattern_names(item)
+          glance.ShorthandField(label: label, ..) -> [label]
+        }
+      })
+    _ -> []
+  }
 }
 
 pub fn call_target_name(target: CallTarget) -> String {
@@ -4197,6 +4355,11 @@ fn is_internal_reference(path: String, name: String) -> Bool {
     | "yumemi/front/live", "component"
     | "yumemi/front/live", "json_string"
     | "yumemi/front/live", "json_object"
+    | "yumemi/front/live", "json_bool"
+    | "yumemi/front/live", "json_int"
+    | "yumemi/front/live", "json_float"
+    | "yumemi/front/live", "json_option"
+    | "yumemi/front/live", "json_list"
     | "yumemi/front/live", "MinLength"
     | "yumemi/front/live", "MaxLength"
     | "yumemi/front/live", "Required"
@@ -4587,7 +4750,7 @@ fn component_notes(front: Front) -> List(stop.Note) {
         Some(fields) ->
           fields
           |> list.filter(fn(field) {
-            forbidden_with_type(front, component, field.1)
+            list.contains(component.with_forbidden, field.0)
           })
           |> list.map(fn(field) {
             "4|With の欄 "
@@ -4597,9 +4760,17 @@ fn component_notes(front: Front) -> List(stop.Note) {
         None -> []
       }
       let tag = component_tag(component)
-      let tag_note = case el_is_custom_element_name(tag) {
-        True -> []
-        False -> [
+      let tag_note = case
+        el_is_custom_element_name(tag),
+        string.starts_with(tag, "yumemi-")
+      {
+        True, True -> [
+          "4|タグ名 "
+          <> tag
+          <> " が yumemi- で始まる(第 18 条、yumemi- は runtime の custom element(yumemi-escape ほか)の名に取ってある)",
+        ]
+        True, False -> []
+        False, _ -> [
           "4|タグ名 "
           <> tag
           <> " が custom element の名の形でない(第 18 条、module 名に _ を含める)",
@@ -4701,23 +4872,25 @@ fn el_is_custom_element_name(tag: String) -> Bool {
   )
 }
 
-/// With の欄の型(List・Option ほかの型引数を辿る)。同じ module の import で解き、別 module の
-/// record の中までは辿らない(51 v6 確認できなかったこと 16)。
+/// With の欄の型(List・Option ほかの型引数を辿る)。同じ module の import(unqualified の型も)で解き、
+/// 同じ module の custom type の欄と型の別名は中まで辿る。別 module の record の中までは辿らない
+/// (51 v6 確認できなかったこと 16)。
 fn forbidden_with_type(
-  front: Front,
-  component: Component,
+  module: glance.Module,
+  seen: List(String),
   type_: glance.Type,
 ) -> Bool {
-  let _ = front
   case type_ {
     glance.FunctionType(..) -> True
     glance.NamedType(name: name, module: alias, parameters: parameters, ..) -> {
-      let path = case alias {
-        Some(alias) -> component_import(component, alias)
-        None -> None
+      let target = case alias {
+        Some(alias) ->
+          imported_module(module.imports, alias)
+          |> option.map(fn(path) { #(path, name) })
+        None -> unqualified_type(module.imports, name)
       }
-      let here = case path {
-        Some(path) ->
+      let here = case target {
+        Some(#(path, name)) ->
           string.starts_with(path, "gen/live/")
           || {
             path == "yumemi/front/el"
@@ -4725,16 +4898,53 @@ fn forbidden_with_type(
           }
         None -> False
       }
-      here || list.any(parameters, forbidden_with_type(front, component, _))
+      // 同じ module の型(record の欄・型の別名)は中まで辿る
+      let local = case alias, list.contains(seen, name) {
+        None, False -> {
+          let seen = [name, ..seen]
+          let in_custom = case g.find_custom_type(module, name) {
+            Some(definition) ->
+              list.any(definition.variants, fn(variant) {
+                list.any(variant.fields, fn(field) {
+                  forbidden_with_type(module, seen, g.variant_field_type(field))
+                })
+              })
+            None -> False
+          }
+          in_custom
+          || list.any(module.type_aliases, fn(definition) {
+            definition.definition.name == name
+            && forbidden_with_type(module, seen, definition.definition.aliased)
+          })
+        }
+        _, _ -> False
+      }
+      here
+      || local
+      || list.any(parameters, forbidden_with_type(module, seen, _))
     }
     glance.TupleType(elements: elements, ..) ->
-      list.any(elements, forbidden_with_type(front, component, _))
+      list.any(elements, forbidden_with_type(module, seen, _))
     _ -> False
   }
 }
 
-fn component_import(component: Component, alias: String) -> Option(String) {
-  list.key_find(component.aliases, alias) |> option.from_result
+/// unqualified に import した型(`import a/b.{type T}`・`{type T as U}`)の #(module の道, 元の名)。
+fn unqualified_type(
+  imports: List(glance.Definition(glance.Import)),
+  name: String,
+) -> Option(#(String, String)) {
+  imports
+  |> list.find_map(fn(definition) {
+    let import_ = definition.definition
+    list.find_map(import_.unqualified_types, fn(found) {
+      case option.unwrap(found.alias, found.name) == name {
+        True -> Ok(#(import_.module, found.name))
+        False -> Error(Nil)
+      }
+    })
+  })
+  |> option.from_result
 }
 
 /// unit の中の関数・構成子の参照の module の道(逃げ道の呼び出しの数え)。

@@ -331,7 +331,8 @@ class YumemiInteractive extends ElementBase {
       this.yumemiBusy(form, false);
     }
     this.yumemiDone(service, serviceSpec, outcome);
-    if (!serviceSpec.read) follow(outcome.ok ? serviceSpec.ok : serviceSpec.error, outcome.value);
+    // 失敗の本文は Out でないので、error 側の穴は埋めない(生成器の第 15 条が穴のある route を止める)
+    if (!serviceSpec.read) follow(outcome.ok ? serviceSpec.ok : serviceSpec.error, outcome.ok ? outcome.value : null);
   }
 
   async yumemiCall(serviceSpec, args, signal, file) {
@@ -345,6 +346,9 @@ class YumemiInteractive extends ElementBase {
     if (outcome.ok) {
       setStates(this, ["ok", `sent-${service}`]);
       for (const place of this.querySelectorAll(`[data-yumemi-out^="${service}."]`)) {
+        // 送りの control の中身は値になる(option の字が select の値、textarea の字)。読みの戻りを書きの
+        // Args に流さないよう、そこには入れない(第 21 条の生成器の検査の書き方に依らない柵)
+        if (place.closest("option, select, textarea, datalist")) continue;
         const slot = place.getAttribute("data-yumemi-out").slice(service.length + 1);
         const path = serviceSpec.slots?.[slot] ?? slot;
         place.textContent = textOf(readPath(outcome.value, path));
@@ -374,8 +378,12 @@ class YumemiInteractive extends ElementBase {
         else url.searchParams.set(field, value);
       }
       const keep = { tag: this.localName, name: target.name };
-      if (hooks.go) hooks.go(url.href, { replace: true, keep });
-      else globalThis.location.replace(url.href);
+      // 欄の変更による取り直しで利用者の遷移でないので、送り手は数えない(`count: false`)
+      if (hooks.go) hooks.go(url.href, { replace: true, keep, count: false });
+      else {
+        try { sessionStorage.setItem("yumemi:uncounted", JSON.stringify({ href: url.href, at: Date.now() })); } catch (_error) {}
+        globalThis.location.replace(url.href);
+      }
       return;
     }
     // 単一の値:前の読みを中断して今の Args で 1 回叩き、out に入れる。fieldset は止めない

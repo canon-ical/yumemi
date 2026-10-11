@@ -269,13 +269,24 @@ let refresh = null;
 
 /// runtime の移動(After の GoTo・`reloads` の一覧)。route 表に当たれば client の遷移で、当たらなければ頁の読み込み。
 /// `replace` は履歴を積まない、`keep` は scroll を保ち focus を同じタグの同じ name の control へ戻す(`{tag, name}`)。
-export function go(href, { replace = false, keep = null } = {}) {
-  if (going !== null) return going(href, replace, keep);
+export function go(href, { replace = false, keep = null, count = true } = {}) {
+  // 数えない移動(`reloads` の一覧の取り直し):頁の読み込みに落ちても、来た頁の送り手が印を見て 1 回だけ外す
+  if (!count) markUncounted(href);
+  if (going !== null) return going(href, replace, keep, count);
   if (replace) globalThis.location.replace(href);
   else globalThis.location.assign(href);
 }
 
 let going = null;
+
+/// 送り手(pageview.mjs)が数えない頁の印。`{href, at}` を sessionStorage の 1 鍵に置き、10 秒の内だけ効く。
+export const uncountedKey = "yumemi:uncounted";
+
+function markUncounted(href) {
+  try {
+    sessionStorage.setItem(uncountedKey, JSON.stringify({ href: new URL(href, globalThis.location.href).href, at: Date.now() }));
+  } catch (_error) {}
+}
 
 /// 書いた後の読み直し。今の頁が route 表に当たれば client 遷移で取り直し、当たらなければ頁の読み込み。
 export function reload() {
@@ -353,10 +364,11 @@ export function start({ routes: paths, csp = {} }) {
     if (!routed(routes, globalThis.location.pathname)) return globalThis.location.assign(globalThis.location.href);
     navigation.reload({ info: refreshInfo });
   };
-  going = (href, replace, keepFocus) => {
+  going = (href, replace, keepFocus, count) => {
     const url = new URL(href, globalThis.location.href);
     if (!routed(routes, url.pathname)) return replace ? globalThis.location.replace(url.href) : globalThis.location.assign(url.href);
-    navigation.navigate(url.href, { history: replace ? "replace" : "push", info: { yumemi: goInfo, keep: keepFocus } });
+    const info = count ? { yumemi: goInfo, keep: keepFocus } : { yumemi: goInfo, keep: keepFocus, count: false };
+    navigation.navigate(url.href, { history: replace ? "replace" : "push", info });
   };
   navigation.addEventListener("navigatesuccess", () => {
     if (navigation.currentEntry) contents.set(navigation.currentEntry.key, shown);

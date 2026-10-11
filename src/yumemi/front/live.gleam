@@ -3,8 +3,10 @@
 //// ★ の目に無い。状態は form の control と custom state(`:state()`)にあり、runtime(`client.mjs`)が
 //// 付け替える。`@internal` の口は生成物(`src/gen/live/*`・`src/gen/interactive.gleam`)だけが呼ぶ。
 
+import gleam/float
+import gleam/int
 import gleam/list
-import gleam/option.{type Option}
+import gleam/option.{type Option, None, Some}
 import gleam/string
 import yumemi/front/css
 import yumemi/front/el.{type Attribute, type Element}
@@ -91,10 +93,11 @@ fn constraint_attribute(constraint: Constraint) -> Attribute {
 }
 
 fn int_text(value: Int) -> String {
-  string.inspect(value)
+  int.to_string(value)
 }
 
 /// `data-yumemi-when="<service>.<state>"` を付けた枝。出し分けは生成器の CSS が `:state()` で持つ。
+/// 包みは `<span>`(CSS は `display: contents`)── `<div>` は `<p>` の中で parser が p を閉じる。
 @internal
 pub fn when(
   service: String,
@@ -102,7 +105,7 @@ pub fn when(
   children: List(Element),
 ) -> Element {
   el.element(
-    "div",
+    "span",
     [el.attribute("data-yumemi-when", service <> "." <> state)],
     children,
   )
@@ -180,6 +183,42 @@ fn int_hex(value: Int) -> String {
     True -> string.slice(digits, value, 1)
     False -> int_hex(value / 16) <> string.slice(digits, value % 16, 1)
   }
+}
+
+/// JSON の真偽(Args の Bool の欄の初期値)。
+@internal
+pub fn json_bool(value: Bool) -> String {
+  case value {
+    True -> "true"
+    False -> "false"
+  }
+}
+
+/// JSON の数(Args の Int の欄の初期値)。
+@internal
+pub fn json_int(value: Int) -> String {
+  int.to_string(value)
+}
+
+/// JSON の数(Args の Float の欄の初期値)。
+@internal
+pub fn json_float(value: Float) -> String {
+  float.to_string(value)
+}
+
+/// `None` は `null`、`Some(x)` は x の JSON(Args の Option の欄の初期値)。
+@internal
+pub fn json_option(value: Option(a), encode: fn(a) -> String) -> String {
+  case value {
+    None -> "null"
+    Some(item) -> encode(item)
+  }
+}
+
+/// JSON の配列(Args の List の欄の初期値)。
+@internal
+pub fn json_list(values: List(a), encode: fn(a) -> String) -> String {
+  "[" <> string.join(list.map(values, encode), ",") <> "]"
 }
 
 /// `{"<name>": <value>, ..}`(値は JSON の字)。

@@ -8,6 +8,7 @@ import gen/live/widget_list as widget_list_live
 import gen/out/widget_list
 import gleam/int
 import gleam/list
+import gleam/option.{None}
 import yumemi/front/html
 import style
 
@@ -34,7 +35,7 @@ pub fn view(it: In) -> el.Element {
       el.text("記事の件数: " <> int.to_string(list.length(it.rows))),
     ]),
     interactive.tag_filter(
-      widget_list_live.Args(widget: "", slug: ""),
+      widget_list_live.Args(widget: None, slug: None),
       tag_filter.With(choices: ["all", "news", "other"]),
     ),
   ])

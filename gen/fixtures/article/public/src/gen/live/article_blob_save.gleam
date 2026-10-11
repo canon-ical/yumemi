@@ -1,11 +1,12 @@
 //// GENERATED from src/components/blob_save.gleam [sha256:4b0ae04257af] — 手で編集しない
 
+import gleam/option.{type Option}
 import yumemi/front/css
 import yumemi/front/el
 import yumemi/front/live
 
 pub type Args {
-  Args(slug: String, blob: String, existing: String)
+  Args(slug: String, blob: String, existing: Option(String))
 }
 
 pub type Field {
@@ -79,7 +80,7 @@ pub fn args_json(args: Args) -> String {
   live.json_object([
     #("slug", live.json_string(args.slug)),
     #("blob", live.json_string(args.blob)),
-    #("existing", live.json_string(args.existing)),
+    #("existing", live.json_option(args.existing, live.json_string)),
   ])
 }
 

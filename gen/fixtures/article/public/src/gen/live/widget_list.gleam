@@ -1,11 +1,12 @@
 //// GENERATED from src/components/tag_filter.gleam [sha256:2061651af7cb] — 手で編集しない
 
+import gleam/option.{type Option}
 import yumemi/front/css
 import yumemi/front/el
 import yumemi/front/live
 
 pub type Args {
-  Args(widget: String, slug: String)
+  Args(widget: Option(String), slug: Option(String))
 }
 
 pub type Field {
@@ -67,8 +68,8 @@ pub fn send(class: css.Class, children: List(el.Element)) -> el.Element {
 @internal
 pub fn args_json(args: Args) -> String {
   live.json_object([
-    #("widget", live.json_string(args.widget)),
-    #("slug", live.json_string(args.slug)),
+    #("widget", live.json_option(args.widget, live.json_string)),
+    #("slug", live.json_option(args.slug, live.json_string)),
   ])
 }
 

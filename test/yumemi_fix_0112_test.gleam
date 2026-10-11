@@ -254,12 +254,18 @@ pub fn live_body_encodes_args_by_type_test() {
     "\"article_publish\": { \"method\": \"POST\", \"path\": \"/api/articles/:slug/publish\", \"read\": false, \"upload\": false, \"accepted\": false, \"entry\": false, \"args\": [{ \"name\": \"slug\", \"wire\": \"text\", \"blob\": false }, { \"name\": \"pinned\", \"wire\": \"bool\", \"blob\": false }, { \"name\": \"rank\", \"wire\": \"int\", \"blob\": false }, { \"name\": \"weight\", \"wire\": \"float\", \"blob\": false }, { \"name\": \"note\", \"wire\": { \"option\": \"int\" }, \"blob\": false }]",
   )
   |> should.be_true
-  // live module は Args を文字列の欄で持ち、送り方を持たない
+  // live module は Args を Service の Args の欄の型で持ち(0.12 r2、Block が初期値を型で書く)、
+  // 送り方を持たない。字への写しは args_json が live.json_* で持つ
   let module = live(files, "article_publish")
   string.contains(
     module,
-    "Args(slug: String, pinned: String, rank: String, weight: String, note: String)",
+    "Args(slug: String, pinned: Bool, rank: Int, weight: Float, note: Option(Int))",
   )
+  |> should.be_true
+  string.contains(module, "live.json_bool(args.pinned)") |> should.be_true
+  string.contains(module, "live.json_int(args.rank)") |> should.be_true
+  string.contains(module, "live.json_float(args.weight)") |> should.be_true
+  string.contains(module, "live.json_option(args.note, live.json_int)")
   |> should.be_true
   string.contains(module, "json.") |> should.be_false
 }

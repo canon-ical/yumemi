@@ -10,7 +10,7 @@ pub type Args {
     title: String,
     body: String,
     category: String,
-    tags: String,
+    tags: List(String),
   )
 }
 
@@ -97,7 +97,7 @@ pub fn args_json(args: Args) -> String {
     #("title", live.json_string(args.title)),
     #("body", live.json_string(args.body)),
     #("category", live.json_string(args.category)),
-    #("tags", live.json_string(args.tags)),
+    #("tags", live.json_list(args.tags, live.json_string)),
   ])
 }
 

@@ -748,3 +748,140 @@ pub fn textarea_bind_renders_the_value_as_content_test() {
   |> el.to_string
   |> should.equal("<input value=\"x\">")
 }
+
+// ── r2(柏木 ゲート 2 の P1 5 件と P2 2 件)─────────────────────────────────────
+
+/// P1-1:第 21 条は pipe・変数・同じ module の関数を通した out も止める。control の外の out は止めない。
+pub fn article_21_out_through_pipe_variable_and_function_test() {
+  [
+    "pub fn view(_p: publish.Args) -> el.Element { el.fragment([html.select_([], [html.option_([], [publish.OutSlug |> publish.out])]), publish.send(css.class([]), [])]) }\n",
+    "pub fn view(_p: publish.Args) -> el.Element { let o = publish.out(publish.OutSlug)\n let p = o\n el.fragment([html.select_([], [html.option_([], [p])]), publish.send(css.class([]), [])]) }\n",
+    "fn slot() -> el.Element { publish.out(publish.OutSlug) }\npub fn view(_p: publish.Args) -> el.Element { el.fragment([html.textarea_([], [slot()]), publish.send(css.class([]), [])]) }\n",
+    "pub fn view(_p: publish.Args) -> el.Element { let o = publish.out(publish.OutSlug)\n el.fragment([[o] |> html.option_([], _), publish.send(css.class([]), [])]) }\n",
+  ]
+  |> list.each(fn(view) {
+    notes_with([component("probe_one", publish_calls <> publish_after <> view)])
+    |> stops("第 21 条", 4)
+  })
+  // control の外の out と、out を持たない変数を option に入れるのは止まらない
+  notes_with([
+    component(
+      "probe_one",
+      publish_calls
+        <> publish_after
+        <> "pub fn view(_p: publish.Args) -> el.Element { let o = publish.out(publish.OutSlug)\n let label = el.text(\"x\")\n el.fragment([o, html.select_([], [html.option_([], [label])]), publish.send(css.class([]), [])]) }\n",
+    ),
+  ])
+  |> with("第 21 条")
+  |> should.equal([])
+}
+
+/// P1-2:第 22 条は unqualified の import・同じ module の record の欄・型の別名も止める。
+pub fn article_22_unqualified_record_and_alias_test() {
+  [
+    "import yumemi/front/el.{type Element as Node}\npub type With { With(inner: Node) }\n",
+    "pub type Item { Item(label: String, icon: el.Element) }\npub type With { With(items: List(Item)) }\n",
+    "pub type Icon = el.Element\npub type With { With(icon: Icon) }\n",
+    "pub type Next = List(create.Args)\npub type With { With(next: Next) }\n",
+  ]
+  |> list.each(fn(types) {
+    notes_with([
+      component(
+        "probe_one",
+        types
+          <> publish_calls
+          <> publish_after
+          <> "pub fn view(_p: publish.Args, with: With) -> el.Element { let _ = with\n publish.send(css.class([]), []) }\n",
+      ),
+    ])
+    |> stops("第 22 条", 4)
+  })
+  // 字と字の List・同じ module の字だけの record は止まらない
+  notes_with([
+    component(
+      "probe_one",
+      "pub type Item { Item(label: String) }\npub type Label = String\npub type With { With(items: List(Item), label: Label) }\n"
+        <> publish_calls
+        <> publish_after
+        <> "pub fn view(_p: publish.Args, with: With) -> el.Element { let _ = with\n publish.send(css.class([]), []) }\n",
+    ),
+  ])
+  |> with("第 22 条")
+  |> should.equal([])
+}
+
+/// P1-4:error 側の GoTo は穴の無い route に限る(失敗の本文で穴を埋めない)。
+pub fn article_15_error_goto_needs_a_route_without_holes_test() {
+  notes_with([
+    component(
+      "probe_one",
+      publish_calls
+        <> "pub const after_send: List(#(service.Service, live.After(route.Route))) = [#(service.ArticlePublish, live.After(ok: live.Stay, error: live.GoTo(route.ArticleArgSlug, notice: None)))]\n"
+        <> publish_view,
+    ),
+  ])
+  |> stops("第 15 条", 4)
+  notes_with([
+    component(
+      "probe_one",
+      publish_calls
+        <> "pub const after_send: List(#(service.Service, live.After(route.Route))) = [#(service.ArticlePublish, live.After(ok: live.Stay, error: live.GoTo(route.Status, notice: None)))]\n"
+        <> publish_view,
+    ),
+  ])
+  |> with("第 15 条")
+  |> should.equal([])
+}
+
+/// P2(b):第 18 条は yumemi- で始まるタグを止める(runtime の `yumemi-escape` の define を奪う)。
+pub fn article_18_yumemi_prefixed_tag_stops_test() {
+  notes_with([
+    component("yumemi_escape", publish_calls <> publish_after <> publish_view),
+  ])
+  |> stops("第 18 条", 4)
+}
+
+/// P1-3:live の Args は Service の Args の欄の型(List・Option)で、Block は初期値を型で書く。字への写しは
+/// 生成物の args_json が持つ。
+pub fn live_args_are_typed_and_blocks_write_values_test() {
+  let assert Ok(create) =
+    simplifile.read(public <> "/src/gen/live/article_create.gleam")
+  string.contains(create, "tags: List(String)") |> should.be_true
+  string.contains(create, "live.json_list(args.tags, live.json_string)")
+  |> should.be_true
+  let assert Ok(save) =
+    simplifile.read(public <> "/src/gen/live/article_blob_save.gleam")
+  string.contains(save, "existing: Option(String)") |> should.be_true
+  let assert Ok(block) = simplifile.read(public <> "/src/blocks/article.gleam")
+  string.contains(block, "tags: [\"fixture\"]") |> should.be_true
+  string.contains(block, "\\\"") |> should.be_false
+  front_live.json_object([
+    #("a", front_live.json_list(["x", "y"], front_live.json_string)),
+    #("b", front_live.json_option(None, front_live.json_int)),
+    #("c", front_live.json_option(Some(3), front_live.json_int)),
+    #("d", front_live.json_bool(True)),
+    #("e", front_live.json_float(2.5)),
+  ])
+  |> should.equal(
+    "{\"a\":[\"x\",\"y\"],\"b\":null,\"c\":3,\"d\":true,\"e\":2.5}",
+  )
+}
+
+/// P2(a):when の包みは span(`<p>` の中で parser が p を閉じない)。
+pub fn when_wraps_with_a_span_test() {
+  html.p_([], [front_live.when("s", "idle", [el.text("x")])])
+  |> el.to_document_string
+  |> string.contains("<p><span data-yumemi-when=\"s.idle\">x</span></p>")
+  |> should.be_true
+}
+
+@external(javascript, "./yumemi_012_y3_test_ffi.mjs", "runtime_r2")
+fn runtime_r2() -> String
+
+/// P1-1・P1-3・P1-4・P1-5 の runtime の側(偽の DOM)。
+pub fn runtime_r2_closes_the_kashiwagi_p1_test() {
+  let out = runtime_r2()
+  string.contains(out, "NG ") |> should.be_false
+  string.contains(out, "STDERR") |> should.be_false
+  string.split(out, "\n") |> list.length |> should.equal(9)
+}

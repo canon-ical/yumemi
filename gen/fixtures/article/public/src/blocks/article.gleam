@@ -96,7 +96,7 @@ pub fn view(it: In, arg: Arg) -> el.Element {
             title: "本日の記事",
             body: "夜のシフトが得意な新人です。よろしくお願いします。",
             category: "news",
-            tags: "[\"fixture\"]",
+            tags: ["fixture"],
           ),
           pick_tag.With(
             choices: ["fixture", "gleam", "cloudflare"],
@@ -106,7 +106,7 @@ pub fn view(it: In, arg: Arg) -> el.Element {
         interactive.blob_save(article_blob_save.Args(
           slug: it.article.slug,
           blob: "stored-image-key",
-          existing: "stored-optional-key",
+          existing: Some("stored-optional-key"),
         )),
         interactive.article_blob_copy(blob_copy.Args(file: "", from: "")),
         interactive.article_manage(
@@ -116,7 +116,7 @@ pub fn view(it: In, arg: Arg) -> el.Element {
             title: it.article.title,
             body: it.article.body,
             category: "news",
-            tags: "[]",
+            tags: [],
           ),
         ),
         interactive.title_lookup(article_title.Args(slug: it.article.slug)),

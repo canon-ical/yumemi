@@ -156,3 +156,79 @@ origin/main `80e3102d0`(BRIEF の書かれた後に進んでいた)を `git arch
 ## DDL
 
 無し(fixture article に足した `db/queries/article_title/root.sql` は読みの 1 文で、表は変えない)
+
+## r2(柏木の P1 5 件と P2 2 件、真壁 Opus 直書き)
+
+基点 `b52fdcd`(r1 `483b5a4` の上に柏木の直し 4 件)。branch `impl/012-y3`。main は merge していない。証跡は `build/012-y3-r2-*`(git の外)。
+
+### やったこと
+
+1. **P1-1 第 21 条の連鎖の抜け**(両方で閉じた)
+   - runtime(`interactive.mjs` の `yumemiDone`):`out` の span が `option`・`select`・`textarea`・`datalist` の中(`closest`)なら書かない。生成器の検査の書き方に依らない柵
+   - 生成器(`reader/front.gleam` の `out_in_control`):`html.option`・`select`・`textarea`(と `_` 付き)の呼び出し・capture(`[o] |> html.option_([], _)`)・pipe の中に、live の `out` の参照(pipe の `publish.OutSlug |> publish.out` も)、`out` を含む値を束ねた変数(関数ごとに `let`・`use`・`case` の束ねを不動点まで、入れ子の Block と fn も)、`out` に届く同じ module の関数(呼び合いも不動点まで)が現れたら止める(4)
+2. **P1-2 第 22 条の 3 形**(`forbidden_with_type` を module を持って解く形に):unqualified の型の import(`el.{type Element}`・`{type Element as Node}`)、同じ module の custom type の欄(`List(Item)` と `Item(icon: el.Element)`、循環は 1 度だけ)、型の別名(`pub type Icon = el.Element`・`pub type Next = List(create.Args)`)。読みは Component の読みの時に `with_forbidden` として畳む(`aliases` を引く `component_import` は消した)
+3. **P1-3 Args の初期値は型付き**(下の「P1-3 の型の形」)
+4. **P1-4 error 側の `GoTo`**(`emit/front.gleam` の第 15 条):`after_send` の `error:` が穴のある route の `GoTo` なら止める(4)。runtime も失敗の時は穴を埋めない(`follow` に Out を渡さない)
+5. **P1-5 一覧の `reloads` は数えない**:runtime は一覧の取り直しで `go(href, {replace: true, keep, count: false})`。`navigate.go` は `count: false` を navigate の `info` に載せ(`{yumemi: "go", keep, count: false}`)、送り手(`pageview.mjs`)は navigate の `info.count === false` を数えない。頁の読み込みに落ちたとき(route 表に無い・取れない・Navigation API が無い)のために、`go` は sessionStorage の `yumemi:uncounted` に `{href, at}` を置き、送り手は頁の読み込みで今の URL と 10 秒の内なら 1 回だけ数えず印を消す(client 遷移の成功でも消す)。README の遷移の節に 1 項
+6. **P2**:(a) `live.when` の包みを `<span>`(CSS の `[data-yumemi-when] { display: contents }` は r1 のまま、`:state()` の隠す規則は属性の選択子なので要素名に依らない)。(b) 第 18 条で `yumemi-` で始まるタグを止める(4)
+7. fixture article:`blocks/article.gleam` の `tags: "[\"fixture\"]"` → `tags: ["fixture"]`・`tags: "[]"` → `tags: []`・`existing: "stored-optional-key"` → `existing: Some("stored-optional-key")`、`blocks/feed.gleam` の `widget_list_live.Args(widget: "", slug: "")` → `(widget: None, slug: None)`。README の Interactive Components の節(Args は型付き・第 22 条の 3 形・error 側の GoTo・第 21 条の辿り・`yumemi-` のタグ・when の span)と遷移の節
+
+### P1-3 の型の形(鷹野に返す点)
+
+live module の `Args` の欄の型は、その Service の Args の欄の wire の形の Gleam の型:`Bool`・`Int`・`Float` はそのまま、`Option(x)`・`List(x)` もそのまま(`gleam/option` を import)、それ以外のスカラ(値型・Id・列挙・日付)は `String`(back が文字列で読む、`gen/out` の値型が `String` の別名なのと同じ)。字への写しは生成物の `args_json` が `live.json_bool`・`json_int`・`json_float`・`json_string`・`json_option(value, encode)`・`json_list(values, encode)`(どれも `@internal`、★ が呼べば第 3 条)で持つ。runtime の表の型(wire)は r1 のままで、型付きの JSON の値もそのまま送る(`wireValue` は配列・真偽・数・null を受ける)。
+
+★ の 1 例(fixture の Block):
+
+```gleam
+interactive.pick_tag(
+  article_create.Args(slug: "article", title: "本日の記事", body: "..", category: "news", tags: ["fixture"]),
+  pick_tag.With(choices: ["fixture", "gleam", "cloudflare"], selected: "fixture"),
+)
+interactive.blob_save(article_blob_save.Args(slug: it.article.slug, blob: "stored-image-key", existing: Some("stored-optional-key")))
+```
+
+生成物(`gen/live/article_create.gleam`):`Args(slug: String, title: String, body: String, category: String, tags: List(String))`、`#("tags", live.json_list(args.tags, live.json_string))`。SSR の `data-yumemi-args` は `"tags":["fixture"]`・`"existing":"stored-optional-key"`・`"widget":null`。
+
+**record・組・Dict・スカラでない要素の List の欄**(wire が `json`)は型で書く形が無いので、その Service を `calls` に置くと止める(4、第 11 条)。後で record の写しと encoder を足せば緩められる(★ の書き方は変わらない向き)。fixture と musearch の写しで当たる数は数えていない(fixture は 0)。
+
+**51 v6 に足す行**(「interactive Component の生成物」):
+
+- 「live module の `Args` の欄は Service の Args の欄の型 ── `Bool`・`Int`・`Float`・`Option`・`List` はそのまま、他のスカラは `String`。Block は初期値を型で書き(`tags: ["news"]`、`note: None`)、`data-yumemi-args` の JSON の字は生成物の `args_json` が `live.json_*` で写す」
+- 「Args の欄が record・組・Dict・スカラでない要素の List の Service は interactive Component の `calls` に置けない(4、第 11 条)」
+- 「生成器が止めるもの」第 15 条に「`after_send` の `error:` の `GoTo` は穴の無い route に限る(4)」、第 18 条に「`yumemi-` で始まるタグ(4)」、第 21 条に「pipe・変数・同じ module の関数を辿る。runtime も control の中の `out` に書かない」、第 22 条に「unqualified の import・同じ module の record の欄・型の別名を辿る」
+- 「`when` の包みは `<span>`(`display: contents`)」、「`reloads` の一覧の取り直しは pageview に数えない(navigate の info の `count: false`、頁の読み込みに落ちたら `yumemi:uncounted` の印で 1 回)」
+
+### 検収
+
+| | before(`b52fdcd`) | after |
+|---|---|---|
+| root `gleam test` | 421 本(`build/012-y3-r2-test0.txt`) | **428 本、失敗 0**(`build/012-y3-r2-test3.txt`) |
+| `gleam format --check src test` | 0 | 0(`build/012-y3-r2-fmt.txt`) |
+
+足した test は `test/yumemi_012_y3_test.gleam` の 7 本(`article_21_out_through_pipe_variable_and_function_test`(4 形 + 止まらない形)・`article_22_unqualified_record_and_alias_test`(4 形 + 止まらない形)・`article_15_error_goto_needs_a_route_without_holes_test`・`article_18_yumemi_prefixed_tag_stops_test`・`live_args_are_typed_and_blocks_write_values_test`・`when_wraps_with_a_span_test`・`runtime_r2_closes_the_kashiwagi_p1_test`(偽の DOM の 9 件、`test/yumemi_012_y3_r2_check.mjs`))。基点のコード(`b52fdcd` の src に live.gleam の json 口だけ足した写し)で回すと、この 7 本が全部落ち、他の 421 本は通った。
+
+期待値を書き換えた test:`yumemi_fix_0112_test.live_body_encodes_args_by_type_test` ── live module の Args が `Args(slug: String, pinned: String, rank: String, weight: String, note: String)` から `Args(slug: String, pinned: Bool, rank: Int, weight: Float, note: Option(Int))` に替わった(P1-3)。`live.json_bool`・`json_int`・`json_float`・`json_option` の写しも見るようにした。
+
+**柏木の直し 4 件(`b52fdcd`)**:それぞれの test(`runtime_uploads_a_chosen_file_once_test`・`textarea_bind_renders_the_value_as_content_test`・`bind_pattern_keeps_the_spec_regex_escapes_test`・`article_3_aliased_unqualified_import_stops_test`)は 428 本の中で通る。柏木の台 `build/012-y3-kashiwagi/double-upload.mjs` を今の runtime で回して `POST の数: 1`。
+
+**fixture の生成**:article 停止コード 0(警告は数えの 1 行だけ)、`git add` の後にもう 1 回で 0・差 0(`build/012-y3-r2-gen-article{1,2}.txt`)。cms 停止コード 0、2 回目 0・差 0(`build/012-y3-r2-gen-cms{1,2}.txt`、差は runtime の入った `client.mjs` だけ)。article の public と admin は `gleam build --target javascript` が通る(Block の型の値で compile、`build/012-y3-r2-public-build.txt`)。
+
+**Chromium 153**(SSR を描き直した `build/012-y3-r2-pages`、台は r1 の `build/012-y3-interactive-checks.mjs`):既定 37/37・`:state()` 無し 37/37・`commandForElement` 無し 38/38・minify 37/37(`build/012-y3-r2-chromium-{default,nostates,nocommand,minify}.txt`、r1 と同じ数)。足した台 `build/012-y3-r2-chromium-probe.mjs`(fixture の client.mjs に送り手の start を足した束、頁に門の印)8/8(`build/012-y3-r2-chromium-probe.txt`):頁の読み込みで initial 1 件 → 一覧の `reloads` で `?widget=other` に移って pageview 0 件 → link の client 遷移で `spa` 1 件・option の中の out に書かず select の値は `""`(外の out には入る)・`<p>` の中の span の when は p に残り div は外へ出る・頁の when は span で `display: contents`。
+
+### 選んだこと・食い違い
+
+- **when の span は `<p>` の件だけを直す。**table の直下(`<table>`・`<tr>` の中で `<td>` の外)は span も div と同じく parser が table の外へ出す(foster parenting。Chromium 153 の DOMParser で `<table><span data-yumemi-when>` の span が table の外、`<td>` の中の span は td の中に残ることを見た)。table の直下に `when` を置く形を止めるかは決めていない(止めていない)
+- **第 21 条の同じ module の関数**は「本体のどこかで `out` に届く関数」を全部数える(戻り値に入るかは見ない)ので、option の中で呼ぶ関数がどこかで `out` を描くだけでも止まる。変数は名で見て、同じ関数の中の同じ名の束ね直し(shadowing)は区別しない(止まる側に倒れる)
+- **第 22 条**は別の module の record の中までは辿らない(r1 のまま、51 v6 確認できなかったこと 16)
+- **`yumemi:uncounted` の印**は 10 秒で効かなくなる。頁の読み込みに落ちた後、印の URL と同じ URL を 10 秒の内に利用者が開き直すと 1 回数えない
+- runtime の柵(control の中の out)は `datalist` も入れた
+
+### 確かめていないこと
+
+- Navigation API の無い browser で、一覧の `reloads` の頁の読み込み(`location.replace`)が数えられないこと(偽の DOM では見た、Chromium の写しは作っていない)
+- record・組・Dict の Args を持つ Service の Component が musearch の写しに何本あるか(第 11 条の新しい止まりの件数)
+- Safari・Firefox
+
+### DDL
+
+無し

@@ -303,7 +303,7 @@ var YumemiInteractive = class extends ElementBase {
       this.yumemiBusy(form, false);
     }
     this.yumemiDone(service, serviceSpec, outcome);
-    if (!serviceSpec.read) follow(outcome.ok ? serviceSpec.ok : serviceSpec.error, outcome.value);
+    if (!serviceSpec.read) follow(outcome.ok ? serviceSpec.ok : serviceSpec.error, outcome.ok ? outcome.value : null);
   }
   async yumemiCall(serviceSpec, args, signal, file) {
     const response = await call(serviceSpec, args, signal, file);
@@ -319,6 +319,7 @@ var YumemiInteractive = class extends ElementBase {
     if (outcome.ok) {
       setStates(this, ["ok", `sent-${service}`]);
       for (const place of this.querySelectorAll(`[data-yumemi-out^="${service}."]`)) {
+        if (place.closest("option, select, textarea, datalist")) continue;
         const slot = place.getAttribute("data-yumemi-out").slice(service.length + 1);
         const path = serviceSpec.slots?.[slot] ?? slot;
         place.textContent = textOf(readPath(outcome.value, path));
@@ -346,8 +347,14 @@ var YumemiInteractive = class extends ElementBase {
         else url.searchParams.set(field, value);
       }
       const keep = { tag: this.localName, name: target.name };
-      if (hooks.go) hooks.go(url.href, { replace: true, keep });
-      else globalThis.location.replace(url.href);
+      if (hooks.go) hooks.go(url.href, { replace: true, keep, count: false });
+      else {
+        try {
+          sessionStorage.setItem("yumemi:uncounted", JSON.stringify({ href: url.href, at: Date.now() }));
+        } catch (_error) {
+        }
+        globalThis.location.replace(url.href);
+      }
       return;
     }
     this.yumemiReading?.abort();
@@ -602,12 +609,20 @@ function stage(target, doc, keep, limit = holdLimit) {
   return { ready, commit, cancel };
 }
 var refresh = null;
-function go(href, { replace = false, keep = null } = {}) {
-  if (going !== null) return going(href, replace, keep);
+function go(href, { replace = false, keep = null, count = true } = {}) {
+  if (!count) markUncounted(href);
+  if (going !== null) return going(href, replace, keep, count);
   if (replace) globalThis.location.replace(href);
   else globalThis.location.assign(href);
 }
 var going = null;
+var uncountedKey = "yumemi:uncounted";
+function markUncounted(href) {
+  try {
+    sessionStorage.setItem(uncountedKey, JSON.stringify({ href: new URL(href, globalThis.location.href).href, at: Date.now() }));
+  } catch (_error) {
+  }
+}
 function reload() {
   if (refresh !== null) return refresh();
   globalThis.location.assign(globalThis.location.href);
@@ -681,10 +696,11 @@ function start2({ routes: paths, csp = {} }) {
     if (!routed(routes, globalThis.location.pathname)) return globalThis.location.assign(globalThis.location.href);
     navigation.reload({ info: refreshInfo });
   };
-  going = (href, replace, keepFocus) => {
+  going = (href, replace, keepFocus, count) => {
     const url = new URL(href, globalThis.location.href);
     if (!routed(routes, url.pathname)) return replace ? globalThis.location.replace(url.href) : globalThis.location.assign(url.href);
-    navigation.navigate(url.href, { history: replace ? "replace" : "push", info: { yumemi: goInfo, keep: keepFocus } });
+    const info = count ? { yumemi: goInfo, keep: keepFocus } : { yumemi: goInfo, keep: keepFocus, count: false };
+    navigation.navigate(url.href, { history: replace ? "replace" : "push", info });
   };
   navigation.addEventListener("navigatesuccess", () => {
     if (navigation.currentEntry) contents.set(navigation.currentEntry.key, shown);
@@ -759,6 +775,19 @@ function readPrevious(key) {
     return null;
   }
 }
+var uncountedKey2 = "yumemi:uncounted";
+function uncounted(href) {
+  try {
+    const raw = sessionStorage.getItem(uncountedKey2);
+    if (raw === null) return false;
+    const mark2 = JSON.parse(raw);
+    if (mark2?.href !== href) return false;
+    sessionStorage.removeItem(uncountedKey2);
+    return typeof mark2.at === "number" && Date.now() - mark2.at < 1e4;
+  } catch (_error) {
+    return false;
+  }
+}
 function idle(run) {
   if ("requestIdleCallback" in globalThis) globalThis.requestIdleCallback(run, { timeout: 1e3 });
   else globalThis.requestAnimationFrame?.(run) ?? setTimeout(run, 0);
@@ -792,7 +821,7 @@ function start3({ endpoint, key, fields }) {
     if (window.opener && entry?.type === "navigate") sessionStorage.removeItem(key);
   } catch (_) {
   }
-  if (marked()) {
+  if (marked() && !uncounted(location.href)) {
     const initial = () => idle(() => send(entry?.type === "reload" ? "reload" : "initial", shown, document.referrer || null));
     const afterLoad = () => {
       if (document.readyState === "complete") initial();
@@ -806,12 +835,13 @@ function start3({ endpoint, key, fields }) {
   let pending = null;
   let current = location.href;
   navigation.addEventListener("navigate", (event) => {
-    pending = event.hashChange || event.downloadRequest != null ? null : { type: event.navigationType, from: current };
+    pending = event.hashChange || event.downloadRequest != null || event.info?.count === false ? null : { type: event.navigationType, from: current };
   });
   navigation.addEventListener("navigatesuccess", () => {
     const navigated = pending;
     pending = null;
     current = location.href;
+    uncounted(location.href);
     if (navigated === null || navigation.transition == null || !marked()) return;
     const url = new URL(location.href);
     idle(() => send(navigated.type === "reload" ? "reload" : "spa", url, navigated.from));

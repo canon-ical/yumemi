@@ -28,3 +28,9 @@ export function runtime_wire() {
   check("text", w("text", "x") === "x");
   return out.join("\n");
 }
+
+/// r2(柏木 ゲート 2 の P1):out を control の中に入れない・error 側の GoTo・一覧の reloads を数えない・型の初期値。
+export function runtime_r2() {
+  const result = spawnSync(process.execPath, [path.resolve("test/yumemi_012_y3_r2_check.mjs")], { encoding: "utf8", timeout: 60000 });
+  return `${result.stdout}${result.stderr ? `\nSTDERR ${result.stderr}` : ""}`.trim();
+}

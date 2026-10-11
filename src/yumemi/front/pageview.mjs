@@ -59,6 +59,22 @@ function readPrevious(key) {
   }
 }
 
+// navigate.mjs の `go(.., {count: false})` が置く印(`{href, at}`、10 秒の内)。今の URL に当たれば消して真
+const uncountedKey = "yumemi:uncounted";
+
+function uncounted(href) {
+  try {
+    const raw = sessionStorage.getItem(uncountedKey);
+    if (raw === null) return false;
+    const mark = JSON.parse(raw);
+    if (mark?.href !== href) return false;
+    sessionStorage.removeItem(uncountedKey);
+    return typeof mark.at === "number" && Date.now() - mark.at < 10000;
+  } catch (_error) {
+    return false;
+  }
+}
+
 function idle(run) {
   if ("requestIdleCallback" in globalThis) globalThis.requestIdleCallback(run, { timeout: 1000 });
   else globalThis.requestAnimationFrame?.(run) ?? setTimeout(run, 0);
@@ -82,7 +98,7 @@ export function start({ endpoint, key, fields }) {
   const entry = performance.getEntriesByType?.("navigation")?.[0];
   // 新しい tab(opener のある navigate)では、元の tab の鎖を引き継がない
   try { if (window.opener && entry?.type === "navigate") sessionStorage.removeItem(key); } catch (_) {}
-  if (marked()) {
+  if (marked() && !uncounted(location.href)) {
     const initial = () => idle(() => send(entry?.type === "reload" ? "reload" : "initial", shown, document.referrer || null));
     const afterLoad = () => {
       if (document.readyState === "complete") initial();
@@ -98,12 +114,16 @@ export function start({ endpoint, key, fields }) {
   let pending = null;
   let current = location.href;
   navigation.addEventListener("navigate", (event) => {
-    pending = event.hashChange || event.downloadRequest != null ? null : { type: event.navigationType, from: current };
+    // `reloads` の一覧の取り直し(info の `count: false`)は利用者の遷移でないので数えない
+    pending = event.hashChange || event.downloadRequest != null || event.info?.count === false
+      ? null
+      : { type: event.navigationType, from: current };
   });
   navigation.addEventListener("navigatesuccess", () => {
     const navigated = pending;
     pending = null;
     current = location.href;
+    uncounted(location.href);
     // 島の `pushState` / `replaceState` も `navigatesuccess` を出すが、transition は null で印は今の頁のまま
     if (navigated === null || navigation.transition == null || !marked()) return;
     const url = new URL(location.href);
