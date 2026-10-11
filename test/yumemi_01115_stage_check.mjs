@@ -196,4 +196,23 @@ const state = (promise) => {
   check("limit passes", ready() === "done");
 }
 
+// 6. 0.12:門の数える印は字が同じでも残さず、来た頁のものに替える(前の頁の印を残さない)。来た頁に無ければ外す
+{
+  const mark = ["meta", { name: "yumemi-pageview" }];
+  const target = makeDoc(true, [css("/www.css"), mark, client], []);
+  const old = target.head.childNodes[1];
+  const incoming = makeDoc(false, [css("/www.css"), mark, client], []);
+  const fresh = incoming.head.childNodes[1];
+  const staged = stage(target, incoming, keep, 1000);
+  await staged.ready;
+  check("mark kept old until commit", old.parentNode === target.head && fresh.parentNode !== target.head);
+  await staged.commit();
+  const marks = target.head.childNodes.filter((node) => node.getAttribute?.("name") === "yumemi-pageview");
+  check("mark replaced by incoming", marks.length === 1 && marks[0] === fresh && old.parentNode === null);
+  const plain = stage(target, makeDoc(false, [css("/www.css"), client], []), keep, 1000);
+  await plain.ready;
+  await plain.commit();
+  check("mark removed when incoming has none", !target.head.childNodes.some((node) => node.getAttribute?.("name") === "yumemi-pageview"));
+}
+
 console.log(out.join("\n"));

@@ -1,33 +1,43 @@
-// yumemi yumemi/front ── Page 間の client 遷移(0.11.4、H9)。生成の `priv/static/_yumemi/client.mjs` が
-// `start({routes, csp, boot, pageview})` を呼ぶ。`routes` は同じ面の Page の route の綴り、`csp` は門の frame-src の
-// CSP を持つ Page の route からその値(0.11.15。0.11.14 までは生成器が CSP を持つ Page を表から外していた。`csp` を
-// 知らない 0.11.14 の client は、CSP の header で頁の読み込みに落ちる)。
+// yumemi yumemi/front ── Page 間の client 遷移(0.11.4、H9 → 0.12 で Navigation API に寄せた)。生成の
+// `priv/static/_yumemi/client.mjs` が `start({routes, csp, boot})` を呼ぶ。`routes` は同じ面の Page の route の綴り、
+// `csp` は門の CSP を持つ Page の route からその値(0.11.15)。
 //
-// 同じ origin で、今の頁と行き先の両方が `routes` に当たり、行き先の CSP が「今の document を読み込んだ Page の CSP」
-// と同じ a の click だけを取る(CSP の header は頁の読み込みの応答にしか効かないので、違う CSP の頁へは読み込みで
-// 移る)。次の頁は server に 1 回の request で取りに行く(門・成人の申告・session の判定は server の今までの道を通る)。
-// 200 の HTML で、応答の CSP の header が表と同じ値で、同じ面の client を持ち、差し替えられる形なら head と body を
-// 差し替え、島を起こし直し(`boot`)、history を積む。戻る / 進むも同じ道で取り直す。取れない(redirect・200 で
-// ない・CSP の header が表と違う・script を持つ・given の島が既に登録済み)ときと、route 表に無い・CSP が違う・
-// 修飾キー付き・target 付き・download の click は、頁の読み込みに落とす。
+// click の横取り・履歴・戻る / 進む・scroll・focus・中断・# はブラウザの Navigation API に任せる。`navigation` の
+// navigate イベントのうち、利用者が起こした push / replace(link の click、GET の form)と、同じ document の中の
+// 戻る / 進む(traverse)と、`reload()` が起こした reload だけを `intercept()` で取る。取るのは、今の頁と行き先の両方が
+// `routes` に当たり、行き先の CSP が「今の document を読み込んだ Page の CSP」と同じときだけ(CSP の header は頁の
+// 読み込みの応答にしか効かない)。scroll と focus は `intercept()` の既定(`after-transition`)のまま ── push は # の
+// 先か頁の頭へ、戻る / 進むは離れた時の位置へ戻し、focus は `autofocus` の要素か body へ移る(reload だけ scroll を
+// 触らせない。下の「書いた後の取り直し」)。同じ頁の中の #・
+// 修飾キー・target・download・別 origin・POST の form は、ブラウザがそのまま扱う。Navigation API の無い browser では
+// 何も取らない(頁の読み込み)。
+//
+// framework に残すのは 7 つ ── 取得・差し替えの判定・head の差分・stylesheet の待ち・body の差し替え・島の再起動
+// (`boot`)・pageview の印。次の頁は server に 1 回の request で取りに行き(門・成人の申告・session の判定は server の
+// 今までの道を通る)、200 の HTML で、応答の CSP の header が表と同じ値で、同じ面の client を持ち、差し替えられる形
+// なら head と body を差し替えて `boot` を呼ぶ。取れない(redirect・200 でない・HTML でない・CSP の header が表と違う・
+// script を持つ・given の島が既に登録済み)ときは、行き先を頁の読み込みで開き直す(URL は取った時点で行き先に
+// 替わっているので、履歴は積まない `location.replace`)。
 //
 // head の差し替え(0.11.15):今の head と来た head で同じ要素(outerHTML が同じ)は残し、順を保って差分だけ
 // 足し引きする(同じ stylesheet の `<link>` を作り直さない ── 作り直すと確かめ直しの往復の間に素の頁が出る)。
 // 新しく足す stylesheet と、来た頁の body にだけある stylesheet は、当たらない media で先に読み終えてから body を
 // 替える(body の側は、自分が読み終えるまで head の写しを残す)。
 //
-// pageview(r2):fetch は印の header `x-yumemi-navigate: 1` を付ける。門は pageview の Page を adult の session に
-// 200 の HTML で返す時、script の代わりに `<meta name="yumemi-pageview">` を head に差す。client は差し替えた後に
-// だけ、その印を見て 1 回送る(kind は遷移が `spa`、書いた後の取り直しが `reload`)。頁の読み込みに落ちた時は
-// 送らない ── 読み込みの応答には門が今までどおり script を差し、それが 1 回数える。
+// pageview(0.12):fetch は印の header `x-yumemi-navigate: 1` を付け、門は数える Page の応答の head に
+// `<meta name="yumemi-pageview">` を差す。ここは送らない。差し替えでは印を毎回来た頁のものに替え(前の頁の印を
+// 残さない)、`navigatesuccess` の時点で今の document にあるのは来た頁の印だけ。送るのは client 側の送り手で、
+// 遷移の種類は `navigation.transition.navigationType`(click は push、戻る / 進むは traverse、書いた後の取り直しは
+// reload)で見る。
 //
-// 書いた後の取り直し(r2):`reload()` は今の頁が route 表に当たれば今の URL を同じ道で取り直す(history を積まず、
-// scroll を保つ)。当たらない・`start` が走っていない時は頁の読み込み。
+// 書いた後の取り直し:`reload()` は今の頁が route 表に当たれば `navigation.reload()` を起こし、それを取って今の URL
+// を同じ道で取り直す(履歴を積まず、scroll は `manual` で今の位置のまま)。当たらない・`start` が走っていない時は
+// 頁の読み込み。
 
 const clientSrc = "/_yumemi/client.mjs";
 /// 門に「client 遷移の fetch」と知らせる header。門はこれを見て pageview の script の代わりに印を差す。
 export const navigateHeader = "x-yumemi-navigate";
-const pageviewMark = 'meta[name="yumemi-pageview"]';
+const pageviewName = "yumemi-pageview";
 
 /// route の綴り(`/muse/:handle/reserve`)に pathname が当たるか。門(`gen/gate.mjs` の matchRoute)と同じ規則:
 /// 節の数が同じ、`:` の節は空でない値、字の節は同じか `_` を `-` に替えたもの。
@@ -67,25 +77,31 @@ export function samePolicy(headers, csp) {
   return (headers.get("content-security-policy") ?? null) === csp;
 }
 
-/// click を client 遷移で取るか。取るなら行き先の URL、取らないなら null。`loaded` は今の document を読み込んだ
-/// Page の CSP(既定は今の頁の表の値)で、行き先の CSP がこれと違えば取らない。
-export function intercept(event, routes, location, loaded = policy(routes, location.pathname)) {
-  if (event.defaultPrevented || event.button !== 0) return null;
-  if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return null;
-  const path = typeof event.composedPath === "function" ? event.composedPath() : [event.target];
-  const anchor = path.find((node) => node?.tagName === "A" && typeof node.getAttribute === "function" && node.hasAttribute("href"));
-  if (!anchor) return null;
-  const target = anchor.getAttribute("target");
-  if ((target !== null && target !== "" && target !== "_self") || anchor.hasAttribute("download")) return null;
+/// `reload()` が起こす reload の印(`navigation.reload` の info)。印の無い reload(`location.reload()`)は取らない。
+const refreshInfo = { yumemi: "reload" };
+
+/// navigate イベントを client 遷移で取るか。取るなら行き先の URL、取らないなら null。取るのは利用者が起こした
+/// push / replace、traverse、印の付いた reload で、ブラウザが取れると言い(`canIntercept`)、同じ頁の中の # でも
+/// download でも POST でもないものだけ。`loaded` は今の document を読み込んだ Page の CSP(既定は今の頁の表の値)で、
+/// 行き先の CSP がこれと違えば取らない。
+export function accept(event, routes, location, loaded = policy(routes, location.pathname)) {
+  if (!event.canIntercept || event.defaultPrevented || event.hashChange) return null;
+  if (event.downloadRequest != null || event.formData != null) return null;
+  const type = event.navigationType;
+  if (type === "reload" ? event.info?.yumemi !== refreshInfo.yumemi : type !== "traverse" && !event.userInitiated) return null;
   let url;
-  try { url = new URL(anchor.getAttribute("href"), location.href); } catch (_error) { return null; }
+  try { url = new URL(event.destination.url); } catch (_error) { return null; }
   if (url.origin !== location.origin) return null;
-  // 同じ頁の中の # は browser に任せる
-  if (url.pathname === location.pathname && url.search === location.search && url.hash !== "") return null;
   const here = policy(routes, location.pathname);
   const there = policy(routes, url.pathname);
   if (here === undefined || there === undefined || here !== loaded || there !== loaded) return null;
   return url;
+}
+
+/// 取らない navigate のうち、同じ document の中の戻る / 進む(# だけの移動でないもの)。ブラウザに任せると URL だけが
+/// 替わって中身が前の頁のまま残るので、取って頁の読み込みで開き直す。
+export function stale(event) {
+  return event.canIntercept && event.navigationType === "traverse" && event.destination?.sameDocument === true && !event.hashChange;
 }
 
 /// 取った頁の文書を差し替えてよいか(同じ面の client を持ち、head の他の script も body の script も持たず、
@@ -130,7 +146,11 @@ const holdLimit = 3000;
 // 読み終えるまで当てない media
 const quietMedia = "not all";
 
+// 門の数える印(`<meta name="yumemi-pageview">`)。字が同じでも残さず、毎回来た頁のものに替える
+let marks = 0;
+
 function nodeKey(node) {
+  if (node.nodeType === 1 && node.localName === "meta" && node.getAttribute("name") === pageviewName) return `#mark:${(marks += 1)}`;
   return node.nodeType === 1 ? node.outerHTML : `#${node.nodeType}:${node.nodeValue}`;
 }
 
@@ -234,43 +254,6 @@ export function stage(target, doc, keep, limit = holdLimit) {
   return { ready, commit, cancel };
 }
 
-/// # の行き先の要素。壊れた百分率の #(`#%E0%A4%A`)は null(投げると島の登録と yumemi-navigated が飛ぶ)。
-export function hashTarget(url, byId) {
-  if (!url.hash) return null;
-  try { return byId(decodeURIComponent(url.hash.slice(1))); } catch (_error) { return null; }
-}
-
-/// 取った文書に門の数える印があるか(門が数えたはずの応答:adult の session・200 の HTML・pageview の Page)。
-export function counted(doc) {
-  return doc.head?.querySelector(pageviewMark) != null;
-}
-
-/// client 遷移の pageview の本文。門の script(頁の読み込み)と同じ欄で、kind は `spa` か `reload`。
-/// 前の event(同じ tab の sessionStorage)が無い時だけ、遷移の元の path を referrer_path に置く。
-export function pageviewPayload({ url, kind, from, previous, sourceParam, id, at }) {
-  const payload = { id, client_at: at, kind, path: url.pathname };
-  if (previous) payload.prev = previous;
-  else if (from) payload.referrer_path = from;
-  const sourceKey = sourceParam ? url.searchParams.get(sourceParam) : null;
-  if (sourceKey && /^[a-z0-9_]{1,16}$/.test(sourceKey)) payload.source_key = sourceKey;
-  return payload;
-}
-
-function sendPageview(config, url, kind, from) {
-  let previous = null;
-  try {
-    const value = sessionStorage.getItem(config.key);
-    previous = value && /^[0-9a-f-]{36}$/.test(value) ? value : null;
-  } catch (_) {}
-  const id = crypto.randomUUID();
-  const body = JSON.stringify(pageviewPayload({ url, kind, from, previous, sourceParam: config.source, id, at: new Date().toISOString() }));
-  try { sessionStorage.setItem(config.key, id); } catch (_) {}
-  const post = () => fetch(config.endpoint, { method: "POST", headers: { "content-type": "application/json" }, body, keepalive: true });
-  const send = () => void post().catch(() => post().catch(() => {}));
-  if ("requestIdleCallback" in window) window.requestIdleCallback(send, { timeout: 1000 });
-  else requestAnimationFrame(send);
-}
-
 // `start` が走った面の取り直し(書いた後の読み直し)。走っていなければ null
 let refresh = null;
 
@@ -285,28 +268,22 @@ export function table(routes, csp = {}) {
   return routes.map((route) => ({ route, csp: Object.hasOwn(csp, route) ? csp[route] : null }));
 }
 
-export function start({ routes: paths, csp = {}, boot, pageview = null }) {
-  if (typeof window === "undefined" || typeof history?.pushState !== "function") return;
+/// この browser に Navigation API の navigate イベントと `intercept()` があるか。
+export function supported(scope = globalThis) {
+  return typeof scope.navigation?.addEventListener === "function" && typeof scope.NavigateEvent?.prototype?.intercept === "function";
+}
+
+export function start({ routes: paths, csp = {}, boot }) {
+  if (typeof window === "undefined" || !supported()) return;
+  const navigation = globalThis.navigation;
   const routes = table(paths, csp);
-  let pending = null;
-  // 今出している文書の pathname + search(# だけの移動は文書を変えない)
-  const page = (location) => location.pathname + location.search;
-  let shown = page(globalThis.location);
-  const load = (url, replace) => {
-    if (replace) globalThis.location.replace(url.href);
-    else globalThis.location.assign(url.href);
-  };
   const keep = (node) => node.nodeName === "SCRIPT" && node.getAttribute("src") === clientSrc;
   // 今の document を読み込んだ Page の CSP(client 遷移は同じ CSP の頁の間だけなので、遷移の後も変わらない)
   const loaded = policy(routes, globalThis.location.pathname);
-  // mode は "push"(click)・"pop"(戻る / 進む)・"refresh"(書いた後の取り直し)
-  const go = async (url, mode) => {
-    const push = mode === "push";
-    pending?.abort();
-    const controller = new AbortController();
-    pending = controller;
+  // 取れない時は行き先を頁の読み込みで開き直す(URL は既に行き先。利用者の起こした遷移でないので取られない)
+  const load = (url) => globalThis.location.replace(url.href);
+  const swap = async (url, signal) => {
     const csp = policy(routes, url.pathname);
-    if (csp === undefined || csp !== loaded) return load(url, !push);
     let response;
     try {
       response = await fetch(url.href, {
@@ -314,64 +291,36 @@ export function start({ routes: paths, csp = {}, boot, pageview = null }) {
         redirect: "manual",
         cache: "no-store",
         headers: { accept: "text/html", [navigateHeader]: "1" },
-        signal: controller.signal,
+        signal,
       });
-    } catch (error) {
-      if (controller.signal.aborted) return;
-      return load(url, !push);
+    } catch (_error) {
+      if (signal.aborted) return;
+      return load(url);
     }
     const type = response.headers.get("content-type") ?? "";
     if (response.type === "opaqueredirect" || response.status !== 200 || !type.startsWith("text/html") || !samePolicy(response.headers, csp)) {
-      return load(url, !push);
+      return load(url);
     }
     let html;
-    try { html = await response.text(); } catch (_error) { if (controller.signal.aborted) return; return load(url, !push); }
-    if (controller.signal.aborted) return;
+    try { html = await response.text(); } catch (_error) { if (signal.aborted) return; return load(url); }
+    if (signal.aborted) return;
     const doc = new DOMParser().parseFromString(html, "text/html");
-    if (!swappable(doc, (tag) => globalThis.customElements.get(tag) !== undefined)) return load(url, !push);
-    // 印は差し替えの前に読む(差し替えが head の子を今の文書へ移す)
-    const count = pageview !== null && counted(doc);
+    if (!swappable(doc, (tag) => globalThis.customElements.get(tag) !== undefined)) return load(url);
     const staged = stage(document, doc, keep);
     await staged.ready;
-    if (controller.signal.aborted) return staged.cancel();
-    pending = null;
-    const from = globalThis.location.pathname;
-    const scroll = [window.scrollX, window.scrollY];
+    if (signal.aborted) return staged.cancel();
     void staged.commit();
-    if (push) history.pushState({ yumemi: "navigate" }, "", url.href);
-    shown = page(url);
-    if (mode !== "refresh") {
-      const anchor = hashTarget(url, (id) => document.getElementById(id));
-      if (anchor) anchor.scrollIntoView();
-      else if (push) window.scrollTo(0, 0);
-    }
     boot();
-    if (mode === "refresh") {
-      // 取り直しは scroll を保つ。島が描き終わって高さが戻った後にも当て直す
-      const stay = () => window.scrollTo(scroll[0], scroll[1]);
-      stay();
-      requestAnimationFrame(() => { stay(); requestAnimationFrame(stay); });
-    }
-    if (count) sendPageview(pageview, url, mode === "refresh" ? "reload" : "spa", from);
-    document.dispatchEvent(new CustomEvent("yumemi-navigated", { detail: { url: url.href, mode } }));
   };
   refresh = () => {
-    const url = new URL(globalThis.location.href);
-    if (!routed(routes, url.pathname)) return globalThis.location.assign(url.href);
-    void go(url, "refresh");
+    if (!routed(routes, globalThis.location.pathname)) return globalThis.location.assign(globalThis.location.href);
+    navigation.reload({ info: refreshInfo });
   };
-  // 最初の頁の history にも印を付ける(戻るで最初の頁へ戻った時も同じ道で取る)
-  if (history.state === null) history.replaceState({ yumemi: "navigate" }, "", globalThis.location.href);
-  document.addEventListener("click", (event) => {
-    const url = intercept(event, routes, globalThis.location, loaded);
-    if (url === null) return;
-    event.preventDefault();
-    void go(url, "push");
-  });
-  window.addEventListener("popstate", (event) => {
-    const url = new URL(globalThis.location.href);
-    if (page(url) === shown) return;
-    if (event.state?.yumemi !== "navigate" || !routed(routes, url.pathname)) return load(url, true);
-    void go(url, "pop");
+  navigation.addEventListener("navigate", (event) => {
+    const url = accept(event, routes, globalThis.location, loaded);
+    // reload の既定の scroll は、離れる時にしか取らない位置(取り直しでは頁の頭)へ戻すので、reload だけ触らせない
+    // (差し替えの前後で同じ位置のまま)。push と traverse は既定(# の先か頭へ、戻る / 進むは離れた時の位置へ)
+    if (url !== null) event.intercept({ handler: () => swap(url, event.signal), scroll: event.navigationType === "reload" ? "manual" : "after-transition" });
+    else if (stale(event)) event.intercept({ handler: () => load(new URL(event.destination.url)) });
   });
 }

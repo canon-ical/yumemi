@@ -102,17 +102,15 @@ export function island_stylesheet() {
   return out.join("\n");
 }
 
-// H9 ── navigate.mjs の純な判定(click の取り方・route の当て方・差し替えてよい文書)
-import { counted, hashTarget, intercept, matches, pageviewPayload, swappable } from "./yumemi/front/navigate.mjs";
+// H9 ── navigate.mjs の純な判定(navigate イベントの取り方・route の当て方・差し替えてよい文書)。0.12 で click の
+// 横取りを Navigation API の navigate イベントに替えた(修飾キー・target はブラウザが別の文書で開くので届かない)
+import { accept, matches, swappable } from "./yumemi/front/navigate.mjs";
 
-function anchor(href, attrs = {}) {
-  return { tagName: "A", getAttribute: (name) => (name === "href" ? href : attrs[name] ?? null), hasAttribute: (name) => name === "href" || name in attrs };
+function navigate(href, extra = {}) {
+  return { canIntercept: true, defaultPrevented: false, hashChange: false, downloadRequest: null, formData: null, navigationType: "push", userInitiated: true, info: undefined, destination: { url: new URL(href, "https://www.example/").href, sameDocument: false }, ...extra };
 }
-function click(node, extra = {}) {
-  return { defaultPrevented: false, button: 0, metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, composedPath: () => [{ tagName: "SPAN" }, node], ...extra };
-}
-function fakeDoc({ scripts, head = true, given = [], mark = false }) {
-  const headEl = { tag: "head", querySelector: (q) => (mark && q === 'meta[name="yumemi-pageview"]' ? {} : null) };
+function fakeDoc({ scripts, head = true, given = [] }) {
+  const headEl = { tag: "head" };
   const els = scripts.map((s) => ({ getAttribute: (n) => s[n] ?? null, parentElement: s.inHead === false ? {} : headEl }));
   return {
     head: headEl,
@@ -129,29 +127,26 @@ export function navigation_rules() {
   check("route param", matches("/muse/:handle/reserve", "/muse/aoi/reserve"));
   check("route empty param", !matches("/muse/:handle/reserve", "/muse//reserve"));
   check("route hyphen", matches("/for_stores/api", "/for-stores/api"));
-  check("routed link", intercept(click(anchor("/muse/aoi/reserve/course?slot=1")), routes, here)?.href === "https://www.example/muse/aoi/reserve/course?slot=1");
-  check("unrouted link", intercept(click(anchor("/search")), routes, here) === null);
-  check("modifier", intercept(click(anchor("/me"), { metaKey: true }), routes, here) === null);
-  check("middle button", intercept(click(anchor("/me"), { button: 1 }), routes, here) === null);
-  check("other origin", intercept(click(anchor("https://evil.example/me")), routes, here) === null);
-  check("target blank", intercept(click(anchor("/me", { target: "_blank" })), routes, here) === null);
-  check("prevented", intercept(click(anchor("/me"), { defaultPrevented: true }), routes, here) === null);
-  check("from unrouted page", intercept(click(anchor("/me")), routes, new URL("https://www.example/search")) === null);
+  check("routed link", accept(navigate("/muse/aoi/reserve/course?slot=1"), routes, here)?.href === "https://www.example/muse/aoi/reserve/course?slot=1");
+  check("unrouted link", accept(navigate("/search"), routes, here) === null);
+  check("not interceptable", accept(navigate("/me", { canIntercept: false }), routes, here) === null);
+  check("script navigation", accept(navigate("/me", { userInitiated: false }), routes, here) === null);
+  check("other origin", accept(navigate("https://evil.example/me"), routes, here) === null);
+  check("hash only", accept(navigate("/muse/aoi/reserve#a", { hashChange: true }), routes, here) === null);
+  check("prevented", accept(navigate("/me", { defaultPrevented: true }), routes, here) === null);
+  check("from unrouted page", accept(navigate("/me"), routes, new URL("https://www.example/search")) === null);
   const client = { src: "/_yumemi/client.mjs", type: "module" };
   check("swappable", swappable(fakeDoc({ scripts: [client] }), () => false));
   check("inline script falls back", !swappable(fakeDoc({ scripts: [client, {}] }), () => false));
   check("given island defined falls back", !swappable(fakeDoc({ scripts: [client], given: ["reserve-time"] }), (tag) => tag === "reserve-time"));
   // r2(柏木 P1-7):download 付きの a は頁の読み込み
-  check("download", intercept(click(anchor("/me", { download: "" })), routes, here) === null);
-  // r2(柏木 P1-4):壊れた百分率の # は投げずに null(島の登録と yumemi-navigated を飛ばさない)
-  check("broken hash", hashTarget(new URL("https://www.example/me#%E0%A4%A"), () => { throw new Error("unreached"); }) === null);
-  check("hash", hashTarget(new URL("https://www.example/me#a%20b"), (id) => id) === "a b");
-  // r2:数える印は門が client 遷移の fetch に差す meta だけ
-  check("counted mark", counted(fakeDoc({ scripts: [client], mark: true })) && !counted(fakeDoc({ scripts: [client] })));
-  const spa = pageviewPayload({ url: new URL("https://www.example/muse/aoi?r=ig_1"), kind: "spa", from: "/search", previous: null, sourceParam: "r", id: "i", at: "t" });
-  check("payload spa", JSON.stringify(spa) === '{"id":"i","client_at":"t","kind":"spa","path":"/muse/aoi","referrer_path":"/search","source_key":"ig_1"}');
-  const chained = pageviewPayload({ url: new URL("https://www.example/muse/aoi?r=BAD!"), kind: "reload", from: "/search", previous: "p", sourceParam: "r", id: "i", at: "t" });
-  check("payload reload chained", JSON.stringify(chained) === '{"id":"i","client_at":"t","kind":"reload","path":"/muse/aoi","prev":"p"}');
+  check("download", accept(navigate("/me", { downloadRequest: "me.txt" }), routes, here) === null);
+  // 0.12:POST の form はブラウザ、GET の form は link と同じ
+  check("post form", accept(navigate("/me", { formData: {} }), routes, here) === null);
+  // 0.12:戻る / 進むは利用者の起こしでなくても取る。reload は `reload()` の印の付いたものだけ
+  check("traverse", accept(navigate("/me", { navigationType: "traverse", userInitiated: false, destination: { url: "https://www.example/me", sameDocument: true } }), routes, here)?.pathname === "/me");
+  check("reload marked", accept(navigate("/muse/aoi/reserve", { navigationType: "reload", userInitiated: false, info: { yumemi: "reload" } }), routes, here)?.pathname === "/muse/aoi/reserve");
+  check("reload unmarked", accept(navigate("/muse/aoi/reserve", { navigationType: "reload" }), routes, here) === null);
   return out.join("\n");
 }
 

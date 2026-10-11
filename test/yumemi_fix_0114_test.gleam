@@ -291,13 +291,13 @@ pub fn client_starts_navigation_over_page_routes_test() {
   |> should.be_true
 }
 
-/// r2:pageview を数える Page も route 表に入れ(client 遷移)、数える送り先を client に渡す。
+/// r2:pageview を数える Page も route 表に入れる(client 遷移)。0.12:navigate は送らないので送り先を渡さない。
 pub fn navigation_keeps_counted_pages_and_passes_pageview_test() {
   let assert Ok(text) =
     face_file([], [counting_gate()], "public/priv/static/_yumemi/client.mjs")
   string.contains(
     text,
-    "startNavigation({ routes: [\"/article/:slug\", \"/status\"], boot, pageview: { endpoint: \"/api/pageviews\", source: \"r\", key: \"k\" } });",
+    "startNavigation({ routes: [\"/article/:slug\", \"/status\"], boot });",
   )
   |> should.be_true
 }
@@ -358,11 +358,11 @@ pub fn done_reload_goes_through_navigation_test() {
 @external(javascript, "./yumemi_fix_0114_test_ffi.mjs", "navigation_rules")
 fn navigation_rules() -> String
 
-/// navigate.mjs の click の取り方と、差し替えてよい文書の判定。
+/// navigate.mjs の navigate イベントの取り方と、差し替えてよい文書の判定(0.12:click の横取りを Navigation API に)。
 pub fn navigation_intercepts_only_routed_plain_clicks_test() {
   let out = navigation_rules()
   string.contains(out, "NG ") |> should.be_false
-  string.split(out, "\n") |> list.length |> should.equal(20)
+  string.split(out, "\n") |> list.length |> should.equal(19)
 }
 
 @external(javascript, "./yumemi_fix_0114_test_ffi.mjs", "read_classification")
