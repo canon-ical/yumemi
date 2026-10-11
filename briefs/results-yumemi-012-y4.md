@@ -95,11 +95,13 @@
 - `navigatesuccess` の時点で、来た頁の `<meta name="yumemi-pageview">` が今の document にあり、前の頁の印は残らない(stage の差分で印を毎回替える。unit test 3 項と実測 9 回 + traverse + reload)
 - 種類は `navigation.transition.navigationType` で見える:click は `push`、戻る・進むは `traverse`、書いた後の取り直しは `reload`(実測で 3 種とも見た)
 - navigate.mjs は送らない。本便の後・Y5 の merge の前の main では client の遷移の pageview は送られない
+- (柏木 ゲート 2 で追記)`navigatesuccess` は navigate.mjs が取らない同じ document の移動(頁の中の #・`history.pushState` / `replaceState`)でも出る。そのとき `navigation.transition` は null で、今の頁の印は残ったまま。送り手は `navigation.transition` が null でない時だけ数える(Chromium 153 の小さな頁で、client の遷移の後の # の移動の `navigatesuccess` が transition null・印 1 つ(来た頁のもの)、島の `pushState` の `navigatesuccess` も transition null、`build/012-y4-k-harness-after.json`)
 
 ## musearch で `yumemi-navigated` を聞いている所(段 D の材料)
 
 - `muses/src/components/muse_nav_ffi.mjs:7-13`:`document.addEventListener("yumemi-navigated", tell)` でナビの選択中の印を付け替えている。0.12 では出ないので、`navigation.addEventListener("navigatesuccess", ..)` に替える
 - ほかに `yumemi-navigated` を聞く所は musearch の 4 面の src(生成物を除く)に無い(`grep`)
+- (柏木 ゲート 2 で追記)4 面の外、`docs/` の Playwright の台本 7 本が聞いている(origin/main `1b0244412`):`docs/acceptance-2b/run.mjs:404`・`docs/acceptance-2c/run.mjs:151`・`docs/acceptance-3-2/run.mjs:234`・`docs/acceptance-batch2/run.mjs:193`・`docs/acceptance-s-3/run.mjs:93`・`docs/mr-1/verify/run.mjs:124`・`docs/nv-4/evidence/probe.mjs:44`。前の 6 本は島の送りの後に `'load'` と `'yumemi-navigated'` の早い方を待つ形で、`.forgejo/workflows/playwright.yml` が path で走らせる。0.12 では書いた後の取り直しがどちらも出さないので、待ちが打ち切りまで延びる。`navigation` の `navigatesuccess` を待つ形に替える
 - `www/test/s-4c-heaven-widget.test.mjs:114` の正規表現(上)
 
 ## 振る舞いが替わったところ(0.11.15 との違い)
