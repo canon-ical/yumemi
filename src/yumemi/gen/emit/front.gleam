@@ -2004,11 +2004,11 @@ pub fn client_notes(
   })
 }
 
-/// client で差し替えてよい Page の route(0.11.4、H9)と、client 遷移で数える pageview の送り先(r2)。面の Page の
-/// route を全部出し、門の `frame_src` の Page は応答に持つ CSP の header の値を `csp` に route ごとに出す(0.11.15)。
-/// client は今の document を読み込んだ Page と CSP が同じ行き先だけを取り、違えば頁の読み込み(CSP の header は
-/// 頁の読み込みにしか効かない)。CSP を持つ Page の無い面は 0.11.14 と同じ字。pageview の Page も入る ── 門が
-/// client 遷移の fetch に数える印を差し、client が送る。
+/// client で差し替えてよい Page の route(0.11.4、H9)。面の Page の route を全部出し、門の `frame_src` の Page は
+/// 応答に持つ CSP の header の値を `csp` に route ごとに出す(0.11.15)。client は今の document を読み込んだ Page と
+/// CSP が同じ行き先だけを取り、違えば頁の読み込み(CSP の header は頁の読み込みにしか効かない)。CSP を持つ Page の
+/// 無い面は 0.11.14 と同じ字。pageview の Page も入る ── 門が client 遷移の fetch に数える印を差し、navigate は
+/// 差し替えで印を来た頁のものに替えるだけ(0.12。送るのは client 側の送り手)。
 fn navigation(
   app: model.App,
   back_units: List(Unit),
@@ -2035,18 +2035,7 @@ fn navigation(
       }
     None -> ""
   }
-  let pageview = case gate.pageview {
-    Some(pageview) ->
-      ", pageview: { endpoint: "
-      <> quoted(pageview.endpoint)
-      <> ", source: "
-      <> quoted(pageview.source_param)
-      <> ", key: "
-      <> quoted(pageview.storage_key)
-      <> " }"
-    None -> ""
-  }
-  #(routes, csp <> pageview)
+  #(routes, csp)
 }
 
 fn client_text(
@@ -2057,7 +2046,7 @@ fn client_text(
   hashes: hash.Hashes,
   navigation: #(List(String), String),
 ) -> String {
-  let #(routes, pageview) = navigation
+  let #(routes, options) = navigation
   // 書いた後の読み直し(r2):route 表があれば navigate の `reload`(当たる頁は client 遷移で取り直す)
   let #(navigation, reload) = case routes {
     [] -> #(#("", ""), "globalThis.location.assign(globalThis.location.href)")
@@ -2067,7 +2056,7 @@ fn client_text(
         "startNavigation({ routes: ["
           <> string.join(list.map(routes, fn(route) { quoted(route) }), ", ")
           <> "], boot"
-          <> pageview
+          <> options
           <> " });\n",
       ),
       "reloadPage()",

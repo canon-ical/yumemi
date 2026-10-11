@@ -18,10 +18,10 @@ pub fn navigation_follows_page_csp_test() {
   string.split(out, "\n") |> list.length |> should.equal(18)
 }
 
-/// head の差分の足し引き、body の側の stylesheet の待ち、取り消し、上限。
+/// head の差分の足し引き、body の側の stylesheet の待ち、取り消し、上限、数える印の替え(0.12)。
 pub fn navigation_stage_keeps_head_and_waits_for_stylesheets_test() {
   let out = navigation_stage()
   string.contains(out, "NG ") |> should.be_false
   string.contains(out, "STDERR") |> should.be_false
-  string.split(out, "\n") |> list.length |> should.equal(25)
+  string.split(out, "\n") |> list.length |> should.equal(28)
 }
