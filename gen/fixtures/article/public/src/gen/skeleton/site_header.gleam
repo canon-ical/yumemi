@@ -1,6 +1,6 @@
 //// GENERATED from public/src/blocks/site_header.gleam [sha256:e2cce72e4142] — 手で編集しない
 
-import framework/front/el
+import yumemi/front/el
 import sketch/lustre/element/html
 
 pub type In =

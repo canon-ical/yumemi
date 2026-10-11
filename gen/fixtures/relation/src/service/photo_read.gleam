@@ -3,8 +3,8 @@ import entity/album
 import entity/label
 import entity/photo
 import entity/shelf
-import framework/effect.{type Effect, Read}
-import framework/step.{type Start, type Step}
+import yumemi/effect.{type Effect, Read}
+import yumemi/step.{type Start, type Step}
 import gen/allow/photo as allow
 import gen/face.{type Face, Test}
 import gen/reads/photo_read as reads

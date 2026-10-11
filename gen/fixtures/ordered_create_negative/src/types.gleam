@@ -1,4 +1,4 @@
-import framework/spec.{type Spec, Range, Text, Uuid}
+import yumemi/spec.{type Spec, Range, Text, Uuid}
 
 pub const parent_id: Spec = Uuid
 

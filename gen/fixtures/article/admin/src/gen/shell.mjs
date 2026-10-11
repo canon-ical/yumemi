@@ -2,7 +2,7 @@
 
 import * as api from "./api.mjs";
 import * as blocksPreview from "./blocks_preview.mjs";
-import * as frontCss from "../../yumemi/framework/front/css.mjs";
+import * as frontCss from "../../yumemi/yumemi/front/css.mjs";
 import * as gate from "./gate.mjs";
 import * as layoutDefinition from "../layout.mjs";
 import * as pageDefinition0 from "../pages/home/page.mjs";

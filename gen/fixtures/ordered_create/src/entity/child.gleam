@@ -1,6 +1,6 @@
 import entity/parent.{type Parent}
-import framework/er.{type Held}
-import framework/verbs
+import yumemi/er.{type Held}
+import yumemi/verbs
 import gen/types/child_id.{type ChildId}
 import gen/types/child_name.{type ChildName}
 import gen/types/child_order.{type ChildOrder}

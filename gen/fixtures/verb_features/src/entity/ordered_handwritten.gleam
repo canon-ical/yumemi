@@ -1,6 +1,6 @@
 import entity/owner.{type Owner}
-import framework/er.{type Held}
-import framework/verbs
+import yumemi/er.{type Held}
+import yumemi/verbs
 import gen/types/ordered_handwritten_id.{type OrderedHandwrittenId}
 import gen/types/position.{type Position}
 

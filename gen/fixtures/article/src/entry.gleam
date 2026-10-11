@@ -1,5 +1,5 @@
 // ★ src/entry.gleam ── 人が来る入口の群。prefix 以外の URL は Service と Entity から生成する。
-import framework/entry.{
+import yumemi/entry.{
   type Entry, All, Anonymous, AnySubject, Authenticated, Http, ReadOnly,
   Subjects,
 }

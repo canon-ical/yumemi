@@ -1,4 +1,4 @@
-import framework/effect.{type Effect, Read}
+import yumemi/effect.{type Effect, Read}
 import gen/allow/example as allow
 import gen/face.{type Face, Missing}
 import gen/root/example_read.{type Service, Service}

@@ -2,9 +2,9 @@
 //// Service widget_page ── 向きの混じった `order` で `Paged`。
 //// gen-3 は列ごとの比較を組み合わせた keyset SQL を生成する。
 //// NULL 境界とページ間の欠落は、生成文字列の検査とは別に SQL 実行で検証する。
-import framework/effect.{type Effect, Read}
-import framework/page.{type Cursor, type Page, type PageSize}
-import framework/step.{type Start, type Step}
+import yumemi/effect.{type Effect, Read}
+import yumemi/page.{type Cursor, type Page, type PageSize}
+import yumemi/step.{type Start, type Step}
 import gen/allow/widget as allow
 import gen/face.{type Face, Test}
 import gen/query as q

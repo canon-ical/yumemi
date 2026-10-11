@@ -1,5 +1,5 @@
-import framework/blob.{type Blob}
-import framework/effect.{type Effect, Write}
+import yumemi/blob.{type Blob}
+import yumemi/effect.{type Effect, Write}
 import gen/face.{type Face, Public}
 import gen/root/article_blob_save.{type Root, type Service, Service}
 import gen/types/slug.{type Slug}

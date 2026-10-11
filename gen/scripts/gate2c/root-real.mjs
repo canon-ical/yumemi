@@ -6,7 +6,7 @@ import { decodeArticle } from '/home/yumemism/yumemism_repo/musearch/app/build/d
 import { makeContext } from '/home/yumemism/yumemism_repo/musearch/app/build/dev/javascript/musearch_app/gen/runtime.mjs';
 const { Root } = await import(`${process.env.ROOT_HARNESS}/build/dev/javascript/gate_root/gen/root/article_read.mjs`);
 const { to_muse } = await import(`${process.env.ROOT_HARNESS}/build/dev/javascript/gate_root/gen/reads/article_read.mjs`);
-const { interpret, fail } = await import(`${process.env.ROOT_HARNESS}/build/dev/javascript/yumemi/framework/step.mjs`);
+const { interpret, fail } = await import(`${process.env.ROOT_HARNESS}/build/dev/javascript/yumemi/yumemi/step.mjs`);
 
 const article = decodeArticle({
   id: '00000000-0000-0000-0000-000000000001',

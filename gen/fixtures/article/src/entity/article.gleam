@@ -3,8 +3,8 @@
 // ★ src/entity/article.gleam
 import entity/category.{type Category}
 import entity/tag.{type Tag}
-import framework/er.{type Has, type Multi}
-import framework/verbs
+import yumemi/er.{type Has, type Multi}
+import yumemi/verbs
 import gen/types/body.{type Body}
 import gen/types/slug.{type Slug}
 import gen/types/title.{type Title}

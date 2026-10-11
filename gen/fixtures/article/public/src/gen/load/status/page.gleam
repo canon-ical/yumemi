@@ -2,8 +2,8 @@
 
 import blocks/feed
 import blocks/site_header
-import framework/front/css
-import framework/front/sketch_css
+import yumemi/front/css
+import yumemi/front/sketch_css
 import gen/load/layout
 import gen/out/widget_list
 import gleam/list

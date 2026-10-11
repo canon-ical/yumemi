@@ -4,8 +4,8 @@
 // ★ src/service/article_publish.gleam
 import entity/article
 import entity/staff
-import framework/effect.{type Effect, Write}
-import framework/step.{type Start, type Step}
+import yumemi/effect.{type Effect, Write}
+import yumemi/step.{type Start, type Step}
 import gen/allow/article as allow
 import gen/face.{type Face, Admin, Public}
 import gen/phase

@@ -1,8 +1,8 @@
 //// Article Block ── article_read の Out だけを描く純粋な view。
 
-import framework/front/css
-import framework/front/el
-import framework/front/sketch_css
+import yumemi/front/css
+import yumemi/front/el
+import yumemi/front/sketch_css
 import gen/out/article_read
 import gleam/option.{type Option, None, Some}
 import lustre/attribute

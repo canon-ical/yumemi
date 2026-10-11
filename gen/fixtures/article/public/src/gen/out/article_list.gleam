@@ -1,6 +1,6 @@
 //// GENERATED from src/service/article_list.gleam [sha256:c641e915671e] — 手で編集しない
 
-import framework/page.{type Page, Page, cursor}
+import yumemi/page.{type Page, Page, cursor}
 import gleam/dynamic/decode
 
 pub type Slug =

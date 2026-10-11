@@ -1,7 +1,7 @@
 //// Feed Block ── widget_list の行数を描く。
 
-import framework/front/el
-import framework/front/sketch_css
+import yumemi/front/el
+import yumemi/front/sketch_css
 import gen/out/widget_list
 import gleam/int
 import gleam/list

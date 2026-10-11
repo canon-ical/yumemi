@@ -1,8 +1,8 @@
-import framework/front.{
+import yumemi/front.{
   type Page, Area, ByKind, Fixed, Flow, Frame, Page, Path, Query, Session,
   SubjectHandle, Var, Widget,
 }
-import framework/front/css
+import yumemi/front/css
 import gen/blocks
 import gen/service
 import gleam/option.{None, Some}

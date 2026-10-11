@@ -7,3 +7,5 @@ gen/build/
 
 # hex publish の鍵(人見が置く、commit しない)
 .hex-token
+node_modules/
+.scratch/

@@ -1,4 +1,4 @@
-import framework/effect.{type Effect, Read}
+import yumemi/effect.{type Effect, Read}
 import gen/allow/article as allow
 import gen/face.{type Face, Test}
 import gen/query as q

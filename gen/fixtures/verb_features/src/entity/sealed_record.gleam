@@ -1,4 +1,4 @@
-import framework/sealed.{type Sealed, type StaffKey}
+import yumemi/sealed.{type Sealed, type StaffKey}
 import gen/types/sealed_record_id.{type SealedRecordId}
 
 pub type SealedRecord {

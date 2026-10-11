@@ -1,5 +1,5 @@
-import framework/er
-import framework/page
+import yumemi/er
+import yumemi/page
 import gleam/option.{type Option, None}
 
 pub type Category {

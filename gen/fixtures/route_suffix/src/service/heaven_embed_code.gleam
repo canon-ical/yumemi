@@ -1,4 +1,4 @@
-import framework/effect.{type Effect, Read}
+import yumemi/effect.{type Effect, Read}
 import gen/face.{type Face, Test}
 import gen/root/heaven_embed_code.{type Root, type Service, Service}
 

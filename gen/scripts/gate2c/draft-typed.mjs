@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import assert from 'node:assert/strict';
 import pg from '/home/yumemism/yumemism_repo/musearch/app/node_modules/pg/lib/index.js';
 const { operation } = await import(`${process.env.DRAFT_HARNESS}/build/dev/javascript/gate_draft/probe.mjs`);
-const { stage } = await import(`${process.env.DRAFT_HARNESS}/build/dev/javascript/yumemi/framework/verb.mjs`);
+const { stage } = await import(`${process.env.DRAFT_HARNESS}/build/dev/javascript/yumemi/yumemi/verb.mjs`);
 const { ChunkCreated } = await import(`${process.env.DRAFT_HARNESS}/build/dev/javascript/gate_draft/gen/draft/chunk.mjs`);
 const client=new pg.Client({host:process.env.PGHOST??'127.0.0.1',port:Number(process.env.PGPORT??55432),user:process.env.PGUSER??'yumemism',database:process.env.PGDATABASE??'gate2c_kashiwagi_3947'});
 await client.connect();

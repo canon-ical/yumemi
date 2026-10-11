@@ -1,4 +1,4 @@
-import framework/front/css
+import yumemi/front/css
 
 pub type MediaVariant {
   Thumb

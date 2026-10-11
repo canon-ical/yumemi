@@ -1,5 +1,5 @@
-// ★ src/server.gleam ── back の宣言(framework/server)。Service でない HTTP の口と、導出規則を上書きする口。
-import framework/server.{Anyone, Attached, Get, Hook, Party, Post, ReadSession}
+// ★ src/server.gleam ── back の宣言(yumemi/server)。Service でない HTTP の口と、導出規則を上書きする口。
+import yumemi/server.{Anyone, Attached, Get, Hook, Party, Post, ReadSession}
 
 pub const attached: List(server.Attached) = [
   Attached(

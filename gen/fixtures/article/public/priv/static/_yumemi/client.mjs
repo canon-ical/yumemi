@@ -5829,7 +5829,7 @@ function dismissCurrentStylesheet() {
   return Result$Ok(void 0);
 }
 
-// public/build/dev/javascript/yumemi/framework/front/island_style.mjs
+// public/build/dev/javascript/yumemi/yumemi/front/island_style.mjs
 function styled(app5) {
   const created = stylesheet(new Persistent());
   if (!Result$isOk(created)) return app5;
@@ -5850,7 +5850,7 @@ function styled(app5) {
   return { ...app5, view: view5 };
 }
 
-// public/build/dev/javascript/yumemi/framework/front/navigate.mjs
+// public/build/dev/javascript/yumemi/yumemi/front/navigate.mjs
 var clientSrc = "/_yumemi/client.mjs";
 var navigateHeader = "x-yumemi-navigate";
 var pageviewMark = 'meta[name="yumemi-pageview"]';
@@ -6089,7 +6089,7 @@ function select_(attributes, children) {
   return element_("select", attributes, children);
 }
 
-// public/build/dev/javascript/yumemi/framework/front/track.mjs
+// public/build/dev/javascript/yumemi/yumemi/front/track.mjs
 var Auto = class extends CustomType {
 };
 var Track$Auto$const = new Auto();
@@ -6097,7 +6097,7 @@ var AutoSize = class extends CustomType {
 };
 var TrackSize$AutoSize$const = new AutoSize();
 
-// public/build/dev/javascript/yumemi/framework/front/css.mjs
+// public/build/dev/javascript/yumemi/yumemi/front/css.mjs
 var Margin = class extends CustomType {
 };
 var SpaceProperty$Margin$const = new Margin();
@@ -6180,7 +6180,7 @@ var Pulse = class extends CustomType {
 };
 var Animation$Pulse$const = new Pulse();
 
-// public/build/dev/javascript/yumemi/framework/front.mjs
+// public/build/dev/javascript/yumemi/yumemi/front.mjs
 var AuthOrigin = class extends CustomType {
 };
 var From$AuthOrigin$const = new AuthOrigin();
@@ -6194,10 +6194,10 @@ var Flow = class extends CustomType {
 };
 var Cell$Flow$const = new Flow();
 
-// public/build/dev/javascript/yumemi/framework/front/el.mjs
+// public/build/dev/javascript/yumemi/yumemi/front/el.mjs
 var text4 = text3;
 
-// public/build/dev/javascript/yumemi/framework/front/live.mjs
+// public/build/dev/javascript/yumemi/yumemi/front/live.mjs
 var State = class extends CustomType {
   constructor(args, given, last, waiting) {
     super();
@@ -6480,7 +6480,7 @@ function app() {
   );
 }
 
-// public/build/dev/javascript/yumemi/framework/spec_ffi.mjs
+// public/build/dev/javascript/yumemi/yumemi/spec_ffi.mjs
 function matches3(raw, pattern) {
   return new RegExp(pattern, "u").test(raw);
 }
@@ -6499,7 +6499,7 @@ function validUrl(raw) {
   }
 }
 
-// public/build/dev/javascript/yumemi/framework/spec.mjs
+// public/build/dev/javascript/yumemi/yumemi/spec.mjs
 var Uuid = class extends CustomType {
 };
 var Spec$Uuid$const = new Uuid();
@@ -7301,7 +7301,7 @@ function decoder3() {
   );
 }
 
-// public/build/dev/javascript/yumemi/framework/page.mjs
+// public/build/dev/javascript/yumemi/yumemi/page.mjs
 var Cursor = class extends CustomType {
   constructor(value2) {
     super();

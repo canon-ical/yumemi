@@ -239,7 +239,7 @@ try {
   const { FreeSpace } = await load("musearch_app/entity/free_space.mjs");
   const { MuseHeaven } = await load("musearch_app/entity/muse_heaven.mjs");
   const { Some, None } = await load("gleam_stdlib/gleam/option.mjs");
-  const step = await load("yumemi/framework/step.mjs");
+  const step = await load("yumemi/yumemi/step.mjs");
   const articleRead = await load("gate_root/gen/reads/article_read.mjs");
   const articleRoot = await load("gate_root/gen/root/article_read.mjs");
   const widgetEdit = await load("gate_root/gen/reads/widget_edit.mjs");
@@ -404,8 +404,8 @@ try {
   // ── fixture:Held / Link / Multi の 3 形(復号関数はこの検証が持つ ── fixture に runtime は無い)──
   const relationBuilt = buildRelationHarness(path.join(workDir, "relation-harness"));
   const loadR = (relative) => import(pathToFileURL(path.join(relationBuilt, relative)).href);
-  const er = await loadR("yumemi/framework/er.mjs");
-  const stepR = await loadR("yumemi/framework/step.mjs");
+  const er = await loadR("yumemi/yumemi/er.mjs");
+  const stepR = await loadR("yumemi/yumemi/step.mjs");
   const optionR = await loadR("gleam_stdlib/gleam/option.mjs");
   const prelude = await loadR("prelude.mjs");
   const album = await loadR("gate_relation/entity/album.mjs");

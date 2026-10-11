@@ -2,8 +2,8 @@
 import entity/album.{type Album}
 import entity/label.{type Label}
 import entity/shelf.{type Shelf}
-import framework/er.{type Held, type Link, type Multi}
-import framework/verbs
+import yumemi/er.{type Held, type Link, type Multi}
+import yumemi/verbs
 import gen/types/photo_caption.{type PhotoCaption}
 import gen/types/photo_id.{type PhotoId}
 import gen/types/photo_order.{type PhotoOrder}

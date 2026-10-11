@@ -1,4 +1,4 @@
-import framework/spec.{type Spec, Text}
+import yumemi/spec.{type Spec, Text}
 
 pub const parent_a: Spec = Text(min: 1, max: 20)
 

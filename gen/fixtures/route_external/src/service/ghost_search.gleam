@@ -1,4 +1,4 @@
-import framework/effect.{type Effect, Read}
+import yumemi/effect.{type Effect, Read}
 import gen/face.{type Face, Test}
 import gen/root/ghost_search.{type Root, type Service, Service}
 

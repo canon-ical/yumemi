@@ -2,7 +2,7 @@
 import { SQL } from './sql.mjs';
 import * as c from './codec.mjs';
 import * as subject from './subject.mjs';
-import { runtime } from '../../yumemi/framework/server/runtime.mjs';
+import { runtime } from '../../yumemi/yumemi/server/runtime.mjs';
 import * as allow_article from './allow/article.mjs';
 import * as draft_article from './draft/article.mjs';
 import * as draft_category from './draft/category.mjs';

@@ -1,6 +1,6 @@
 //// GENERATED from public/src/blocks/row_article.gleam [sha256:ace188936635] — 手で編集しない
 
-import framework/front/el
+import yumemi/front/el
 import gen/out/widget_list
 import gleam/string
 import sketch/lustre/element/html

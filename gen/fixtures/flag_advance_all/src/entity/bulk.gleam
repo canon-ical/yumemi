@@ -1,4 +1,4 @@
-import framework/verbs
+import yumemi/verbs
 
 pub type Bulk {
   Bulk(id: String)

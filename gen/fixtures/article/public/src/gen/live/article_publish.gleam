@@ -1,7 +1,7 @@
 //// GENERATED from src/components/like_button.gleam [sha256:0ca7721b0f95] — 手で編集しない
 
-import framework/front/live
-import framework/spec
+import yumemi/front/live
+import yumemi/spec
 import gen/out/article_publish
 import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode

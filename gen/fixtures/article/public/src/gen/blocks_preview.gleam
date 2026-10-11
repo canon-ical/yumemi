@@ -7,7 +7,7 @@ import blocks/row_article
 import blocks/row_summary
 import blocks/site_header
 import blocks/summary
-import framework/front/el
+import yumemi/front/el
 import gleam/option.{None}
 import lustre/attribute
 import lustre/element/html as raw_html

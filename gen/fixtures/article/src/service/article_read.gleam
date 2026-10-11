@@ -4,8 +4,8 @@
 import entity/article
 import entity/category
 import entity/tag
-import framework/effect.{type Effect, Read}
-import framework/step.{type Start, type Step}
+import yumemi/effect.{type Effect, Read}
+import yumemi/step.{type Start, type Step}
 import gen/allow/article as allow
 import gen/face.{type Face, Admin, Public}
 import gen/reads/article_read as reads

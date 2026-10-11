@@ -1,7 +1,7 @@
 // ★ 順序列が Option ── 生成器が名指しで止まる(exit 4)。
 import entity/album.{type Album}
-import framework/er.{type Held}
-import framework/verbs
+import yumemi/er.{type Held}
+import yumemi/verbs
 import gen/types/photo_id.{type PhotoId}
 import gen/types/photo_order.{type PhotoOrder}
 import gleam/option.{type Option}

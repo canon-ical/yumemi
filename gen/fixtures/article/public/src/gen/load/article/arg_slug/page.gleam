@@ -7,9 +7,9 @@ import blocks/row_article
 import blocks/row_summary
 import blocks/site_header
 import blocks/summary
-import framework/front/css
-import framework/front/el
-import framework/front/sketch_css
+import yumemi/front/css
+import yumemi/front/el
+import yumemi/front/sketch_css
 import gen/load/layout
 import gen/out/article_read
 import gen/out/widget_list

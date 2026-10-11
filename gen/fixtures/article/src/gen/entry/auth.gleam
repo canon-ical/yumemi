@@ -1,6 +1,6 @@
 //// GENERATED from framework session contract [sha256:bbf198d7f83a] — 手で編集しない
 
-import framework/io.{type Promise}
+import yumemi/io.{type Promise}
 
 pub type Database
 

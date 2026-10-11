@@ -1,4 +1,4 @@
-import framework/entry.{type Entry, All, Anonymous, AnySubject, Http}
+import yumemi/entry.{type Entry, All, Anonymous, AnySubject, Http}
 
 pub type Subject {
   Guest

@@ -1,7 +1,7 @@
 //// GENERATED from src/components/blob_save.gleam [sha256:5f2785f02d66] — 手で編集しない
 
-import framework/front/live
-import framework/spec
+import yumemi/front/live
+import yumemi/spec
 import gen/out/article_blob_save
 import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode

@@ -1,8 +1,8 @@
 //// GENERATED from admin/src/pages/home/page.gleam [sha256:38b74da7dca1] — 手で編集しない
 
 import blocks/admin_header
-import framework/front/css
-import framework/front/sketch_css
+import yumemi/front/css
+import yumemi/front/sketch_css
 import gen/load/layout
 import gleam/list
 import lustre/attribute

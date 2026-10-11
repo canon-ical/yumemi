@@ -2,8 +2,8 @@
 //// Service widget_list ── 20:710 の `IsTrue` / `EqOrNull`(2026-09-16 人見)と、
 //// 20:838 の既定2つ(`order: []` は key の ASC、Option の列の ASC は NULLS LAST)を
 //// 1 Service で当てる。
-import framework/effect.{type Effect, Read}
-import framework/step.{type Start, type Step}
+import yumemi/effect.{type Effect, Read}
+import yumemi/step.{type Start, type Step}
 import gen/allow/widget as allow
 import gen/face.{type Face, Test}
 import gen/query as q

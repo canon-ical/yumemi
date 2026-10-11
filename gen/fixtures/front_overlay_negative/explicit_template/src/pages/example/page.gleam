@@ -1,5 +1,5 @@
-import framework/front.{type Page, Area, Frame, Page}
-import framework/front/css
+import yumemi/front.{type Page, Area, Frame, Page}
+import yumemi/front/css
 import gleam/option.{None}
 
 pub const page: Page(Nil, Nil) = Page(

@@ -1,7 +1,7 @@
 // ★ src/service/photo_filter.gleam ── Has / HasNone の相関述語を固定する。
 import entity/photo
-import framework/effect.{type Effect, Read}
-import framework/step.{type Start, type Step}
+import yumemi/effect.{type Effect, Read}
+import yumemi/step.{type Start, type Step}
 import gen/face.{type Face, Test}
 import gen/query as q
 import gen/root/photo_filter.{type Actor, type Root, type Service, Service}

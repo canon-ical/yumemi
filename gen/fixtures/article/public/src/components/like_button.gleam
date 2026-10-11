@@ -1,8 +1,8 @@
 //// Interactive Component ── the generated live module owns State / Event / update.
 
-import framework/front
-import framework/front/el
-import framework/front/live as front_live
+import yumemi/front
+import yumemi/front/el
+import yumemi/front/live as front_live
 import gen/live/article_publish
 import gen/service
 import gleam/int
