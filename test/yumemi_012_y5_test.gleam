@@ -226,7 +226,8 @@ pub fn to_service_is_counted_as_escape_with_warning_test() {
   code |> should.equal(0)
   lines
   |> should.equal([
-    "[exit 0 警告] public: 逃げ道 ToService を 1 つ使っている(数える口 → service.page_resolve。framework の器 Store に移せば消える)",
+    // 0.12 段 C:ToService の数は面ごとの逃げ道の 1 行に入った(期待を別の警告の行から替えた)
+    "[exit 0 警告] public: 逃げ道 ── escape 0 種 0 か所(うち interactive Component の中 0)、生の CSS 0 file 0 規則、数える口の送り先 ToService 1",
   ])
   // 載らないことがある欄(source_key)を Option で受けなければ止まる
   let #(code, lines) =

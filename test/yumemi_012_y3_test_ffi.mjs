@@ -1,0 +1,36 @@
+// 0.12 段 C(Y3)── runtime(interactive.mjs)の Args の送り方を、表の型(wire)ごとに 1 行 1 件で見る。
+import path from "node:path";
+import { spawnSync } from "node:child_process";
+import { internals } from "./yumemi/front/interactive.mjs";
+
+/// 送りの file の上げ方(偽の DOM と fetch で globals を替えるので子の node で走らせる)。
+export function runtime_submit() {
+  const result = spawnSync(process.execPath, [path.resolve("test/yumemi_012_y3_submit_check.mjs")], { encoding: "utf8", timeout: 60000 });
+  return `${result.stdout}${result.stderr ? `\nSTDERR ${result.stderr}` : ""}`.trim();
+}
+
+export function runtime_wire() {
+  const out = [];
+  const check = (name, ok) => out.push((ok ? "ok " : "NG ") + name);
+  const w = internals.wireValue;
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  check("bool true", w("bool", "on") === true && w("bool", "true") === true);
+  check("bool false", w("bool", "") === false && w("bool", "False") === false);
+  check("bool unreadable stays text", w("bool", "maybe") === "maybe");
+  check("int", w("int", "42") === 42 && w("int", "4.2") === "4.2");
+  check("float", w("float", "2.5") === 2.5 && w("float", "3") === 3);
+  check("option empty is null", w({ option: "int" }, "") === null && w({ option: "int" }, "7") === 7);
+  check("list of json strings", same(w({ list: "int" }, '["1","2"]'), [1, 2]));
+  check("list of controls", same(w({ list: "text" }, ["a", "b"]), ["a", "b"]));
+  check("option list", w({ option: { list: "bool" } }, "") === null);
+  check("json body", same(w("json", '{"a":1}'), { a: 1 }) && w("json", "{bad") === "{bad");
+  check("path holes are encoded", internals.fillPath("/api/a/:slug/x", { slug: "a b/c" }) === "/api/a/a%20b%2Fc/x");
+  check("text", w("text", "x") === "x");
+  return out.join("\n");
+}
+
+/// r2(柏木 ゲート 2 の P1):out を control の中に入れない・error 側の GoTo・一覧の reloads を数えない・型の初期値。
+export function runtime_r2() {
+  const result = spawnSync(process.execPath, [path.resolve("test/yumemi_012_y3_r2_check.mjs")], { encoding: "utf8", timeout: 60000 });
+  return `${result.stdout}${result.stderr ? `\nSTDERR ${result.stderr}` : ""}`.trim();
+}

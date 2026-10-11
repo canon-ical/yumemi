@@ -958,17 +958,21 @@ type Consumer {
   Consumer(imports: List(String), row: String)
 }
 
-/// root の 1 文を持たない consumer は、root の 1 文を持ち自分を queue で呼ぶ Service(名の順で先頭)の
-/// root を借りる。借りた root の Entity(その Service の root Entity)と相だけを写す。
+/// root の 1 文を持たない consumer は、root の 1 文を持ち自分を queue で呼ぶ Service の root を借りる。借りた
+/// root の Entity(その Service の root Entity)と相だけを写す。
+///
+/// 0.12 段 C(m012-api):積む Service が複数あり、その root の Entity が食い違えば止める ── 0.11.15 は名前順の先頭を
+/// 基にしたので、別の root の Service を 1 本足すと consumer が黙って別の Entity を読み 404 になった。root の Entity が
+/// 揃っていれば、どれを基にしても読む Entity は同じなので名前順の先頭を使う(★ の宣言は増やさない)。
 fn consumer_of(
   app: App,
   units: List(Unit),
   service: Service,
   rooted: fn(String) -> Bool,
 ) -> Result(Consumer, String) {
-  let base =
+  let bases =
     sorted_services(app)
-    |> list.find(fn(other) {
+    |> list.filter(fn(other) {
       other.module != service.module
       && rooted(other.module)
       && list.contains(
@@ -976,12 +980,30 @@ fn consumer_of(
         service.module,
       )
     })
-  let entity = case base {
-    Ok(base) ->
-      case root.root_for(app, base) {
-        Some(entity) -> Some(entity)
-        None -> allow_entity(app, base)
+  let root_of = fn(base: Service) {
+    case root.root_for(app, base) {
+      Some(entity) -> Some(entity)
+      None -> allow_entity(app, base)
+    }
+  }
+  let entities =
+    bases
+    |> list.map(fn(base) {
+      #(base.module, case root_of(base) {
+        Some(entity) -> entity.module
+        None -> ""
+      })
+    })
+  use <-
+    fn(next) {
+      case consumer_roots_conflict(service.module, entities) {
+        Some(text) -> Error(text)
+        None -> next()
       }
+    }
+  let base = list.first(bases)
+  let entity = case base {
+    Ok(base) -> root_of(base)
     Error(_) -> None
   }
   case entity, base, service.allow_module {
@@ -1039,6 +1061,28 @@ fn consumer_of(
         "queue の consumer "
         <> service.module
         <> " の root を借りる Service が無い(root の 1 文を持ち、自分を queue で呼ぶ Service)",
+      )
+  }
+}
+
+/// consumer を積む Service の root の Entity が食い違うときの停止の字(揃っていれば None)。
+@internal
+pub fn consumer_roots_conflict(
+  consumer: String,
+  entities: List(#(String, String)),
+) -> Option(String) {
+  case list.unique(list.map(entities, fn(pair) { pair.1 })) {
+    [] | [_] -> None
+    _ ->
+      Some(
+        "queue の consumer "
+        <> consumer
+        <> " を積む Service の root の Entity が食い違う(どの root を借りるか決まらない): "
+        <> string.join(
+          list.map(entities, fn(pair) { pair.0 <> " → " <> pair.1 }),
+          "、",
+        )
+        <> "。consumer を積む Service を同じ root の Entity に揃えるか、consumer に root の 1 文を持たせる",
       )
   }
 }

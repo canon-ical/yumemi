@@ -1,10 +1,16 @@
 //// GENERATED from public/src/pages/**/page.gleam [sha256:1601ec0a328e] — 手で編集しない
 
+/// 面の Page の閉じた enum(interactive Component の `live.GoTo` の行き先)。
+pub type Route {
+  ArticleArgSlug
+  Status
+}
+
 pub type PageRoute {
-  PageRoute(path: String)
+  PageRoute(route: Route, path: String)
 }
 
 pub const routes: List(PageRoute) = [
-  PageRoute(path: "/article/:slug"),
-  PageRoute(path: "/status"),
+  PageRoute(route: ArticleArgSlug, path: "/article/:slug"),
+  PageRoute(route: Status, path: "/status"),
 ]

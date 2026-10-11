@@ -1,0 +1,39 @@
+//// GENERATED from src/server.gleam (media) [sha256:5f0b1a77a1d0] — 手で編集しない
+//// 画像の variant と URL(`/media/<key>?v=<name>`)。頁の色の地の画像は `w1600`。
+
+import gleam/list
+import gleam/string
+import gleam/uri
+import yumemi/blob.{type Blob}
+import yumemi/front/el
+
+pub type Variant {
+  /// 1600、scale-down
+  W1600
+}
+
+/// 頁の色の地の画像に使う variant。
+pub const theme_background: Variant = W1600
+
+pub fn name(variant: Variant) -> String {
+  case variant {
+    W1600 -> "w1600"
+  }
+}
+
+/// `el.img` の src(0.12 段 C、51 v6「media の variant」)。
+pub fn src(blob: Blob, variant: Variant) -> el.Src {
+  el.media_src(url(blob, variant))
+}
+
+/// blob の key を `/` で割り、各節を百分率符号化する(`+` も `%2B`)。
+pub fn url(blob: Blob, variant: Variant) -> String {
+  let key =
+    blob.to_string(blob)
+    |> string.split(on: "/")
+    |> list.map(fn(segment) {
+      uri.percent_encode(segment) |> string.replace(each: "+", with: "%2B")
+    })
+    |> string.join(with: "/")
+  "/media/" <> key <> "?v=" <> name(variant)
+}

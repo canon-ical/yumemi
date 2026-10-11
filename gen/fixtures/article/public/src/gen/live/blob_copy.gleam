@@ -1,129 +1,104 @@
-//// GENERATED from src/server.gleam [sha256:0b4158d2a3fd] — 手で編集しない
+//// GENERATED from src/components/article_blob_copy.gleam [sha256:62df9e944a06] — 手で編集しない
 
-import gleam/dynamic.{type Dynamic}
-import gleam/dynamic/decode
-import gleam/json
-import gleam/option.{None, Some}
-import lustre/attribute
-import lustre/effect.{type Effect}
-import lustre/event
+import yumemi/front/css
+import yumemi/front/el
 import yumemi/front/live
 
 pub type Args {
-  Args(file: String)
+  Args(file: String, from: String)
 }
 
 pub type Field {
   File
+  From
 }
 
-pub type State =
-  live.State(Args, Nil, String, String)
+pub type Error
 
-pub type Event =
-  live.Event(Field, Nil, String, String)
-
-pub fn init(_given: Nil) -> #(State, Effect(Event)) {
-  #(
-    live.State(args: Args(file: ""), given: Nil, last: None, waiting: False),
-    effect.none(),
-  )
+pub type When {
+  Idle
+  Waiting
+  Succeeded
+  Failed
+  Refused(Error)
 }
 
-pub fn update(model: State, msg: Event) -> #(State, Effect(Event)) {
-  case msg {
-    live.Set(File, value) -> #(
-      live.State(..model, args: Args(file: value)),
-      effect.none(),
-    )
-    live.Send ->
-      case model.waiting {
-        True -> #(model, effect.none())
-        False -> #(live.State(..model, waiting: True), send(model.args))
-      }
-    live.Given(_) -> #(model, effect.none())
-    live.Done(result) -> #(
-      live.State(..model, last: Some(result), waiting: False),
-      effect.none(),
-    )
+pub type Slot {
+  OutKey
+}
+
+/// name="blob_copy.<field>" と、Spec から写せる制約検証の属性と value。
+pub fn bind(field: Field, value: String) -> el.Attribute {
+  case field {
+    File -> live.bind("blob_copy", "file", value, [])
+    From -> live.bind("blob_copy", "from", value, [])
   }
 }
 
-pub fn file_input() -> List(attribute.Attribute(Event)) {
-  [
-    attribute.attribute("type", "file"),
-    attribute.attribute("data-yumemi-file-input", ""),
-    event.on("change", file_input_event()),
-  ]
+/// checkbox。
+pub fn bind_check(field: Field, checked: Bool) -> el.Attribute {
+  live.bind_check("blob_copy", field_name(field), checked)
 }
 
-fn file_input_event() -> decode.Decoder(Event) {
-  decode.map(decode.dynamic, fn(event) { live.Set(File, file_token(event)) })
+/// select と radio の name(選択肢は attr.value / attr.selected)。
+pub fn bind_choice(field: Field) -> el.Attribute {
+  live.bind_choice("blob_copy", field_name(field))
 }
 
-@external(javascript, "./transport_ffi.mjs", "file_token")
-fn file_token(event: Dynamic) -> String
-
-@external(javascript, "./transport_ffi.mjs", "upload_file")
-fn transport_upload(
-  method: String,
-  path: String,
-  token: String,
-  on_ok: fn(String) -> Nil,
-  on_error: fn(Nil) -> Nil,
-) -> Nil
-
-fn send(args: Args) -> Effect(Event) {
-  effect.from(fn(dispatch) {
-    transport_upload(
-      "POST",
-      "/api/blobs",
-      args.file,
-      fn(key) { dispatch(live.Done(Ok(key))) },
-      fn(_unit) { dispatch(live.Done(Error("file upload failed"))) },
-    )
-    Nil
-  })
+/// file の control(Blob の欄)。送る前に runtime が上げ、key を Args に入れる。
+pub fn bind_file(field: Field) -> el.Attribute {
+  live.bind_file("blob_copy", field_name(field))
 }
 
-/// URL の写し(`{from: url}` を JSON で送る)。成功は写した key、失敗は本文の `code`(無ければ `url copy failed`)。
-/// `Send`(file の upload)と同じ State を使い、送りの間は `waiting`。
-pub fn copy_from(model: State, url: String) -> #(State, Effect(Event)) {
-  case model.waiting || url == "" {
-    True -> #(model, effect.none())
-    False -> #(live.State(..model, waiting: True), send_from(url))
+/// data-yumemi-when="blob_copy.<state>" の枝。
+pub fn when(state: When, children: List(el.Element)) -> el.Element {
+  live.when("blob_copy", state_name(state), children)
+}
+
+/// data-yumemi-out="blob_copy.<slot>" の空の span。
+pub fn out(slot: Slot) -> el.Element {
+  live.out("blob_copy", slot_name(slot))
+}
+
+/// 送りのボタン。叩くのはこの Service 1 本。
+pub fn send(class: css.Class, children: List(el.Element)) -> el.Element {
+  live.send("blob_copy", class, children)
+}
+
+/// `data-yumemi-args` の JSON(生成物の `gen/interactive` が使う)。
+@internal
+pub fn args_json(args: Args) -> String {
+  live.json_object([
+    #("file", live.json_string(args.file)),
+    #("from", live.json_string(args.from)),
+  ])
+}
+
+fn field_name(field: Field) -> String {
+  case field {
+    File -> "file"
+    From -> "from"
   }
 }
 
-@external(javascript, "./transport_ffi.mjs", "send")
-fn transport_send(
-  method: String,
-  path: String,
-  body: json.Json,
-  blob_fields: List(String),
-  on_ok: fn(Dynamic) -> Nil,
-  on_error: fn(Dynamic) -> Nil,
-) -> Nil
+fn state_name(state: When) -> String {
+  case state {
+    Idle -> "idle"
+    Waiting -> "waiting"
+    Succeeded -> "succeeded"
+    Failed -> "failed"
+    Refused(error) -> "refused-" <> error_code(error)
+  }
+}
 
-fn send_from(url: String) -> Effect(Event) {
-  effect.from(fn(dispatch) {
-    transport_send(
-      "POST",
-      "/api/blobs",
-      json.object([#("from", json.string(url))]),
-      [],
-      fn(value) {
-        case decode.run(value, decode.at(["key"], decode.string)) {
-          Ok(key) if key != "" -> dispatch(live.Done(Ok(key)))
-          _ -> dispatch(live.Done(Error("invalid response")))
-        }
-      },
-      fn(value) {
-        case decode.run(value, decode.at(["code"], decode.string)) {
-          Ok(code) if code != "" -> dispatch(live.Done(Error(code)))
-          _ -> dispatch(live.Done(Error("url copy failed")))
-        }
-      },
-    )
-  })
+fn error_code(error: Error) -> String {
+  case error {
+    _ -> ""
+  }
+}
+
+fn slot_name(slot: Slot) -> String {
+  case slot {
+    OutKey -> "key"
+  }
 }

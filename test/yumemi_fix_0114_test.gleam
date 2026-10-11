@@ -5,6 +5,7 @@ import glance
 import gleam/list
 import gleam/string
 import gleeunit/should
+import simplifile
 import yumemi/gen/emit/back
 import yumemi/gen/emit/front as front_emit
 import yumemi/gen/emit/hash
@@ -150,30 +151,20 @@ fn result_map(value: Result(a, Nil), f: fn(a) -> b) -> Result(b, Nil) {
 
 /// H5:BlobCopy の live は file の upload(`Send`)に加えて、URL の写し(`copy_from`)を持つ。
 /// `{from: url}` を JSON で送り、本文の `key` を `Done(Ok(key))` に読む。
+/// 0.12 段 C:Args は `file`(file の control)と `from`(URL)の 2 欄、runtime は file が無ければ `{from}` を送り、
+/// 戻りの `key` を out の OutKey に入れる(期待を Gleam の copy_from から替えた)。
 pub fn blob_copy_live_copies_from_url_test() {
   let assert Ok(text) = face_file([], [], "public/src/gen/live/blob_copy.gleam")
   string.contains(
     text,
-    "pub fn copy_from(model: State, url: String) -> #(State, Effect(Event)) {",
+    "pub type Args {\n  Args(file: String, from: String)\n}",
   )
   |> should.be_true
-  string.contains(text, "json.object([#(\"from\", json.string(url))]),")
+  string.contains(text, "pub type Field {\n  File\n  From\n}") |> should.be_true
+  string.contains(text, "pub type Slot {\n  OutKey\n}") |> should.be_true
+  let assert Ok(runtime) = simplifile.read("src/yumemi/front/interactive.mjs")
+  string.contains(runtime, "body: JSON.stringify({ from: args.from }),")
   |> should.be_true
-  string.contains(
-    text,
-    "case decode.run(value, decode.at([\"key\"], decode.string)) {",
-  )
-  |> should.be_true
-  string.contains(
-    text,
-    "Ok(key) if key != \"\" -> dispatch(live.Done(Ok(key)))",
-  )
-  |> should.be_true
-  // file の upload はそのまま(Args / Field / State は変えない)
-  string.contains(text, "pub type Args {\n  Args(file: String)\n}")
-  |> should.be_true
-  string.contains(text, "pub type Field {\n  File\n}") |> should.be_true
-  string.contains(text, "transport_upload(") |> should.be_true
 }
 
 fn switch_server() -> source.Unit {
@@ -196,17 +187,17 @@ fn switch_server() -> source.Unit {
 fn sync_component() -> source.Unit {
   unit(
     "components/subject_switch",
-    "import yumemi/front\nimport yumemi/front/el\nimport yumemi/front/live as front_live\n"
-      <> "import gen/api\nimport gen/live/fixture_sync\nimport lustre\nimport lustre/event\n"
-      <> "import sketch/lustre/element/html\n\n"
-      <> "pub const target: api.Target = front.Entry(api.FixtureSync)\n\n"
-      <> "pub const after_send: front_live.After = front_live.ReloadPage\n\n"
-      <> "pub fn view(_it: fixture_sync.State) -> el.Element(fixture_sync.Event) {\n"
-      <> "  html.button_([event.on_click(front_live.Send)], [el.text(\"switch\")])\n}\n",
+    // 0.12 段 C:`pub const target` は `calls` に畳み、view は Args を受ける
+    "import yumemi/front\nimport yumemi/front/css\nimport yumemi/front/el\n"
+      <> "import gen/api\nimport gen/live/fixture_sync as sync\nimport gen/service\n\n"
+      <> "pub const calls: List(front.Target(service.Service, api.Attached)) = [front.Entry(api.FixtureSync)]\n\n"
+      <> "pub fn view(_it: sync.Args) -> el.Element {\n"
+      <> "  sync.send(css.class([]), [el.text(\"switch\")])\n}\n",
   )
 }
 
 /// H6:framework の役が本文を読む attached の口(`SwitchSubject`)の live は、`{kind, id}` を Args に持って body に載せる。
+/// 0.12 段 C:Args と Field は live に、送り方は runtime の表(`entry` と欄)に。期待を Gleam の update / request から替えた。
 pub fn attached_live_sends_role_body_test() {
   let assert Ok(text) =
     face_file(
@@ -217,29 +208,34 @@ pub fn attached_live_sends_role_body_test() {
   string.contains(text, "pub type Field {\n  Kind\n  Id\n}") |> should.be_true
   string.contains(text, "pub type Args {\n  Args(kind: String, id: String)\n}")
   |> should.be_true
-  string.contains(text, "args: Args(kind: \"\", id: \"\")") |> should.be_true
-  string.contains(text, "live.Set(Kind, value) ->") |> should.be_true
-  string.contains(text, "args: Args(..model.args, id: value)") |> should.be_true
-  string.contains(text, "request(model.args)") |> should.be_true
-  string.contains(text, "#(\"kind\", json.string(args.kind)),")
+  string.contains(text, "#(\"kind\", live.json_string(args.kind)),")
   |> should.be_true
-  string.contains(text, "#(\"id\", json.string(args.id))])") |> should.be_true
-  string.contains(text, "    json.null(),\n") |> should.be_false
-  // after_send の ReloadPage はそのまま
-  string.contains(text, "event.emit(\"yumemi-done\", json.null())")
+  let assert Ok(client) =
+    face_file(
+      [switch_server()],
+      [sync_component()],
+      "public/priv/static/_yumemi/client.mjs",
+    )
+  string.contains(
+    client,
+    "\"fixture_sync\": { \"method\": \"POST\", \"path\": \"/fixture/sync\", \"read\": false, \"upload\": false, \"accepted\": false, \"entry\": true, \"args\": [{ \"name\": \"kind\", \"wire\": \"text\", \"blob\": false }, { \"name\": \"id\", \"wire\": \"text\", \"blob\": false }]",
+  )
   |> should.be_true
 }
 
 /// 役の無い attached の口の live は 0.11.3 と同じ(Args は空、body は null)。
+/// 0.12 段 C:runtime が `entry` で欄の無い口に null を送る(期待を Gleam の request から替えた)。
 pub fn attached_live_without_role_body_keeps_null_test() {
   let assert Ok(text) =
     face_file([], [sync_component()], "public/src/gen/live/fixture_sync.gleam")
   string.contains(text, "pub type Field\n") |> should.be_true
   string.contains(text, "pub type Args {\n  Args\n}") |> should.be_true
-  string.contains(text, "    live.Set(_, _) -> #(model, effect.none())")
+  let assert Ok(client) =
+    face_file([], [sync_component()], "public/priv/static/_yumemi/client.mjs")
+  string.contains(client, "\"entry\": true, \"args\": []") |> should.be_true
+  let assert Ok(runtime) = simplifile.read("src/yumemi/front/interactive.mjs")
+  string.contains(runtime, "spec.entry && spec.args.length === 0 ? \"null\"")
   |> should.be_true
-  string.contains(text, "    json.null(),\n    [],") |> should.be_true
-  string.contains(text, "fn request() -> Effect(Event) {") |> should.be_true
 }
 
 // ── H8 ──────────────────────────────────────────────────────────────
@@ -269,27 +265,23 @@ fn counting_gate() -> source.Unit {
   )
 }
 
-/// H9:client は島の登録を `boot()` にまとめ、面の Page の route 表で client 遷移を起こす(登録済みの島は登録し直さない)。
+/// H9:client は面の Page の route 表で client 遷移を起こす。0.12 段 C:島の登録の `boot()` は無くなり、
+/// Component はタグごとの define で接続時に起きる(期待を boot / lustreRegister から替えた)。
 pub fn client_starts_navigation_over_page_routes_test() {
   let assert Ok(text) =
     face_file([], [], "public/priv/static/_yumemi/client.mjs")
   string.contains(
     text,
-    "import { reload as reloadPage, start as startNavigation } from \"__YUMEMI_BUILD__/yumemi/yumemi/front/navigate.mjs\";",
+    "import { go as navigateGo, reload as reloadPage, start as startNavigation } from \"__YUMEMI_BUILD__/yumemi/yumemi/front/navigate.mjs\";",
   )
   |> should.be_true
-  string.contains(text, "function boot() {\n") |> should.be_true
-  string.contains(text, "}\n\nboot();\n") |> should.be_true
+  string.contains(text, "boot") |> should.be_false
   string.contains(
     text,
-    "startNavigation({ routes: [\"/article/:slug\", \"/status\"], boot });",
+    "startNavigation({ routes: [\"/article/:slug\", \"/status\"] });",
   )
   |> should.be_true
-  string.contains(
-    text,
-    "if (!defined(\"like-button\")) lustreRegister(styled(like_button.app()), \"like-button\");",
-  )
-  |> should.be_true
+  string.contains(text, "  \"like-button\": {\n") |> should.be_true
 }
 
 /// r2:pageview を数える Page も route 表に入れる(client 遷移)。0.12:navigate は送らないので送り先を渡さない。
@@ -298,7 +290,8 @@ pub fn navigation_keeps_counted_pages_and_passes_pageview_test() {
     face_file([], [counting_gate()], "public/priv/static/_yumemi/client.mjs")
   string.contains(
     text,
-    "startNavigation({ routes: [\"/article/:slug\", \"/status\"], boot });",
+    // 0.12 段 C:boot は無くなった
+    "startNavigation({ routes: [\"/article/:slug\", \"/status\"] });",
   )
   |> should.be_true
 }
@@ -321,24 +314,23 @@ pub fn navigation_carries_csp_pages_test() {
     face_file([], [csp_gate], "public/priv/static/_yumemi/client.mjs")
   string.contains(
     text,
-    "startNavigation({ routes: [\"/article/:slug\", \"/status\"], boot, csp: { \"/status\": \"frame-src 'self' https://frames.example\" } });",
+    // 0.12 段 C:boot は無くなった、CSP の各指令に 'self'(Y6)
+    "startNavigation({ routes: [\"/article/:slug\", \"/status\"], csp: { \"/status\": \"frame-src 'self' https://frames.example\" } });",
   )
   |> should.be_true
 }
 
 /// r2:島の Done の後の読み直しは navigate の `reload`(route 表に当たる頁は client 遷移で取り直す)。
+/// 0.12 段 C:runtime の After の ReloadPage / GoTo は client.mjs が渡す navigate の `reload` / `go` を通る。
 pub fn done_reload_goes_through_navigation_test() {
   let assert Ok(text) =
     face_file([], [], "public/priv/static/_yumemi/client.mjs")
   string.contains(
     text,
-    "import { reload as reloadPage, start as startNavigation } from \"__YUMEMI_BUILD__/yumemi/yumemi/front/navigate.mjs\";",
+    "import { go as navigateGo, reload as reloadPage, start as startNavigation } from \"__YUMEMI_BUILD__/yumemi/yumemi/front/navigate.mjs\";",
   )
   |> should.be_true
-  string.contains(
-    text,
-    "    element.addEventListener(\"yumemi-done\", () => {\n      reloadPage();\n",
-  )
+  string.contains(text, "  go: navigateGo, reload: reloadPage,\n")
   |> should.be_true
   string.contains(text, "location.assign") |> should.be_false
 }

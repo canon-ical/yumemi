@@ -55,50 +55,35 @@ console.log(out.join("\\n"));
 `);
 }
 
-// H8 ── 生成の client が島を包む `styled` を、node で島の view に当てる(ブラウザでだけ出ていた panic を node で捕まえる)
-import { styled } from "./yumemi/front/island_style.mjs";
-import { class$, color } from "../sketch/sketch/css.mjs";
-import { element as sketchElement, element_ as plainElement } from "../sketch_lustre/sketch/lustre/element.mjs";
-import { node as sketchNode, render as sketchRender, setup as sketchSetup } from "../sketch_lustre/sketch/lustre.mjs";
-import { text, to_string } from "../lustre/lustre/element.mjs";
+// H8 → 0.12 段 C:島の `styled`(shadow の `<style>`)は無くなった。interactive Component の Style は Block と同じく
+// SSR の `<style>` に出る。class 名は CSS の字の hash(構成子の名に依らない)で、集める所の外でも panic しない。
+import { class_name, collect } from "./yumemi/front/sketch_css.mjs";
+import { class$ as cssClass, Color, Hex, Background } from "./yumemi/front/css.mjs";
 import { toList } from "../prelude.mjs";
 
-function classedView(model) {
-  return sketchElement("a", class$(toList([color("red")])), toList([]), toList([text(model)]));
-}
-function plainView(model) {
-  return plainElement("a", toList([]), toList([text(model)]));
-}
-
-/// 包まない view は panic し、包んだ view は class の CSS を `<style>` に出す。class の無い島は DOM を変えない。
 export function island_stylesheet() {
   const out = [];
   const check = (name, ok) => out.push((ok ? "ok " : "NG ") + name);
-  let panicked = "";
-  try { classedView("x"); } catch (error) { panicked = String(error?.message ?? error); }
-  check("bare view panics", panicked.includes("Stylesheet is not initialized"));
-  const app = { init: () => null, update: (m) => m, view: classedView, config: {} };
-  let html = "";
-  try { html = to_string(styled(app).view("claim-url")); } catch (error) { html = "THROW " + String(error?.message ?? error); }
-  check("styled renders", html.includes("claim-url") && !html.startsWith("THROW"));
-  check("style has class css", /<style>[^<]*color:\s*red/.test(html));
-  const cls = html.match(/<a class="([^"]+)"/)?.[1] ?? "";
-  check("class in style", cls !== "" && html.includes("." + cls.split(" ")[0]));
-  // 2 回目の描画も同じ(stylesheet は島ごとに持ち続ける)
-  let again = "";
-  try { again = to_string(styled(app).view("claim-url")); } catch (error) { again = "THROW"; }
-  check("second island renders", again === html);
-  const plain = { ...app, view: plainView };
-  check("plain unchanged", to_string(styled(plain).view("p")) === to_string(plainView("p")));
-  // 自分で stylesheet を持って render する島(www の島の形)は、包んでも同じ DOM(`<style>` を二重にしない)
-  const own = sketchSetup()[0];
-  const ownView = (model) => sketchRender(own, toList([sketchNode()]), () => classedView(model));
-  const ownHtml = to_string(ownView("own"));
-  check("own render unchanged", to_string(styled({ ...app, view: ownView }).view("own")) === ownHtml && (ownHtml.match(/<style>/g) ?? []).length === 1);
-  // 描き終えたら current を戻す(島の外の描画に stylesheet を漏らさない)
-  let after = "";
-  try { classedView("y"); } catch (error) { after = String(error?.message ?? error); }
-  check("current dismissed", after.includes("Stylesheet is not initialized"));
+  const red = () => cssClass(toList([new Color(new Hex("#ff0000"))]));
+  let bare = "";
+  try { bare = class_name(red()); } catch (error) { bare = "THROW"; }
+  check("bare class does not panic", /^css-[0-9A-F]{8}$/.test(bare));
+  const [css, name] = collect(() => class_name(red()));
+  check("collected name", name === bare);
+  check("style has class css", css.includes("." + name) && /color:\s*#ff0000/.test(css));
+  const [css2, name2] = collect(() => class_name(red()));
+  check("second render same", css2 === css && name2 === name);
+  const [both] = collect(() => { class_name(red()); class_name(red()); return class_name(cssClass(toList([new Background(new Hex("#00ff00"))]))); });
+  check("dedup within page", (both.match(new RegExp("\\." + name + " ", "g")) ?? []).length === 1);
+  check("two classes", both.includes("background"));
+  // 構成子の名(JS の class 名)を替えても同じ名(minify の bundle で名が変わっても合う)
+  const original = Color.name;
+  Object.defineProperty(Color, "name", { value: "Zq", configurable: true });
+  let renamed = "";
+  try { renamed = class_name(red()); } finally { Object.defineProperty(Color, "name", { value: original, configurable: true }); }
+  check("constructor name independent", renamed === name);
+  const [outside] = collect(() => "");
+  check("collect is scoped", outside === "");
   return out.join("\n");
 }
 
@@ -109,12 +94,12 @@ import { accept, matches, swappable } from "./yumemi/front/navigate.mjs";
 function navigate(href, extra = {}) {
   return { canIntercept: true, defaultPrevented: false, hashChange: false, downloadRequest: null, formData: null, navigationType: "push", userInitiated: true, info: undefined, destination: { url: new URL(href, "https://www.example/").href, sameDocument: false }, ...extra };
 }
-function fakeDoc({ scripts, head = true, given = [] }) {
+function fakeDoc({ scripts, head = true }) {
   const headEl = { tag: "head" };
   const els = scripts.map((s) => ({ getAttribute: (n) => s[n] ?? null, parentElement: s.inHead === false ? {} : headEl }));
   return {
     head: headEl,
-    body: { querySelectorAll: () => given.map((tag) => ({ localName: tag })) },
+    body: {},
     querySelectorAll: () => els,
   };
 }
@@ -136,9 +121,10 @@ export function navigation_rules() {
   check("prevented", accept(navigate("/me", { defaultPrevented: true }), routes, here) === null);
   check("from unrouted page", accept(navigate("/me"), routes, new URL("https://www.example/search")) === null);
   const client = { src: "/_yumemi/client.mjs", type: "module" };
-  check("swappable", swappable(fakeDoc({ scripts: [client] }), () => false));
-  check("inline script falls back", !swappable(fakeDoc({ scripts: [client, {}] }), () => false));
-  check("given island defined falls back", !swappable(fakeDoc({ scripts: [client], given: ["reserve-time"] }), (tag) => tag === "reserve-time"));
+  check("swappable", swappable(fakeDoc({ scripts: [client] })));
+  check("inline script falls back", !swappable(fakeDoc({ scripts: [client, {}] })));
+  // 0.12 段 C:given の条件は無くなった。runtime の移動(GoTo・reloads の一覧)は印の付いた navigate を取る
+  check("runtime go marked", accept(navigate("/me", { userInitiated: false, info: { yumemi: "go" } }), routes, here)?.pathname === "/me");
   // r2(柏木 P1-7):download 付きの a は頁の読み込み
   check("download", accept(navigate("/me", { downloadRequest: "me.txt" }), routes, here) === null);
   // 0.12:POST の form はブラウザ、GET の form は link と同じ

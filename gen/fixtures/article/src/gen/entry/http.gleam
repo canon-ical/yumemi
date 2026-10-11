@@ -1,4 +1,4 @@
-//// GENERATED from entry.gleam / service declarations [sha256:d74f3cd4c922] — 手で編集しない
+//// GENERATED from entry.gleam / service declarations [sha256:be6af1112305] — 手で編集しない
 
 import entry
 import yumemi/entry.{type Entry} as entry_types
@@ -98,6 +98,14 @@ pub const routes: List(Route) = [
     method: "POST",
     path: "/api/admin/articles/{slug}/retract",
     service: "article_retract",
+    path_keys: ["slug"],
+    credential: Session,
+  ),
+  Route(
+    face: "public",
+    method: "GET",
+    path: "/api/articles/{slug}/title",
+    service: "article_title",
     path_keys: ["slug"],
     credential: Session,
   ),

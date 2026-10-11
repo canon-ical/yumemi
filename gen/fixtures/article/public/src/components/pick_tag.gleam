@@ -1,76 +1,45 @@
-//// Interactive Component ── choices come from the generated reload Out.
+//// interactive Component(0.12)── 選択肢は置いた Block が `with` で渡す(SSR で 1 回描く値、状態ではない)。
 
-import yumemi/front
-import sketch/lustre/element as el
-import yumemi/front/live as front_live
-import gen/live/article_create
-import gen/out/article_list
+import gen/live/article_create as create
+import gen/route
 import gen/service
-import gleam/json
-import gleam/list
-import lustre
-import lustre/attribute
-import lustre/component
-import lustre/event
-import sketch/lustre/element/html
+import gleam/option.{Some}
+import yumemi/front/attr
+import yumemi/front/css
+import yumemi/front/el.{type Element}
+import yumemi/front/html
+import yumemi/front/live
 
-pub const calls: List(front.Target(service.Service, Nil)) = [
-  front.Of(service.ArticleCreate),
+pub const calls: List(service.Service) = [service.ArticleCreate]
+
+pub const after_send: List(#(service.Service, live.After(route.Route))) = [
+  #(
+    service.ArticleCreate,
+    live.After(
+      ok: live.ReloadPage(notice: Some("タグを保存しました")),
+      error: live.Stay,
+    ),
+  ),
 ]
 
-pub const reloads: List(#(article_create.Field, service.Service)) = [
-  #(article_create.Slug, service.ArticleList),
-]
+pub type With {
+  With(choices: List(String), selected: String)
+}
 
-pub const after_send: front_live.After = front_live.ReloadPage
-
-pub fn view(it: article_create.State) -> el.Element(article_create.Event) {
+pub fn view(it: create.Args, with: With) -> Element {
   html.div_([], [
+    html.input_([attr.type_("text"), create.bind(create.Title, it.title)]),
     html.select_(
-      [
-        event.on_change(fn(value) {
-          front_live.Set(article_create.Tags, tags([value]))
-        }),
-      ],
-      list.map(it.given.counts, fn(item) {
-        let #(category, _count) = item
-        html.option_([attribute.value(category.name)], [el.text(category.name)])
-      }),
+      [create.bind_choice(create.Tags)],
+      el.each(with.choices, fn(choice) {
+        html.option_(
+          [attr.value(choice), attr.selected(choice == with.selected)],
+          [el.text(choice)],
+        )
+      })
+        |> fn(options) { [options] },
     ),
-    html.button_(
-      [event.on_click(front_live.Send), attribute.disabled(it.waiting)],
-      [
-        el.text("タグを保存"),
-      ],
-    ),
+    create.send(css.class([]), [el.text("タグを保存")]),
+    create.when(create.Failed, [html.p_([], [el.text("保存できませんでした")])]),
   ])
-}
-
-pub fn app() -> lustre.App(
-  article_list.Out,
-  article_create.State,
-  article_create.Event,
-) {
-  lustre.component(article_create.init, article_create.update, view, [
-    component.on_attribute_change("slug", fn(value) {
-      Ok(front_live.Set(article_create.Slug, value))
-    }),
-    component.on_attribute_change("title", fn(value) {
-      Ok(front_live.Set(article_create.Title, value))
-    }),
-    component.on_attribute_change("body", fn(value) {
-      Ok(front_live.Set(article_create.Body, value))
-    }),
-    component.on_attribute_change("category", fn(value) {
-      Ok(front_live.Set(article_create.Category, value))
-    }),
-    component.on_attribute_change("selected", fn(value) {
-      Ok(front_live.Set(article_create.Tags, tags([value])))
-    }),
-  ])
-}
-
-/// List の Args は JSON の文字列の配列で Set する(0.11.2)。
-fn tags(names: List(String)) -> String {
-  json.array(names, json.string) |> json.to_string
 }

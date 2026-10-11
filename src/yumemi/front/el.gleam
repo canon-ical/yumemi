@@ -27,6 +27,8 @@ pub opaque type Attribute {
   Attribute(name: String, value: String)
   /// 出さない属性(`attr.disabled(False)`・名の不正な `attr.data` など)。
   NoAttribute
+  /// 生成物の口(live の `bind` ほか)が 1 つの Attribute で複数の属性を出すための束。
+  Attributes(List(Attribute))
 }
 
 pub fn text(content: String) -> Element {
@@ -141,8 +143,105 @@ pub fn each_modal(
   ])
 }
 
-pub fn img(class: css.Class, attributes: List(Attribute)) -> Element {
-  element("img", [class_attribute(class), ..attributes], [])
+/// 画像。src は `gen/media.src`(Blob の variant)か `el.static_src`(`priv/static` の file)だけが作る。
+pub fn img(
+  class: css.Class,
+  src: Src,
+  alt: String,
+  attributes: List(Attribute),
+) -> Element {
+  element(
+    "img",
+    [class_attribute(class), ..attributes]
+      |> list.append([Attribute("src", src.url), Attribute("alt", alt)]),
+    [],
+  )
+}
+
+/// 画像の在り処。`gen/media.src` と `el.static_src` だけが作る(51 v6「html と el」)。
+pub opaque type Src {
+  Src(url: String)
+}
+
+/// `priv/static` の file。path は文字列の literal で書く(第 43 条)。`static_sheet` と同じ柵。
+pub fn static_src(path: String) -> Src {
+  Src(static_path(path))
+}
+
+/// 生成物(`gen/media.src`)が組んだ URL の Src。
+@internal
+pub fn media_src(url: String) -> Src {
+  Src(url)
+}
+
+/// Layout の Block に置く、読み直した先・移った先の文言の置き場(51 v6「After」)。runtime が 1 回だけ
+/// textContent を入れる。
+pub fn notice(class: css.Class) -> Element {
+  element(
+    "p",
+    [
+      class_attribute(class),
+      Attribute("data-yumemi-notice", ""),
+      Attribute("role", "status"),
+      Attribute("hidden", ""),
+    ],
+    [],
+  )
+}
+
+/// 確認の 1 段などに使う `<dialog>`(51 v6「invoker commands」)。`key` は literal。
+pub fn dialog(
+  key: String,
+  class: css.Class,
+  attributes: List(Attribute),
+  children: List(Element),
+) -> Element {
+  element(
+    "dialog",
+    [class_attribute(class), ..attributes]
+      |> list.append([Attribute("id", dialog_id(key))]),
+    children,
+  )
+}
+
+/// `dialog` を開くボタン(`command="show-modal"`)。invoker commands の無い browser は runtime が代わる。
+pub fn dialog_opener(
+  key: String,
+  class: css.Class,
+  children: List(Element),
+) -> Element {
+  dialog_button("show-modal", key, class, children)
+}
+
+/// `dialog` を閉じるボタン(`command="close"`)。
+pub fn dialog_closer(
+  key: String,
+  class: css.Class,
+  children: List(Element),
+) -> Element {
+  dialog_button("close", key, class, children)
+}
+
+fn dialog_button(
+  command: String,
+  key: String,
+  class: css.Class,
+  children: List(Element),
+) -> Element {
+  element(
+    "button",
+    [
+      class_attribute(class),
+      Attribute("type", "button"),
+      Attribute("command", command),
+      Attribute("commandfor", dialog_id(key)),
+    ],
+    children,
+  )
+}
+
+fn dialog_id(key: String) -> String {
+  "yumemi-dialog-" <> key
 }
 
 /// 生の CSS の逃げ道(51 v6「生の CSS の逃げ道」)。`priv/static` の .css を `<link>` で読む。
@@ -162,40 +261,25 @@ pub opaque type Sheet {
 
 /// `priv/static` の .css。path は文字列の literal で書く(第 31 条)。`/` で始めても始めなくてもよい。
 pub fn static_sheet(path: String) -> Sheet {
-  case string.starts_with(path, "/") {
-    True -> Sheet(path)
-    False -> Sheet("/" <> path)
-  }
+  Sheet(static_path(path))
 }
 
-/// 0.11 の形の interactive Component(`pub fn app` を持つ module)を置く一時の口。段 C の
-/// Y3 で生成物 `gen/islands` の関数に替わって消える。タグ名が custom element の名の形で
-/// なければ何も出さず、引数の名が `[a-z][a-z0-9-]*` でないか `on` で始まるか
-/// `style` / `class` / `srcdoc` なら、その引数を出さない。
-pub fn legacy_island(tag: String, args: List(#(String, String))) -> Element {
-  case is_custom_element_name(tag) {
-    True ->
-      Node(
-        "",
-        tag,
-        list.map(args, fn(arg) {
-          case is_island_argument(arg.0) {
-            True -> Attribute(arg.0, arg.1)
-            False -> NoAttribute
-          }
-        }),
-        [],
-      )
-    False -> Fragment([])
+/// `priv/static` の中の道。外の origin へ出る字(`//`・`\`・`:`)と `..` の段を含めば、何も指さない
+/// `/`(読み込みは空振り)にする ── 生成器が literal を検査するが、実行時にも外を読ませない。
+fn static_path(path: String) -> String {
+  let path = case string.starts_with(path, "/") {
+    True -> path
+    False -> "/" <> path
   }
-}
-
-fn is_island_argument(name: String) -> Bool {
-  is_name(name)
-  && !string.starts_with(name, "on")
-  && name != "style"
-  && name != "class"
-  && name != "srcdoc"
+  case
+    string.contains(path, "//")
+    || string.contains(path, "\\")
+    || string.contains(path, ":")
+    || list.contains(string.split(path, "/"), "..")
+  {
+    True -> "/"
+    False -> path
+  }
 }
 
 fn badge_count(count: Option(Int)) -> String {
@@ -254,6 +338,26 @@ pub fn raw_text(
 @internal
 pub fn attribute(name: String, value: String) -> Attribute {
   Attribute(name, value)
+}
+
+/// 名前付きの逃げ道の置き場(生成物 `gen/escapes` だけが呼ぶ)。runtime が接続で `mount` を呼ぶ。
+@internal
+pub fn escape_point(
+  name: String,
+  attributes: List(Attribute),
+  fallback: List(Element),
+) -> Element {
+  element(
+    "yumemi-escape",
+    list.append(attributes, [Attribute("name", name)]),
+    fallback,
+  )
+}
+
+/// 複数の属性を 1 つの Attribute に束ねる(生成物の live の `bind` ほか)。
+@internal
+pub fn attributes(attributes: List(Attribute)) -> Attribute {
+  Attributes(attributes)
 }
 
 @internal
@@ -346,6 +450,8 @@ fn render(element: Element, parent_namespace: String) -> String {
       <> tag
       <> ">"
     Node(namespace:, tag:, attributes:, children:) -> {
+      let #(attributes, children) =
+        textarea_value(namespace, tag, attributes, children)
       let xmlns = case namespace != "" && namespace != parent_namespace {
         True -> " xmlns=\"" <> escape(namespace) <> "\""
         False -> ""
@@ -369,6 +475,45 @@ fn render_all(children: List(Element), namespace: String) -> String {
   children
   |> list.map(render(_, namespace))
   |> string.concat
+}
+
+/// textarea は `value` 属性を読まない(初めの値は中身の字)。`value`(live の `bind`・`attr.value`)は、中身が
+/// 無ければ中身の字に移して属性から外す ── 属性のままだと空の textarea が描かれ、送りが初めの値を "" で上書き
+/// する(0.12 段 C、柏木 ゲート 2)。中身を書いたなら中身が勝つ。
+fn textarea_value(
+  namespace: String,
+  tag: String,
+  attributes: List(Attribute),
+  children: List(Element),
+) -> #(List(Attribute), List(Element)) {
+  case namespace, tag {
+    "", "textarea" -> {
+      let flat = flatten_attributes(attributes)
+      let value =
+        list.fold(flat, None, fn(found, attribute) {
+          case attribute {
+            Attribute("value", value) -> Some(value)
+            _ -> found
+          }
+        })
+      case value {
+        None -> #(attributes, children)
+        Some(value) -> #(
+          list.filter(flat, fn(attribute) {
+            case attribute {
+              Attribute("value", _) -> False
+              _ -> True
+            }
+          }),
+          case children {
+            [] -> [Text(value)]
+            _ -> children
+          },
+        )
+      }
+    }
+    _, _ -> #(attributes, children)
+  }
 }
 
 /// textarea / pre / listing は、直後の最初の改行を HTML の parser が 1 つ捨てる。本文が改行で始まるなら 1 つ足して落とさない。
@@ -410,9 +555,11 @@ fn is_void(tag: String) -> Bool {
 /// 同じ値)。class だけは空白でつなぐ。空の class は出さない。
 fn render_attributes(attributes: List(Attribute)) -> String {
   attributes
+  |> flatten_attributes
   |> list.filter_map(fn(attribute) {
     case attribute {
-      Attribute("class", "") | Attribute("", _) | NoAttribute -> Error(Nil)
+      Attribute("class", "") | Attribute("", _) | NoAttribute | Attributes(_) ->
+        Error(Nil)
       Attribute(name, value) -> Ok(#(name, value))
     }
   })
@@ -425,6 +572,15 @@ fn render_attributes(attributes: List(Attribute)) -> String {
     }
   })
   |> string.concat
+}
+
+fn flatten_attributes(attributes: List(Attribute)) -> List(Attribute) {
+  list.flat_map(attributes, fn(attribute) {
+    case attribute {
+      Attributes(inner) -> flatten_attributes(inner)
+      _ -> [attribute]
+    }
+  })
 }
 
 /// 後ろから見て、初めて出た名だけを残す(class は値をつなぐ)。並びの安定に頼らない。

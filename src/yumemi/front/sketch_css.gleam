@@ -1,3 +1,4 @@
+import gleam/dynamic.{type Dynamic}
 import gleam/float
 import gleam/int
 import gleam/list
@@ -10,55 +11,71 @@ import sketch/internals/cache/cache as sketch_style
 import yumemi/front/css
 import yumemi/front/track
 
-/// sketch の Class。0.11 の形の interactive Component(`pub fn app` を持つ module、段 C の
-/// Y3 で消す)だけが使う。★ の Block と Layout は `css.class` を要素の関数に渡す。
-pub fn class(styles: List(css.Style)) -> sketch_css.Class {
-  styles
-  |> list.flat_map(to_sketch)
-  |> sketch_css.class
-}
+@external(javascript, "./sheet_ffi.mjs", "add")
+fn add_rule(name: String, css: String) -> Nil
 
-@external(javascript, "./sheet_ffi.mjs", "current")
-fn current_sheet() -> Result(sketch.StyleSheet, Nil)
+@external(javascript, "./sheet_ffi.mjs", "start")
+fn start_collecting() -> Dynamic
 
-@external(javascript, "./sheet_ffi.mjs", "set_current")
-fn set_current_sheet(sheet: Result(sketch.StyleSheet, Nil)) -> Nil
+@external(javascript, "./sheet_ffi.mjs", "finish")
+fn finish_collecting(previous: Dynamic) -> String
 
-/// `css.Class` の class 名。いま集めている stylesheet(`collect`)に規則を足して名を返す。
-/// 集めていない所(test や Block リストの外で描いたとき)では、その場の stylesheet を 1 つ
-/// 持って名だけを返す。
+/// `css.Class` の class 名。Style の列を sketch で CSS の字にし、その字(class 名を伏せたもの)の
+/// FNV-1a の hash から名を作る(0.12 段 C)。sketch の名は Style の `string.inspect` の hash で、
+/// bundle や minify で構成子の名が替わると変わる(78、Y2 の実測)。CSS の字は構成子の名に依らない
+/// ので、node・Worker・minify の bundle のどこで描いても同じ Style は同じ名になる。いま集めている
+/// 所(`collect`)があれば規則を足す。
 @internal
 pub fn class_name(class: css.Class) -> String {
-  let sheet = case current_sheet() {
-    Ok(sheet) -> sheet
-    Error(_) -> new_sheet()
+  case css.class_styles(class) {
+    [] -> ""
+    _ -> stable_class_name(class)
   }
-  let #(sheet, name) =
+}
+
+fn stable_class_name(class: css.Class) -> String {
+  let #(sheet, raw) =
     css.class_styles(class)
     |> list.flat_map(to_sketch)
     |> sketch_css.class
-    |> sketch.class_name(sheet)
-  set_current_sheet(Ok(sheet))
+    |> sketch.class_name(new_sheet())
+  let template = string.replace(sketch.render(sheet), raw, "\u{1}")
+  let name = "css-" <> stable_hash(template)
+  add_rule(name, string.replace(template, "\u{1}", name))
   name
 }
 
 /// `body` を描く間に使った class の CSS を集める。戻りは #(CSS の字, body の値)。
 @internal
 pub fn collect(body: fn() -> a) -> #(String, a) {
-  let previous = current_sheet()
-  set_current_sheet(Ok(new_sheet()))
+  let previous = start_collecting()
   let value = body()
-  let css = case current_sheet() {
-    Ok(sheet) -> sketch.render(sheet)
-    Error(_) -> ""
-  }
-  set_current_sheet(previous)
-  #(css, value)
+  #(finish_collecting(previous), value)
 }
 
 fn new_sheet() -> sketch.StyleSheet {
   let assert Ok(sheet) = sketch.stylesheet(strategy: sketch.Ephemeral)
   sheet
+}
+
+/// FNV-1a(32 bit)を UTF-8 の byte に掛け、16 進 8 桁の大文字にする。JS の数で 2^53 を
+/// 超えないよう、掛け算は 2^24 の項と 403 の項に割る。
+@internal
+pub fn stable_hash(text: String) -> String {
+  fnv(<<text:utf8>>, 2_166_136_261)
+  |> int.to_base16
+  |> string.pad_start(8, "0")
+}
+
+fn fnv(bytes: BitArray, hash: Int) -> Int {
+  case bytes {
+    <<byte, rest:bytes>> -> {
+      let low = hash % 256
+      let mixed = hash - low + int.bitwise_exclusive_or(low, byte)
+      fnv(rest, { mixed % 256 * 16_777_216 + mixed * 403 } % 4_294_967_296)
+    }
+    _ -> hash
+  }
 }
 
 /// 色を CSS の字にする。形の合わない Hex・Token は `unset`(宣言の外へ出る字を書かない)。

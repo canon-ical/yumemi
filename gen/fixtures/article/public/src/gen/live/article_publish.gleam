@@ -1,15 +1,8 @@
-//// GENERATED from src/components/like_button.gleam [sha256:aaa44fe5356c] — 手で編集しない
+//// GENERATED from src/components/article_manage.gleam [sha256:457d64aa5779] — 手で編集しない
 
-import gen/out/article_publish
-import gleam/dynamic.{type Dynamic}
-import gleam/dynamic/decode
-import gleam/json
-import gleam/list
-import gleam/option.{None, Some}
-import gleam/string
-import lustre/effect.{type Effect}
+import yumemi/front/css
+import yumemi/front/el
 import yumemi/front/live
-import yumemi/spec
 
 pub type Args {
   Args(slug: String)
@@ -24,139 +17,106 @@ pub type Error {
   AlreadyRetracted
 }
 
-pub type Failure {
+pub type When {
+  Idle
+  Waiting
+  Succeeded
+  Failed
   Refused(Error)
-  Broke(String)
 }
 
-pub type State =
-  live.State(Args, Nil, article_publish.Out, Failure)
-
-pub type Event =
-  live.Event(Field, Nil, article_publish.Out, Failure)
-
-pub fn init(given: Nil) -> #(State, Effect(Event)) {
-  #(
-    live.State(args: Args(slug: ""), given: given, last: None, waiting: False),
-    effect.none(),
-  )
+pub type Slot {
+  OutSlug
+  OutTitle
+  OutBody
+  OutVersion
+  OutOrder
+  OutCategory
+  OutTags
 }
 
-pub fn update(model: State, msg: Event) -> #(State, Effect(Event)) {
-  case msg {
-    live.Set(Slug, value) -> #(
-      live.State(..model, args: Args(slug: value)),
-      effect.none(),
-    )
-    live.Send ->
-      case model.waiting {
-        True -> #(model, effect.none())
-        False ->
-          case validate(model) {
-            Error(errors) -> #(
-              live.State(
-                ..model,
-                last: Some(Error(Broke(validation_error_text(errors)))),
-              ),
-              effect.none(),
-            )
-            Ok(args) -> #(live.State(..model, waiting: True), send(args))
-          }
-      }
-    live.Given(given) -> #(live.State(..model, given: given), effect.none())
-    live.Done(result) -> {
-      let next = live.State(..model, last: Some(result), waiting: False)
-      case result {
-        Ok(_) -> #(next, effect.none())
-        Error(_) -> #(next, effect.none())
-      }
-    }
+/// name="article_publish.<field>" と、Spec から写せる制約検証の属性と value。
+pub fn bind(field: Field, value: String) -> el.Attribute {
+  case field {
+    Slug ->
+      live.bind("article_publish", "slug", value, [
+        live.MinLength(1),
+        live.Required,
+        live.MaxLength(64),
+        live.Pattern("[a-z0-9]+(-[a-z0-9]+)*"),
+      ])
   }
 }
 
-pub fn validate(model: State) -> Result(Args, List(#(Field, String))) {
-  let errors =
-    list.flatten([
-      validate_field(
-        Slug,
-        model.args.slug,
-        spec.Pattern(min: 1, max: 64, regex: "^[a-z0-9]+(-[a-z0-9]+)*$"),
-        "must contain 1 to 64 characters and match /^[a-z0-9]+(-[a-z0-9]+)*$/",
-      ),
-    ])
-  case errors {
-    [] -> Ok(model.args)
-    _ -> Error(errors)
+/// checkbox。
+pub fn bind_check(field: Field, checked: Bool) -> el.Attribute {
+  live.bind_check("article_publish", field_name(field), checked)
+}
+
+/// select と radio の name(選択肢は attr.value / attr.selected)。
+pub fn bind_choice(field: Field) -> el.Attribute {
+  live.bind_choice("article_publish", field_name(field))
+}
+
+/// file の control(Blob の欄)。送る前に runtime が上げ、key を Args に入れる。
+pub fn bind_file(field: Field) -> el.Attribute {
+  live.bind_file("article_publish", field_name(field))
+}
+
+/// data-yumemi-when="article_publish.<state>" の枝。
+pub fn when(state: When, children: List(el.Element)) -> el.Element {
+  live.when("article_publish", state_name(state), children)
+}
+
+/// data-yumemi-out="article_publish.<slot>" の空の span。
+pub fn out(slot: Slot) -> el.Element {
+  live.out("article_publish", slot_name(slot))
+}
+
+/// 送りのボタン。叩くのはこの Service 1 本。
+pub fn send(class: css.Class, children: List(el.Element)) -> el.Element {
+  live.send("article_publish", class, children)
+}
+
+/// `data-yumemi-args` の JSON(生成物の `gen/interactive` が使う)。
+@internal
+pub fn args_json(args: Args) -> String {
+  live.json_object([
+    #("slug", live.json_string(args.slug)),
+  ])
+}
+
+fn field_name(field: Field) -> String {
+  case field {
+    Slug -> "slug"
   }
 }
 
-fn validate_field(
-  field: Field,
-  raw: String,
-  constraint: spec.Spec,
-  message: String,
-) -> List(#(Field, String)) {
-  case spec.validate(raw, constraint) {
-    Ok(_) -> []
-    Error(_) -> [#(field, message)]
+fn state_name(state: When) -> String {
+  case state {
+    Idle -> "idle"
+    Waiting -> "waiting"
+    Succeeded -> "succeeded"
+    Failed -> "failed"
+    Refused(error) -> "refused-" <> error_code(error)
   }
 }
 
-fn validation_error_text(errors: List(#(Field, String))) -> String {
-  errors |> list.map(fn(error) { error.1 }) |> string.join("; ")
-}
-
-fn error_failure(value: Dynamic) -> Failure {
-  case error_text(value) {
-    "already_published" -> Refused(AlreadyPublished)
-    "already_retracted" -> Refused(AlreadyRetracted)
-    code -> Broke(code)
+fn error_code(error: Error) -> String {
+  case error {
+    AlreadyPublished -> "already-published"
+    AlreadyRetracted -> "already-retracted"
   }
 }
 
-fn error_text(value: Dynamic) -> String {
-  case decode.run(value, error_field_decoder("code")) {
-    Ok(code) if code != "" -> code
-    _ ->
-      case decode.run(value, error_field_decoder("message")) {
-        Ok(message) if message != "" -> message
-        _ -> "invalid error payload"
-      }
+fn slot_name(slot: Slot) -> String {
+  case slot {
+    OutSlug -> "slug"
+    OutTitle -> "title"
+    OutBody -> "body"
+    OutVersion -> "version"
+    OutOrder -> "order"
+    OutCategory -> "category"
+    OutTags -> "tags"
   }
-}
-
-fn error_field_decoder(field: String) -> decode.Decoder(String) {
-  decode.optional_field(field, "", decode.string, fn(value) {
-    decode.success(value)
-  })
-}
-
-@external(javascript, "./transport_ffi.mjs", "send")
-fn transport_send(
-  method: String,
-  path: String,
-  body: json.Json,
-  blob_fields: List(String),
-  on_ok: fn(Dynamic) -> Nil,
-  on_error: fn(Dynamic) -> Nil,
-) -> Nil
-
-fn send(args: Args) -> Effect(Event) {
-  effect.from(fn(dispatch) {
-    transport_send(
-      "POST",
-      "/api/articles/" <> args.slug <> "/publish",
-      json.object([
-        #("slug", json.string(args.slug)),
-      ]),
-      [],
-      fn(value) {
-        case decode.run(value, article_publish.decoder()) {
-          Ok(out) -> dispatch(live.Done(Ok(out)))
-          Error(_) -> dispatch(live.Done(Error(Broke("invalid response"))))
-        }
-      },
-      fn(value) { dispatch(live.Done(Error(error_failure(value)))) },
-    )
-  })
 }

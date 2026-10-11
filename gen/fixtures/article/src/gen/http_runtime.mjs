@@ -1,4 +1,4 @@
-//// GENERATED from entry.entries / service declarations / framework dispatch [sha256:5a7812900d2a] — 手で編集しない
+//// GENERATED from entry.entries / service declarations / framework dispatch [sha256:73a68a69ea55] — 手で編集しない
 import { Ok, Error } from '../gleam.mjs';
 import { registry } from './registry.mjs';
 import { attached } from './attached.mjs';
@@ -16,11 +16,12 @@ const args={
  article_publish:[['slug',['scalar','slug']]],
  article_read:[['slug',['scalar','slug']]],
  article_retract:[['slug',['scalar','slug']]],
+ article_title:[['slug',['scalar','slug']]],
  widget_list:[['widget',['option',['text']]],['slug',['option',['text']]]],
 };
 const modules={};
 const phaseGates={};
-const accepted={article_create:'article',article_publish:'article',article_read:'article',article_retract:'article'};
+const accepted={article_create:'article',article_publish:'article',article_read:'article',article_retract:'article',article_title:'article'};
 const ports={fixture_browser:h_attachedFixtureBrowser,fixture_sync:h_attachedFixtureSync,blob_copy:h_attachedBlobCopy};
 const hooks={};
 const subjects=[];

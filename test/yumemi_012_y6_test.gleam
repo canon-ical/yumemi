@@ -147,7 +147,8 @@ pub fn to_service_args_take_app_types_test() {
     ))
   code |> should.equal(0)
   lines
-  |> list.filter(fn(line) { !string.contains(line, "逃げ道 ToService") })
+  // 0.12 段 C:ToService は警告の 1 行でなく面の逃げ道の数えの 1 行(Y3)に入る
+  |> list.filter(fn(line) { !string.contains(line, "数える口の送り先 ToService") })
   |> should.equal([])
 }
 

@@ -354,32 +354,37 @@ fn client_fixture() -> #(List(stop.Note), String) {
     list.find(files, fn(file) {
       file.path == "public/priv/static/_yumemi/client.mjs"
     })
-  #(front_emit.client_notes(package, front_model), client.text)
+  #(reader_front.notes(front_model, app.services), client.text)
 }
 
+/// 0.12 段 C:client は Component の表を runtime に渡し、タグごとに define する(lustre の登録は無い)。
+/// `pub fn app` を持つ module は第 9 条で止まり(0.11.15 の「app() が無ければ exit 3」は逆になった)、
+/// 0.11 の形の view(`calls` の Args を受けない)は第 11 条で止まる。期待を 0.11 の lustreRegister から替えた。
 pub fn client_registers_every_app_component_and_flags_missing_app_test() {
   let #(notes, client) = client_fixture()
-  // calls の無い島も app() があれば登録する
   client
-  |> string.contains(
-    "if (!defined(\"copy-link\")) lustreRegister(styled(copy_link.app()), \"copy-link\");",
-  )
+  |> string.contains("startInteractive({")
   |> should.be_true
-  // 既存の島(calls と app() を持つ)はそのまま
-  client
-  |> string.contains(
-    "if (!defined(\"like-button\")) lustreRegister(styled(like_button.app()), \"like-button\");",
-  )
+  client |> string.contains("\"like-button\": {") |> should.be_true
+  client |> string.contains("lustre") |> should.be_false
+  let texts = list.map(notes, fn(note) { note.text })
+  list.any(texts, fn(text) {
+    string.contains(text, "components/copy_link")
+    && string.contains(text, "第 9 条")
+  })
   |> should.be_true
-  // app() の無い島は登録せず、exit 3 で名指す
+  list.any(texts, fn(text) {
+    string.contains(text, "components/copy_link")
+    && string.contains(text, "第 1 条")
+  })
+  |> should.be_true
+  list.any(texts, fn(text) {
+    string.contains(text, "components/no_app")
+    && string.contains(text, "第 11 条")
+  })
+  |> should.be_true
+  // 第 11 条で止まる Component は置く関数も表も出さない
   client |> string.contains("no-app") |> should.be_false
-  notes
-  |> should.equal([
-    stop.Note(
-      stop.Missing,
-      "public/components/no_app: `pub fn app()` が無い(client の入口は島を `app()` で登録する)",
-    ),
-  ])
 }
 
 // ── Attached Entry の live module(musearch の ▲ browser_adult を生成物に戻す形)────────────
@@ -387,15 +392,19 @@ pub fn client_registers_every_app_component_and_flags_missing_app_test() {
 const attached_entry_source = "
 import yumemi/front
 import gen/api
+import gen/live/fixture_browser as browser
+import yumemi/front/css
+import yumemi/front/el
 
 pub const calls: List(api.Target) = [front.Entry(api.FixtureBrowser)]
 
-pub fn app() {
-  Nil
+pub fn view(_it: browser.Args) -> el.Element {
+  browser.send(css.class([]), [el.text(\"go\")])
 }
 "
 
-/// `transport_send` の外部宣言は `transport_ffi.mjs` の `send`(6 引数)と同じ数、呼び出しは `blob_fields` に `[]`。
+/// 0.12 段 C:attached の上げ口(`Entry`)の live module は Service と同じ形(bind・send・when・out)で、送りは
+/// runtime の表に method と path で載る(transport_ffi.mjs は無くなった)。期待を 0.11 の transport_send から替えた。
 pub fn attached_entry_live_sends_blob_fields_test() {
   let assert Ok(back_units) = source.load("gen/fixtures/article")
   let assert Ok(app) = reader.read(back_units)
@@ -421,23 +430,11 @@ pub fn attached_entry_live_sends_blob_fields_test() {
     })
   live.text
   |> string.contains(
-    "fn transport_send(method: String, path: String, body: json.Json, blob_fields: List(String), on_ok: fn(Dynamic) -> Nil, on_error: fn(Dynamic) -> Nil) -> Nil",
+    "pub fn send(class: css.Class, children: List(el.Element)) -> el.Element {\n  live.send(\"fixture_browser\", class, children)\n}",
   )
   |> should.be_true
-  live.text
-  |> string.contains(
-    "    \"/fixture/browser\",\n    json.null(),\n    [],\n    fn(value) { dispatch(live.Done(Ok(value))) },",
-  )
-  |> should.be_true
-  let assert Ok(ffi) =
-    list.find(files, fn(file) {
-      file.path == "public/src/gen/live/transport_ffi.mjs"
-    })
-  ffi.text
-  |> string.contains(
-    "export function send(method, path, body, blobFields, onOk, onError) {",
-  )
-  |> should.be_true
+  list.any(files, fn(file) { string.ends_with(file.path, "transport_ffi.mjs") })
+  |> should.be_false
 }
 
 @external(javascript, "./yumemi_fix_0114_test_ffi.mjs", "gate_marks_navigation_fetch")

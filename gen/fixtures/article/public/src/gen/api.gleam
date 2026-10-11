@@ -1,4 +1,4 @@
-//// GENERATED from src/entry.gleam [sha256:5c3196bb57ce] — 手で編集しない
+//// GENERATED from src/entry.gleam [sha256:16bb7f860a06] — 手で編集しない
 
 import gen/service
 import yumemi/front
@@ -40,12 +40,16 @@ pub const routes: List(Route) = [
     path: "/api/articles/:slug/blob_save",
   ),
   Route(service: service.ArticleCreate, method: Post, path: "/api/articles"),
-  Route(service: service.ArticleList, method: Get, path: "/api/articles"),
   Route(
     service: service.ArticlePublish,
     method: Post,
     path: "/api/articles/:slug/publish",
   ),
   Route(service: service.ArticleRead, method: Get, path: "/api/articles/:slug"),
+  Route(
+    service: service.ArticleTitle,
+    method: Get,
+    path: "/api/articles/:slug/title",
+  ),
   Route(service: service.WidgetList, method: Get, path: "/api/widgets"),
 ]

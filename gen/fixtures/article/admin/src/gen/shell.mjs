@@ -1,4 +1,4 @@
-// GENERATED from admin/src/{gen/route.gleam,gen/load/**,pages/**,layout.gleam,shell.gleam} [sha256:e616ee3ccc02] — 手で編集しない
+// GENERATED from admin/src/{gen/route.gleam,gen/load/**,pages/**,layout.gleam,shell.gleam} [sha256:e305eb3c195a] — 手で編集しない
 
 import * as api from "./api.mjs";
 import * as blocksPreview from "./blocks_preview.mjs";

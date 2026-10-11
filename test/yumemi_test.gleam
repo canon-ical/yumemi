@@ -376,12 +376,23 @@ fn render_two_each_modals() -> String {
 
 // ── yumemi-look(0.11.7)── Style に足した見た目の語彙 7 つ ─────────────────
 
-@external(javascript, "./yumemi_look_ffi.mjs", "island_shadow_style")
-fn island_shadow_style(class: sketch_class.Class) -> String
+/// 0.12 段 C:interactive Component の Style は Block と同じく SSR の `<style>` に出る(shadow の
+/// `<style>` は無くなった)。`el.styled` が集める CSS の字を返す。
+fn component_style(styles: List(css.Style)) -> String {
+  front_sketch_css.collect(fn() {
+    front_sketch_css.class_name(css.class(styles))
+  }).0
+}
+
+fn sketch_class_of(styles: List(css.Style)) -> sketch_class.Class {
+  styles
+  |> list.flat_map(front_sketch_css.to_sketch)
+  |> sketch_class.class
+}
 
 fn css_of(styles: List(css.Style)) -> String {
   let assert Ok(sheet) = sketch.stylesheet(strategy: sketch.Ephemeral)
-  let #(sheet, _) = sketch.class_name(front_sketch_css.class(styles), sheet)
+  let #(sheet, _) = sketch.class_name(sketch_class_of(styles), sheet)
   sketch.render(sheet)
 }
 
@@ -553,24 +564,22 @@ fn look_styles_work_inside_state_and_responsive() {
 }
 
 fn look_styles_reach_island_shadow_style() {
-  let class =
-    front_sketch_css.class([
-      css.Background(css.Token("ma-color-bg")),
-      css.Border(
-        edge: css.BottomEdge,
-        width: css.Px(2.0),
-        style: css.Solid,
-        color: css.Token("ma-color-line"),
-      ),
-      css.Outline(
-        width: css.Px(3.0),
-        offset: css.Px(3.0),
-        color: css.Token("ma-color-focus"),
-      ),
-      css.Crop(fit: css.Cover, ratio: css.Ratio(width: 1.0, height: 1.0)),
-    ])
-  let html = island_shadow_style(class)
-  assert_contains(html, "<style>", "island renders a shadow style tag")
+  let class = [
+    css.Background(css.Token("ma-color-bg")),
+    css.Border(
+      edge: css.BottomEdge,
+      width: css.Px(2.0),
+      style: css.Solid,
+      color: css.Token("ma-color-line"),
+    ),
+    css.Outline(
+      width: css.Px(3.0),
+      offset: css.Px(3.0),
+      color: css.Token("ma-color-focus"),
+    ),
+    css.Crop(fit: css.Cover, ratio: css.Ratio(width: 1.0, height: 1.0)),
+  ]
+  let html = component_style(class)
   assert_contains(
     html,
     "background-color: var(--ma-color-bg);",
@@ -607,8 +616,7 @@ fn look2_box_sizing_renders_to_css() {
   assert_contains(input, "min-height: 48.0px;", "min-height stays")
   let content = css_of([css.Sizing(css.ContentBox)])
   assert_contains(content, "box-sizing: content-box;", "Sizing ContentBox")
-  let html =
-    island_shadow_style(front_sketch_css.class([css.Sizing(css.BorderBox)]))
+  let html = component_style([css.Sizing(css.BorderBox)])
   assert_contains(html, "box-sizing: border-box;", "island style has Sizing")
 }
 
@@ -954,12 +962,10 @@ fn v01114_focus_visible_and_hover_capable_render_to_css() {
   assert_not_contains(sp_hover, "(hover: hover)", "Hover in Responsive")
   // 島の shadow の `<style>` にも出る(島の Style も Block の Style も同じ sketch_css)。
   let island =
-    island_shadow_style(
-      front_sketch_css.class([
-        css.State(css.FocusVisible, ring),
-        css.State(css.HoverCapable, [css.Background(css.Hex("#ff0000"))]),
-      ]),
-    )
+    component_style([
+      css.State(css.FocusVisible, ring),
+      css.State(css.HoverCapable, [css.Background(css.Hex("#ff0000"))]),
+    ])
   assert_contains(island, ":focus-visible {", "island has FocusVisible")
   assert_contains(island, "@media (hover: hover) {", "island has HoverCapable")
 }

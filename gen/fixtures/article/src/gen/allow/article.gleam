@@ -1,4 +1,4 @@
-//// GENERATED from allow.article [sha256:b574c508f12e] — 手で編集しない
+//// GENERATED from allow.article [sha256:99fed65d7484] — 手で編集しない
 
 import entity/article
 import entity/staff

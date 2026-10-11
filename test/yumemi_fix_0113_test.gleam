@@ -51,10 +51,15 @@ fn reloading_component() -> String {
     simplifile.read(
       "gen/fixtures/article/public/src/components/like_button.gleam",
     )
+  // 0.12 段 C:書きの送りの成功の後は頁の読み直し(After の組)
   string.replace(
     text,
-    "pub const after_send: front_live.After = front_live.Stay",
-    "pub const after_send: front_live.After = front_live.ReloadPage",
+    "live.After(ok: live.Stay, error: live.Stay)",
+    "live.After(ok: live.ReloadPage(notice: None), error: live.Stay)",
+  )
+  |> string.replace(
+    "import gen/service\n",
+    "import gen/service\nimport gleam/option.{None}\n",
   )
 }
 
@@ -77,14 +82,20 @@ fn live_text(publish: String) -> String {
       pages: face.UndeclaredPages,
       units: face_units,
     )
-  let assert Ok(file) =
+  let files =
     front_emit.emit(app, back_units, package, front_model, hash.of(back_units))
-    |> list.find(fn(file) {
+  let assert Ok(file) =
+    list.find(files, fn(file) {
       file.path == "public/src/gen/live/article_publish.gleam"
     })
   // 生成物は gleam の構文として読める
   let assert Ok(_) = glance.module(file.text)
-  file.text
+  // 0.12 段 C:202 の扱いは runtime の表(client.mjs)に移ったので、live と表を並べて返す
+  let assert Ok(client) =
+    list.find(files, fn(file) {
+      file.path == "public/priv/static/_yumemi/client.mjs"
+    })
+  file.text <> "\n----\n" <> client.text
 }
 
 /// 宣言から決める:`step.commit(` を持つ Service は 202 を返す、持たない Service は返さない。
@@ -108,55 +119,26 @@ pub fn accepts_follows_commit_test() {
   |> should.equal(["article_publish"])
 }
 
-/// H4:commit の後に続きを持つ Service の live は `Reply` を持ち、202 の 1 欄の本文を `Accepted(id)` に読んで
-/// `Done(Ok(_))` にする(after_send の読み直しへ進む)。200 の Out は `Replied(out)`。
+/// H4:commit の後に続きを持つ Service は 202 と 1 欄の本文(`{<root>: id}`)を成功として読み、after_send の
+/// 読み直しへ進む。0.12 段 C:読み方は runtime(ok の応答を Out として out と GoTo の穴に使う)で、表が
+/// `"accepted": true` を持ち、GoTo の穴の検査(第 15 条)を外す。期待を live の Reply 型から表の行に替えた。
 pub fn live_reads_accepted_as_success_test() {
   let text = live_text(committing_source())
+  string.contains(text, "pub type Reply") |> should.be_false
   string.contains(
     text,
-    "pub type Reply {\n  Replied(article_publish.Out)\n  Accepted(id: String)\n}",
+    "\"article_publish\": { \"method\": \"POST\", \"path\": \"/api/articles/:slug/publish\", \"read\": false, \"upload\": false, \"accepted\": true,",
   )
   |> should.be_true
   string.contains(
     text,
-    "pub type State = live.State(Args, Nil, Reply, Failure)",
-  )
-  |> should.be_true
-  string.contains(
-    text,
-    "pub type Event = live.Event(Field, Nil, Reply, Failure)",
-  )
-  |> should.be_true
-  string.contains(text, "case decode.run(value, reply_decoder()) {")
-  |> should.be_true
-  string.contains(text, "Ok(reply) -> dispatch(live.Done(Ok(reply)))")
-  |> should.be_true
-  string.contains(
-    text,
-    "decode.one_of(decode.map(article_publish.decoder(), Replied), [",
-  )
-  |> should.be_true
-  string.contains(
-    text,
-    "use fields <- decode.then(decode.dict(decode.string, decode.string))",
-  )
-  |> should.be_true
-  string.contains(text, "[#(_, id)] -> decode.success(Accepted(id))")
-  |> should.be_true
-  string.contains(text, "import gleam/dict") |> should.be_true
-  // Done(Ok(_)) は after_send(ReloadPage)へ
-  string.contains(text, "Ok(_) -> #(next, reload_page())") |> should.be_true
-  string.contains(text, "event.emit(\"yumemi-done\", json.null())")
-  |> should.be_true
-  // 読めない本文は今までどおり invalid response
-  string.contains(
-    text,
-    "Error(_) -> dispatch(live.Done(Error(Broke(\"invalid response\"))))",
+    "\"ok\": { \"then\": \"reload\" }, \"error\": { \"then\": \"stay\" }",
   )
   |> should.be_true
 }
 
 /// 202 を返さない Service の live は 0.11.2 と同じ(Out を持ち、Out の decoder だけ)。
+/// 0.12 段 C:表の `"accepted": false`(期待を替えた)。
 pub fn live_without_commit_keeps_out_test() {
   let text = live_text(publish_source())
   string.contains(text, "Reply") |> should.be_false
@@ -164,11 +146,7 @@ pub fn live_without_commit_keeps_out_test() {
   string.contains(text, "import gleam/dict") |> should.be_false
   string.contains(
     text,
-    "pub type State = live.State(Args, Nil, article_publish.Out, Failure)",
+    "\"article_publish\": { \"method\": \"POST\", \"path\": \"/api/articles/:slug/publish\", \"read\": false, \"upload\": false, \"accepted\": false,",
   )
-  |> should.be_true
-  string.contains(text, "case decode.run(value, article_publish.decoder()) {")
-  |> should.be_true
-  string.contains(text, "Ok(out) -> dispatch(live.Done(Ok(out)))")
   |> should.be_true
 }

@@ -8,5 +8,8 @@ import style
 pub type In = Nil
 
 pub fn view(_it: In) -> el.Element {
-  html.header(css.class([style.heading]), [], [el.text("記事")])
+  html.header(css.class([style.heading]), [], [
+    el.text("記事"),
+    el.notice(css.class([])),
+  ])
 }

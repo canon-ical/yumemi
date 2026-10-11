@@ -1,32 +1,23 @@
+//// interactive Component(0.12)── 上げ口(attached の `Entry`)も `calls` に並べる(`pub const target` は畳んだ)。
+
 import yumemi/front
-import sketch/lustre/element as el
-import yumemi/front/live as front_live
 import gen/api
-import gen/live/blob_copy
-import gleam/option.{None, Some}
-import lustre
-import lustre/attribute
-import lustre/event
-import sketch/lustre/element/html
+import gen/live/blob_copy as copy
+import gen/service
+import yumemi/front/css
+import yumemi/front/el.{type Element}
+import yumemi/front/html
 
-pub const target: api.Target = front.Entry(api.BlobCopy)
+pub const calls: List(front.Target(service.Service, api.Attached)) = [
+  front.Entry(api.BlobCopy),
+]
 
-pub fn view(it: blob_copy.State) -> el.Element(blob_copy.Event) {
+pub fn view(_copy: copy.Args) -> Element {
   html.div_([], [
-    html.input_(blob_copy.file_input()),
-    html.button_(
-      [event.on_click(front_live.Send), attribute.disabled(it.waiting)],
-      [el.text("Upload article image")],
-    ),
-    case it.last {
-      Some(Ok(key)) ->
-        html.p_([attribute.attribute("data-blob-key", key)], [el.text(key)])
-      Some(Error(_)) -> html.p_([], [el.text("upload failed")])
-      None -> html.p_([], [el.text("choose a file")])
-    },
+    html.input_([copy.bind_file(copy.File)]),
+    copy.send(css.class([]), [el.text("Upload article image")]),
+    copy.when(copy.Succeeded, [html.p_([], [copy.out(copy.OutKey)])]),
+    copy.when(copy.Failed, [html.p_([], [el.text("upload failed")])]),
+    copy.when(copy.Idle, [html.p_([], [el.text("choose a file")])]),
   ])
-}
-
-pub fn app() -> lustre.App(Nil, blob_copy.State, blob_copy.Event) {
-  lustre.component(blob_copy.init, blob_copy.update, view, [])
 }

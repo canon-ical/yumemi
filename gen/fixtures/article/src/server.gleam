@@ -1,5 +1,9 @@
 // ★ src/server.gleam ── back の宣言(yumemi/server)。Service でない HTTP の口と、導出規則を上書きする口。
-import yumemi/server.{Anyone, Attached, Get, Hook, Party, Post, ReadSession}
+import gleam/option.{None}
+import yumemi/server.{
+  Anyone, Attached, Get, Hook, ImageVariant, Media, Party, Post, ReadSession,
+  ScaleDown,
+}
 
 pub const attached: List(server.Attached) = [
   Attached(
@@ -34,3 +38,12 @@ pub const hooks: List(server.Hook) = [
   Hook(name: "attached_fixture_sync", module: "hooks"),
   Hook(name: "attached_blob_copy", module: "hooks"),
 ]
+
+// 画像の variant(0.12 段 C)── 頁の色の地の画像の URL は生成物 gen/media の theme_background で組む
+pub const media: server.Media = Media(
+  path: "/media",
+  theme_background: "w1600",
+  variants: [
+    ImageVariant(name: "w1600", width: 1600, height: None, fit: ScaleDown),
+  ],
+)
