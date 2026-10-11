@@ -4,7 +4,7 @@ import { registry } from './registry.mjs';
 import { attached } from './attached.mjs';
 import * as c from './codec.mjs';
 import * as runtime from './runtime.mjs';
-import { http } from '../../yumemi/framework/server/http.mjs';
+import { http } from '../../yumemi/yumemi/server/http.mjs';
 import { attachedFixtureBrowser as h_attachedFixtureBrowser } from '../hooks.mjs';
 import { attachedFixtureSync as h_attachedFixtureSync } from '../hooks.mjs';
 import { attachedBlobCopy as h_attachedBlobCopy } from '../hooks.mjs';

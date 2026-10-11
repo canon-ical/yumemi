@@ -6,9 +6,9 @@ import entity/article
 import entity/category
 import entity/staff
 import entity/tag
-import framework/effect.{type Effect, Write}
-import framework/er.{type Key}
-import framework/step.{type Start, type Step}
+import yumemi/effect.{type Effect, Write}
+import yumemi/er.{type Key}
+import yumemi/step.{type Start, type Step}
 import gen/allow/article as allow
 import gen/draft/article.{type ArticleDraft, ArticleDraft}
 import gen/face.{type Face, Admin, Public}

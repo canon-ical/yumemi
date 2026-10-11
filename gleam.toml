@@ -1,5 +1,5 @@
 name = "yumemi"
-version = "0.11.15"
+version = "0.12.0-dev"
 target = "javascript"
 description = "Have a sweet Gleam. A framework for Gleam on Cloudflare Workers: write the design, the code follows."
 licences = ["Apache-2.0"]
@@ -10,3 +10,11 @@ gleam_stdlib = ">= 0.44.0 and < 2.0.0"
 lustre = ">= 5.7.1 and < 6.0.0"
 sketch = ">= 4.2.1 and < 5.0.0"
 sketch_lustre = ">= 3.1.2 and < 3.2.0"
+# 生成器 `yumemi/gen` の依存(0.12 で本体の module に入れた、app の lock した版の生成器が走る)。
+glance = "7.0.0"
+glexer = ">= 2.0.0 and < 3.0.0"
+simplifile = ">= 2.0.0 and < 4.0.0"
+argv = ">= 1.0.0 and < 2.0.0"
+
+[dev-dependencies]
+gleeunit = ">= 1.0.0 and < 2.0.0"

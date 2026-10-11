@@ -1,6 +1,6 @@
 //// GENERATED from public/src/blocks/article.gleam [sha256:aff8d491424c] — 手で編集しない
 
-import framework/front/el
+import yumemi/front/el
 import gen/out/article_read
 import gleam/string
 import sketch/lustre/element/html

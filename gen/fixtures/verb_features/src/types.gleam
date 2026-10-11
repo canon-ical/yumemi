@@ -1,4 +1,4 @@
-import framework/spec.{type Spec, Range, Text, Uuid}
+import yumemi/spec.{type Spec, Range, Text, Uuid}
 
 pub const feature_id: Spec = Uuid
 pub const owner_id: Spec = Uuid

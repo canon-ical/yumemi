@@ -1,0 +1,1734 @@
+//// 束4 ── `db/queries/<service>/<name>.sql`。名前付きクエリ値 1つにつき SELECT 1文。
+//// 実行時は `$1..$n` を埋めるだけ。組み立ては全部ここで済ませる(20:837)。
+
+import gleam/int
+import gleam/list
+import gleam/option.{type Option, None, Some}
+import gleam/string
+import yumemi/gen/emit/hash
+import yumemi/gen/emit/reads
+import yumemi/gen/emit/root
+import yumemi/gen/emit/types.{type File, File}
+import yumemi/gen/emit/typing
+import yumemi/gen/model.{type App, type Entity, type Select}
+import yumemi/gen/naming
+import yumemi/gen/relation
+import yumemi/gen/stop
+import yumemi/gen/storage
+import yumemi/schema
+
+/// SQL を出せない理由。`class` は 20 の exit code 表(`stop`)へそのまま写る。
+pub type Reason {
+  Reason(class: stop.Class, text: String)
+}
+
+fn undone(text: String) -> Reason {
+  Reason(class: stop.NotImplemented, text: text)
+}
+
+fn clash(text: String) -> Reason {
+  Reason(class: stop.Conflict, text: text)
+}
+
+pub type Skipped {
+  Skipped(service: String, query: String, reason: Reason)
+}
+
+pub fn emit(app: App, hashes: hash.Hashes) -> List(File) {
+  let #(files, _) = build(app, hashes)
+  files
+}
+
+/// 出せなかった SQL を 20 の exit code つきで返す。**1本でも出ていなければ 0 で終われない**
+/// ── reads の関数だけ在って SQL が無い状態は、実行時に必ず落ちる不整合(柏木 P2-2)。
+pub fn notes(app: App, hashes: hash.Hashes) -> List(stop.Note) {
+  let #(_, skipped) = build(app, hashes)
+  list.map(skipped, fn(entry) {
+    stop.Note(
+      class: entry.reason.class,
+      text: "SQL を出さなかった "
+        <> entry.service
+        <> "/"
+        <> entry.query
+        <> ": "
+        <> entry.reason.text,
+    )
+  })
+}
+
+pub fn build(app: App, hashes: hash.Hashes) -> #(List(File), List(Skipped)) {
+  let #(files, skipped) = build_queries(app, hashes)
+  let #(arrow_files, arrow_skipped) = build_arrows(app, hashes)
+  #(list.append(files, arrow_files), list.append(skipped, arrow_skipped))
+}
+
+/// 矢印の read の SQL ── `db/queries/<service>/to_<prop>.sql`。鍵の列(jsonb 配列)を
+/// 受けて関係先の行を鍵の順で返す。実行側は Context の `relation` でこれを流し、復号して返す。
+fn build_arrows(app: App, hashes: hash.Hashes) -> #(List(File), List(Skipped)) {
+  list.fold(app.services, #([], []), fn(acc, service) {
+    reads.root_arrows(app, service)
+    |> list.filter(fn(arrow) {
+      !storage.in_object_named(app, arrow.target_entity)
+    })
+    |> list.fold(acc, fn(inner, arrow) {
+      let #(files, skipped) = inner
+      let query = reads.arrow_query(arrow)
+      case arrow_statement(app, arrow) {
+        Ok(text) -> #(
+          [
+            File(
+              path: "db/queries/" <> service.module <> "/" <> query <> ".sql",
+              text: "-- GENERATED from service."
+                <> service.module
+                <> " / "
+                <> arrow.name
+                <> " [sha256:"
+                <> hash.service(hashes, service.module)
+                <> "] — 手で編集しない\n"
+                <> text,
+            ),
+            ..files
+          ],
+          skipped,
+        )
+        Error(reason) -> #(files, [
+          Skipped(service: service.module, query: query, reason: reason),
+          ..skipped
+        ])
+      }
+    })
+  })
+}
+
+fn arrow_statement(app: App, arrow: model.Arrow) -> Result(String, Reason) {
+  use target <- try(
+    model.entity_by_name(app.entities, arrow.target_entity)
+    |> option.to_result(clash("矢印の先が無い: " <> arrow.target_entity)),
+  )
+  use key_column <- try(case target.key_columns {
+    [single] -> Ok(single)
+    [] ->
+      case target.key_column {
+        "" -> Error(clash("矢印の先に key が無い: " <> target.module))
+        column -> Ok(column)
+      }
+    _ -> Error(undone("矢印の先が複合 key: " <> target.module <> "(Key は1列の鍵しか運ばない)"))
+  })
+  let cast = case
+    list.find(target.fields, fn(field) { field.column == key_column })
+  {
+    Ok(field) -> keyset_cast(sql_type(app, field.value))
+    Error(_) -> "::text"
+  }
+  Ok(
+    "SELECT t.*\nFROM jsonb_array_elements_text($1::jsonb) WITH ORDINALITY AS keys(value,ord)\nJOIN "
+    <> schema.app
+    <> "."
+    <> target.table
+    <> " t ON t."
+    <> quoted(key_column)
+    <> "=keys.value"
+    <> cast
+    <> "\nORDER BY keys.ord;\n",
+  )
+}
+
+fn build_queries(
+  app: App,
+  hashes: hash.Hashes,
+) -> #(List(File), List(Skipped)) {
+  list.fold(app.services, #([], []), fn(acc, service) {
+    list.fold(service.queries, acc, fn(inner, query) {
+      let #(files, skipped) = inner
+      case storage.in_object_named(app, query.select.from) {
+        True -> inner
+        False -> query_file(app, hashes, service, query, files, skipped)
+      }
+    })
+  })
+}
+
+fn query_file(
+  app: App,
+  hashes: hash.Hashes,
+  service: model.Service,
+  query: model.NamedQuery,
+  files: List(File),
+  skipped: List(Skipped),
+) -> #(List(File), List(Skipped)) {
+  case statement(app, service, query.select) {
+    Ok(text) -> #(
+      [
+        File(
+          path: "db/queries/" <> service.module <> "/" <> query.name <> ".sql",
+          text: "-- GENERATED from service."
+            <> service.module
+            <> "."
+            <> query.name
+            <> " [sha256:"
+            <> hash.service(hashes, service.module)
+            <> "] — 手で編集しない\n"
+            <> text,
+        ),
+        ..files
+      ],
+      skipped,
+    )
+    Error(reason) -> #(files, [
+      Skipped(service: service.module, query: query.name, reason: reason),
+      ..skipped
+    ])
+  }
+}
+
+// ── 別名 ────────────────────────────────────────────────────────────────────
+
+type Scope {
+  Scope(
+    /// Entity の名 -> 別名
+    aliases: List(#(String, String)),
+    next_param: Int,
+  )
+}
+
+fn assign(scope: Scope, entity: Entity) -> Scope {
+  let wanted = naming.initial(entity.table)
+  let taken = list.map(scope.aliases, fn(pair) { pair.1 })
+  let alias = free(wanted, taken, 1)
+  Scope(
+    aliases: list.append(scope.aliases, [#(entity.name, alias)]),
+    next_param: scope.next_param,
+  )
+}
+
+fn free(wanted: String, taken: List(String), attempt: Int) -> String {
+  case list.contains(taken, wanted) {
+    False -> wanted
+    True -> free(wanted <> int.to_string(attempt), taken, attempt + 1)
+  }
+}
+
+fn alias_of(scope: Scope, entity_name: String) -> Option(String) {
+  case list.key_find(scope.aliases, entity_name) {
+    Ok(alias) -> Some(alias)
+    Error(_) -> None
+  }
+}
+
+// ── 列と型 ──────────────────────────────────────────────────────────────────
+
+const reserved = [
+  "order", "user", "group", "limit", "offset", "select", "from", "where",
+  "table", "column", "default", "check", "references", "primary", "key", "end",
+  "all", "any", "as", "case", "cast", "constraint", "create", "do", "else",
+  "for", "foreign", "grant", "having", "in", "into", "is", "join", "left",
+  "like", "natural", "not", "null", "on", "only", "or", "outer", "right", "some",
+  "then", "to", "true", "false", "union", "unique", "using", "when", "with",
+  "desc", "asc", "distinct", "values", "window", "returning",
+]
+
+fn quoted(column: String) -> String {
+  case list.contains(reserved, column) {
+    True -> "\"" <> column <> "\""
+    False -> column
+  }
+}
+
+fn sql_type(app: App, value: model.FieldValue) -> String {
+  case value {
+    model.PhaseValue(_) -> "text"
+    model.DatetimeValue -> "timestamptz"
+    model.RelValue(target_module: target_module, ..) ->
+      case model.entity_by_module(app.entities, target_module) {
+        Some(target) ->
+          case
+            list.find(target.fields, fn(field) {
+              field.column == target.key_column
+            })
+          {
+            Ok(field) -> sql_type(app, field.value)
+            Error(_) -> "text"
+          }
+        None -> "text"
+      }
+    model.TypeValue(reference) ->
+      case reference.module {
+        Some("yumemi/time") ->
+          case reference.name {
+            "Datetime" -> "timestamptz"
+            "Date" -> "date"
+            "Time" -> "time"
+            _ -> "text"
+          }
+        Some("yumemi/vector") -> "public.vector"
+        Some(path) ->
+          case string.starts_with(path, "gen/types/") {
+            True ->
+              case model.value_type_by_name(app.value_types, reference.name) {
+                Some(value_type) ->
+                  case value_type.spec {
+                    "Uuid" -> "uuid"
+                    "Range" -> "integer"
+                    _ -> "text"
+                  }
+                None -> "text"
+              }
+            False -> "text"
+          }
+        None ->
+          case reference.name {
+            "Int" -> "integer"
+            "Bool" -> "boolean"
+            "Float" -> "double precision"
+            _ -> "text"
+          }
+      }
+  }
+}
+
+fn cast_of(kind: String) -> String {
+  case kind {
+    "uuid" | "timestamptz" | "date" | "time" | "public.vector" -> "::" <> kind
+    _ -> ""
+  }
+}
+
+type Column {
+  Column(reference: String, kind: String, optional: Bool)
+}
+
+fn column(
+  app: App,
+  scope: Scope,
+  field_name: String,
+) -> Result(Column, Reason) {
+  case model.field_by_name(app.entities, field_name) {
+    None -> Error(clash("列 " <> field_name <> " が Entity 宣言に無い"))
+    Some(field) ->
+      case alias_of(scope, field.entity_name) {
+        None ->
+          Error(clash("列 " <> field_name <> " の Entity が from にも join にも無い"))
+        Some(alias) ->
+          Ok(Column(
+            reference: alias <> "." <> quoted(field.column),
+            kind: sql_type(app, field.value),
+            optional: field.optional,
+          ))
+      }
+  }
+}
+
+// ── 1文 ─────────────────────────────────────────────────────────────────────
+
+fn statement(
+  app: App,
+  service: model.Service,
+  select: Select,
+) -> Result(String, Reason) {
+  use _ <- try(case select.unshaped {
+    [] -> Ok(Nil)
+    items -> Error(clash("読めない項: " <> string.join(items, ", ")))
+  })
+  use _ <- try(case select.unread {
+    [] -> Ok(Nil)
+    items -> Error(clash("矢印として読めない項: " <> string.join(items, ", ")))
+  })
+  use _ <- try(case select.columns, select.group, select.agg {
+    Some(_), [_, ..], _ | Some(_), _, [_, ..] ->
+      Error(clash("列の選択(Pick)は group / agg と併用しない"))
+    _, _, _ -> Ok(Nil)
+  })
+  use from <- try(
+    model.entity_by_name(app.entities, select.from)
+    |> option.to_result(clash("from の Entity が無い: " <> select.from)),
+  )
+  use _ <- try(case select.along {
+    [] -> Ok(Nil)
+    [model.LDistance] -> Ok(Nil)
+    _ -> Error(undone("along(Rank / Running)は未実装"))
+  })
+  let scope = assign(Scope(aliases: [], next_param: 1), from)
+  use #(scope, joins) <- try(join_clauses(app, scope, select.join))
+  use #(scope, wheres) <- try(where_clauses(app, scope, select.where))
+  // 穴の並びは read 関数と同じ ── Paged の size が先、cursor(keyset)が後。
+  let #(scope, size_place) = size_param(scope, select.limit)
+  use #(scope, keyset) <- try(keyset_clause(app, scope, select, from))
+  use selected <- try(select_list(app, scope, select, from))
+  use #(scope, havings) <- try(having_clauses(app, scope, select.having))
+  use groups <- try(group_clause(app, scope, select.group))
+  use order <- try(order_clause(app, scope, select, from))
+  // allow 句の穴は、読みの穴(where / size / keyset / having、Nearest の `$1`)の全部の後ろ。
+  // Nearest の穴は `$1` 固定で Scope に数えていないので、read 関数の穴の数とも比べる。
+  let after_reads =
+    int.max(scope.next_param, list.length(typing.params(app, select)) + 1)
+  use #(scope, allowed) <- try(allow_clause(
+    app,
+    service,
+    Scope(..scope, next_param: after_reads),
+  ))
+  let _ = scope
+  let conditions =
+    list.flatten([
+      wheres,
+      keyset,
+      option.map(allowed, fn(found) { [found.text] }) |> option.unwrap([]),
+    ])
+  Ok(
+    string.concat([
+      case allowed {
+        Some(found) -> found.contract <> "\n"
+        None -> ""
+      },
+      "SELECT ",
+      selected,
+      "\nFROM ",
+      schema.app,
+      ".",
+      from.table,
+      " ",
+      option.unwrap(alias_of(scope, from.name), "t"),
+      case joins {
+        [] -> ""
+        _ -> "\n" <> string.join(joins, "\n")
+      },
+      case conditions {
+        [] -> ""
+        _ -> "\nWHERE " <> string.join(conditions, " AND ")
+      },
+      case groups {
+        "" -> ""
+        text -> "\nGROUP BY " <> text
+      },
+      case havings {
+        [] -> ""
+        _ -> "\nHAVING " <> string.join(havings, " AND ")
+      },
+      case order {
+        "" -> ""
+        text -> "\nORDER BY " <> text
+      },
+      limit_clause(select.limit, size_place),
+      ";\n",
+    ]),
+  )
+}
+
+fn miss(result: Result(a, relation.Miss)) -> Result(a, Reason) {
+  case result {
+    Ok(value) -> Ok(value)
+    Error(found) -> Error(Reason(class: found.class, text: found.text))
+  }
+}
+
+fn try(result: Result(a, e), next: fn(a) -> Result(b, e)) -> Result(b, e) {
+  case result {
+    Ok(value) -> next(value)
+    Error(error) -> Error(error)
+  }
+}
+
+fn join_clauses(
+  app: App,
+  scope: Scope,
+  arrows: List(String),
+) -> Result(#(Scope, List(String)), Reason) {
+  list.try_fold(arrows, #(scope, []), fn(acc, arrow_name) {
+    let #(current, clauses) = acc
+    use arrow <- try(relation.join_arrow(app, arrow_name) |> miss)
+    use target <- try(
+      model.entity_by_name(app.entities, arrow.target_entity)
+      |> option.to_result(clash("矢印の先が無い: " <> arrow.target_entity)),
+    )
+    use owner <- try(
+      alias_of(current, arrow.from_entity)
+      |> option.to_result(clash("矢印の元が from に無い: " <> arrow.from_entity)),
+    )
+    let next = assign(current, target)
+    use alias <- try(
+      alias_of(next, target.name)
+      |> option.to_result(undone("別名が付かない: " <> target.name)),
+    )
+    Ok(#(
+      next,
+      list.append(clauses, [
+        "JOIN "
+        <> schema.app
+        <> "."
+        <> target.table
+        <> " "
+        <> alias
+        <> " ON "
+        <> alias
+        <> "."
+        <> quoted(target.key_column)
+        <> "="
+        <> owner
+        <> "."
+        <> quoted(arrow.prop <> "_id"),
+      ]),
+    ))
+  })
+}
+
+fn select_list(
+  app: App,
+  scope: Scope,
+  select: Select,
+  from: Entity,
+) -> Result(String, Reason) {
+  let alias = option.unwrap(alias_of(scope, from.name), "t")
+  case select.group, select.agg {
+    [], [] if select.columns != None -> picked_list(app, scope, select, from)
+    [], [] -> {
+      let joined =
+        list.filter_map(select.join, fn(arrow_name) {
+          case model.arrow_by_name(app.arrows, arrow_name) {
+            Some(arrow) ->
+              case alias_of(scope, arrow.target_entity) {
+                Some(target) ->
+                  Ok("to_jsonb(" <> target <> ") AS " <> arrow.prop)
+                None -> Error(Nil)
+              }
+            None -> Error(Nil)
+          }
+        })
+      let distance = distance_columns(app, scope, select)
+      use attached <- try(with_clauses(app, scope, from, select))
+      Ok(string.join(
+        list.flatten([[alias <> ".*"], joined, attached, distance]),
+        ",",
+      ))
+    }
+    groups, aggs -> {
+      use group_cols <- try(
+        list.try_map(groups, fn(item) {
+          case item {
+            model.GByField(field) ->
+              case column(app, scope, field) {
+                Ok(found) -> Ok(found.reference)
+                Error(reason) -> Error(reason)
+              }
+            model.GBucket(field, unit) ->
+              case column(app, scope, field) {
+                Ok(found) ->
+                  Ok(
+                    "date_trunc('"
+                    <> string.lowercase(unit)
+                    <> "',"
+                    <> found.reference
+                    <> ")::date",
+                  )
+                Error(reason) -> Error(reason)
+              }
+            model.GVia(arrow_name) ->
+              case model.arrow_by_name(app.arrows, arrow_name) {
+                Some(arrow) ->
+                  case alias_of(scope, arrow.from_entity) {
+                    Some(owner) ->
+                      Ok(owner <> "." <> quoted(arrow.prop <> "_id"))
+                    None -> Error(clash("Via の元が from に無い"))
+                  }
+                None -> Error(clash("Via の矢印が無い: " <> arrow_name))
+              }
+          }
+        }),
+      )
+      use agg_cols <- try(list.try_map(aggs, agg_expression(app, scope, _)))
+      Ok(string.join(list.append(group_cols, agg_cols), ","))
+    }
+  }
+}
+
+fn distance_columns(app: App, scope: Scope, select: Select) -> List(String) {
+  case select.along {
+    [model.LDistance] ->
+      list.filter_map(select.order, fn(order) {
+        case order {
+          model.ONearest(field, _) ->
+            case column(app, scope, field) {
+              Ok(found) ->
+                Ok(
+                  found.reference
+                  <> " OPERATOR(public.<=>) $1::public.vector AS distance",
+                )
+              Error(_) -> Error(Nil)
+            }
+          _ -> Error(Nil)
+        }
+      })
+    _ -> []
+  }
+}
+
+// ── 列の選択(`q.Pick`)─────────────────────────────────────────────────────
+
+/// 選んだ列だけを `<別名>.<列> AS <欄の名>` で返す。欄の名は reads の record の欄と同じ
+/// (`typing.picked_label`)。with の子と along の値は従来どおり後ろに付く。
+/// 選べない形は exit 4 ── 空の選択、重複、from / join に無い列、欄の名の衝突、
+/// keyset / order / with が要る列を落とす選択、group / agg との併用。
+fn picked_list(
+  app: App,
+  scope: Scope,
+  select: Select,
+  from: Entity,
+) -> Result(String, Reason) {
+  let columns = option.unwrap(select.columns, [])
+  use _ <- try(case columns {
+    [] -> Error(clash("列の選択が空"))
+    _ -> Ok(Nil)
+  })
+  use _ <- try(case duplicated(columns) {
+    [] -> Ok(Nil)
+    names -> Error(clash("列の選択に重複: " <> string.join(names, ", ")))
+  })
+  use _ <- try(
+    list.try_each(columns, fn(field_name) {
+      case typing.owner(app, select, field_name) {
+        typing.Ambiguous ->
+          Error(clash(
+            "列の選択の列 "
+            <> field_name
+            <> " の Entity が from / join と with の子(または with の子 2 本)に居て、どちらの列か決まらない",
+          ))
+        _ -> Ok(Nil)
+      }
+    }),
+  )
+  let rows = typing.row_columns(app, select)
+  use found <- try(
+    list.try_map(rows, fn(field_name) {
+      case column(app, scope, field_name) {
+        Ok(found) -> Ok(found)
+        Error(reason) ->
+          Error(Reason(..reason, text: reason.text <> "(with の子にも無い)"))
+      }
+    }),
+  )
+  let labels = typing.picked_labels(app, select)
+  use _ <- try(case duplicated(labels) {
+    [] -> Ok(Nil)
+    names -> Error(clash("列の選択の欄の名が衝突: " <> string.join(names, ", ")))
+  })
+  use _ <- try(case required_columns(select, from) {
+    [] -> Ok(Nil)
+    needs ->
+      case list.filter(needs, fn(need) { !list.contains(columns, need.0) }) {
+        [] -> Ok(Nil)
+        [#(name, why), ..] ->
+          Error(clash("列の選択が " <> why <> " の要る列を落とす: " <> name))
+      }
+  })
+  let picked =
+    list.map2(found, rows, fn(item, field_name) {
+      item.reference
+      <> " AS "
+      <> quoted(typing.picked_label(app, select, field_name))
+    })
+  use attached <- try(with_clauses(app, scope, from, select))
+  Ok(string.join(
+    list.flatten([picked, attached, distance_columns(app, scope, select)]),
+    ",",
+  ))
+}
+
+/// 選んだ列に必ず含める列(Field の名)と理由。order の列(Asc / Desc)、Paged の keyset
+/// と with が引く from の key。Nearest の列(embedding)は並べるだけで返さなくてよい。
+fn required_columns(select: Select, from: Entity) -> List(#(String, String)) {
+  let key = case from.key_prop {
+    "" -> []
+    prop -> [from.name <> naming.pascal(prop)]
+  }
+  let ordered =
+    list.filter_map(select.order, fn(order) {
+      case order {
+        model.OAsc(field) | model.ODesc(field) -> Ok(#(field, "order"))
+        _ -> Error(Nil)
+      }
+    })
+  let keyset = case select.limit {
+    model.LPaged(..) -> list.map(key, fn(field) { #(field, "keyset") })
+    _ -> []
+  }
+  let with = case select.with {
+    [] -> []
+    _ -> list.map(key, fn(field) { #(field, "with") })
+  }
+  list.flatten([ordered, keyset, with])
+}
+
+fn duplicated(names: List(String)) -> List(String) {
+  names
+  |> list.filter(fn(name) {
+    list.length(list.filter(names, fn(other) { other == name })) > 1
+  })
+  |> list.unique
+}
+
+fn agg_expression(
+  app: App,
+  scope: Scope,
+  value: model.Agg,
+) -> Result(String, Reason) {
+  case value {
+    model.ACount -> Ok("count(*)::integer AS count")
+    model.ASum(field) -> wrap(app, scope, "sum", field)
+    model.AMin(field) -> wrap(app, scope, "min", field)
+    model.AMax(field) -> wrap(app, scope, "max", field)
+    model.AAvg(field) -> wrap(app, scope, "avg", field)
+  }
+}
+
+fn wrap(
+  app: App,
+  scope: Scope,
+  name: String,
+  field: String,
+) -> Result(String, Reason) {
+  case column(app, scope, field) {
+    Ok(found) -> Ok(name <> "(" <> found.reference <> ") AS " <> name)
+    Error(reason) -> Error(reason)
+  }
+}
+
+fn where_clauses(
+  app: App,
+  scope: Scope,
+  conds: List(model.Cond),
+) -> Result(#(Scope, List(String)), Reason) {
+  list.try_fold(conds, #(scope, []), fn(acc, cond) {
+    let #(current, clauses) = acc
+    use #(next, text) <- try(where_one(app, current, cond))
+    Ok(#(next, list.append(clauses, [text])))
+  })
+}
+
+fn where_one(
+  app: App,
+  scope: Scope,
+  cond: model.Cond,
+) -> Result(#(Scope, String), Reason) {
+  case cond {
+    model.CEq(field, operand) -> compare(app, scope, field, "=", operand)
+    model.CNe(field, operand) -> compare(app, scope, field, "<>", operand)
+    model.CLt(field, operand) -> compare(app, scope, field, "<", operand)
+    model.CLe(field, operand) -> compare(app, scope, field, "<=", operand)
+    model.CGt(field, operand) -> compare(app, scope, field, ">", operand)
+    model.CGe(field, operand) -> compare(app, scope, field, ">=", operand)
+    model.CIn(field, operand) -> compare(app, scope, field, "= ANY", operand)
+    model.CContains(field, operand) ->
+      compare(app, scope, field, "ILIKE", operand)
+    model.CIsNull(field) ->
+      case column(app, scope, field) {
+        Ok(found) -> Ok(#(scope, found.reference <> " IS NULL"))
+        Error(reason) -> Error(reason)
+      }
+    model.CNotNull(field) ->
+      case column(app, scope, field) {
+        Ok(found) -> Ok(#(scope, found.reference <> " IS NOT NULL"))
+        Error(reason) -> Error(reason)
+      }
+    model.CIsTrue(field) ->
+      case column(app, scope, field) {
+        Ok(found) -> Ok(#(scope, found.reference <> " IS TRUE"))
+        Error(reason) -> Error(reason)
+      }
+    model.CEqOrNull(field, operand) ->
+      case column(app, scope, field), operand {
+        Ok(found), model.OpParam(_) -> {
+          let placeholder =
+            "$" <> int.to_string(scope.next_param) <> cast_of(found.kind)
+          Ok(#(
+            Scope(..scope, next_param: scope.next_param + 1),
+            found.reference <> " IS NOT DISTINCT FROM " <> placeholder,
+          ))
+        }
+        Ok(_), _ -> Error(undone("EqOrNull の相手は穴だけ"))
+        Error(reason), _ -> Error(reason)
+      }
+    model.CCurrentVersion(left, right) ->
+      case column(app, scope, left), column(app, scope, right) {
+        Ok(one), Ok(other) ->
+          Ok(#(scope, one.reference <> "=" <> other.reference))
+        Error(reason), _ -> Error(reason)
+        _, Error(reason) -> Error(reason)
+      }
+    model.CHas(arrow, inner) -> has_clause(app, scope, arrow, inner, False)
+    model.CHasNone(arrow, inner) -> has_clause(app, scope, arrow, inner, True)
+  }
+}
+
+fn has_clause(
+  app: App,
+  scope: Scope,
+  arrow_name: String,
+  inner: List(model.Cond),
+  negate: Bool,
+) -> Result(#(Scope, String), Reason) {
+  use arrow <- try(
+    model.arrow_by_name(app.arrows, arrow_name)
+    |> option.to_result(clash("Has の矢印が無い: " <> arrow_name)),
+  )
+  use _ <- try(case arrow.kind {
+    model.Multi ->
+      Error(undone("Has / HasNone は Multi の矢印に未対応: " <> arrow_name))
+    model.Has | model.Held | model.Link -> Ok(Nil)
+  })
+  use target <- try(
+    model.entity_by_name(app.entities, arrow.target_entity)
+    |> option.to_result(clash("Has の関係先が無い: " <> arrow.target_entity)),
+  )
+  use owner <- try(
+    alias_of(scope, arrow.from_entity)
+    |> option.to_result(clash("Has の元が from / join に無い: " <> arrow.from_entity)),
+  )
+  let nested = assign(scope, target)
+  use target_alias <- try(
+    alias_of(nested, target.name)
+    |> option.to_result(undone("Has の関係先に別名が付かない: " <> target.name)),
+  )
+  use #(after, clauses) <- try(where_clauses(app, nested, inner))
+  let relation =
+    target_alias
+    <> "."
+    <> quoted(target.key_column)
+    <> "="
+    <> owner
+    <> "."
+    <> quoted(arrow.prop <> "_id")
+  let keyword = case negate {
+    True -> "NOT EXISTS"
+    False -> "EXISTS"
+  }
+  let predicates = list.append([relation], clauses)
+  Ok(#(
+    Scope(..scope, next_param: after.next_param),
+    keyword
+      <> "(\n  SELECT 1 FROM "
+      <> schema.app
+      <> "."
+      <> target.table
+      <> " "
+      <> target_alias
+      <> "\n  WHERE "
+      <> string.join(predicates, "\n    AND ")
+      <> "\n)",
+  ))
+}
+
+// ── allow 句 ───────────────────────────────────────────────────────────────
+
+/// 読みの WHERE に入れる allow 句と、実行側への契約の 1 行(`-- allow: clauses=$N party=$M`)。
+type Allowed {
+  Allowed(text: String, contract: String)
+}
+
+/// 関係を 1 本辿って allow 句の Entity を見る入れ子の EXISTS。
+type Hop {
+  Hop(table: String, alias: String, relation: String)
+}
+
+/// root を持たない Service(`Root(at, seed)`)の名前付き読みに allow 句を入れる。
+/// allow が相(`Only`)か owner(`NoOwner` 以外)を絞るときだけ入れる。句の形は
+/// musearch の `article_search/nearest.sql` と同じ ── 実行側が渡す句の jsonb を
+/// `jsonb_array_elements` で開き、相は allow の Entity の `phase`、owner
+/// `Via<Entity>Party` はその Entity の `party` 列と party の穴で照らす。
+/// owner `Self` は主体の鍵の穴で照らす。ただし句が全部 `Self` でどの `As<X>` も allow の Entity
+/// そのものなら、読みの行を絞らない(主体の門と Logic の主体の鍵に任せる)。
+/// 入れられない形(相の無い Entity、from / join から辿れない Entity)は exit 4。
+fn allow_clause(
+  app: App,
+  service: model.Service,
+  scope: Scope,
+) -> Result(#(Scope, Option(Allowed)), Reason) {
+  case root.root_for(app, service) {
+    Some(_) -> Ok(#(scope, None))
+    None -> {
+      let clauses = case list.key_find(app.clauses, service.module) {
+        Ok(found) -> found
+        Error(_) -> []
+      }
+      use readable <- try(
+        list.try_map(clauses, fn(clause) {
+          case clause {
+            model.Clause(at: model.UnreadAt(text), ..) ->
+              Error(clash("allow の at が読めない: " <> text))
+            model.Clause(..) -> Ok(clause)
+            model.UnreadClause(text) -> Error(clash("allow の句が読めない: " <> text))
+          }
+        }),
+      )
+      let phased =
+        list.any(readable, fn(clause) {
+          case clause {
+            model.Clause(at: model.OnlyAt(_), ..) -> True
+            _ -> False
+          }
+        })
+      let owners =
+        readable
+        |> list.filter_map(fn(clause) {
+          case clause {
+            model.Clause(owner: "NoOwner", ..) -> Error(Nil)
+            model.Clause(owner: "Self", ..) -> Error(Nil)
+            model.Clause(owner: owner, ..) -> Ok(owner)
+            model.UnreadClause(..) -> Error(Nil)
+          }
+        })
+        |> list.unique
+      let selves =
+        readable
+        |> list.filter_map(fn(clause) {
+          case clause {
+            model.Clause(owner: "Self", who: who, ..) -> Ok(who)
+            _ -> Error(Nil)
+          }
+        })
+        |> list.unique
+      let all_self =
+        readable != []
+        && list.all(readable, fn(clause) {
+          case clause {
+            model.Clause(owner: "Self", ..) -> True
+            _ -> False
+          }
+        })
+      // 句が全部 `Self` で、どの句の `As<X>` も allow の Entity そのもの(主体の行 = allow の行)の
+      // Service は主体(actor)を絞る句で、読みの行を絞らない(WGy r3)── `Self` は actor の admission と
+      // 入口の相の門で判じ、他の Entity の行(claim の前の Roster、他の嬢の Heaven の連携)は読みの側で
+      // 主体に縛らない(基点の SQL と同じ意味)。X が allow の Entity と違う形(`memo` × `AsStaff` × `Self`)は
+      // 「その行の X が自分」の意味なので、主体の鍵の穴(`subject=$K`)で絞るか、辿れなければ exit 4(WGy r4)
+      let own =
+        all_self
+        && list.all(selves, fn(who) {
+          root.who_is_allow_entity(app, service, who)
+        })
+      case own, phased, owners, selves {
+        True, _, _, _ -> Ok(#(scope, None))
+        _, False, [], [] -> Ok(#(scope, None))
+        _, _, _, _ -> restricted(app, service, scope, phased, owners, selves)
+      }
+    }
+  }
+}
+
+fn restricted(
+  app: App,
+  service: model.Service,
+  scope: Scope,
+  phased: Bool,
+  owners: List(String),
+  selves: List(String),
+) -> Result(#(Scope, Option(Allowed)), Reason) {
+  let allow_entity = case service.allow_module {
+    Some(path) ->
+      case list.last(string.split(path, "/")) {
+        Ok(module) -> model.entity_by_module(app.entities, module)
+        Error(_) -> None
+      }
+    None -> None
+  }
+  use phase_target <- try(case phased, allow_entity {
+    False, _ -> Ok(None)
+    True, None ->
+      Error(clash(
+        "allow 句の at が相を絞るが allow の Entity が無い: "
+        <> option.unwrap(service.allow_module, "(allow 無し)"),
+      ))
+    True, Some(entity) ->
+      case
+        list.find(entity.fields, fn(field) {
+          field.value == model.PhaseValue(entity.module)
+        })
+      {
+        Ok(field) -> Ok(Some(#(entity, field.column)))
+        Error(_) ->
+          Error(clash("allow 句の at が相を絞るが " <> entity.name <> " に相が無い"))
+      }
+  })
+  use parties <- try(
+    list.try_map(owners, fn(owner) {
+      use entity <- try(party_of(app, owner))
+      case model.field_for_prop(entity, "party") {
+        Some(field) -> Ok(#(owner, entity, field.column))
+        None ->
+          Error(clash(
+            "allow 句の owner "
+            <> owner
+            <> " の "
+            <> entity.name
+            <> " に party の列が無い",
+          ))
+      }
+    }),
+  )
+  use subjects <- try(list.try_map(selves, subject_of(app, _)))
+  let wanted =
+    list.flatten([
+      option.map(phase_target, fn(pair) { [pair.0] }) |> option.unwrap([]),
+      list.map(parties, fn(item) { item.1 }),
+      subjects,
+    ])
+    |> list.fold([], fn(acc, entity: Entity) {
+      case list.any(acc, fn(other: Entity) { other.name == entity.name }) {
+        True -> acc
+        False -> list.append(acc, [entity])
+      }
+    })
+  let clauses_place = scope.next_param
+  let party_place = scope.next_param + 1
+  let subject_place = case parties {
+    [] -> scope.next_param + 1
+    _ -> scope.next_param + 2
+  }
+  use #(inner, hops) <- try(
+    list.try_fold(wanted, #(scope, []), fn(acc, entity) {
+      let #(current, hops) = acc
+      // 辿れない Entity は exit 4。主体の行そのものを鍵の穴で引く逃げ道は、読みの行を縛らないので持たない
+      // (WGy r4 ── 句が全部 `Self` で辿れない形は、主体の形なら上で絞らず、別の Entity なら名指しで止める)
+      reach(app, current, hops, entity)
+    }),
+  )
+  let taken = list.map(inner.aliases, fn(pair) { pair.1 })
+  let clause_alias = free("cl", taken, 1)
+  let phase_part = case phase_target {
+    Some(#(entity, column)) -> [
+      "("
+      <> clause_alias
+      <> "->'phases'='null'::jsonb OR "
+      <> clause_alias
+      <> "->'phases' ? "
+      <> option.unwrap(alias_of(inner, entity.name), "t")
+      <> "."
+      <> quoted(column)
+      <> ")",
+    ]
+    None -> []
+  }
+  let self_rows =
+    list.map(subjects, fn(entity) {
+      "("
+      <> clause_alias
+      <> "->>'owner'='self' AND "
+      <> option.unwrap(alias_of(inner, entity.name), "t")
+      <> "."
+      <> quoted(entity.key_column)
+      <> "=$"
+      <> int.to_string(subject_place)
+      <> ")"
+    })
+  let owner_part = case parties, self_rows {
+    [], [] -> []
+    _, _ -> [
+      "("
+      <> clause_alias
+      <> "->>'owner'='no_owner' OR "
+      <> string.join(
+        list.append(
+          list.map(parties, fn(item) {
+            let #(owner, entity, column) = item
+            "("
+            <> clause_alias
+            <> "->>'owner'='"
+            <> naming.snake(owner)
+            <> "' AND "
+            <> option.unwrap(alias_of(inner, entity.name), "t")
+            <> "."
+            <> quoted(column)
+            <> "=$"
+            <> int.to_string(party_place)
+            <> ")"
+          }),
+          self_rows,
+        ),
+        " OR ",
+      )
+      <> ")",
+    ]
+  }
+  let core =
+    "EXISTS(SELECT 1 FROM jsonb_array_elements($"
+    <> int.to_string(clauses_place)
+    <> "::jsonb) "
+    <> clause_alias
+    <> "\n WHERE "
+    <> string.join(list.append(phase_part, owner_part), "\n AND ")
+    <> ")"
+  let text =
+    list.fold_right(hops, core, fn(inside, hop) {
+      "EXISTS(SELECT 1 FROM "
+      <> schema.app
+      <> "."
+      <> hop.table
+      <> " "
+      <> hop.alias
+      <> " WHERE "
+      <> hop.relation
+      <> " AND "
+      <> inside
+      <> ")"
+    })
+  let party_contract = case parties {
+    [] -> ""
+    _ -> " party=$" <> int.to_string(party_place)
+  }
+  let subject_contract = case subjects {
+    [] -> ""
+    _ -> " subject=$" <> int.to_string(subject_place)
+  }
+  let next = case parties, subjects {
+    [], [] -> clauses_place + 1
+    _, [] -> party_place + 1
+    _, _ -> subject_place + 1
+  }
+  let contract =
+    "-- allow: clauses=$"
+    <> int.to_string(clauses_place)
+    <> party_contract
+    <> subject_contract
+  Ok(#(
+    Scope(..scope, next_param: next),
+    Some(Allowed(text: text, contract: contract)),
+  ))
+}
+
+/// owner `Self` の句が照らす主体の Entity。`who` の `As<Entity>` の Entity で、その key の列と
+/// 主体の鍵の穴(`subject=$K`、実行側が actor の subject の id を渡す)を比べる(hw-1 の鷹野宛 1 の案、
+/// WGy の裁定 4)。`As` で始まらない `who`(`Anyone` など)に `Self` は付かない。
+/// 句が全部 `Self` でどの `As<X>` も allow の Entity そのものの形は、ここに来ず穴を使わない
+/// (`allow_clause` が読みを絞らない ── WGy r3 / r4)。穴を使うのは X が allow の Entity と違う形と、
+/// `Self` と他の owner が混ざる形だけ。
+fn subject_of(app: App, who: String) -> Result(Entity, Reason) {
+  let name = case string.split(who, ".") |> list.last {
+    Ok(last) -> last
+    Error(_) -> who
+  }
+  case string.starts_with(name, "As") {
+    False -> Error(clash("allow 句の owner Self の who が主体でない: " <> who))
+    True -> {
+      let entity_name = string.drop_start(name, 2)
+      model.entity_by_name(app.entities, entity_name)
+      |> option.to_result(clash(
+        "allow 句の owner Self の who の Entity が無い: " <> entity_name,
+      ))
+    }
+  }
+}
+
+/// owner の名から party を持つ Entity への道。`Via<Entity>Party` = その Entity の party
+/// (`ViaMuseParty` = muse の party)。hw-2 の `party_of` と同じ規則。
+/// `Self` は `subject_of` の持ち分(party の穴ではなく主体の鍵の穴で照らす)。
+fn party_of(app: App, owner: String) -> Result(Entity, Reason) {
+  case owner {
+    _ ->
+      case
+        string.starts_with(owner, "Via") && string.ends_with(owner, "Party")
+      {
+        False -> Error(clash("allow 句の owner が読めない: " <> owner))
+        True -> {
+          let name = string.drop_end(string.drop_start(owner, 3), 5)
+          model.entity_by_name(app.entities, name)
+          |> option.to_result(clash(
+            "allow 句の owner " <> owner <> " の Entity が無い: " <> name,
+          ))
+        }
+      }
+  }
+}
+
+/// allow 句の Entity を読みの中に見つける。from / join に居ればその別名、居なければ
+/// from / join(と先に辿った Entity)から出る順向きの矢印 1 本で入れ子の EXISTS を足す。
+fn reach(
+  app: App,
+  scope: Scope,
+  hops: List(Hop),
+  entity: Entity,
+) -> Result(#(Scope, List(Hop)), Reason) {
+  case alias_of(scope, entity.name) {
+    Some(_) -> Ok(#(scope, hops))
+    None -> {
+      let candidates =
+        list.filter(app.arrows, fn(arrow) {
+          arrow.target_entity == entity.name
+          && arrow.kind != model.Multi
+          && alias_of(scope, arrow.from_entity) != None
+        })
+      case candidates {
+        [arrow] -> {
+          let next = assign(scope, entity)
+          let alias = option.unwrap(alias_of(next, entity.name), "t")
+          let owner = option.unwrap(alias_of(scope, arrow.from_entity), "t")
+          Ok(#(
+            next,
+            list.append(hops, [
+              Hop(
+                table: entity.table,
+                alias: alias,
+                relation: alias
+                  <> "."
+                  <> quoted(entity.key_column)
+                  <> "="
+                  <> owner
+                  <> "."
+                  <> quoted(arrow.prop <> "_id"),
+              ),
+            ]),
+          ))
+        }
+        [] ->
+          Error(clash("allow 句の " <> entity.name <> " が from / join から辿れない"))
+        _ ->
+          Error(clash(
+            "allow 句の "
+            <> entity.name
+            <> " へ辿る矢印が複数: "
+            <> string.join(list.map(candidates, fn(arrow) { arrow.name }), ", "),
+          ))
+      }
+    }
+  }
+}
+
+fn with_clauses(
+  app: App,
+  scope: Scope,
+  from: Entity,
+  select: Select,
+) -> Result(List(String), Reason) {
+  let children = typing.children(app, select)
+  use #(texts, _) <- try(
+    list.try_fold(select.with, #([], scope), fn(acc, name) {
+      let #(texts, current) = acc
+      // 列を選んだ子(`q.Pick` の columns に子の列がある)は、選んだ列だけを返す。
+      let picked = case list.find(children, fn(child) { child.name == name }) {
+        Ok(child) -> typing.child_columns(app, select, child)
+        Error(_) -> []
+      }
+      use #(next, text) <- try(with_clause(app, current, from, name, picked))
+      Ok(#(list.append(texts, [text]), next))
+    }),
+  )
+  Ok(texts)
+}
+
+fn with_clause(
+  app: App,
+  scope: Scope,
+  from: Entity,
+  name: String,
+  picked: List(String),
+) -> Result(#(Scope, String), Reason) {
+  use arrow <- try(
+    relation.with_arrow(app.entities, app.arrows, from, name)
+    |> miss,
+  )
+  use child <- try(
+    model.entity_by_name(app.entities, arrow.target_entity)
+    |> option.to_result(clash("with の関係先が無い: " <> arrow.target_entity)),
+  )
+  use owner <- try(
+    alias_of(scope, from.name)
+    |> option.to_result(clash("with の元が from / join に無い: " <> from.name)),
+  )
+  let nested = assign(scope, child)
+  use child_alias <- try(
+    alias_of(nested, child.name)
+    |> option.to_result(undone("with の関係先に別名が付かない: " <> child.name)),
+  )
+  let order = with_order(child, child_alias)
+  let output = relation.with_output(from, name)
+  let relation =
+    child_alias
+    <> "."
+    <> quoted(arrow.prop <> "_id")
+    <> "="
+    <> owner
+    <> "."
+    <> quoted(from.key_column)
+  use value <- try(case picked {
+    [] -> Ok("to_jsonb(" <> child_alias <> ")")
+    _ -> {
+      use pairs <- try(
+        list.try_map(picked, fn(field_name) {
+          use found <- try(column(app, nested, field_name))
+          Ok(
+            "'"
+            <> typing.child_label(app, field_name)
+            <> "',"
+            <> found.reference,
+          )
+        }),
+      )
+      Ok("jsonb_build_object(" <> string.join(pairs, ",") <> ")")
+    }
+  })
+  let aggregate = "jsonb_agg(" <> value <> order <> ")"
+  Ok(#(
+    nested,
+    "COALESCE((SELECT "
+      <> aggregate
+      <> "\nFROM "
+      <> schema.app
+      <> "."
+      <> child.table
+      <> " "
+      <> child_alias
+      <> "\nWHERE "
+      <> relation
+      <> "),'[]'::jsonb) AS "
+      <> output,
+  ))
+}
+
+fn with_order(child: Entity, alias: String) -> String {
+  let key = alias <> "." <> quoted(child.key_column)
+  case list.find(child.fields, fn(field) { field.column == "order" }) {
+    Ok(_) -> " ORDER BY " <> alias <> ".\"order\"," <> key
+    Error(_) -> " ORDER BY " <> key
+  }
+}
+
+fn compare(
+  app: App,
+  scope: Scope,
+  field: String,
+  operator: String,
+  operand: model.Operand,
+) -> Result(#(Scope, String), Reason) {
+  use found <- try(column(app, scope, field))
+  case operand {
+    model.OpParam(_) -> {
+      let placeholder =
+        "$" <> int.to_string(scope.next_param) <> cast_of(found.kind)
+      Ok(#(
+        Scope(..scope, next_param: scope.next_param + 1),
+        found.reference <> operator <> placeholder,
+      ))
+    }
+    model.OpNum(value) ->
+      Ok(#(scope, found.reference <> operator <> int.to_string(value)))
+    model.OpStr(value) ->
+      Ok(#(scope, found.reference <> operator <> "'" <> value <> "'"))
+    model.OpPhase(_, variant) ->
+      Ok(#(
+        scope,
+        found.reference <> operator <> "'" <> naming.snake(variant) <> "'",
+      ))
+    model.OpCol(other) ->
+      case column(app, scope, other) {
+        Ok(target) ->
+          Ok(#(scope, found.reference <> operator <> target.reference))
+        Error(reason) -> Error(reason)
+      }
+    model.OpAt(_) -> Error(undone("At(固定時刻)は未実装"))
+    model.OpKey(_) -> Error(undone("KeyOf(固定識別子)は未実装"))
+  }
+}
+
+fn having_clauses(
+  app: App,
+  scope: Scope,
+  entries: List(#(String, model.Agg, model.Operand)),
+) -> Result(#(Scope, List(String)), Reason) {
+  list.try_fold(entries, #(scope, []), fn(acc, entry) {
+    let #(current, clauses) = acc
+    let #(name, value, operand) = entry
+    let operator = case name {
+      "AggGt" -> ">"
+      "AggGe" -> ">="
+      "AggLt" -> "<"
+      "AggLe" -> "<="
+      _ -> "="
+    }
+    use expression <- try(agg_bare(app, current, value))
+    case operand {
+      model.OpParam(_) ->
+        Ok(#(
+          Scope(..current, next_param: current.next_param + 1),
+          list.append(clauses, [
+            expression <> operator <> "$" <> int.to_string(current.next_param),
+          ]),
+        ))
+      model.OpNum(number) ->
+        Ok(#(
+          current,
+          list.append(clauses, [
+            expression <> operator <> int.to_string(number),
+          ]),
+        ))
+      _ -> Error(undone("having の相手は穴か数だけ"))
+    }
+  })
+}
+
+fn agg_bare(
+  app: App,
+  scope: Scope,
+  value: model.Agg,
+) -> Result(String, Reason) {
+  case value {
+    model.ACount -> Ok("count(*)")
+    model.ASum(field) -> bare(app, scope, "sum", field)
+    model.AMin(field) -> bare(app, scope, "min", field)
+    model.AMax(field) -> bare(app, scope, "max", field)
+    model.AAvg(field) -> bare(app, scope, "avg", field)
+  }
+}
+
+fn bare(
+  app: App,
+  scope: Scope,
+  name: String,
+  field: String,
+) -> Result(String, Reason) {
+  case column(app, scope, field) {
+    Ok(found) -> Ok(name <> "(" <> found.reference <> ")")
+    Error(reason) -> Error(reason)
+  }
+}
+
+fn group_clause(
+  app: App,
+  scope: Scope,
+  groups: List(model.Group),
+) -> Result(String, Reason) {
+  case groups {
+    [] -> Ok("")
+    _ -> {
+      use parts <- try(
+        list.try_map(groups, fn(item) {
+          case item {
+            model.GByField(field) ->
+              case column(app, scope, field) {
+                Ok(found) -> Ok(found.reference)
+                Error(reason) -> Error(reason)
+              }
+            model.GBucket(field, unit) ->
+              case column(app, scope, field) {
+                Ok(found) ->
+                  Ok(
+                    "date_trunc('"
+                    <> string.lowercase(unit)
+                    <> "',"
+                    <> found.reference
+                    <> ")",
+                  )
+                Error(reason) -> Error(reason)
+              }
+            model.GVia(arrow_name) ->
+              case model.arrow_by_name(app.arrows, arrow_name) {
+                Some(arrow) ->
+                  case alias_of(scope, arrow.from_entity) {
+                    Some(owner) ->
+                      Ok(owner <> "." <> quoted(arrow.prop <> "_id"))
+                    None -> Error(clash("Via の元が from に無い"))
+                  }
+                None -> Error(clash("Via の矢印が無い: " <> arrow_name))
+              }
+          }
+        }),
+      )
+      Ok(string.join(parts, ","))
+    }
+  }
+}
+
+/// 並び。宣言した列のあと、最後の向きで key を1本足す(カーソルの安定順)。
+fn order_clause(
+  app: App,
+  scope: Scope,
+  select: Select,
+  from: Entity,
+) -> Result(String, Reason) {
+  use declared <- try(
+    list.try_map(select.order, fn(order) {
+      case order {
+        model.OAsc(field) -> direction(app, scope, field, "ASC")
+        model.ODesc(field) -> direction(app, scope, field, "DESC")
+        model.OAscAgg(value) ->
+          case agg_bare(app, scope, value) {
+            Ok(expression) -> Ok(expression <> " ASC")
+            Error(reason) -> Error(reason)
+          }
+        model.ODescAgg(value) ->
+          case agg_bare(app, scope, value) {
+            Ok(expression) -> Ok(expression <> " DESC")
+            Error(reason) -> Error(reason)
+          }
+        model.ONearest(field, _) ->
+          case column(app, scope, field) {
+            Ok(found) ->
+              Ok(found.reference <> " OPERATOR(public.<=>) $1::public.vector")
+            Error(reason) -> Error(reason)
+          }
+      }
+    }),
+  )
+  case select.group, select.agg, declared {
+    [], [], _ -> {
+      let alias = option.unwrap(alias_of(scope, from.name), "t")
+      let key = alias <> "." <> quoted(from.key_column)
+      let last_direction = case list.last(select.order) {
+        Ok(model.ODesc(_)) -> "DESC"
+        _ -> "ASC"
+      }
+      let tail = case
+        list.any(declared, fn(text) { string.starts_with(text, key <> " ") })
+      {
+        True -> []
+        False -> [key <> " " <> last_direction]
+      }
+      Ok(string.join(list.append(declared, tail), ","))
+    }
+    _, _, [] -> Ok("")
+    _, _, _ -> Ok(string.join(declared, ","))
+  }
+}
+
+fn direction(
+  app: App,
+  scope: Scope,
+  field: String,
+  way: String,
+) -> Result(String, Reason) {
+  case column(app, scope, field) {
+    Ok(found) ->
+      Ok(
+        found.reference
+        <> " "
+        <> way
+        <> case found.optional {
+          True -> " NULLS LAST"
+          False -> ""
+        },
+      )
+    Error(reason) -> Error(reason)
+  }
+}
+
+/// keyset。`order` が空の Paged は止める(20:787)。
+/// 向きが混じる場合は、列ごとの比較を OR でつなぐ lexicographic keyset にする。
+fn keyset_clause(
+  app: App,
+  scope: Scope,
+  select: Select,
+  from: Entity,
+) -> Result(#(Scope, List(String)), Reason) {
+  case select.limit {
+    model.LPaged(..) ->
+      case select.order {
+        [] -> Error(clash("order が空の Paged はカーソルが成立しない"))
+        orders -> {
+          use directions <- try(
+            list.try_map(orders, fn(order) {
+              case order {
+                model.OAsc(field) -> Ok(#(field, "ASC"))
+                model.ODesc(field) -> Ok(#(field, "DESC"))
+                _ -> Error(undone("keyset は列の Asc / Desc だけ"))
+              }
+            }),
+          )
+          let ways = list.unique(list.map(directions, fn(pair) { pair.1 }))
+          case ways {
+            [single] -> uniform_keyset(app, scope, directions, from, single)
+            _ -> {
+              use columns <- try(
+                list.try_map(directions, fn(pair) { column(app, scope, pair.0) }),
+              )
+              let key_field = from.name <> naming.pascal(from.key_prop)
+              use key <- try(column(app, scope, key_field))
+              let terms =
+                list.append(
+                  list.map2(columns, directions, fn(found, pair) {
+                    #(found, pair.1)
+                  }),
+                  [#(key, last_direction(directions))],
+                )
+              let first = scope.next_param
+              let places =
+                range(first + 1, list.length(terms))
+                |> list.map(fn(index) { "$" <> int.to_string(index) })
+              let comparisons =
+                list.map2(terms, places, fn(term, place) {
+                  let #(found, way) = term
+                  cursor_compare(found, way, place)
+                })
+              let branches = keyset_branches(terms, places, comparisons, [])
+              let text =
+                "($"
+                <> int.to_string(first)
+                <> "::boolean=false OR "
+                <> string.join(branches, " OR ")
+                <> ")"
+              Ok(
+                #(Scope(..scope, next_param: first + list.length(terms) + 1), [
+                  text,
+                ]),
+              )
+            }
+          }
+        }
+      }
+    _ -> Ok(#(scope, []))
+  }
+}
+
+fn uniform_keyset(
+  app: App,
+  scope: Scope,
+  directions: List(#(String, String)),
+  from: Entity,
+  way: String,
+) -> Result(#(Scope, List(String)), Reason) {
+  use columns <- try(
+    list.try_map(directions, fn(pair) { column(app, scope, pair.0) }),
+  )
+  let alias = option.unwrap(alias_of(scope, from.name), "t")
+  let key_reference = alias <> "." <> quoted(from.key_column)
+  let key_kind = case
+    list.find(from.fields, fn(field) { field.column == from.key_column })
+  {
+    Ok(field) -> sql_type(app, field.value)
+    Error(_) -> "text"
+  }
+  let first = scope.next_param
+  let count = list.length(columns) + 1
+  let places =
+    range(first, count)
+    |> list.map(fn(index) { "$" <> int.to_string(index) })
+  let places = case list.reverse(places) {
+    [last, ..rest] -> list.reverse([last <> cast_of(key_kind), ..rest])
+    [] -> []
+  }
+  let head_cast = case columns {
+    [head, ..] -> cast_of(head.kind)
+    [] -> ""
+  }
+  let operator = case way {
+    "DESC" -> "<"
+    _ -> ">"
+  }
+  let text =
+    "($"
+    <> int.to_string(first)
+    <> head_cast
+    <> " IS NULL OR ("
+    <> string.join(
+      list.append(list.map(columns, fn(found) { found.reference }), [
+        key_reference,
+      ]),
+      ",",
+    )
+    <> ")"
+    <> operator
+    <> "("
+    <> string.join(places, ",")
+    <> "))"
+  Ok(#(Scope(..scope, next_param: first + count), [text]))
+}
+
+fn keyset_branches(
+  terms: List(#(Column, String)),
+  places: List(String),
+  comparisons: List(String),
+  prefix: List(String),
+) -> List(String) {
+  case terms, places, comparisons {
+    [term, ..rest_terms], [place, ..rest_places], [comparison, ..rest] -> {
+      let branch = case prefix {
+        [] -> comparison
+        _ -> "(" <> string.join(prefix, " AND ") <> " AND " <> comparison <> ")"
+      }
+      let #(found, _) = term
+      let equal =
+        found.reference
+        <> " IS NOT DISTINCT FROM "
+        <> place
+        <> keyset_cast(found.kind)
+      [
+        branch,
+        ..keyset_branches(
+          rest_terms,
+          rest_places,
+          rest,
+          list.append(prefix, [equal]),
+        )
+      ]
+    }
+    _, _, _ -> []
+  }
+}
+
+fn last_direction(directions: List(#(String, String))) -> String {
+  case list.last(directions) {
+    Ok(pair) -> pair.1
+    Error(_) -> "ASC"
+  }
+}
+
+fn cursor_compare(found: Column, way: String, place: String) -> String {
+  let operator = case way {
+    "DESC" -> "<"
+    _ -> ">"
+  }
+  let right = place <> keyset_cast(found.kind)
+  case found.optional {
+    True ->
+      "("
+      <> right
+      <> " IS NOT NULL AND ("
+      <> found.reference
+      <> " IS NULL OR ("
+      <> found.reference
+      <> " IS NOT NULL AND "
+      <> found.reference
+      <> operator
+      <> right
+      <> ")))"
+    False -> found.reference <> operator <> right
+  }
+}
+
+fn keyset_cast(kind: String) -> String {
+  case kind {
+    "uuid" -> "::uuid"
+    "timestamptz" -> "::timestamptz"
+    "date" -> "::date"
+    "time" -> "::time"
+    "public.vector" -> "::public.vector"
+    "integer" -> "::integer"
+    "boolean" -> "::boolean"
+    "double precision" -> "::double precision"
+    _ -> "::text"
+  }
+}
+
+fn range(first: Int, count: Int) -> List(Int) {
+  case count {
+    0 -> []
+    _ -> [first, ..range(first + 1, count - 1)]
+  }
+}
+
+/// Paged の size が穴なら番号を1つ取る。read 関数の並びに合わせて keyset より先。
+fn size_param(scope: Scope, limit: model.Limit) -> #(Scope, Option(Int)) {
+  case limit {
+    model.LPaged(size: model.OpParam(_), ..) -> #(
+      Scope(..scope, next_param: scope.next_param + 1),
+      Some(scope.next_param),
+    )
+    _ -> #(scope, None)
+  }
+}
+
+fn limit_clause(limit: model.Limit, size_place: Option(Int)) -> String {
+  case limit, size_place {
+    model.LNoLimit, _ -> ""
+    model.LFirst(count), _ -> "\nLIMIT " <> int.to_string(count)
+    model.LPaged(size: model.OpNum(size), ..), _ ->
+      "\nLIMIT " <> int.to_string(size + 1)
+    model.LPaged(..), Some(place) ->
+      "\nLIMIT $" <> int.to_string(place) <> " + 1"
+    model.LPaged(..), None -> "\nLIMIT 21"
+    model.LFirstPerGroup(..), _ -> ""
+  }
+}

@@ -1,7 +1,7 @@
 //// SiteHeader Block ── 入力無しの静的ヘッダ。
 
-import framework/front/el
-import framework/front/sketch_css
+import yumemi/front/el
+import yumemi/front/sketch_css
 import sketch/lustre/element/html
 import style
 

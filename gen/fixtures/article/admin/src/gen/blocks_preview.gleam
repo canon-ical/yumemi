@@ -1,7 +1,7 @@
 //// GENERATED from admin/src/{layout.gleam,pages/**/page.gleam,blocks/*.gleam} [sha256:5eda0a4ec120] — 手で編集しない
 
 import blocks/admin_header
-import framework/front/el
+import yumemi/front/el
 import lustre/attribute
 import lustre/element/html as raw_html
 import sketch/lustre as sketch_lustre

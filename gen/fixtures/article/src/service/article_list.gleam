@@ -6,9 +6,9 @@
 // ★ src/service/article_list.gleam
 import entity/article
 import entity/category
-import framework/effect.{type Effect, Read}
-import framework/page.{type Cursor, type Page, type PageSize}
-import framework/step.{type Start, type Step}
+import yumemi/effect.{type Effect, Read}
+import yumemi/page.{type Cursor, type Page, type PageSize}
+import yumemi/step.{type Start, type Step}
 import gen/allow/article as allow
 import gen/face.{type Face, Admin, Public}
 import gen/query as q

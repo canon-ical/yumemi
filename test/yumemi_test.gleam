@@ -1,15 +1,16 @@
-import framework/front
-import framework/front/css
-import framework/front/el
-import framework/front/sketch_css as front_sketch_css
-import framework/front/track
 import gleam/io
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
+import gleeunit
 import lustre/element as lustre_element
 import sketch
 import sketch/css as sketch_class
+import yumemi/front
+import yumemi/front/css
+import yumemi/front/el
+import yumemi/front/sketch_css as front_sketch_css
+import yumemi/front/track
 
 pub type Service {
   ArticleRead
@@ -51,6 +52,8 @@ pub fn main() {
   v01110_wrap_renders_overflow_wrap()
   v01114_focus_visible_and_hover_capable_render_to_css()
   io.println("Framework checks passed: 25 groups")
+  // 生成器の test(旧 `gen/test`)は gleeunit が `test/` の `*_test` を拾って回す。
+  gleeunit.main()
 }
 
 fn vars_are_typed_sources() {

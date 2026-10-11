@@ -1,14 +1,14 @@
 //// GENERATED from entity / types declarations [sha256:bbf198d7f83a] — 手で編集しない
-// 宣言から導けない decoder(hook も無い): article(tags が Multi), staff(framework/idp.Name の module が読めない)
+// 宣言から導けない decoder(hook も無い): article(tags が Multi), staff(yumemi/idp.Name の module が読めない)
 import { Some, None } from '../../gleam_stdlib/gleam/option.mjs';
 import { toList, List } from '../gleam.mjs';
-import * as party from '../../yumemi/framework/party.mjs';
-import * as time from '../../yumemi/framework/time.mjs';
-import * as blob from '../../yumemi/framework/blob.mjs';
-import * as er from '../../yumemi/framework/er.mjs';
-import * as page from '../../yumemi/framework/page.mjs';
-import * as secret from '../../yumemi/framework/secret_ffi.mjs';
-import { codec } from '../../yumemi/framework/server/codec.mjs';
+import * as party from '../../yumemi/yumemi/party.mjs';
+import * as time from '../../yumemi/yumemi/time.mjs';
+import * as blob from '../../yumemi/yumemi/blob.mjs';
+import * as er from '../../yumemi/yumemi/er.mjs';
+import * as page from '../../yumemi/yumemi/page.mjs';
+import * as secret from '../../yumemi/yumemi/secret_ffi.mjs';
+import { codec } from '../../yumemi/yumemi/server/codec.mjs';
 import * as article from '../entity/article.mjs';
 import * as category from '../entity/category.mjs';
 import * as staff from '../entity/staff.mjs';

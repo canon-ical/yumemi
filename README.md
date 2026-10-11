@@ -10,23 +10,45 @@ Open source, coming soon. https://gleam.canon-ical.com/
 
 **Under development.** The API may change between 0.x releases.
 
-Extracted from the `framework/` directory of a production application on 2026-09-16, history included. Module namespace is still `framework/*`; the package name is `yumemi`. Published on Hex as [`yumemi`](https://hex.pm/packages/yumemi) (0.2.0 = the 2026-09-16 extraction; the generator and gen-3/gen-4 changes ship from 0.3.0).
+Extracted from the `framework/` directory of a production application on 2026-09-16, history included. Since 0.12 the module namespace is `yumemi/*` (it was `framework/*` up to 0.11) and the generator is the module `yumemi/gen` of the same package, so the Hex package [`yumemi`](https://hex.pm/packages/yumemi) carries both: the generator that runs is the yumemi version your `manifest.toml` locks. The database schema the runtime reads is still named `framework` (`db/queries/framework/*.sql`, keys such as `framework/outbox_claim`).
 
 ## Layout
 
 | Module | What |
 |---|---|
-| `framework/spec` `framework/er` | Entity / Property / Type ── the model and its derivation |
-| `framework/entry` `framework/verb` `framework/party` `framework/require` | Entrances and Authorization |
-| `framework/step` `framework/effect` `framework/query` `framework/io` | Service logic: read / guard / apply / call / done |
-| `framework/connector` `framework/page` `framework/blob` `framework/vector` | Connectors, SSR pages, R2, Vectorize |
-| `framework/secret` `framework/sealed` `framework/time` | Secrets, sealed values, time |
+| `yumemi/spec` `yumemi/er` | Entity / Property / Type ── the model and its derivation |
+| `yumemi/entry` `yumemi/verb` `yumemi/party` `yumemi/require` | Entrances and Authorization |
+| `yumemi/step` `yumemi/effect` `yumemi/query` `yumemi/io` | Service logic: read / guard / apply / call / done |
+| `yumemi/connector` `yumemi/page` `yumemi/blob` `yumemi/vector` | Connectors, SSR pages, R2, Vectorize |
+| `yumemi/secret` `yumemi/sealed` `yumemi/time` | Secrets, sealed values, time |
+| `yumemi/front` `yumemi/front/*` | Faces: Layout, Page, Frame, Style, the client runtime (`navigate.mjs`) |
+| `yumemi/server` `yumemi/server/*.mjs` `yumemi/gate` | The back-end runtime the generated code imports, and a face's gate |
+| `yumemi/gen` | The generator (reads the app's Gleam sources, writes the derived Gleam, SQL and JS) |
+
+## The generator
+
+Run it from any package that depends on `yumemi` (the app's `api/`, or a face):
 
 ```
-gleam build
+gleam run -m yumemi/gen -- <app dir> <out dir>
 ```
 
-## `framework/front` ── Shell: the home screen, the service worker and the stylesheets (0.11.12, 0.11.15)
+For example, in a repository with `api/` and faces beside it, `cd api && gleam run -m yumemi/gen -- . ..` writes the back under `api/` and each face's files under the face's package. It exits non-zero when the output is incomplete; the exit code says who fixes it (`yumemi/gen/stop`).
+
+A face's `priv/static/_yumemi/client.mjs` is bundled with the esbuild the face's lockfile installed (`<face>/node_modules/.bin/esbuild`). When it is missing the generator stops with exit 3 and names the path — add `esbuild` to the face's `devDependencies` and run `npm ci` in the face. It does not fall back to `npx`.
+
+## Developing yumemi
+
+```
+npm ci        # the esbuild the generator tests bundle with
+gleam test    # the runtime checks and the generator tests (fixtures in gen/fixtures)
+```
+
+`gen/fixtures` (sample apps) and `gen/scripts` (one-off verification scripts) are not part of the Hex package.
+
+To generate a fixture in place, run the generator from the root (`gleam run -m yumemi/gen -- gen/fixtures/article gen/fixtures/article`). The fixture faces have no `package.json`, so first link the root's esbuild into each face that has a client (`public` in `article`: `mkdir -p gen/fixtures/article/public/node_modules/.bin && ln -s "$PWD/node_modules/.bin/esbuild" gen/fixtures/article/public/node_modules/.bin/esbuild`); without it the generator stops with exit 3. When yumemi's `[dependencies]` change, run `gleam update yumemi` in each fixture face, or its client build cannot see the new packages.
+
+## `yumemi/front` ── Shell: the home screen, the service worker and the stylesheets (0.11.12, 0.11.15)
 
 A face's `src/shell.gleam` holds the constants the generator puts in every page's `<head>`. `lang`, `title` and `theme` are required (as before). Five more are optional `String` constants; each one that is present adds one element after the `<title>`, in this order, and a shell without them generates exactly what 0.11.11 did:
 
@@ -54,9 +76,9 @@ pub const stylesheets: List(String) = ["/brand/tokens.css", "/brand/site.css"]
 - Client navigation keeps the `<head>` elements the next page also has and swaps the rest, so each element stays exactly once after a navigation.
 - A constant that is present but is not a non-empty `String` constant (another type, or `""`) stops the generator like a missing `title`: exit 3, `<face>/src/shell.gleam: <name> は空でない String の定数で書く`. For `stylesheets` the same holds when it is not a list literal of non-empty strings: `<face>/src/shell.gleam: stylesheets は空でない String の List の定数で書く`.
 
-## `framework/front` ── Client navigation (0.11.4, 0.11.15)
+## `yumemi/front` ── Client navigation (0.11.4, 0.11.15)
 
-The generated client calls `framework/front/navigate.mjs`'s `start({routes, csp, boot, pageview})`. `routes` lists every Page route of the face; `csp` maps each route of a gate `frame_src` Page to the `content-security-policy` value the gate sends with it (`frame-src https://<host> ..` from the entry's `frame_src` hosts). A face without such Pages gets no `csp` key, exactly as in 0.11.14.
+The generated client calls `yumemi/front/navigate.mjs`'s `start({routes, csp, boot, pageview})`. `routes` lists every Page route of the face; `csp` maps each route of a gate `frame_src` Page to the `content-security-policy` value the gate sends with it (`frame-src https://<host> ..` from the entry's `frame_src` hosts). A face without such Pages gets no `csp` key, exactly as in 0.11.14.
 
 - **Which clicks.** A plain left click on a same-origin link, from a routed Page to a routed Page, whose destination has the same CSP as the Page that loaded the current document (both none, or the same value). A CSP header only takes effect on a page load, so a link to a Page with another CSP — or from a Page without one to a Page with one — is a page load, and the destination's policy holds. Modified clicks, `target`, `download` and links to unrouted paths are page loads, as before.
 - **Which responses.** One fetch with `x-yumemi-navigate: 1` (the gate, the adult declaration and the session go through the server as before). It falls back to a page load on a redirect (a gate's 302, e.g. to `/enter`), a non-200, a non-HTML body, a `content-security-policy` header that differs from the route table's value for that Page (or is present where the table has none, or missing where it has one), a page with scripts other than the client, or an already-registered given island. 0.11.14 fell back on any CSP header.
@@ -64,7 +86,7 @@ The generated client calls `framework/front/navigate.mjs`'s `start({routes, csp,
 - **Stylesheets load before the body changes.** A stylesheet new to `<head>`, and a copy (in `<head>`, marked `data-yumemi-hold`) of each stylesheet that only the next page's `<body>` links (an article's font CSS, say), is inserted with `media="not all"` and awaited (load or error, at most 3 seconds); then its `media` is restored, the old head elements leave and the body is swapped. A copy is removed once the body's own `<link>` has loaded. The old page stays on screen meanwhile, so no unstyled page shows; the swap waits for those downloads.
 - **Pageviews, back / forward and reload after a write** are unchanged: the gate's mark in `<head>` counts the navigation (`kind` `spa`), back / forward take the same path, and `navigate.reload()` refetches a routed Page in place (`kind` `reload`).
 
-## `framework/front` ── Page theme: where the colours come from (0.11.13)
+## `yumemi/front` ── Page theme: where the colours come from (0.11.13)
 
 `Page(.., theme: Some(name), ..)` paints the page with a `PageTheme` value read on the server (the body's `--bg`, `--bg-image`, `--text`, `--accent`; the shell's `theme` constant gives the defaults). `theme: None` paints the defaults only.
 
@@ -74,9 +96,9 @@ The generated client calls `framework/front/navigate.mjs`'s `start({routes, csp,
 - `name` is also the name of the `Data` field (`theme: Option(<service>.PageTheme)`) in the generated `load/**/page.gleam`.
 - When no field path reaches a `PageTheme`, the generator does not stop: `load/**/page.gleam` is what 0.11.12 generated (with no source holding one, it names `<root service>.PageTheme`, which does not compile), the shell's theme row stays `{ theme: true }`, and the page gets `None` (the defaults) at runtime.
 
-## `framework/front` ── Style (0.11.10)
+## `yumemi/front` ── Style (0.11.10)
 
-`framework/front/css`'s `Style` is the typed vocabulary a Page / Area / component carries; `framework/front/sketch_css` maps it to CSS (sketch classes, so a Style used by an island also lands in the island's shadow `<style>`). Color values are strings passed straight through, so `var(--ma-color-bg)` and `color-mix(...)` work — the app owns its palette, yumemi bakes in no hex. Every word also works inside `State(Hover / Focus / FocusVisible / HoverCapable / Disabled / Current, ..)` and `Responsive(SP / PC / Tablet, ..)`.
+`yumemi/front/css`'s `Style` is the typed vocabulary a Page / Area / component carries; `yumemi/front/sketch_css` maps it to CSS (sketch classes, so a Style used by an island also lands in the island's shadow `<style>`). Color values are strings passed straight through, so `var(--ma-color-bg)` and `color-mix(...)` work — the app owns its palette, yumemi bakes in no hex. Every word also works inside `State(Hover / Focus / FocusVisible / HoverCapable / Disabled / Current, ..)` and `Responsive(SP / PC / Tablet, ..)`.
 
 | Style | CSS |
 |---|---|
@@ -106,18 +128,18 @@ Lengths (`css.Length`) are `Px(n)` / `Rem(n)` and, from 0.11.9:
 
 They work everywhere a Length does: `Space`, `Text`, `Border`, `Outline`, `Flow` gaps, and an Area's flow `gap` in the generated grid CSS (literal or a `style` constant).
 
-## `framework/front` ── Grid style and the bottom bar (0.11.10)
+## `yumemi/front` ── Grid style and the bottom bar (0.11.10)
 
 - **`StyledFrame(areas:, placements:, cols:, rows:, template:, style:)`** — a `Frame` (sp, pc or tablet) whose `style: List(css.Style)` goes on the grid element itself (`data-yumemi-grid`, the Layout's or a Page's). The other fields are those of `Frame`, and a plain `Frame` (or `style: []`) generates exactly what 0.11.9 did. It is a second constructor rather than a new field, so every existing `Frame(..)` keeps compiling. Write the style like an Area's: a `style` constant (`style: style.shell`) or a list of them (`style: [style.shell]`); the generator stops on anything else. The sp Frame's style holds at every width; a pc / tablet Frame's style is wrapped in `Responsive(PC / Tablet, ..)` (the same widths as the grid's media rules). The style becomes a sketch class on the grid element, and every Area keeps its own class, so the two never share a rule. Columns, rows and `gap` stay with the Frame's fields (the generated grid CSS writes them); use the style for the rest. `front.frame_style(frame)` reads it (`[]` for `Frame`).
   - The screen-tall shell: `style.shell = [css.Space(css.MinHeight, css.Dvh(100.0))]` with `rows: [track.Auto, track.Fr(1), track.Auto]` — the grid is at least the screen tall and the body row takes what is left, so a short page still puts the last row at the bottom of the screen; a long page is laid out as before.
 - **`pin: BottomFlush`** — a bar stuck to the very bottom of the screen: `position: sticky; bottom: 0; padding-bottom: env(safe-area-inset-bottom, 0px); z-index: 3`. Its background reaches the bottom edge, and its content sits above the iPhone home indicator. The bottom padding of the Area is the safe-area inset (it wins over an Area style's `padding`), so put any further space inside the bar's block. `Bottom` is unchanged (`bottom: env(safe-area-inset-bottom)`, floating above the inset).
 
-## `framework/front` ── Layout vars and Overlay (0.11.9)
+## `yumemi/front` ── Layout vars and Overlay (0.11.9)
 
 - **`Var(name, CurrentRoute)`** — the route spelling of the Page being drawn, as the generated route table writes it (`/rosters/:id`, `/`). It is a constant the generator knows per Page; the request's argument values and query never enter it. It can sit in a Layout (where `Path` / `Query` / `Session` cannot) or in a Page, and arrives as a `String` block arg of the same name — a header block compares it with its links' routes to set `aria-current="page"`.
 - **`pin: AnchoredOverlay(side: Below / Above, align: AlignStart / AlignEnd)`** — an Overlay Area that opens next to the `el.opener` button that opened it, below or above it, lining up its start or end edge with the button's. It is an Overlay in every other respect (`el.opener` / `el.closer`, popover, not in the grid). The generated CSS uses CSS anchor positioning inside `@supports (anchor-name: ..)` (`position-area`, `position-try-fallbacks: flip-block`) and leaves the backdrop clear. A browser without anchor positioning opens it like `Overlay`: centred by the UA, with the darkened backdrop. With several openers for the same Area the anchor is the last one in document order. `Overlay` and `[popover]::backdrop` are unchanged.
 
-## `framework/front` ── Area flow (0.11.8)
+## `yumemi/front` ── Area flow (0.11.8)
 
 An Area's `flow` in a Layout or a Page's Frame now reaches the generated grid CSS (the `<style>` that `htmlWithGridCss` puts in SSR pages and `_yumemi/style.css`, which carry the same text): the Area's rule gets the flow's declarations after `grid-area`, so the blocks placed in the Area are laid out by it. Before 0.11.8 the Area stayed `display: block` and the flow was ignored.
 
@@ -132,11 +154,11 @@ An Area's `flow` in a Layout or a Page's Frame now reaches the generated grid CS
 - `gap` is a literal (`css.Px(..)` / `css.Rem(..)`) or a constant of the app's `style` module (`style.s2`). A gap the generator cannot read leaves the Area's rule without flow lines (as before).
 - Every variant writes its direction, so a `pc` / `tablet` Frame that gives the Area another flow overrides the `sp` one inside its media rule. An Area shown only at a breakpoint (hidden elsewhere) keeps `display: none` outside it; inside the media rule its flow's `display` shows it, and no `display: block` is added.
 - An Area pinned `Overlay` gets no flow lines (its display stays with the overlay). `pin` and `style` output is unchanged.
-- `framework/front.area_flow_css(flow)` returns the declarations for one `css.Flow`.
+- `yumemi/front.area_flow_css(flow)` returns the declarations for one `css.Flow`.
 
-## `framework/server` ── what the app must provide (0.11.1)
+## `yumemi/server` ── what the app must provide (0.11.1)
 
-The back-end runtime (`framework/server/*.mjs`) is JavaScript that the generated `src/gen/*.mjs` imports. It knows no application names: route names, cookie names, key bindings and the party a queue consumer reads its borrowed root as come from the app's `src/server.gleam` (`attached_roles`, `browser`, `hooks`, `roots`' `QueueParty`). The generated face gate (`<face>/src/gen/gate.mjs`, declared in `<face>/src/gate.gleam` with `framework/gate`) reads the session through the `ReadSession` attached route. Gleam packages cannot declare npm dependencies, so the app supplies the following itself.
+The back-end runtime (`yumemi/server/*.mjs`) is JavaScript that the generated `src/gen/*.mjs` imports. It knows no application names: route names, cookie names, key bindings and the party a queue consumer reads its borrowed root as come from the app's `src/server.gleam` (`attached_roles`, `browser`, `hooks`, `roots`' `QueueParty`). The generated face gate (`<face>/src/gen/gate.mjs`, declared in `<face>/src/gate.gleam` with `yumemi/gate`) reads the session through the `ReadSession` attached route. Gleam packages cannot declare npm dependencies, so the app supplies the following itself.
 
 Generated live modules (0.11.2) send Args by their declared type: `Bool` as a JSON boolean (the live field's `"true"` / `"false"`), `Int` / `Float` as numbers. On a `GET` route the Args that are not path holes go on the query string (an empty `Option` is left out), and the runtime reads `bool` (`true` / `false`) and `float` spellings from the query of `GET` / `HEAD` requests. `POST` / `PUT` / `DELETE` bodies are read as JSON as before.
 
@@ -146,12 +168,12 @@ A Service whose logic runs `step.commit` and continues after it (and is not a qu
 
 0.11.4 adds, without changing the existing public types:
 
-- **Reads time out and retry once.** `driver.mjs` cuts a read-only statement (one `SELECT` / `WITH` / `VALUES` / `TABLE` with no write keyword — `INTO` and row locks count as writes — and no call to a function outside the built-in allow list, read after one pass that strips strings, quoted identifiers and comments; see `framework/server/read_retry.mjs`) after `DATABASE_READ_TIMEOUT_MS` (default 10000) and retries it once when the failure is outside the database (timeout, fetch failure, HTTP 5xx; not an SQLSTATE). Writes and transactions are never retried and get no timeout. Every failure outside the database, read or write, is logged as one JSON line (`{"yumemi":"driver.failed",kind,key,attempt,ms,code,status,name,body}`, `kind` is `read` / `write` / `transaction`) with the response body.
+- **Reads time out and retry once.** `driver.mjs` cuts a read-only statement (one `SELECT` / `WITH` / `VALUES` / `TABLE` with no write keyword — `INTO` and row locks count as writes — and no call to a function outside the built-in allow list, read after one pass that strips strings, quoted identifiers and comments; see `yumemi/server/read_retry.mjs`) after `DATABASE_READ_TIMEOUT_MS` (default 10000) and retries it once when the failure is outside the database (timeout, fetch failure, HTTP 5xx; not an SQLSTATE). Writes and transactions are never retried and get no timeout. Every failure outside the database, read or write, is logged as one JSON line (`{"yumemi":"driver.failed",kind,key,attempt,ms,code,status,name,body}`, `kind` is `read` / `write` / `transaction`) with the response body.
 - **Attached routes with a framework role that reads a body** send it: the live for a `SwitchSubject` route has `Args(kind, id)` and sends `{kind, id}`. Other attached lives are unchanged (no Args, `null` body).
 - **The `BlobCopy` live copies a URL.** Besides the file upload (`Send`), `copy_from(state, url)` sends `{from: url}` to the same route and reads `{key}` into `Done(Ok(key))`.
 - **Split records decode.** A record Property stored with `Split` is rebuilt from its columns in `src/gen/codec.mjs`.
-- **Islands render sketch classes.** The generated client registers each island through `framework/front/island_style.mjs`'s `styled(app)`: the island gets its own sketch stylesheet while its view runs, and the CSS goes into a `<style>` inside the island (only when the island uses classes and does not render its own stylesheet).
-- **Client navigation between Pages.** The generated client calls `framework/front/navigate.mjs`'s `start({routes, boot, pageview})`. A plain left click on a same-origin link, from a Page to a Page that are both in the face's route table (minus the gate's `frame_src` Pages), fetches the next page with one request (the gate, the adult declaration and the session go through the server as before), swaps `<head>` and `<body>`, re-runs the island registrations and pushes history; back / forward do the same. A redirect, a non-200, a `content-security-policy` header, a page with scripts other than the client, an already-registered given island, a modified click, `target` or `download` fall back to a page load.
+- **Islands render sketch classes.** The generated client registers each island through `yumemi/front/island_style.mjs`'s `styled(app)`: the island gets its own sketch stylesheet while its view runs, and the CSS goes into a `<style>` inside the island (only when the island uses classes and does not render its own stylesheet).
+- **Client navigation between Pages.** The generated client calls `yumemi/front/navigate.mjs`'s `start({routes, boot, pageview})`. A plain left click on a same-origin link, from a Page to a Page that are both in the face's route table (minus the gate's `frame_src` Pages), fetches the next page with one request (the gate, the adult declaration and the session go through the server as before), swaps `<head>` and `<body>`, re-runs the island registrations and pushes history; back / forward do the same. A redirect, a non-200, a `content-security-policy` header, a page with scripts other than the client, an already-registered given island, a modified click, `target` or `download` fall back to a page load.
 - **Pageviews count once per navigation.** The navigation fetch carries `x-yumemi-navigate: 1`; for it the gate puts `<meta name="yumemi-pageview">` in `<head>` instead of the pageview script (same conditions: adult session, 200 HTML, a `pageview` Page) and adds `vary: x-yumemi-navigate`. The client posts the pageview (`kind` `spa`) only after it swapped that page in; a fallback to a page load gets the script as before.
 - **Reload after a write stays in the page.** An island's `yumemi-done` calls `navigate.reload()`: on a routed Page it refetches the current URL the same way (no history entry, scroll kept, pageview `kind` `reload`); otherwise it reloads the page.
 
@@ -220,8 +242,8 @@ A Service whose logic runs `step.commit` and continues after it (and is not a qu
 
 | Import | Imported by | Provided by |
 |---|---|---|
-| `@neondatabase/serverless` | `framework/server/driver.mjs` (Neon HTTP transport, `database(env, observe)`) | the app's `package.json` |
-| `cloudflare:workers` | `framework/server/worker.mjs` (`DurableObject` / `WorkerEntrypoint`) | the Workers runtime (wrangler / workerd); not an npm package, so modules that import `worker.mjs` (the generated `shell.mjs`) do not load under plain node |
+| `@neondatabase/serverless` | `yumemi/server/driver.mjs` (Neon HTTP transport, `database(env, observe)`) | the app's `package.json` |
+| `cloudflare:workers` | `yumemi/server/worker.mjs` (`DurableObject` / `WorkerEntrypoint`) | the Workers runtime (wrangler / workerd); not an npm package, so modules that import `worker.mjs` (the generated `shell.mjs`) do not load under plain node |
 
 **SQL** — the runtime runs these keys through the app's SQL bundle (`src/gen/sql.mjs`, built from `db/queries/**`). The app writes them as `db/queries/framework/<name>.sql` against its own `framework` schema (DDL is the app's). Holes are positional, in the order below.
 

@@ -1,6 +1,6 @@
-import framework/front
-import framework/front/el
-import framework/front/live as front_live
+import yumemi/front
+import yumemi/front/el
+import yumemi/front/live as front_live
 import gen/api
 import gen/live/article_blob_save
 import gen/service

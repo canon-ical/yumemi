@@ -1,6 +1,6 @@
 //// GENERATED from src/entry.gleam [sha256:7a3c0e1de776] — 手で編集しない
 
-import framework/front
+import yumemi/front
 import gen/service
 
 pub type Method {

@@ -1,7 +1,7 @@
 //// RowSummary Block ── widget_list の Summary 行だけを描く。
 
-import framework/front/el
-import framework/front/sketch_css
+import yumemi/front/el
+import yumemi/front/sketch_css
 import gen/out/widget_list
 import sketch/lustre/element/html
 import style

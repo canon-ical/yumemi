@@ -6,8 +6,8 @@
 ////
 //// 主体 Entity は初ログイン時にフレームワークが自動で作る(第7巡)。だから Property は
 //// 「IdP 由来 / Option / 既定値あり」の3種しか置けない ── ここは3つとも IdP 由来。
-import framework/idp.{type Email, type Name}
-import framework/party.{type PartyId}
+import yumemi/idp.{type Email, type Name}
+import yumemi/party.{type PartyId}
 
 pub type Staff {
   Staff(party: PartyId, name: Name, email: Email)

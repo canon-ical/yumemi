@@ -1,6 +1,6 @@
 //// GENERATED from src/server.gleam [sha256:91b6b08d9d7a] — 手で編集しない
 
-import framework/front/live
+import yumemi/front/live
 import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
 import gleam/json

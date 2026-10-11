@@ -1,4 +1,4 @@
-import framework/party.{type PartyId}
+import yumemi/party.{type PartyId}
 import gen/types/title.{type Title}
 import ledger_store.{type LedgerStoreId}
 

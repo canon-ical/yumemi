@@ -1,5 +1,5 @@
 import entity/category.{type Category}
-import framework/er.{type Has}
+import yumemi/er.{type Has}
 
 pub type Article {
   Article(id: Int, category: Has(Category))

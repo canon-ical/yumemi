@@ -1,5 +1,5 @@
 import entity/label.{type Label}
-import framework/er.{type Multi}
+import yumemi/er.{type Multi}
 
 pub type Photo {
   Photo(id: Int, labels: Multi(Label))

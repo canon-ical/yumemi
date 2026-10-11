@@ -1,7 +1,7 @@
 //// GENERATED from src/components/pick_tag.gleam [sha256:cb6c05f590ba] — 手で編集しない
 
-import framework/front/live
-import framework/spec
+import yumemi/front/live
+import yumemi/spec
 import gen/out/article_create
 import gen/out/article_list
 import gleam/dynamic.{type Dynamic}

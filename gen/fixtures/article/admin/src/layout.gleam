@@ -1,5 +1,5 @@
-import framework/front.{type Layout, Area, Frame, Layout}
-import framework/front/css
+import yumemi/front.{type Layout, Area, Frame, Layout}
+import yumemi/front/css
 import gen/blocks
 import gen/service
 import gleam/option.{None}

@@ -1,4 +1,4 @@
-import framework/effect.{type Effect, Write}
+import yumemi/effect.{type Effect, Write}
 import gen/face.{type Face, Test}
 import gen/root/schedule_add.{type Root, type Service, Service}
 

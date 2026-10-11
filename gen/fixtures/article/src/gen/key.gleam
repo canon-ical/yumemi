@@ -3,7 +3,7 @@
 import entity/article
 import entity/category
 import entity/tag
-import framework/er.{type Key}
+import yumemi/er.{type Key}
 import gen/types/category_name.{type CategoryName}
 import gen/types/slug.{type Slug}
 import gen/types/tag_name.{type TagName}

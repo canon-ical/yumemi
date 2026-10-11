@@ -1,8 +1,8 @@
 //// GENERATED from entry.gleam / service declarations [sha256:f61fc5acf538] — 手で編集しない
 
 import entry
-import framework/entry.{type Entry} as entry_types
-import framework/io.{type Promise}
+import yumemi/entry.{type Entry} as entry_types
+import yumemi/io.{type Promise}
 
 pub type Credential {
   Session

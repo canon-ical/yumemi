@@ -2,8 +2,8 @@
 
 // ★ src/service/widget_list.gleam
 import entity/article
-import framework/effect.{type Effect, Read}
-import framework/step.{type Start, type Step}
+import yumemi/effect.{type Effect, Read}
+import yumemi/step.{type Start, type Step}
 import gen/allow/article as allow
 import gen/face.{type Face, Admin, Public}
 import gen/query as q

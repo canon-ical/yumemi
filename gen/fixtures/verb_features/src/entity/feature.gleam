@@ -1,7 +1,7 @@
 import entity/owner.{type Owner}
 import entity/space.{type Space}
-import framework/er.{type Held}
-import framework/verbs
+import yumemi/er.{type Held}
+import yumemi/verbs
 import gen/types/feature_id.{type FeatureId}
 import gen/types/position.{type Position}
 import gen/types/title.{type Title}

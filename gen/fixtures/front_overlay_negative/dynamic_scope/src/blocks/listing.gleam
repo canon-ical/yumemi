@@ -1,4 +1,4 @@
-import framework/front/el
+import yumemi/front/el
 
 const scope = "article-row"
 

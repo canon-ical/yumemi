@@ -1,4 +1,4 @@
-import framework/front/css
+import yumemi/front/css
 
 pub const ink: css.Style = css.Color("#2b1d3a")
 

@@ -1,7 +1,7 @@
 //// 20 の写しではない ── 生成器の fixture として gen-3b で置いた(P0-3 / P0-5 の検算)。
 
 // ★ src/types.gleam ── 矢印 3 形(必須 / 任意 / 複数)と、値域つき順序列の最小の ★。
-import framework/spec.{type Spec, Range, Text, Uuid}
+import yumemi/spec.{type Spec, Range, Text, Uuid}
 
 pub const album_id: Spec = Uuid
 
