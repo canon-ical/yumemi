@@ -1,5 +1,13 @@
 // 0.12 段 C(Y3)── runtime(interactive.mjs)の Args の送り方を、表の型(wire)ごとに 1 行 1 件で見る。
+import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { internals } from "./yumemi/front/interactive.mjs";
+
+/// 送りの file の上げ方(偽の DOM と fetch で globals を替えるので子の node で走らせる)。
+export function runtime_submit() {
+  const result = spawnSync(process.execPath, [path.resolve("test/yumemi_012_y3_submit_check.mjs")], { encoding: "utf8", timeout: 60000 });
+  return `${result.stdout}${result.stderr ? `\nSTDERR ${result.stderr}` : ""}`.trim();
+}
 
 export function runtime_wire() {
   const out = [];

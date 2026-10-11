@@ -7,6 +7,10 @@ import gleam/option.{None, Some}
 import gleam/string
 import gleeunit/should
 import simplifile
+import yumemi/front/attr
+import yumemi/front/el
+import yumemi/front/html
+import yumemi/front/live as front_live
 import yumemi/gen as yumemi_gen
 import yumemi/gen/emit/back
 import yumemi/gen/emit/front as front_emit
@@ -475,6 +479,25 @@ pub fn hand_placed_file_in_src_gen_is_checked_as_star_test() {
   notes_with(units) |> stops("gen/hand: ★ が lustre を import している(第 1 条", 4)
 }
 
+/// 別名の unqualified import(`el.{raw_text as rt}`)で呼んでも第 3 条で止まる(柏木 ゲート 2、名の照合が
+/// 別名のままだと抜けた)。
+pub fn article_3_aliased_unqualified_import_stops_test() {
+  let notes =
+    notes_with([
+      unit(
+        "blocks/probe_alias",
+        "import yumemi/front/el.{attribute as at, raw_text as rt}\nimport yumemi/front/html\n"
+          <> "pub type In = Nil\n"
+          <> "pub fn view(_it: In) -> el.Element {\n  html.div_([at(\"onclick\", \"x\")], [rt(\"script\", [], \"x\")])\n}\n",
+      ),
+    ])
+  let found = with(notes, "第 3 条")
+  list.length(found) |> should.equal(2)
+  with(found, "el.raw_text") |> list.length |> should.equal(1)
+  with(found, "el.attribute") |> list.length |> should.equal(1)
+  stop.worst(found) |> should.equal(4)
+}
+
 // ── Css と生の CSS(第 26・28〜31・43 条)と逃げ道の数え ──────────────────────
 
 pub fn article_26_non_literal_shell_color_is_exit_four_test() {
@@ -642,6 +665,18 @@ pub fn runtime_wire_encodes_args_by_type_test() {
   string.split(out, "\n") |> list.length |> should.equal(12)
 }
 
+@external(javascript, "./yumemi_012_y3_test_ffi.mjs", "runtime_submit")
+fn runtime_submit() -> String
+
+/// 上げ口(attached の `BlobCopy`)は file を送りの本文で 1 回だけ上げ、Service の Blob の欄は上げた key を Args に
+/// 入れる(柏木 ゲート 2、上げ口が先に /api/blobs へも上げて 2 回上がっていた)。
+pub fn runtime_uploads_a_chosen_file_once_test() {
+  let out = runtime_submit()
+  string.contains(out, "NG ") |> should.be_false
+  string.contains(out, "STDERR") |> should.be_false
+  string.split(out, "\n") |> list.length |> should.equal(4)
+}
+
 pub fn generated_live_module_has_no_update_or_state_test() {
   let assert Ok(text) =
     simplifile.read(public <> "/src/gen/live/article_publish.gleam")
@@ -655,4 +690,61 @@ pub fn generated_live_module_has_no_update_or_state_test() {
   ]
   |> list.each(fn(word) { string.contains(text, word) |> should.be_true })
   let _ = Some(Nil)
+}
+
+/// Spec の正規表現の escape は 1 回だけ写る ── `"^\\d+(\\.[a-z]+)?$"` の `pattern` は `\d+(\.[a-z]+)?`(柏木
+/// ゲート 2、glance の字に quoted を重ねて `\\d`(backslash と d)になり、正しい値を制約検証が拒んでいた)。
+pub fn bind_pattern_keeps_the_spec_regex_escapes_test() {
+  let assert Ok(back_units) = source.load(fixture)
+  let back_units =
+    list.map(back_units, fn(item) {
+      case item.path {
+        "types" ->
+          unit(
+            "types",
+            string.replace(
+              item.text,
+              "regex: \"^[a-z0-9]+(-[a-z0-9]+)*$\"",
+              "regex: \"^\\\\d+(\\\\.[a-z]+)?$\"",
+            ),
+          )
+        _ -> item
+      }
+    })
+  let assert Ok(app) = reader.read(back_units)
+  let assert Ok(units) = source.load(public)
+  let assert Ok(model) = front.read("public", units, app.services)
+  let package =
+    face.Package(
+      name: "public",
+      path: public,
+      pages: face.UndeclaredPages,
+      units: units,
+    )
+  let files =
+    front_emit.emit(app, back_units, package, model, hash.of(back_units))
+  let assert Ok(live) =
+    list.find(files, fn(file) {
+      file.path == "public/src/gen/live/article_publish.gleam"
+    })
+  string.contains(live.text, "live.Pattern(\"\\\\d+(\\\\.[a-z]+)?\")")
+  |> should.be_true
+  string.contains(live.text, "\\\\\\\\d") |> should.be_false
+}
+
+/// textarea の `bind` は初めの値を中身の字に描く ── `value` 属性は browser が読まず、空の textarea から送りが
+/// 初めの値を "" で上書きしていた(柏木 ゲート 2)。中身を書いたなら中身が勝つ。
+pub fn textarea_bind_renders_the_value_as_content_test() {
+  html.textarea_(
+    [front_live.bind("edit", "body", "\na<b", [front_live.Required])],
+    [],
+  )
+  |> el.to_string
+  |> should.equal("<textarea name=\"edit.body\" required>\n\na&lt;b</textarea>")
+  html.textarea_([attr.value("x")], [el.text("中身")])
+  |> el.to_string
+  |> should.equal("<textarea>中身</textarea>")
+  html.input_([attr.value("x")])
+  |> el.to_string
+  |> should.equal("<input value=\"x\">")
 }

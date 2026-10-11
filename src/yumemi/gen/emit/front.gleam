@@ -8574,8 +8574,13 @@ fn arg_constraints(
               case
                 g.labelled(expression, "regex") |> option.then(g.string_value)
               {
+                // glance の String は書いた escape のまま(`"\\d"` は `\` 2 つ)なので、quoted で escape を
+                // 重ねずにそのまま literal に戻す ── 重ねると `\d` が `\\d`(backslash と d)になり、正しい値を
+                // browser の制約検証が拒む
                 Some(regex) -> [
-                  "live.Pattern(" <> quoted(html_pattern(regex)) <> ")",
+                  "live.Pattern(\""
+                  <> string.replace(html_pattern(regex), "\n", "\\n")
+                  <> "\")",
                 ]
                 None -> []
               }

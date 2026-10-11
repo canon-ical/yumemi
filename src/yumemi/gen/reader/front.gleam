@@ -565,8 +565,8 @@ fn front_el_function(
         _ -> None
       }
     glance.Variable(name: name, ..) ->
-      case unqualified_module(imports, name) {
-        Some("yumemi/front/el") -> Some(name)
+      case unqualified_value(imports, name) {
+        Some(#("yumemi/front/el", original)) -> Some(original)
         _ -> None
       }
     _ -> None
@@ -3943,27 +3943,28 @@ fn imported_module(
   }
 }
 
-fn unqualified_module(
+/// unqualified に import した値の module の道と元の名。別名(`import m.{f as g}` の `g`)は元の名 `f` に
+/// 戻す ── 別名のまま返すと第 3 条ほかの名の照合を `{raw_text as rt}` の形で抜ける。
+fn unqualified_value(
   imports: List(glance.Definition(glance.Import)),
   name: String,
-) -> Option(String) {
+) -> Option(#(String, String)) {
   case
     list.find_map(imports, fn(definition) {
       let import_ = definition.definition
-      case
-        list.any(import_.unqualified_values, fn(value) {
-          case value.alias {
-            Some(alias) -> alias == name
-            None -> value.name == name
-          }
-        })
-      {
-        True -> Ok(import_.module)
-        False -> Error(Nil)
-      }
+      list.find_map(import_.unqualified_values, fn(value) {
+        let local = case value.alias {
+          Some(alias) -> alias
+          None -> value.name
+        }
+        case local == name {
+          True -> Ok(#(import_.module, value.name))
+          False -> Error(Nil)
+        }
+      })
     })
   {
-    Ok(module) -> Some(module)
+    Ok(found) -> Some(found)
     Error(_) -> None
   }
 }
@@ -4147,9 +4148,7 @@ fn resolve_callee(
     ) ->
       imported_module(imports, alias)
       |> option.map(fn(path) { #(path, label) })
-    glance.Variable(name: name, ..) ->
-      unqualified_module(imports, name)
-      |> option.map(fn(path) { #(path, name) })
+    glance.Variable(name: name, ..) -> unqualified_value(imports, name)
     _ -> None
   }
 }

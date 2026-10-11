@@ -152,8 +152,9 @@ async function buildArgs(spec, initial, controls, serviceName) {
     if (collected.has(arg.name)) {
       const items = collected.get(arg.name);
       const files = items.filter((item) => typeof File !== "undefined" && item instanceof File);
-      if (files.length > 0) raw = await upload(files[0]);
-      else if (isList) raw = items;
+      if (files.length > 0) {
+        if (!spec.upload) raw = await upload(files[0]);
+      } else if (isList) raw = items;
       else if (items.length > 0) raw = items[items.length - 1];
       else if (!arg.blob) raw = "";
     }

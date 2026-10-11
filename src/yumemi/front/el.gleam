@@ -450,6 +450,8 @@ fn render(element: Element, parent_namespace: String) -> String {
       <> tag
       <> ">"
     Node(namespace:, tag:, attributes:, children:) -> {
+      let #(attributes, children) =
+        textarea_value(namespace, tag, attributes, children)
       let xmlns = case namespace != "" && namespace != parent_namespace {
         True -> " xmlns=\"" <> escape(namespace) <> "\""
         False -> ""
@@ -473,6 +475,45 @@ fn render_all(children: List(Element), namespace: String) -> String {
   children
   |> list.map(render(_, namespace))
   |> string.concat
+}
+
+/// textarea は `value` 属性を読まない(初めの値は中身の字)。`value`(live の `bind`・`attr.value`)は、中身が
+/// 無ければ中身の字に移して属性から外す ── 属性のままだと空の textarea が描かれ、送りが初めの値を "" で上書き
+/// する(0.12 段 C、柏木 ゲート 2)。中身を書いたなら中身が勝つ。
+fn textarea_value(
+  namespace: String,
+  tag: String,
+  attributes: List(Attribute),
+  children: List(Element),
+) -> #(List(Attribute), List(Element)) {
+  case namespace, tag {
+    "", "textarea" -> {
+      let flat = flatten_attributes(attributes)
+      let value =
+        list.fold(flat, None, fn(found, attribute) {
+          case attribute {
+            Attribute("value", value) -> Some(value)
+            _ -> found
+          }
+        })
+      case value {
+        None -> #(attributes, children)
+        Some(value) -> #(
+          list.filter(flat, fn(attribute) {
+            case attribute {
+              Attribute("value", _) -> False
+              _ -> True
+            }
+          }),
+          case children {
+            [] -> [Text(value)]
+            _ -> children
+          },
+        )
+      }
+    }
+    _, _ -> #(attributes, children)
+  }
 }
 
 /// textarea / pre / listing は、直後の最初の改行を HTML の parser が 1 つ捨てる。本文が改行で始まるなら 1 つ足して落とさない。
