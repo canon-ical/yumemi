@@ -111,7 +111,7 @@ fn resolved(
   image_url: fn(Blob) -> String,
 ) -> #(String, String, String, String) {
   let default_image = case defaults.background_image {
-    Some(path) -> css_url(path)
+    Some(path) -> css_url(static_href(path))
     None -> "none"
   }
   case value {
@@ -145,6 +145,15 @@ fn default_color(raw: String) -> String {
   case color.parse(raw) {
     Ok(value) -> color.to_css(value)
     Error(_) -> "unset"
+  }
+}
+
+/// Shell の既定の地の画像は `priv/static` の path(`/` で始めても始めなくてもよい、第 26 条)。
+/// 頁の URL からの相対にならないよう `/` から書く(`el.static_sheet` と同じ)。
+fn static_href(path: String) -> String {
+  case string.starts_with(path, "/") {
+    True -> path
+    False -> "/" <> path
   }
 }
 

@@ -163,6 +163,14 @@ pub fn page_theme_renders_four_custom_properties_test() {
   |> should.be_true
   theme.has_image(None, theme.Defaults("#000000", "#000000", "#000000", None))
   |> should.be_false
+  // Shell の既定の地の画像は `/` の無い path でも頁の URL からの相対にしない
+  theme.body_rule(
+    None,
+    theme.Defaults("#000000", "#000000", "#000000", Some("bg/paper.png")),
+    blob.to_string,
+  )
+  |> string.contains("--yumemi-theme-bg-image: url(\"/bg/paper.png\");")
+  |> should.be_true
 }
 
 // ── Css の語彙 ───────────────────────────────────────────────────────────
