@@ -1,4 +1,0 @@
-[exit 3 宣言の不足] service.note_delete: root(note)を読む db/queries/note_delete/root.sql が無い(実行時に 503)
-[exit 3 宣言の不足] service.note_edit: root(note)を読む db/queries/note_edit/root.sql が無い(実行時に 503)
-[exit 3 宣言の不足] service.note_read: root(note)を読む db/queries/note_read/root.sql が無い(実行時に 503)
-停止コード: 3
