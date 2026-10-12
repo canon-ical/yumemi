@@ -917,7 +917,24 @@ fn sql_files(
       }
     None -> []
   }
-  let ordered_locks = list.append(single_lock, many_lock)
+  // 冪等キー(0.13 r2):並びの Entity を作る書きの記録の order を、同じ transaction で埋める 1 文
+  let idempotency_order = case entity.ordered_by {
+    Some(ordered) ->
+      case emits(app, entity, "create_" <> entity.module) {
+        True -> [
+          sql_file(
+            entity,
+            hashes,
+            "create_" <> entity.module <> "_idempotency_order",
+            ordered_create_idempotency_sql(entity, app, ordered),
+          ),
+        ]
+        False -> []
+      }
+    None -> []
+  }
+  let ordered_locks =
+    list.append(single_lock, list.append(many_lock, idempotency_order))
   list.append(
     create_files,
     list.append(
@@ -1003,6 +1020,35 @@ fn ordered_create_lock_sql(
   <> "=$1"
   <> key_cast(app, parent)
   <> ";\n"
+}
+
+/// 冪等キー(0.13 r2):並びの Entity を作る書きは order が DB で決まる(`next_order`)ので、transaction の前に組む
+/// 記録の応答に order が入らない。runtime は記録の本文の order を印にして先頭に入れ、作る文の後にこの 1 文で印を
+/// 作った行の order の字に替える(同じ transaction、commit した時点で記録が応答と同じ)。行が無ければ $5。
+fn ordered_create_idempotency_sql(
+  entity: model.Entity,
+  app: model.App,
+  ordered: model.OrderedBy,
+) -> String {
+  let order_column = quoted(verb_prop_column(app, entity, ordered.field))
+  let key = quoted(first_key_column(entity))
+  "-- 冪等キーの記録(0.13):create_"
+  <> entity.module
+  <> " と同じ transaction で、記録の応答の印 $3(引用符ごと)を作った行の order に替える。\n"
+  <> "-- $1 party・$2 key・$4 作った行の鍵・$5 行が無いときの字。\n"
+  <> "UPDATE "
+  <> schema.framework
+  <> ".idempotency\n"
+  <> "SET result=jsonb_set(result,'{body}',to_jsonb(replace(result->>'body',$3,COALESCE((SELECT "
+  <> order_column
+  <> "::text FROM "
+  <> table(entity)
+  <> " WHERE "
+  <> key
+  <> "=$4"
+  <> key_cast(app, entity)
+  <> "),$5))))\n"
+  <> "WHERE party=$1 AND key=$2;\n"
 }
 
 fn ordered_create_many_lock_sql(
@@ -2734,6 +2780,11 @@ fn create_row(
       }
     None -> []
   }
+  // 冪等キー(0.13 r2):並びの Entity は 5 つ目に記録の order を埋める SQL(runtime の finish が使う)
+  let order_fill = case entity.ordered_by {
+    Some(_) -> [js_text("verb/" <> name <> "_idempotency_order")]
+    None -> []
+  }
   entry(name, [
     #("tuple", "false"),
     #("params", js_array(tokens)),
@@ -2744,6 +2795,7 @@ fn create_row(
         js_text(entity.name <> "Created"),
         js_array(created_fields),
         key_scalar,
+        ..order_fill
       ]),
     ),
     ..before

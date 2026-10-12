@@ -45,6 +45,13 @@ async function server() {
         d.notes.push({ id: params[0], title: params[1], order });
         return [{ id: params[0], title: params[1], order }];
       }
+      // 生成の `create_<entity>_idempotency_order` と同じ:記録の本文の印($3)を作った行の order の字に替える
+      case "verb/create_ordered_idempotency_order": {
+        const row = d.idem.get(params[0] + "\u0000" + params[1]);
+        const note = d.notes.find((x) => x.id === params[3]);
+        if (row) { const result = JSON.parse(row.result); result.body = result.body.split(params[2]).join(note ? String(note.order) : params[4]); row.result = JSON.stringify(result); }
+        return [];
+      }
       case "verb/reject_note": d.rejects.push(params[0]); return [];
       case "framework/audit": d.audit++; return [];
     }
@@ -86,8 +93,8 @@ async function server() {
     parse: (_scalar, value) => value, text: (value) => value, checked: (value) => value,
     time: { datetime: (value) => value }, party: { parse: (value) => value },
   };
-  const SQL = Object.fromEntries(["framework/idempotency_find", "framework/idempotency_record", "framework/idempotency_repair", "verb/create_note", "verb/create_flaky", "verb/create_ordered", "verb/reject_note", "framework/audit"].map((key) => [key, "-- " + key]));
-  const create = (name, key) => ({ key, params: [["id"], ["f", "title", null]], created: ["note", "NoteCreated", name === "ordered" ? ["id", "title", "=order"] : ["id", "title"], "note_id"] });
+  const SQL = Object.fromEntries(["framework/idempotency_find", "framework/idempotency_record", "framework/idempotency_repair", "verb/create_note", "verb/create_flaky", "verb/create_ordered", "verb/create_ordered_idempotency_order", "verb/reject_note", "framework/audit"].map((key) => [key, "-- " + key]));
+  const create = (name, key) => ({ key, params: [["id"], ["f", "title", null]], created: name === "ordered" ? ["note", "NoteCreated", ["id", "title", "=order"], "note_id", key + "_idempotency_order"] : ["note", "NoteCreated", ["id", "title"], "note_id"] });
   const stage = (name, input) => verb.staged((ctx) => ctx.stage(name, input));
   const logic = (verbName) => (_actor, _root, args) => {
     if (args.title === "") return step.fail(tagged("empty_title"));
@@ -195,13 +202,22 @@ async function server() {
   check("reject: the refusal is recorded in its own transaction", log.some((x) => x === "tx:framework/idempotency_record,verb/reject_note,framework/audit,framework/audit,framework/audit,framework/audit,framework/audit,framework/audit"), log.filter((x) => x.startsWith("tx:")));
   check("reject: the retry answers the same 422 and writes no second refusal", refused.status === 422 && refusedAgain.body === refused.body && refusedAgain.replayed && data.rejects.length === 1, [refused, refusedAgain, data.rejects]);
 
-  // DB が RETURNING で埋めた欄(order)は、記録を transaction の後に直す
+  // DB が RETURNING で埋めた欄(並びの order)は、作る文の後の 1 文が同じ transaction で記録に埋める(r2)
   reset();
   await post({ title: "x" });
   const ordered = await post({ service: "note_ordered", title: "ordered", key: "k-order" });
   const orderedAgain = await post({ service: "note_ordered", title: "ordered", key: "k-order" });
+  const orderedTx = log.find((x) => x.startsWith("tx:framework/idempotency_record,verb/create_ordered"));
   check("order: the answer carries the database's order", JSON.parse(ordered.body).order === 2, ordered);
-  check("order: the record is repaired after the transaction", log.includes("framework/idempotency_repair") && orderedAgain.body === ordered.body, [log, orderedAgain]);
+  check("order: the record's order is filled in the write's transaction, after the create", orderedTx?.startsWith("tx:framework/idempotency_record,verb/create_ordered,verb/create_ordered_idempotency_order,"), orderedTx);
+  check("order: the record equals the answer at commit, so nothing repairs it after", !log.includes("framework/idempotency_repair") && orderedAgain.replayed && orderedAgain.body === ordered.body, [log, orderedAgain]);
+  // commit の後に応答を失った(同じ要求の引き直しも届かない)形:再投稿は DB の order を返す
+  reset();
+  await post({ title: "x" });
+  await post({ title: "y" });
+  const orderLost = await post({ service: "note_ordered", title: "ordered lost", key: "k-order-lost", db: database({ drop: true }) });
+  const orderRetry = await post({ service: "note_ordered", title: "ordered lost", key: "k-order-lost" });
+  check("order: after a lost response the retry replays the database's order", orderLost.status === 503 && orderRetry.replayed && JSON.parse(orderRetry.body).order === 3 && data.notes.filter((x) => x.title === "ordered lost").length === 1, [orderLost, orderRetry, data.notes]);
 
   // 読みの Service はキーを見ない、形の外れたキーは 400
   reset();

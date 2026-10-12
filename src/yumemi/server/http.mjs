@@ -478,8 +478,9 @@ export function http(spec) {
   if(!keyed.recorded) return await idempotentReplay(s,keyed,true)??outcomeResponse(s,outcome);
   const final=outcomeResponse(s,outcome);
   const stored=await storedResponse(final);
-  // 記録は transaction の前に組んだ応答。DB が RETURNING で埋めた欄(並びの order・★ の returned)で応答が
-  // 変わったときだけ、記録を後から直す。直しが落ちても書きは済んでいるので応答は返す(再投稿は直す前の記録)
+  // 記録は transaction の前に組んだ応答。生成の並びの order は runtime が同じ transaction で記録に埋める(r2)。
+  // それ以外に DB が RETURNING で埋めた欄(★ の returned)で応答が変わったときだけ、記録を後から直す。直しが
+  // 落ちても書きは済んでいるので応答は返す(再投稿は直す前の記録)
   if(stored.body!==keyed.recorded.body||stored.status!==keyed.recorded.status) {
    try { await spec.runtime.run(s.db,'framework/idempotency_repair',[keyed.party,keyed.key,JSON.stringify(stored)]); }
    catch(error) { console.error('yumemi idempotency: repair failed',s.record.name,error?.code??error?.message); }

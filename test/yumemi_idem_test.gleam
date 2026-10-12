@@ -5,6 +5,7 @@
 import gleam/list
 import gleam/string
 import gleeunit/should
+import simplifile
 import yumemi/gen as yumemi_gen
 import yumemi/gen/stop
 
@@ -83,6 +84,29 @@ pub fn generator_adds_the_idempotency_sql_ddl_and_purge_test() {
   |> should.be_true
 }
 
+/// r2:並びの Entity を作る verb は、記録の order を同じ transaction で埋める SQL を 1 本持ち、verb の表の
+/// `created` の 5 つ目がその道。並びの無い Entity(notes)には足さない。題材は commit 済みの article の生成物
+/// (生成器 2 回で差 0 を別に見る)。
+pub fn ordered_create_fills_the_record_order_test() {
+  let assert Ok(sql) = simplifile.read("gen/fixtures/article/src/gen/sql.mjs")
+  string.contains(
+    sql,
+    "UPDATE framework.idempotency\\nSET result=jsonb_set(result,'{body}',to_jsonb(replace(result->>'body',$3,COALESCE((SELECT \\\"order\\\"::text FROM app.article WHERE slug=$4),$5))))\\nWHERE party=$1 AND key=$2;\\n\"",
+  )
+  |> should.be_true
+  let assert Ok(runtime) =
+    simplifile.read("gen/fixtures/article/src/gen/runtime.mjs")
+  string.contains(
+    runtime,
+    "created:['article','ArticleCreated',['id','title','body','version','=order','category'],'slug','verb/create_article_idempotency_order']",
+  )
+  |> should.be_true
+  let #(code, files) = generated([])
+  code |> should.equal(0)
+  string.contains(text_of(files, "src/gen/sql.mjs"), "_idempotency_order")
+  |> should.be_false
+}
+
 /// app の ★(`db/queries/framework/idempotency_sweep.sql`)が既定に勝つ ── 保持の文を app が替えられる。
 pub fn app_sql_wins_over_the_default_test() {
   let mine =
@@ -97,10 +121,11 @@ pub fn app_sql_wins_over_the_default_test() {
 }
 
 /// 入口と runtime(偽の取引の DB):同じキー・同じ本文は 1 行で同じ応答、違う本文は 409、キー無しは今のまま、
-/// commit の後に応答を捨てた再投稿は 1 件、並んだ 2 本は一意の制約で 1 本、party で引く、断りも記録、order は後で直す、
+/// commit の後に応答を捨てた再投稿は 1 件、並んだ 2 本は一意の制約で 1 本、party で引く、断りも記録、order は同じ
+/// transaction で記録に埋める(r2、応答を失った再投稿も DB の order)、
 /// ★ の db_error が走らせ直した書きも記録する。
 pub fn server_replays_and_conflicts_test() {
-  idem_check("server") |> all_ok(28)
+  idem_check("server") |> all_ok(30)
 }
 
 /// client:書きの送りにキー、503・網の失敗はキーと入力を保って失敗の After に移らない、答えが出たら捨てる。
