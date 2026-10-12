@@ -12,5 +12,5 @@ pub fn items(
   then then: fn(List(#(article.Article, article.Phase))) ->
     Step(out, err, state),
 ) -> Step(out, err, state) {
-  step.read(fn(ctx) { query(ctx, "items", Nil) }, then)
+  step.read(fn(ctx) { query(ctx, "widget_list/items", Nil) }, then)
 }

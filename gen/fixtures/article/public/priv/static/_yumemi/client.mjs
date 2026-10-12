@@ -328,6 +328,7 @@ var YumemiInteractive = class extends ElementBase {
       const code = outcome.value?.code;
       const names = ["error", `sent-${service}`];
       if (typeof code === "string" && (serviceSpec.refused ?? []).includes(code)) names.push(`refused-${kebab(code)}`);
+      else names.push("failed");
       setStates(this, names);
     }
   }

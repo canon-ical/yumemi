@@ -17,11 +17,14 @@ pub fn items(
   then then: fn(Page(#(article.Article, article.Phase))) ->
     Step(out, err, state),
 ) -> Step(out, err, state) {
-  step.read(fn(ctx) { query(ctx, "items", #(limit, cursor)) }, then)
+  step.read(
+    fn(ctx) { query(ctx, "article_list/items", #(limit, cursor)) },
+    then,
+  )
 }
 
 pub fn counts(
   then then: fn(List(#(category.Category, Int))) -> Step(out, err, state),
 ) -> Step(out, err, state) {
-  step.read(fn(ctx) { query(ctx, "counts", Nil) }, then)
+  step.read(fn(ctx) { query(ctx, "article_list/counts", Nil) }, then)
 }
