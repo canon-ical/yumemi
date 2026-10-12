@@ -1,5 +1,5 @@
 name = "yumemi"
-version = "0.12.2"
+version = "0.13.0"
 target = "javascript"
 description = "Have a sweet Gleam. A framework for Gleam on Cloudflare Workers: write the design, the code follows."
 licences = ["Apache-2.0"]
