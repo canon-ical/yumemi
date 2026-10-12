@@ -39,3 +39,14 @@ export async function hooked({record,args,db,env,at,invoke}) {
 export async function rollupPageviews({db,run,at=new Date().toISOString()}) {
  await run(db,'framework/pageview_rollup',[at]);
 }
+
+/**
+ * 冪等キーの古い行を消す(0.13)。保持期間は env `IDEMPOTENCY_RETENTION_HOURS`(正の数、既定 24)。
+ * 生成の `shell.mjs` の scheduled が式によらず起動のたびに呼ぶ。期間を過ぎた後の再投稿は新しい要求になる。
+ */
+export const defaultIdempotencyHours=24;
+export async function purgeIdempotency({db,env,run,at=new Date().toISOString()}) {
+ const hours=Number(env?.IDEMPOTENCY_RETENTION_HOURS)>0?Number(env.IDEMPOTENCY_RETENTION_HOURS):defaultIdempotencyHours;
+ const before=new Date(Date.parse(at)-hours*3600*1000).toISOString();
+ await run(db,'framework/idempotency_sweep',[before]);
+}

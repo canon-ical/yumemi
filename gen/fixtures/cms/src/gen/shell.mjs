@@ -1,6 +1,6 @@
 //// GENERATED from entry.entries / server.gleam / framework Cloudflare adapter [sha256:6a5b1b1c95d8] — 手で編集しない
 import { handlers, appSystem, durableObject } from '../../yumemi/yumemi/server/worker.mjs';
-import { rollupPageviews } from '../../yumemi/yumemi/server/cron.mjs';
+import { purgeIdempotency, rollupPageviews } from '../../yumemi/yumemi/server/cron.mjs';
 import { database } from '../../yumemi/yumemi/server/driver.mjs';
 import { dispatch } from './entry/http.mjs';
 import { issueSession,resolveSession,revokeParty,run } from './runtime.mjs';
@@ -12,6 +12,7 @@ export default {
  queue: worker.queue,
  async scheduled(controller,env,execution) {
   const db=database(env,observe);
+  execution.waitUntil(purgeIdempotency({db,env,run}));
   if(controller.cron==='0 1 * * *') execution.waitUntil(rollupPageviews({db,run}));
   execution.waitUntil(sweep(db,env));
  }

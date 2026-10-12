@@ -18,6 +18,12 @@
 // - `pageviews`: 入口の名 -> 数える口(`{only,fields,sink}`)。面の門の `pageview` から(0.12)。受け口は `<prefix>/_yumemi/pageviews`
 // - `subjectFree`: 入口の主体の集合の検査を外す Service の名(`subject_free` の宣言から。主体を切り替える前に読む口)
 // - `hooks`: ★ の業務の行(下の `hook(...)` の名)。どれも無くてよい
+//
+// 冪等キー(0.13):書きの Service(effect が write、`runtime.invoke` で走るもの)への要求が `Idempotency-Key` を
+// 持てば、(party, key) で `framework.idempotency` を引く。同じ本文(`request_hash`)の記録があれば記録した応答を
+// そのまま返し、違う本文なら 409 `idempotency_conflict`。無ければ Service を走らせ、runtime が書きの transaction の
+// 先頭に記録を入れる。並んで来た 2 本目は一意の制約で transaction ごと落ちるので、落ちた後に引き直して 1 本目の
+// 応答を返す。キーの無い要求・読みの Service・attached の口・port は今までどおり。
 import * as framework_entry from '../entry.mjs';
 import * as color from '../front/color.mjs';
 
@@ -322,6 +328,7 @@ export function http(spec) {
   let path;
   try {path=Object.fromEntries(Object.entries(s.pathArgs).map(([k,v])=>[k,decodeURIComponent(v)]));} catch {fail('invalid_argument',400,'path');}
   const raw={...Object.fromEntries(s.url.searchParams),...body,...path};
+  s.rawArgs=raw;
   s.queryKeys=['POST','PUT','DELETE'].includes(s.request.method)?null:new Set([...s.url.searchParams.keys()].filter(key=>!(key in path)));
   if(!s.record.module) {
    if(roleOf(s.record.name,'switch_subject')) {
@@ -400,13 +407,84 @@ export function http(spec) {
    const port=spec.ports[s.record.name];
    if(port) return await port(s,{c,response,emptyResponse,fail,run:spec.runtime.run});
    if(hook('early')?.(s)) return emptyResponse(s,202);
+   const keyed=await idempotencyOf(s);
+   if(keyed) {
+    const prior=await idempotentReplay(s,keyed);
+    if(prior) return prior;
+    s.idempotency=keyed;
+   }
    const outcome=await spec.runtime.invoke(s);
+   if(keyed) return await idempotentOutcome(s,keyed,outcome);
    return outcomeResponse(s,outcome);
   } catch(error) {
+   // 並んで来た 2 本目(一意の制約で落ちた)・commit の後に先に記録が入った要求は、引き直して 1 本目の応答
+   if(s.idempotency) { const prior=await idempotentReplay(s,s.idempotency,true); if(prior) return prior; }
    const recovered=await hook('db_error')?.(s,error,{response,c,run:spec.runtime.run,invoke:spec.runtime.invoke,outcomeResponse});
    if(recovered) return recovered;
    return failure(s,error);
   }
+ }
+ // ── 冪等キー(0.13)─────────────────────────────────────────────────────
+ // キーは 1〜255 字の印字できる ASCII(client は UUID を作る)。外れたキーは 400(field `idempotency_key`)
+ const idempotencyKeyShape=/^[\x21-\x7e]{1,255}$/;
+ // 本文の比べは Service の名と、query・本文・path の穴を合わせた欄(decode の段の `raw`)を鍵の順に並べた JSON
+ function canonical(value) {
+  if(Array.isArray(value)) return '['+value.map(canonical).join(',')+']';
+  if(value&&typeof value==='object') return '{'+Object.keys(value).sort().map(key=>JSON.stringify(key)+':'+canonical(value[key])).join(',')+'}';
+  return JSON.stringify(value??null);
+ }
+ async function sha256(text) {
+  const bytes=new Uint8Array(await crypto.subtle.digest('SHA-256',encoder.encode(text)));
+  return Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('');
+ }
+ // 記録の持ち主。session・API key の party、無ければ browser の印、どちらも無ければ匿名の 1 つの枠
+ function idempotencyParty(s) {
+  if(s.resolved?.party) return String(s.resolved.party);
+  if(s.browser?.id) return 'browser:'+s.browser.id;
+  return 'anonymous';
+ }
+ async function idempotencyOf(s) {
+  const key=s.request.headers.get('idempotency-key');
+  if(key===null||!s.record?.module||c.tag(s.record.module.effect)!=='write') return null;
+  if(!idempotencyKeyShape.test(key)) fail('invalid_argument',400,'idempotency_key');
+  const hash=await sha256(s.record.name+'\n'+canonical(s.rawArgs??{}));
+  return {party:idempotencyParty(s),key,hash,recorded:null,encode:outcome=>storedResponse(outcomeResponse(s,outcome))};
+ }
+ async function storedResponse(r) {
+  return {status:r.status,type:r.headers.get('content-type'),body:r.status===204||r.body===null?null:await r.clone().text()};
+ }
+ function replayedResponse(s,stored) {
+  const headers=new Headers({'cache-control':'no-store','x-control-path':s.trace.join(','),'idempotency-replayed':'true'});
+  if(stored.type) headers.set('content-type',stored.type);
+  if(stored.status===401) headers.set('www-authenticate','Bearer');
+  for(const cookie of s.setCookies) headers.append('set-cookie',cookie);
+  if(s.env.ISOLATE_MARKER==='1') headers.set('x-isolate-marker',String(s.invocation??1));
+  return new Response(stored.body??null,{status:stored.status,headers});
+ }
+ // 記録があれば応答(同じ本文は記録の応答、違う本文は 409)、無ければ null。`quiet` は失敗の後の引き直しで、
+ // 引けなければ(DB に届かない)元の失敗を返すよう null
+ async function idempotentReplay(s,keyed,quiet=false) {
+  let rows;
+  try { rows=await spec.runtime.run(s.db,'framework/idempotency_find',[keyed.party,keyed.key]); }
+  catch(error) { if(quiet) return null; throw error; }
+  const row=rows?.[0];
+  if(!row) return null;
+  if(row.request_hash!==keyed.hash) return response(s,{code:'idempotency_conflict'},409);
+  const stored=typeof row.result==='string'?JSON.parse(row.result):row.result;
+  return replayedResponse(s,stored);
+ }
+ async function idempotentOutcome(s,keyed,outcome) {
+  // 書きの無い結果(業務の失敗で何も書かなかった)は記録が無い。並んで来た 1 本目が先に書いていれば、その応答
+  if(!keyed.recorded) return await idempotentReplay(s,keyed,true)??outcomeResponse(s,outcome);
+  const final=outcomeResponse(s,outcome);
+  const stored=await storedResponse(final);
+  // 記録は transaction の前に組んだ応答。DB が RETURNING で埋めた欄(並びの order・★ の returned)で応答が
+  // 変わったときだけ、記録を後から直す。直しが落ちても書きは済んでいるので応答は返す(再投稿は直す前の記録)
+  if(stored.body!==keyed.recorded.body||stored.status!==keyed.recorded.status) {
+   try { await spec.runtime.run(s.db,'framework/idempotency_repair',[keyed.party,keyed.key,JSON.stringify(stored)]); }
+   catch(error) { console.error('yumemi idempotency: repair failed',s.record.name,error?.code??error?.message); }
+  }
+  return final;
  }
  // ── 数える口の受け口(0.12)──────────────────────────────────────────────
  // 二重計数の 1〜6 のうち、ここが持つのは bot と監視(3)・先読み(4)と、欄の検査・数える条件・印の発行。

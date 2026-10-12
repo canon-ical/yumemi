@@ -25,6 +25,19 @@ pub fn reject(
   stage: fn(Context) -> Promise(value),
 ) -> Promise(Nil)
 
+/// `finish` に、この後に返す結果(`step.Outcome`)を添える(0.13)。冪等キーの付いた要求では、runtime が
+/// 結果の応答を業務の書き込みと同じ transaction に記録する。添えを読まない context は `finish` と同じ。
+@external(javascript, "./io_ffi.mjs", "finish_with")
+pub fn finish_with(context: Context, outcome: outcome) -> Promise(Nil)
+
+/// `reject` に、この後に返す断り(`step.Fail`)を添える(0.13)。断りの verb の transaction に冪等の記録が入る。
+@external(javascript, "./io_ffi.mjs", "reject_with")
+pub fn reject_with(
+  context: Context,
+  stage: fn(Context) -> Promise(value),
+  outcome: outcome,
+) -> Promise(Nil)
+
 /// 宣言された矢印 1 本。生成器が ★ から写して `gen/reads/<service>.gleam` に置く。
 /// 実行側はここに書かれた名前だけで関係先を引く ── 名前を推測しない。
 pub type Relation {

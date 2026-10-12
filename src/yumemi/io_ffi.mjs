@@ -5,6 +5,9 @@ export const then = (value, next) => value.then(next);
 export const commit = (context, carry) => context.commit(carry);
 export const finish = (context) => context.finish();
 export const reject = (context, stage) => context.reject(stage);
+// 0.13:結果を添える。添えを読まない context(test の偽の ctx・★ の器)は 2 つ目を見ない
+export const finish_with = (context, outcome) => context.finish(outcome);
+export const reject_with = (context, stage, outcome) => context.reject(stage, outcome);
 
 /// The Context contract for arrow reads. The runtime must implement
 /// `relation(relation, keys)` and return the decoded target entities, one per

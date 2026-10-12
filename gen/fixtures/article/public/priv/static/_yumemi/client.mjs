@@ -166,7 +166,29 @@ async function buildArgs(spec, initial, controls, serviceName) {
   }
   return args;
 }
-async function call(spec, args, signal, uploadFile) {
+function keyed(spec) {
+  return !spec.read && !spec.upload && spec.method !== "GET";
+}
+function unsettled(outcome) {
+  return outcome.network === true || outcome.status >= 500;
+}
+function newKey() {
+  if (typeof globalThis.crypto?.randomUUID === "function") return globalThis.crypto.randomUUID();
+  const bytes = globalThis.crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = bytes[6] & 15 | 64;
+  bytes[8] = bytes[8] & 63 | 128;
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+function keyFor(pending, service, args) {
+  const body = JSON.stringify(args);
+  const kept = pending.get(service);
+  if (kept && kept.body === body) return kept.key;
+  const key = newKey();
+  pending.set(service, { body, key });
+  return key;
+}
+async function call(spec, args, signal, uploadFile, key = null) {
   if (spec.upload) {
     if (uploadFile) {
       return fetch(spec.path, {
@@ -198,10 +220,12 @@ async function call(spec, args, signal, uploadFile) {
     const text = query.toString();
     if (text !== "") path = `${path}?${text}`;
   }
+  const headers = { "content-type": "application/json", accept: "application/json" };
+  if (key !== null) headers["idempotency-key"] = key;
   return fetch(path, {
     method: spec.method,
     credentials: "same-origin",
-    headers: { "content-type": "application/json", accept: "application/json" },
+    headers,
     // attached の口で本文の欄が無いものは 0.11 と同じく null を送る
     body: spec.method === "GET" ? void 0 : spec.entry && spec.args.length === 0 ? "null" : JSON.stringify(args),
     signal
@@ -236,6 +260,7 @@ var YumemiInteractive = class extends ElementBase {
     this.yumemiReading = null;
     this.yumemiSending = false;
     this.yumemiCleanup = null;
+    this.yumemiKeys = /* @__PURE__ */ new Map();
   }
   get yumemiInitial() {
     try {
@@ -293,31 +318,35 @@ var YumemiInteractive = class extends ElementBase {
     this.yumemiReading = null;
     this.yumemiSending = true;
     const initial = this.yumemiInitial[service] ?? {};
+    const withKey = keyed(serviceSpec);
     let outcome;
     try {
       const fileControl = serviceSpec.upload ? controls.find((control) => control.type === "file") : null;
       const args = await buildArgs(serviceSpec, initial, controls, service);
+      const key = withKey ? keyFor(this.yumemiKeys, service, args) : null;
       setStates(this, ["waiting", `sent-${service}`]);
       this.yumemiBusy(form, true);
-      outcome = await this.yumemiCall(serviceSpec, args, null, fileControl?.files?.[0]);
+      outcome = await this.yumemiCall(serviceSpec, args, null, fileControl?.files?.[0], key);
     } catch (error) {
-      outcome = { ok: false, value: { code: error?.code ?? "network_error" } };
+      outcome = { ok: false, network: error?.code === void 0, value: { code: error?.code ?? "network_error" } };
     } finally {
       this.yumemiSending = false;
       this.yumemiBusy(form, false);
     }
+    const kept = withKey && !outcome.ok && unsettled(outcome);
+    if (withKey && !kept) this.yumemiKeys.delete(service);
     this.yumemiDone(service, serviceSpec, outcome);
-    if (!serviceSpec.read) follow(outcome.ok ? serviceSpec.ok : serviceSpec.error, outcome.ok ? outcome.value : null);
+    if (!serviceSpec.read && !kept) follow(outcome.ok ? serviceSpec.ok : serviceSpec.error, outcome.ok ? outcome.value : null);
   }
-  async yumemiCall(serviceSpec, args, signal, file) {
-    const response = await call(serviceSpec, args, signal, file);
+  async yumemiCall(serviceSpec, args, signal, file, key = null) {
+    const response = await call(serviceSpec, args, signal, file, key);
     let value = null;
     try {
       value = await response.json();
     } catch (_error) {
       value = response.ok ? null : { code: "request_failed" };
     }
-    return { ok: response.ok, value };
+    return { ok: response.ok, status: response.status, value };
   }
   yumemiDone(service, serviceSpec, outcome) {
     if (outcome.ok) {

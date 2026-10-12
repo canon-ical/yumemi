@@ -27,6 +27,7 @@ import yumemi/gen/emit/codec
 import yumemi/gen/emit/entry
 import yumemi/gen/emit/hash
 import yumemi/gen/emit/http
+import yumemi/gen/emit/idempotency
 import yumemi/gen/emit/pageview
 import yumemi/gen/emit/root
 import yumemi/gen/emit/runtime
@@ -65,7 +66,12 @@ pub fn emit(
     False -> Output(files: [], notes: [])
     True -> {
       let input = back_hash(units, hashes)
-      let queries = bundle(app_queries, generated, pageview.queries(app))
+      let queries =
+        bundle(
+          app_queries,
+          generated,
+          list.append(pageview.queries(app), idempotency.queries()),
+        )
       let kinds = queue_kinds(app, units)
       let #(queue_file, queue_notes) =
         queue_text(app, units, kinds, queries, input)
@@ -119,6 +125,7 @@ pub fn emit(
           queue_file,
           cron_file,
           pageview.files(app),
+          idempotency.files(),
         ])
       Output(
         files: files,
@@ -523,7 +530,8 @@ fn registry_text(app: App, units: List(Unit), input: String) -> String {
 /// 足す。同じ道は app の file が勝つ ── 実行側の穴の契約は app が採った SQL に合っているため。生成 SQL を
 /// 採る(`db/queries` に置く)と、その回から sql.mjs もそれに揃う。道の順に並べる。
 /// framework の SQL のうち 0.11.6 で足した `framework/outbox_claim` だけは既定の 1 文をここで足す(app に
-/// ★ があればそちらが勝つ)── 足した版で sweep が止まらないように。
+/// ★ があればそちらが勝つ)── 足した版で sweep が止まらないように。`framework_queries` は器 `Store` の SQL
+/// (0.12)と冪等キーの SQL(0.13)の既定で、同じく app の ★ が勝つ。
 fn bundle(
   app_queries: List(#(String, String)),
   generated: List(File),
@@ -1269,10 +1277,14 @@ fn shell_text(app: App, input: String) -> String {
   <> "import { handlers, appSystem, durableObject } from '"
   <> framework
   <> "worker.mjs';\n"
+  <> "import { "
   <> case pageview.stored(app) {
-    True -> "import { rollupPageviews } from '" <> framework <> "cron.mjs';\n"
-    False -> ""
+    True -> "purgeIdempotency, rollupPageviews"
+    False -> "purgeIdempotency"
   }
+  <> " } from '"
+  <> framework
+  <> "cron.mjs';\n"
   <> "import { database } from '"
   <> framework
   <> "driver.mjs';\n"
@@ -1288,6 +1300,8 @@ fn shell_text(app: App, input: String) -> String {
   <> " queue: worker.queue,\n"
   <> " async scheduled(controller,env,execution) {\n"
   <> "  const db=database(env,observe);\n"
+  // 冪等キーの古い行(0.13)。どの式の起動でも、保持期間を過ぎた行を消す
+  <> "  execution.waitUntil(purgeIdempotency({db,env,run}));\n"
   <> case pageview.stored(app) {
     // 数える口の器の集計(0.12)。式は framework の決め打ち、app の cron の表とは別に回す
     True ->

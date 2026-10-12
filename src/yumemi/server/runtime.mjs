@@ -20,6 +20,10 @@
 // - `subjects`: session の主体になる Entity の module(作った行の party が session の party なら session に結ぶ)
 // - `connectorNames`: 口の名 -> 診断に出す connector の名
 // - `apiKeyLabel` / `claimLabel`: HMAC の label(★ の const)
+//
+// 冪等キー(0.13):入口が `state.idempotency`(`{party,key,hash,encode(outcome)}`)を置いた要求は、書きの
+// transaction の先頭に `framework/idempotency_record`(結果の応答)を足す。記録は書きと同じ transaction で、
+// 書きの無い要求(業務の失敗・読みだけ)は記録しない。`recorded` に記録した応答を置く。
 import * as step from '../step.mjs';
 import { value as secretValue } from '../secret_ffi.mjs';
 import { encrypt as seal } from '../sealed_ffi.mjs';
@@ -414,25 +418,34 @@ export function runtime(spec) {
     return true;
    }
    const parent=crypto.randomUUID(),value=c.encode(carry),fold=record.folded;
+   const accepted=new step.Accepted();
    state.committedCarry=value;
    pending.push(statement('framework/outbox_parent',[parent,record.name+':1',JSON.stringify({service:record.name,carry:value,args:c.encode(state.args)}),state.eventId??null,at,!!fold]));
    if(fold) for(const kind of fold.kinds) {
     const payload=spec.folds[kind](value,root);
     pending.push(statement('framework/outbox_child',[crypto.randomUUID(),kind,JSON.stringify(payload),parent,at]));
    }
-   await ctx.finish();
+   await ctx.finish(accepted);
    committed=true;
    return false;
   },async enqueue(kind,input) {
    if(!committed) throw new Error('write connector before commit');
    const payload=spec.enqueues[kind](c.encode(input));
    await db.transaction([statement('framework/outbox_child',[crypto.randomUUID(),kind,JSON.stringify(payload),state.eventId,at])]);
-  },async reject(stageRejected) {
+  },async reject(stageRejected,outcome) {
+   // 断りの verb だけの transaction。冪等の記録(`state.idempotency` は同じもの)は断りの応答でここに入る
    const isolated=makeContext({...state,eventId:null,seed:await seededId(state.seed,'reject')});
-   try {await stageRejected(isolated);await isolated.finish();}
+   try {await stageRejected(isolated);await isolated.finish(outcome);}
    catch(cause) {throw Object.assign(new Error('upstream_unavailable',{cause}),{status:503,connector:cause.connector??'neon'});}
-  },async finish() {
+  },async finish(outcome) {
    if(!pending.length&&!state.eventId) return;
+   // 結果(`outcome`)を添えない finish(★ の器・古い生成物)は記録しない ── キーの無い要求と同じ振る舞い
+   const keyed=state.idempotency;
+   if(keyed&&!keyed.recorded&&pending.length&&outcome!==undefined) {
+    const stored=await keyed.encode(outcome);
+    pending.unshift(statement('framework/idempotency_record',[keyed.party,keyed.key,keyed.hash,JSON.stringify(stored),at]));
+    keyed.recorded=stored;
+   }
    if(ctx.onboard) pending.push(statement('framework/session_onboard',[state.resolved.id,state.resolved.party,ctx.onboard]));
    if(state.eventId) pending.push(statement('framework/outbox_done',[state.eventId]));
    for(const stage of ['entry','resolve','decode','judge','execute','commit']) pending.push(statement('framework/audit',[seed,stage,record.name,state.resolved?.party??null,'ok',at]));
