@@ -1555,20 +1555,23 @@ fn attached_requirement_codes(app: model.App, name: String) -> List(String) {
   }
 }
 
-/// Service の `Error` の後ろに要件の構成子を足す。同じ名の構成子を ★ が書いていればそれを使う。
-fn with_requirement_errors(
+/// 要件の構成子のうち、★ が Service の `Error` に同じ名で書いていないもの(書いていればそれを使う)。
+fn without_star_errors(
   variants: List(glance.Variant),
   codes: List(String),
-) -> List(glance.Variant) {
+) -> List(String) {
+  list.filter(codes, fn(code) {
+    !list.any(variants, fn(variant) { variant.name == code })
+  })
+}
+
+/// live module の `Error` の構成子:Service の `Error` の後ろに要件の構成子。
+fn live_errors(target: LiveTarget) -> List(glance.Variant) {
   list.append(
-    variants,
-    codes
-      |> list.filter(fn(code) {
-        !list.any(variants, fn(variant) { variant.name == code })
-      })
-      |> list.map(fn(code) {
-        glance.Variant(name: code, fields: [], attributes: [])
-      }),
+    target.errors,
+    list.map(target.requires, fn(name) {
+      glance.Variant(name: name, fields: [], attributes: [])
+    }),
   )
 }
 
@@ -8413,6 +8416,9 @@ type LiveTarget {
     path: String,
     args: List(LiveArg),
     errors: List(glance.Variant),
+    /// 要件(`requires`・attached の `NeedsDeclared`)が断るときの構成子の名で、`errors` に無いもの(0.12.1)。
+    /// live module の `Error` には足し、client の表では `refused`(Service の `Error`)と分けて `requires` に置く
+    requires: List(String),
     /// Slot の構成子の名 → Out の欄の道
     slots: List(#(String, String)),
     read: Bool,
@@ -8497,7 +8503,8 @@ fn live_target(
                 constraints: arg_constraints(app, units, arg),
               )
             }),
-            errors: with_requirement_errors(
+            errors: service_error_variants(units, service),
+            requires: without_star_errors(
               service_error_variants(units, service),
               requirement_codes(units, service.module),
             ),
@@ -8563,10 +8570,8 @@ fn live_target(
                   )
                 })
             },
-            errors: with_requirement_errors(
-              [],
-              attached_requirement_codes(app, route.name),
-            ),
+            errors: [],
+            requires: attached_requirement_codes(app, route.name),
             slots: case upload {
               True -> [#("OutKey", "key")]
               False -> []
@@ -8738,7 +8743,7 @@ fn live_module_text(target: LiveTarget) -> String {
     }
   }
   let error_codes =
-    list.map(target.errors, fn(variant) {
+    list.map(live_errors(target), fn(variant) {
       #(
         case variant.fields {
           [] -> variant.name
@@ -8760,7 +8765,7 @@ fn live_module_text(target: LiveTarget) -> String {
   <> "\n"
   <> field_type
   <> "\n"
-  <> service_error_type_text(target.errors)
+  <> service_error_type_text(live_errors(target))
   <> "pub type When {\n  Idle\n  Waiting\n  Succeeded\n  Failed\n  Refused(Error)\n}\n\n"
   <> slot_type
   <> "\n"
@@ -9149,6 +9154,11 @@ fn interactive_table(
               }),
               ", ",
             )
+            <> "], \"requires\": ["
+            <> string.join(
+              list.map(target.requires, fn(name) { quoted(naming.snake(name)) }),
+              ", ",
+            )
             <> "], \"slots\": { "
             <> string.join(
               list.map(target.slots, fn(slot) {
@@ -9224,7 +9234,7 @@ fn interactive_state_css(
               #(svc <> ".succeeded", ["ok", sent], False),
               // Failed は断り(Refused の符号)でない失敗だけ(0.12.1)── runtime が `failed` を立てる
               #(svc <> ".failed", ["failed", sent], False),
-              ..list.map(target.errors, fn(variant) {
+              ..list.map(live_errors(target), fn(variant) {
                 let code = "refused-" <> kebab(variant.name)
                 #(svc <> "." <> code, [code, sent], False)
               })

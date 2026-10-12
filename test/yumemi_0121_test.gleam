@@ -133,7 +133,8 @@ pub fn closed_dialog_stays_hidden_test() {
 
 // ── 4 Failed と Refused ─────────────────────────────────────────────────
 
-/// `when(Failed)` の枝は `failed` で出る(`error` は断りでも立つ)。runtime は断りで `failed` を立てない。
+/// `when(Failed)` の枝は `failed` で出る(`error` は断りでも立つ)。runtime は、断りの枝(`when(Refused(..))`)が
+/// Component にある断りで `failed` を立てない。枝の無い断りは今までどおり Failed で出す。
 pub fn failed_branch_is_not_shown_on_a_refusal_test() {
   let #(_, _, files) = generated([])
   let style = text_of(files, "public/priv/static/_yumemi/style.css")
@@ -148,15 +149,16 @@ pub fn failed_branch_is_not_shown_on_a_refusal_test() {
   )
   |> should.be_true
   string.contains(style, ":not(:state(error):state(sent-") |> should.be_false
-  ok_lines(runtime_states(), 6)
+  ok_lines(runtime_states(), 7)
 }
 
 // ── 5 要件の符号 ────────────────────────────────────────────────────────
 
 const publish = "src/service/article_publish.gleam"
 
-/// `requires` の `Consented` は live module の `Error` に `ConsentMissing` を足し、client の表の refused と
-/// 状態の CSS に `consent_missing` / `refused-consent-missing` が載る(★ の Component は書き換えない)。
+/// `requires` の `Consented` は live module の `Error` に `ConsentMissing` を足し、client の表の `requires` と
+/// 状態の CSS に `consent_missing` / `refused-consent-missing` が載る(★ の Component は書き換えない)。表の
+/// `refused` は Service の `Error` の符号のまま。
 pub fn requirement_codes_ride_on_refused_test() {
   let #(code, lines, files) =
     generated([
@@ -192,7 +194,7 @@ pub fn requirement_codes_ride_on_refused_test() {
   let client = text_of(files, "public/priv/static/_yumemi/client.mjs")
   string.contains(
     client,
-    "\"refused\": [\"already_published\", \"already_retracted\", \"consent_missing\"]",
+    "\"refused\": [\"already_published\", \"already_retracted\"], \"requires\": [\"consent_missing\"]",
   )
   |> should.be_true
   let style = text_of(files, "public/priv/static/_yumemi/style.css")
@@ -253,6 +255,9 @@ pub fn needs_declared_attached_route_test() {
   string.contains(live, "pub type Error {\n  DeclarationMissing\n}\n")
   |> should.be_true
   let client = text_of(files, "public/priv/static/_yumemi/client.mjs")
-  string.contains(client, "\"refused\": [\"declaration_missing\"]")
+  string.contains(
+    client,
+    "\"refused\": [], \"requires\": [\"declaration_missing\"]",
+  )
   |> should.be_true
 }
