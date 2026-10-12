@@ -1541,11 +1541,13 @@ fn requirement_codes(units: List(Unit), service: String) -> List(String) {
   |> list.unique
 }
 
-/// attached の口の役 `NeedsDeclared` が断るときの構成子(`declaration_missing`)。
+/// attached の口の役 `NeedsDeclared` が断るときの構成子(`declaration_missing`)。口の名は model では
+/// `BlobCopy`、役の表では `blob_copy` の綴りなので snake で突き合わせる。
 fn attached_requirement_codes(app: model.App, name: String) -> List(String) {
   case
     list.any(app.server.attached_roles, fn(role) {
-      role.attached == name && role.role == "needs_declared"
+      naming.snake(role.attached) == naming.snake(name)
+      && role.role == "needs_declared"
     })
   {
     True -> ["DeclarationMissing"]
