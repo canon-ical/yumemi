@@ -1525,6 +1525,51 @@ fn service_error_variants(
   }
 }
 
+/// 要件(`requires`)が断るときの構成子(0.12.1)。`Declared` は `DeclarationMissing`、`Consented` /
+/// `ConsentedFor` は `ConsentMissing` ── 403 の `code`(`declaration_missing` / `consent_missing`)を
+/// live module の `Error` に載せ、Component が `when(Refused(ConsentMissing), ..)` で同意の欠けだけの枝を書ける。
+fn requirement_codes(units: List(Unit), service: String) -> List(String) {
+  cms.requirements(units)
+  |> list.filter(fn(requirement) { requirement.service == service })
+  |> list.filter_map(fn(requirement) {
+    case requirement.constructor {
+      "Declared" -> Ok("DeclarationMissing")
+      "Consented" | "ConsentedFor" -> Ok("ConsentMissing")
+      _ -> Error(Nil)
+    }
+  })
+  |> list.unique
+}
+
+/// attached の口の役 `NeedsDeclared` が断るときの構成子(`declaration_missing`)。
+fn attached_requirement_codes(app: model.App, name: String) -> List(String) {
+  case
+    list.any(app.server.attached_roles, fn(role) {
+      role.attached == name && role.role == "needs_declared"
+    })
+  {
+    True -> ["DeclarationMissing"]
+    False -> []
+  }
+}
+
+/// Service の `Error` の後ろに要件の構成子を足す。同じ名の構成子を ★ が書いていればそれを使う。
+fn with_requirement_errors(
+  variants: List(glance.Variant),
+  codes: List(String),
+) -> List(glance.Variant) {
+  list.append(
+    variants,
+    codes
+      |> list.filter(fn(code) {
+        !list.any(variants, fn(variant) { variant.name == code })
+      })
+      |> list.map(fn(code) {
+        glance.Variant(name: code, fields: [], attributes: [])
+      }),
+  )
+}
+
 fn error_variant_text(variant: glance.Variant) -> String {
   case variant.fields {
     [] -> "  " <> variant.name <> "\n"
@@ -4204,6 +4249,7 @@ fn style_text(package: face.Package, front: reader_front.Front) -> String {
 
 fn generated_front_css(front: reader_front.Front) -> String {
   badge_css()
+  <> closed_dialog_css()
   <> case front_has_overlay(front) {
     True -> "[popover]::backdrop { background: rgba(0, 0, 0, 0.45); }\n"
     False -> ""
@@ -4323,6 +4369,14 @@ fn is_ident_char(char: String) -> Bool {
     }
     _ -> False
   }
+}
+
+/// 閉じた `<dialog>` を出さない(0.12.1)。UA の `dialog:not([open]) { display: none }` は作り手の Style の
+/// `display`(`Flow` ほか)に負けるので、`!important` で、`@layer` の中にも置く ── 層の中の `!important` は層の
+/// 外の `!important` より強い(`@layer` の無い browser は層の外の 1 行が効く)。
+fn closed_dialog_css() -> String {
+  "dialog:not([open]) { display: none !important; }\n"
+  <> "@layer yumemi-closed-dialog { dialog:not([open]) { display: none !important; } }\n"
 }
 
 fn badge_css() -> String {
@@ -8441,7 +8495,10 @@ fn live_target(
                 constraints: arg_constraints(app, units, arg),
               )
             }),
-            errors: service_error_variants(units, service),
+            errors: with_requirement_errors(
+              service_error_variants(units, service),
+              requirement_codes(units, service.module),
+            ),
             slots: fields
               |> list.filter(fn(field) { !gl_type_has_list(field.1) })
               |> list.map(fn(field) {
@@ -8504,7 +8561,10 @@ fn live_target(
                   )
                 })
             },
-            errors: [],
+            errors: with_requirement_errors(
+              [],
+              attached_requirement_codes(app, route.name),
+            ),
             slots: case upload {
               True -> [#("OutKey", "key")]
               False -> []
@@ -9160,7 +9220,8 @@ fn interactive_state_css(
               #(svc <> ".idle", [sent], True),
               #(svc <> ".waiting", ["waiting", sent], False),
               #(svc <> ".succeeded", ["ok", sent], False),
-              #(svc <> ".failed", ["error", sent], False),
+              // Failed は断り(Refused の符号)でない失敗だけ(0.12.1)── runtime が `failed` を立てる
+              #(svc <> ".failed", ["failed", sent], False),
               ..list.map(target.errors, fn(variant) {
                 let code = "refused-" <> kebab(variant.name)
                 #(svc <> "." <> code, [code, sent], False)

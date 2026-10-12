@@ -8,7 +8,7 @@
 // - submit:submitter の `data-yumemi-send` で Service を決め、その Service の control(name が `<service>.`)だけに
 //   制約検証を掛け、Args を組み(初期値に control の値を重ねる、0.11.2 の送り方)、route を 1 回叩く。送りの間は
 //   `waiting` と `sent-<service>` を立て、fieldset を止め、`aria-busy`
-// - Done:`ok` か `error`(と `refused-<code>`)を立て、`data-yumemi-out` に Out の欄を textContent で入れ、After に従う
+// - Done:`ok` か `error`(と `refused-<code>` か `failed`)を立て、`data-yumemi-out` に Out の欄を textContent で入れ、After に従う
 // - `reloads`:単一の値は読みを叩いて out に入れる(前の読みは中断)、一覧は query を替えた URL へ履歴を積まずに移る
 // - 状態は `ElementInternals.states`(`:state()`)に立て、無ければ `data-yumemi-state` に同じ名を書く
 // - 逃げ道:`<yumemi-escape name>` の接続で `mount(element)` を呼び、外れたら戻りの関数を呼ぶ
@@ -354,9 +354,12 @@ class YumemiInteractive extends ElementBase {
         place.textContent = textOf(readPath(outcome.value, path));
       }
     } else {
+      // 断り(refused に載る符号)は `refused-<code>`、それ以外の失敗は `failed`(`when(Failed)`)── 断りの
+      // ときに汎用の失敗の枝を並べない(0.12.1)。どちらも `error` は立てる
       const code = outcome.value?.code;
       const names = ["error", `sent-${service}`];
       if (typeof code === "string" && (serviceSpec.refused ?? []).includes(code)) names.push(`refused-${kebab(code)}`);
+      else names.push("failed");
       setStates(this, names);
     }
   }
