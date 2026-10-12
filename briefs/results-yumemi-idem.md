@@ -45,7 +45,7 @@
 | `src/yumemi/front/interactive.mjs` | キーを作る・保つ・捨てる、unsettled の失敗で After に移らない |
 | `src/yumemi/gen/emit/idempotency.gleam`(新)・`back.gleam` | 既定の SQL 4 本(★ が勝つ)、DDL の file、shell の消し |
 | `README.md` | `yumemi/server` の節に 0.13.0 の項、SQL の表に 4 行、Worker env に 2 つ |
-| `test/yumemi_idem_*` | 生成器 2 本・server 27 項・client 10 項・purge 3 項 |
+| `test/yumemi_idem_*` | 生成器 2 本・server 28 項(柏木ゲート 2 で 1 項足した)・client 10 項・purge 3 項 |
 
 生成物の差(fixture、全部):`src/gen/sql.mjs` に既定の 4 本、`src/gen/shell.mjs` に `purgeIdempotency` の import と scheduled の 1 行、`db/framework/idempotency.sql` を新しく、`public/priv/static/_yumemi/client.mjs`(article・cms、同梱の interactive の差)。
 
@@ -96,7 +96,7 @@ ready on=200 off=503
 
 ### 子の node の check(`build/idem-check-{server,client,purge}.txt`、全部 ok)
 
-- server 27 項:先頭の記録、(a)〜(d)、並んだ 2 本(1 本目を 2 本目の commit まで待たせ、1 本目は 23505 で落ちて引き直し)、別の party の同じキーは別の書き、業務の失敗は記録しない、断りは断りの transaction に記録して再投稿で断りの行が増えない、order の直し、読みはキーを見ない、形の外れたキー、匿名の枠
+- server 28 項:先頭の記録、(a)〜(d)、並んだ 2 本(1 本目を 2 本目の commit まで待たせ、1 本目は 23505 で落ちて引き直し)、別の party の同じキーは別の書き、業務の失敗は記録しない、断りは断りの transaction に記録して再投稿で断りの行が増えない、order の直し、読みはキーを見ない、形の外れたキー、匿名の枠、★ の db_error が業務の一意の制約で落ちた書きを走らせ直したときの記録(柏木ゲート 2:`recorded` を commit の前に置いていたため、走らせ直した書きが記録なしで commit され、同じキーの再投稿で 2 行になっていた。`recorded` を commit の後に置いて直した)
 - client 10 項:UUID のキー、503 で After に移らず入力が残る、網の失敗と次の再送で同じキー、成功で捨てる、Args が変われば新しいキー、4xx で捨てる、読みはキーを載せない
 - purge 3 項:既定 24 時間、env の 1 時間、0 は既定へ
 

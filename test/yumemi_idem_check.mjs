@@ -16,6 +16,8 @@ async function server() {
   // 偽の DB。transaction は写しに当てて全部通れば入れ替える(1 文でも落ちれば何も残らない)
   const data = { notes: [], rejects: [], idem: new Map(), audit: 0 };
   const log = [];
+  // verb/create_flaky の transaction を業務の一意の制約で落とす回数(★ の db_error が走らせ直す形)
+  let flaky = 0;
   const clone = (d) => ({ notes: [...d.notes], rejects: [...d.rejects], idem: new Map(d.idem), audit: d.audit });
   const unique = () => Object.assign(new Error('duplicate key value violates unique constraint "idempotency_pkey"'), { code: "23505", constraint: "idempotency_pkey" });
   function exec(d, key, params) {
@@ -35,6 +37,9 @@ async function server() {
         return [];
       }
       case "verb/create_note": d.notes.push({ id: params[0], title: params[1] }); return [{ id: params[0], title: params[1] }];
+      case "verb/create_flaky":
+        if (flaky-- > 0) throw Object.assign(new Error("duplicate key"), { code: "23505", constraint: "note_title_key" });
+        d.notes.push({ id: params[0], title: params[1] }); return [{ id: params[0], title: params[1] }];
       case "verb/create_ordered": {
         const order = d.notes.length + 1;
         d.notes.push({ id: params[0], title: params[1], order });
@@ -81,7 +86,7 @@ async function server() {
     parse: (_scalar, value) => value, text: (value) => value, checked: (value) => value,
     time: { datetime: (value) => value }, party: { parse: (value) => value },
   };
-  const SQL = Object.fromEntries(["framework/idempotency_find", "framework/idempotency_record", "framework/idempotency_repair", "verb/create_note", "verb/create_ordered", "verb/reject_note", "framework/audit"].map((key) => [key, "-- " + key]));
+  const SQL = Object.fromEntries(["framework/idempotency_find", "framework/idempotency_record", "framework/idempotency_repair", "verb/create_note", "verb/create_flaky", "verb/create_ordered", "verb/reject_note", "framework/audit"].map((key) => [key, "-- " + key]));
   const create = (name, key) => ({ key, params: [["id"], ["f", "title", null]], created: ["note", "NoteCreated", name === "ordered" ? ["id", "title", "=order"] : ["id", "title"], "note_id"] });
   const stage = (name, input) => verb.staged((ctx) => ctx.stage(name, input));
   const logic = (verbName) => (_actor, _root, args) => {
@@ -93,18 +98,26 @@ async function server() {
   const records = {
     note_create: service("note_create", "write", "create_note"),
     note_ordered: service("note_ordered", "write", "create_ordered"),
+    note_flaky: service("note_flaky", "write", "create_flaky"),
     note_peek: service("note_peek", "read", "create_note"),
   };
   const rt = runtime({
     SQL, c, roots: {}, actors: {}, manualVerbs: { names: new Set() }, connectors: {}, connectorNames: {}, folds: {}, enqueues: {},
     boundaries: new Set(), relationDecoders: {}, phaseModules: {}, encoders: {}, carried: {}, reads: {}, subjects: [],
-    verbs: { create_note: create("note", "verb/create_note"), create_ordered: create("ordered", "verb/create_ordered"),
+    verbs: { create_note: create("note", "verb/create_note"), create_flaky: create("note", "verb/create_flaky"), create_ordered: create("ordered", "verb/create_ordered"),
       reject_note: { key: "verb/reject_note", params: [["f", "title", null]] } },
     drafts: { note: { NoteCreated } },
   });
   class Ok { constructor(value) { this[0] = value; } }
   class Er { constructor(value) { this[0] = value; } }
-  const h = http({ c, registry: [], attached: [], Ok, Error: Er, hosts: {}, runtime: rt, roles: {}, ports: {}, accepted: {}, args: {} });
+  // ★ の db_error:業務の一意の制約で落ちた書きを、同じ要求の中で走らせ直す(取り合いに負けた側の受け)
+  const hooks = {
+    async db_error(s, error, x) {
+      if (error.constraint !== "note_title_key") return undefined;
+      return x.outcomeResponse(s, await x.invoke({ ...s, trace: [...s.trace] }));
+    },
+  };
+  const h = http({ c, registry: [], attached: [], Ok, Error: Er, hosts: {}, runtime: rt, roles: {}, ports: {}, accepted: {}, args: {}, hooks });
 
   let seeds = 0;
   async function post({ service = "note_create", title, key, party = "party-a", db = database() }) {
@@ -202,6 +215,13 @@ async function server() {
   const anon = await post({ title: "anon", key: "k-anon", party: null });
   const anonAgain = await post({ title: "anon", key: "k-anon", party: null });
   check("anonymous: replays within the anonymous party", anonAgain.replayed && anonAgain.body === anon.body && [...data.idem.keys()][0] === "anonymous\u0000k-anon", [...data.idem.keys()]);
+
+  // ★ の db_error が落ちた書きを走らせ直す:取り消された 1 本目の記録の代わりに、走らせ直した書きの transaction が記録を持つ
+  reset();
+  flaky = 1;
+  const rerun = await post({ service: "note_flaky", title: "rerun", key: "k-rerun" });
+  const rerunAgain = await post({ service: "note_flaky", title: "rerun", key: "k-rerun" });
+  check("rerun: the hook's second run records in its own transaction, the retry is replayed", rerun.status === 200 && data.idem.has("party-a\u0000k-rerun") && rerunAgain.replayed && rerunAgain.body === rerun.body && rows() === 1, [rerun, rerunAgain, log.filter((x) => x.startsWith("tx:"))]);
 }
 
 // ── client ────────────────────────────────────────────────────────────────

@@ -23,7 +23,7 @@
 //
 // 冪等キー(0.13):入口が `state.idempotency`(`{party,key,hash,encode(outcome)}`)を置いた要求は、書きの
 // transaction の先頭に `framework/idempotency_record`(結果の応答)を足す。記録は書きと同じ transaction で、
-// 書きの無い要求(業務の失敗・読みだけ)は記録しない。`recorded` に記録した応答を置く。
+// 書きの無い要求(業務の失敗・読みだけ)は記録しない。commit した後に `recorded` に記録した応答を置く。
 import * as step from '../step.mjs';
 import { value as secretValue } from '../secret_ffi.mjs';
 import { encrypt as seal } from '../sealed_ffi.mjs';
@@ -441,15 +441,18 @@ export function runtime(spec) {
    if(!pending.length&&!state.eventId) return;
    // 結果(`outcome`)を添えない finish(★ の器・古い生成物)は記録しない ── キーの無い要求と同じ振る舞い
    const keyed=state.idempotency;
+   let recording=null;
    if(keyed&&!keyed.recorded&&pending.length&&outcome!==undefined) {
-    const stored=await keyed.encode(outcome);
-    pending.unshift(statement('framework/idempotency_record',[keyed.party,keyed.key,keyed.hash,JSON.stringify(stored),at]));
-    keyed.recorded=stored;
+    recording=await keyed.encode(outcome);
+    pending.unshift(statement('framework/idempotency_record',[keyed.party,keyed.key,keyed.hash,JSON.stringify(recording),at]));
    }
    if(ctx.onboard) pending.push(statement('framework/session_onboard',[state.resolved.id,state.resolved.party,ctx.onboard]));
    if(state.eventId) pending.push(statement('framework/outbox_done',[state.eventId]));
    for(const stage of ['entry','resolve','decode','judge','execute','commit']) pending.push(statement('framework/audit',[seed,stage,record.name,state.resolved?.party??null,'ok',at]));
    const result=await transactionWithRetry(db,pending);
+   // `recorded` は commit の後に置く。落ちた transaction の記録は取り消されているので、★ の db_error が同じ要求で
+   // Service を走らせ直したとき、その書きの transaction にも記録を入れる
+   if(recording) keyed.recorded=recording;
    for(let index=0;index<pending.length;index++) {
     const operation=pending[index],value=operation.created;
     if(!value) continue;

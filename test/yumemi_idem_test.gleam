@@ -97,9 +97,10 @@ pub fn app_sql_wins_over_the_default_test() {
 }
 
 /// 入口と runtime(偽の取引の DB):同じキー・同じ本文は 1 行で同じ応答、違う本文は 409、キー無しは今のまま、
-/// commit の後に応答を捨てた再投稿は 1 件、並んだ 2 本は一意の制約で 1 本、party で引く、断りも記録、order は後で直す。
+/// commit の後に応答を捨てた再投稿は 1 件、並んだ 2 本は一意の制約で 1 本、party で引く、断りも記録、order は後で直す、
+/// ★ の db_error が走らせ直した書きも記録する。
 pub fn server_replays_and_conflicts_test() {
-  idem_check("server") |> all_ok(27)
+  idem_check("server") |> all_ok(28)
 }
 
 /// client:書きの送りにキー、503・網の失敗はキーと入力を保って失敗の After に移らない、答えが出たら捨てる。

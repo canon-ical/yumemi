@@ -370,7 +370,8 @@ class YumemiInteractive extends ElementBase {
       this.yumemiBusy(form, true);
       outcome = await this.yumemiCall(serviceSpec, args, null, fileControl?.files?.[0], key);
     } catch (error) {
-      // fetch が投げた(網の失敗)。Args を組む前の失敗(`no file` ほか)は送っていないので答えの出た失敗
+      // fetch が投げた(網の失敗)。code の付いた失敗(上げ口の `no file`)は送っていないので答えの出た失敗。
+      // file の欄の先の上げ(`upload`)の失敗は code が無く、網の失敗と同じに入力を保つ(キーはまだ作っていない)
       outcome = { ok: false, network: error?.code === undefined, value: { code: error?.code ?? "network_error" } };
     } finally {
       this.yumemiSending = false;
