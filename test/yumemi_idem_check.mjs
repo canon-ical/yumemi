@@ -1,7 +1,7 @@
 // yumemi-idem(0.13)── 冪等キーを子の node で回す。`yumemi_idem_test_ffi.mjs` が `node test/yumemi_idem_check.mjs <which>`
 // で走らせ、1 行 1 件の ok / NG を出す。
 // `server`:入口(http の execute)と runtime を、取引の付いた偽の DB(一意の制約・commit の後に応答を捨てる形・並んだ 2 本)で回す。
-// `client`:interactive の送りを偽の DOM で回す(キーを作る・保つ・捨てる、503 で失敗の After に移らない)。
+// `client`:interactive の送りを偽の DOM で回す(キーを作る・保つ・捨てる、503 で失敗の After に移らない、file の欄は上げ直さない)。
 // `purge`:cron の古い行の消し(保持期間の既定と env)。
 const out = [];
 const check = (name, ok, detail) => out.push((ok ? "ok " : "NG ") + name + (ok ? "" : " " + JSON.stringify(detail)));
@@ -306,6 +306,36 @@ async function client() {
   form.elements = [{ ...field, name: "note_list.title" }, button("note_list")];
   await submit("note_list");
   check("a read send carries no key", sent.length === before + 1 && sent[before].key === null, sent[before]);
+
+  // file の欄がある書き:上げた File の key を保ち、再送では上げ直さない(上げ口は上げるたびに新しい key を返す)
+  let blobs = 0;
+  const upload = () => replies.push({ status: 200, value: { key: `blob/${++blobs}` } });
+  Component.yumemiSpec.services.note_create.args.push({ name: "image", wire: "text", blob: true });
+  const photo = new File(["photo"], "photo.png", { type: "image/png" });
+  const fileField = { name: "note_create.image", type: "file", files: [photo], disabled: false, checkValidity: () => true };
+  form.elements = [{ ...field, value: "with file" }, fileField, button("note_create")];
+  const writes = () => sent.filter((x) => x.url === "/api/notes");
+  const uploads = () => sent.filter((x) => x.url === "/api/blobs").length;
+  upload();
+  replies.push({ status: 503, value: { code: "upstream_unavailable" } });
+  await submit();
+  const lost = writes().at(-1);
+  const written = writes().length;
+  await submit();
+  const retried = writes().at(-1);
+  check("file: the retry after a 503 does not upload the File again", uploads() === 1, sent.map((x) => x.url));
+  check("file: the retry carries the same Args and the same key", writes().length === written + 1 && retried.body === lost.body && retried.key === lost.key && JSON.parse(lost.body).image === "blob/1", [lost, retried]);
+  upload();
+  await submit();
+  check("file: after an answer the File is uploaded again (new Args, new key)", uploads() === 2 && writes().at(-1).key !== lost.key && JSON.parse(writes().at(-1).body).image === "blob/2", sent.map((x) => x.url));
+  upload();
+  replies.push({ status: 503, value: { code: "upstream_unavailable" } });
+  await submit();
+  const kept2 = writes().at(-1);
+  fileField.files = [new File(["other"], "other.png", { type: "image/png" })];
+  upload();
+  await submit();
+  check("file: another File after a 503 is uploaded and gets a new key", uploads() === 4 && writes().at(-1).key !== kept2.key && JSON.parse(writes().at(-1).body).image === "blob/4", sent.map((x) => x.url));
 }
 
 // ── purge ─────────────────────────────────────────────────────────────────

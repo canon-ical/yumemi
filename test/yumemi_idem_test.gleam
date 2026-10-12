@@ -104,8 +104,9 @@ pub fn server_replays_and_conflicts_test() {
 }
 
 /// client:書きの送りにキー、503・網の失敗はキーと入力を保って失敗の After に移らない、答えが出たら捨てる。
+/// file の欄は上げた key を同じ間だけ保ち、再送で上げ直さない(r2)。
 pub fn client_keeps_the_key_until_settled_test() {
-  idem_check("client") |> all_ok(10)
+  idem_check("client") |> all_ok(14)
 }
 
 /// cron:保持期間(既定 24 時間、env `IDEMPOTENCY_RETENTION_HOURS`)を過ぎた行を消す。

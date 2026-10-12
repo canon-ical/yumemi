@@ -147,7 +147,14 @@ function collect(controls, service) {
   }
   return values;
 }
-async function buildArgs(spec, initial, controls, serviceName) {
+async function uploadOnce(file, uploaded) {
+  const kept = uploaded?.get(file);
+  if (kept !== void 0) return kept;
+  const key = await upload(file);
+  uploaded?.set(file, key);
+  return key;
+}
+async function buildArgs(spec, initial, controls, serviceName, uploaded = null) {
   const collected = collect(controls, serviceName);
   const args = {};
   for (const arg of spec.args) {
@@ -157,7 +164,7 @@ async function buildArgs(spec, initial, controls, serviceName) {
       const items = collected.get(arg.name);
       const files = items.filter((item) => typeof File !== "undefined" && item instanceof File);
       if (files.length > 0) {
-        if (!spec.upload) raw = await upload(files[0]);
+        if (!spec.upload) raw = await uploadOnce(files[0], uploaded);
       } else if (isList) raw = items;
       else if (items.length > 0) raw = items[items.length - 1];
       else if (!arg.blob) raw = "";
@@ -261,6 +268,7 @@ var YumemiInteractive = class extends ElementBase {
     this.yumemiSending = false;
     this.yumemiCleanup = null;
     this.yumemiKeys = /* @__PURE__ */ new Map();
+    this.yumemiUploads = /* @__PURE__ */ new Map();
   }
   get yumemiInitial() {
     try {
@@ -322,7 +330,12 @@ var YumemiInteractive = class extends ElementBase {
     let outcome;
     try {
       const fileControl = serviceSpec.upload ? controls.find((control) => control.type === "file") : null;
-      const args = await buildArgs(serviceSpec, initial, controls, service);
+      let uploaded = null;
+      if (withKey) {
+        uploaded = this.yumemiUploads.get(service) ?? /* @__PURE__ */ new WeakMap();
+        this.yumemiUploads.set(service, uploaded);
+      }
+      const args = await buildArgs(serviceSpec, initial, controls, service, uploaded);
       const key = withKey ? keyFor(this.yumemiKeys, service, args) : null;
       setStates(this, ["waiting", `sent-${service}`]);
       this.yumemiBusy(form, true);
@@ -334,7 +347,10 @@ var YumemiInteractive = class extends ElementBase {
       this.yumemiBusy(form, false);
     }
     const kept = withKey && !outcome.ok && unsettled(outcome);
-    if (withKey && !kept) this.yumemiKeys.delete(service);
+    if (withKey && !kept) {
+      this.yumemiKeys.delete(service);
+      this.yumemiUploads.delete(service);
+    }
     this.yumemiDone(service, serviceSpec, outcome);
     if (!serviceSpec.read && !kept) follow(outcome.ok ? serviceSpec.ok : serviceSpec.error, outcome.ok ? outcome.value : null);
   }

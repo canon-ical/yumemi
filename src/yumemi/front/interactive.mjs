@@ -17,7 +17,8 @@
 // - 冪等キー(0.13):書きの送り(GET でも読みでも上げ口でもない)は、送る Args にキー(UUID)を 1 つ作って
 //   `Idempotency-Key` に載せる。結果の分からない失敗(5xx・網の失敗)はキーと入力を保ち、失敗の After に移らない
 //   ── 同じ Args の再送は同じキーで、server は 1 本目の応答を返す。答えが出たら(2xx・4xx)キーを捨て、Args が
-//   変われば新しいキー
+//   変われば新しいキー。file の欄の上げは File ごとに上げた key を同じ間だけ保ち、再送では上げ直さない(key が
+//   変わると Args が変わり、キーも変わる)
 
 const noticeKey = "yumemi:notice";
 const stateNames = ["waiting", "ok", "error"];
@@ -175,7 +176,17 @@ function collect(controls, service) {
   return values;
 }
 
-async function buildArgs(spec, initial, controls, serviceName) {
+/// file の欄の上げ。上げた File の key を `uploaded`(File -> key)に保ち、同じ File の再送では上げ直さない
+/// ── 上げ口が上げるたびに新しい key を返すと、Args が変わって冪等キーも変わり、再送が別の書きになる
+async function uploadOnce(file, uploaded) {
+  const kept = uploaded?.get(file);
+  if (kept !== undefined) return kept;
+  const key = await upload(file);
+  uploaded?.set(file, key);
+  return key;
+}
+
+async function buildArgs(spec, initial, controls, serviceName, uploaded = null) {
   const collected = collect(controls, serviceName);
   const args = {};
   for (const arg of spec.args) {
@@ -185,7 +196,7 @@ async function buildArgs(spec, initial, controls, serviceName) {
       const items = collected.get(arg.name);
       const files = items.filter((item) => typeof File !== "undefined" && item instanceof File);
       // 上げ口(`spec.upload`)は送りそのものが file を本文で上げるので、ここで先に上げない(2 回上がる)
-      if (files.length > 0) { if (!spec.upload) raw = await upload(files[0]); }
+      if (files.length > 0) { if (!spec.upload) raw = await uploadOnce(files[0], uploaded); }
       else if (isList) raw = items;
       else if (items.length > 0) raw = items[items.length - 1];
       else if (!arg.blob) raw = "";
@@ -300,6 +311,8 @@ class YumemiInteractive extends ElementBase {
     this.yumemiCleanup = null;
     // 書きの送りの保っているキー(Service の名 -> {body, key})。答えの出ない失敗の間だけ持つ
     this.yumemiKeys = new Map();
+    // 書きの送りの file の欄の上げた key(Service の名 -> WeakMap(File -> key))。キーと同じ間だけ持つ
+    this.yumemiUploads = new Map();
   }
 
   get yumemiInitial() {
@@ -364,7 +377,12 @@ class YumemiInteractive extends ElementBase {
     let outcome;
     try {
       const fileControl = serviceSpec.upload ? controls.find((control) => control.type === "file") : null;
-      const args = await buildArgs(serviceSpec, initial, controls, service);
+      let uploaded = null;
+      if (withKey) {
+        uploaded = this.yumemiUploads.get(service) ?? new WeakMap();
+        this.yumemiUploads.set(service, uploaded);
+      }
+      const args = await buildArgs(serviceSpec, initial, controls, service, uploaded);
       const key = withKey ? keyFor(this.yumemiKeys, service, args) : null;
       setStates(this, ["waiting", `sent-${service}`]);
       this.yumemiBusy(form, true);
@@ -379,7 +397,10 @@ class YumemiInteractive extends ElementBase {
     }
     // 答えが出たらキーを捨てる。結果の分からない失敗はキーと入力を保ち、失敗の After(読み直し・移動)に移らない
     const kept = withKey && !outcome.ok && unsettled(outcome);
-    if (withKey && !kept) this.yumemiKeys.delete(service);
+    if (withKey && !kept) {
+      this.yumemiKeys.delete(service);
+      this.yumemiUploads.delete(service);
+    }
     this.yumemiDone(service, serviceSpec, outcome);
     // 失敗の本文は Out でないので、error 側の穴は埋めない(生成器の第 15 条が穴のある route を止める)
     if (!serviceSpec.read && !kept) follow(outcome.ok ? serviceSpec.ok : serviceSpec.error, outcome.ok ? outcome.value : null);
@@ -523,4 +544,4 @@ export function start({ components = {}, escapes = {}, go = null, reload = null 
   globalThis.navigation?.addEventListener?.("navigatesuccess", () => showNotice());
 }
 
-export const internals = { setStates, currentStates, wireValue, fillPath, stateNames, keyed, unsettled, keyFor, call };
+export const internals = { setStates, currentStates, wireValue, fillPath, stateNames, keyed, unsettled, keyFor, call, uploadOnce };
