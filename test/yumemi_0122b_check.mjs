@@ -34,7 +34,8 @@ async function auto(line) {
   check("the key reaches the INSERT's first hole", typeof id === "string" && uuid.test(id), statement?.params);
   check("the created value carries the same key", id != null && created?.fields?.[0] === id, created?.fields);
   check("the rest of the created value is the draft", JSON.stringify(created?.fields?.slice(1)) === JSON.stringify(["t", "b", "2026-10-13T00:00:00.000Z"]), created?.fields);
-  // 同じ seed なら同じ key(Queue の retry で同じ要求を流し直しても行は 1 つ)
+  // 同じ seed なら同じ key(採番は seed と要求の中の順番だけで決まる。Queue の retry は seed を引き直すので、
+  // retry で行が 1 つなのは outbox_done が同じ transaction に入るからで、この柵ではない)
   const again = makeContext({ record: { name: "note_create" }, db: {}, root: null, at: "2026-10-13T00:00:00.000Z", seed: "seed-1" });
   await again.stage(name, { title: "t", body: "b", created_at: "2026-10-13T00:00:00.000Z" }).catch(() => {});
   check("the same seed gives the same key", id != null && again.pending[0]?.params?.[0] === id, again.pending[0]?.params?.[0]);

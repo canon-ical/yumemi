@@ -19,7 +19,7 @@
 
 変えたもの:
 - `src/yumemi/gen/emit/verb.gleam`:1 件を作る INSERT の列(`create_fields`)に `auto_key` の key を戻し、key の穴は `auto_key` かどうかに関わらず `['id']`。Draft から外すのは今までどおり(`draft.gleam` は触っていない)。**CreateMany は変えない**(`many_create_fields`、入力 JSON は Draft の欄だけなので key の列を書かず DB の DEFAULT に任せる、今までと同じ SQL)
-- `src/yumemi/gen/reader.gleam`:`validate_auto_keys`。`auto_key` の key が Uuid の値型 1 つでなければ exit 4 で止める(`auto_key の key が Uuid でない: <名>`)。複合の key に `auto_key` を書いても exit 4(`auto_key は 1 つの Property の key にだけ書ける`)── runtime の作った値は key の欄すべてに同じ採番の値を入れるので、複合の key は黙って崩れる
+- `src/yumemi/gen/reader.gleam`:`validate_auto_keys`。`auto_key` の key が Uuid の値型 1 つでなければ exit 4 で止める(`auto_key の key が Uuid でない: <名>`)。複合の key に `auto_key` を書いても exit 4(`auto_key は 1 つの Property の key にだけ書ける`)── runtime は INSERT の key の列ごとに別の採番の値を入れ、作った値は最後の採番の値を key の欄すべてに入れるので、複合の key は黙って崩れる(柏木ゲート 2 で書き直し)
 - `src/yumemi/server/runtime.mjs` の `stageVerb` は変えていない
 
 test:`auto_key_create_stages_a_runtime_key_test`(Draft に id が無い、INSERT に id の列、子の node で stage が通り、INSERT の 1 番目の穴と作った値の key が同じ UUID、同じ seed で同じ key)、`auto_key_on_a_non_uuid_key_stops_test`(notes の `note_id` を `Text` にすると exit 4)、`auto_key_on_a_composite_key_stops_test`(flag の Chunk の複合 key に `auto_key = ["a"]` で exit 4)。
@@ -101,7 +101,7 @@ main `955e34eb7` を `git archive` で `.scratch/musearch` に置き、api・www
 ## 次の版へ(触っていない)
 
 - **CreateMany の `auto_key`**:key の列を書かず DB の DEFAULT に任せたまま。runtime は CreateMany に作った値を組まない(`created` の無い verb の表)ので今回の 400 は出ないが、`List(Created)` を受ける logic が何を受けるかは見ていない。key を runtime で採番する形に揃えるかは別の便で
-- `auto_key` の無い Entity は、Draft の key を runtime が `['id']` の採番で上書きする(r1 の notes も `note_id.parse(it.seed)` を渡していたが、行の id は `seededId(seed, 0)`)。BRIEF のとおり触っていない。複合の key(flag の Chunk)も key の欄すべてが同じ採番の値になる形のまま
+- `auto_key` の無い Entity は、Draft の key を runtime が `['id']` の採番で上書きする(r1 の notes も `note_id.parse(it.seed)` を渡していたが、行の id は `seededId(seed, 0)`)。BRIEF のとおり触っていない。複合の key(flag の Chunk)も、INSERT の key の列は列ごとに別の採番の値、作った値は最後の採番の値を key の欄すべてに入れる形(行と作った値の key が食い違う)のまま(柏木ゲート 2 で書き直し)
 - results-yumemi-0122「次の版へ」の残り(server.gleam の無い app の exit 0、Host の variant の意味)、柏木の P1-2〜4(畳みの道の size、variant の数、kind の無い queue の ack)、size の上限は触っていない
 
 ## DDL
