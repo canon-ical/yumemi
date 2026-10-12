@@ -62,8 +62,8 @@ fn with_manual(
   let port = case string.contains(file.text, "fn query(ctx: Context") {
     True -> ""
     False ->
-      "\n@external(javascript, \"../operations_ffi.mjs\", \"read\")\n"
-      <> "fn query(ctx: Context, name: String, input: a) -> Promise(b)\n"
+      "\n@external(javascript, \"../operations_ffi.mjs\", \"read_of\")\n"
+      <> "fn query(ctx: Context, owner: String, name: String, input: a) -> Promise(b)\n"
   }
   let functions =
     manual
@@ -85,7 +85,7 @@ fn with_manual(
       <> read.returns
       <> ") -> Step(out, err, state),\n) -> Step(out, err, state) {\n  step.read(fn(ctx) { query(ctx, \""
       <> read.service
-      <> "/"
+      <> "\", \""
       <> read.query
       <> "\", "
       <> input
@@ -226,8 +226,8 @@ fn one(app: model.App, service: model.Service, input_hash: String) -> File {
       case service.queries {
         [] -> ""
         _ ->
-          "@external(javascript, \"../operations_ffi.mjs\", \"read\")\n"
-          <> "fn query(ctx: Context, name: String, input: a) -> Promise(b)\n"
+          "@external(javascript, \"../operations_ffi.mjs\", \"read_of\")\n"
+          <> "fn query(ctx: Context, owner: String, name: String, input: a) -> Promise(b)\n"
       },
       "\n",
       "\n",
@@ -466,8 +466,8 @@ fn record(
   ])
 }
 
-/// 読みの口は `<service>/<query>` を運ぶ ── 他の Service の読みの module を 2 本 import して同じ名の読みが
-/// 並んでも、runtime が名だけで引いて取り違えない(0.12.1)。
+/// 読みの口は名と持ち主の Service(`owner`)を運ぶ ── 他の Service の読みの module を 2 本 import して同じ名の
+/// 読みが並んでも、runtime が名だけで引いて取り違えない(0.12.1)。
 fn function(
   app: model.App,
   style: Style,
@@ -502,7 +502,7 @@ fn function(
     ") -> Step(out, err, state) {\n",
     "  step.read(fn(ctx) { query(ctx, \"",
     owner,
-    "/",
+    "\", \"",
     query.name,
     "\", ",
     input,

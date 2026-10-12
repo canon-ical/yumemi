@@ -1330,7 +1330,7 @@ fn operations_text(app: App, input: String) -> String {
     |> list.unique
     |> list.sort(string.compare)
   js_header("verb / reads / connector operations", input)
-  <> "export { stage, read, call, enqueue } from '"
+  <> "export { stage, read, read_of, call, enqueue } from '"
   <> framework
   <> "operations.mjs';\n"
   <> string.concat(

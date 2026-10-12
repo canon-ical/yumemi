@@ -361,19 +361,16 @@ export function runtime(spec) {
    pending.push(operation);
    if(out.subject&&out.party===state.resolved?.party) ctx.onboard=out.subject;
    return out.created;
-  },async read(name,input) {
-   // 生成の読みの口は `<service>/<query>` を運ぶ(0.12.1)── 他の Service の読みを同じ名で 2 本 import しても
-   // その Service の表を直に引く。名だけの口(0.12.0 までの生成物・手書きの FFI)は今までどおり、自分の表、
+  },async read(name,input,owner) {
+   // 生成の読みの口は持ち主の Service を添える(`read_of`、0.12.1)── 他の Service の読みを同じ名で 2 本 import
+   // しても、その Service の表を直に引く。添えの無い口(0.12.0 までの生成物・手書きの FFI)は今までどおり、自分の表、
    // import した Service の表(`readAliases`)、表の中で 1 本だけの名の順に引く
-   const slash=name.lastIndexOf('/');
-   const bare=slash<0?name:name.slice(slash+1);
-   const entry=slash<0
-    ?[record.name,...(spec.readAliases?.[record.name]??[])].map(owner=>spec.reads[owner+'/'+name]).find(Boolean)??uniqueRead(name)
-    :spec.reads[name];
-   if(!entry) throw new Error('unregistered read: '+(slash<0?record.name+'/'+name:name));
+   const entry=(owner?spec.reads[owner+'/'+name]:undefined)
+    ??[record.name,...(spec.readAliases?.[record.name]??[])].map(owner=>spec.reads[owner+'/'+name]).find(Boolean)??uniqueRead(name);
+   if(!entry) throw new Error('unregistered read: '+(owner??record.name)+'/'+name);
    if(entry.hook) return entry.hook(input,x);
    // 畳みは root の Service 自身の読みにだけ掛かる
-   const folded=slash<0||name.slice(0,slash)===record.name?state.folds?.[bare]:undefined;
+   const folded=!owner||owner===record.name?state.folds?.[name]:undefined;
    if(folded&&state.row) {
     const raw=state.row[folded];
     const value=typeof raw==='string'&&/^[\[{]/.test(raw)?JSON.parse(raw):raw;

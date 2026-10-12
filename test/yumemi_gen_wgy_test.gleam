@@ -486,12 +486,15 @@ pub fn manual_read_writes_the_typed_port_test() {
   string.contains(text, "import yumemi/time.{type Date}\n") |> should.be_true
   string.contains(
     text,
-    "fn query(ctx: Context, name: String, input: a) -> Promise(b)",
+    "fn query(ctx: Context, owner: String, name: String, input: a) -> Promise(b)",
   )
   |> should.be_true
   string.contains(text, "then then: fn(List(#(String, Int))) -> Step(")
   |> should.be_true
-  string.contains(text, "query(ctx, \"article_create/counts\", #(muse, since))")
+  string.contains(
+    text,
+    "query(ctx, \"article_create\", \"counts\", #(muse, since))",
+  )
   |> should.be_true
   let notes = server_reader.notes(app)
   list.any(notes, fn(note) {

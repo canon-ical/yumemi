@@ -92,29 +92,40 @@ pub fn star_get_form_keeps_its_method_test() {
 
 // ── 2 同じ名の読み ──────────────────────────────────────────────────────
 
-/// 生成の読みの口は `<service>/<query>` を運ぶ(名だけだと、同じ名の読みを 2 本 import した Service で runtime が
-/// 取り違えた)。
-pub fn generated_reads_carry_the_service_name_test() {
+/// 生成の読みの口は名と持ち主の Service を運ぶ(`read_of`)── 名だけだと、同じ名の読みを 2 本 import した Service で
+/// runtime が取り違えた。名は今までどおり運ぶ(名だけで引く ★ の ctx を壊さない)。
+pub fn generated_reads_carry_the_owner_test() {
   let assert Ok(units) = source.load(fixture)
   let assert Ok(app) = reader.read(units)
   let files = reads.emit(app, hash.of(units))
-  { files != [] } |> should.be_true
+  let with_query =
+    list.filter(files, fn(file) { string.contains(file.text, "query(ctx, \"") })
+  { with_query != [] } |> should.be_true
   list.each(files, fn(file) {
     let service =
       file.path
       |> string.replace("src/gen/reads/", "")
       |> string.replace(".gleam", "")
-    string.split(file.text, "query(ctx, \"")
-    |> list.drop(1)
-    |> list.each(fn(rest) {
-      string.starts_with(rest, service <> "/") |> should.be_true
+    let calls = string.split(file.text, "query(ctx, \"") |> list.drop(1)
+    // 矢印だけの module(関係の読み)は query を持たない
+    case calls {
+      [] -> Nil
+      _ ->
+        string.contains(
+          file.text,
+          "@external(javascript, \"../operations_ffi.mjs\", \"read_of\")\nfn query(ctx: Context, owner: String, name: String, input: a) -> Promise(b)\n",
+        )
+        |> should.be_true
+    }
+    list.each(calls, fn(rest) {
+      string.starts_with(rest, service <> "\", \"") |> should.be_true
     })
   })
 }
 
-/// runtime は修飾した名でその Service の表を直に引く。名だけの口は今までどおり。
+/// runtime は持ち主の Service の表を直に引く。添えの無い口・名だけで引く ctx は今までどおり。
 pub fn runtime_reads_the_qualified_query_test() {
-  ok_lines(runtime_read(), 6)
+  ok_lines(runtime_read(), 7)
 }
 
 // ── 3 閉じた dialog ─────────────────────────────────────────────────────
