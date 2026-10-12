@@ -248,15 +248,16 @@ export function runtime(spec) {
    return value;
   })));
  }
- function decodeRows(out,rows,keyset) {
+ // size は頁の大きさ(既定は keyset の定数の size、穴の size は `pageSize`)
+ function decodeRows(out,rows,keyset,size=keyset?.size) {
   const [head,item]=out;
   switch(head) {
    case 'list': return c.toList(rows.map(row=>decodeItem(item,row)));
    case 'option': return c.option(rows[0]??null,row=>decodeItem(item,row));
    case 'one': return decodeItem(item,rows[0]??{});
    case 'page': {
-    const visible=rows.slice(0,keyset.size),last=visible.at(-1);
-    const cursor=rows.length>keyset.size?c.checked(c.page.cursor(cursorText(keyset,last))):null;
+    const visible=rows.slice(0,size),last=visible.at(-1);
+    const cursor=rows.length>size?c.checked(c.page.cursor(cursorText(keyset,last))):null;
     return new c.page.Page(c.toList(visible.map(row=>decodeItem(item,row))),c.option(cursor));
    }
   }
@@ -272,8 +273,17 @@ export function runtime(spec) {
   } catch { throw Object.assign(new Error('invalid_argument'),{status:400,field:'cursor'}); }
   return keyset.uniform?parts:[true,...parts];
  }
+ // 読みの穴の値の並び(args の順)
+ const argValues=(entry,input)=>entry.args.length===0?[]:entry.args.length===1?[input]:[...input];
+ // 頁の大きさ。size が穴(keyset の `sizeArg` は args の番号、0.12.2)なら、`readParams` が SQL の `LIMIT $n + 1` に
+ // 渡すのと同じ値。定数の size は keyset の size のまま
+ function pageSize(entry,input) {
+  const index=entry.keyset?.sizeArg;
+  if(index==null) return entry.keyset?.size;
+  return Number(encodeValue(argValues(entry,input)[index],entry.args[index][1]));
+ }
  async function readParams(entry,input,state,x) {
-  const values=entry.args.length===0?[]:entry.args.length===1?[input]:[...input];
+  const values=argValues(entry,input);
   const params=[];
   for(const [index,[kind,scalar]] of entry.args.entries()) {
    const value=values[index];
@@ -379,7 +389,7 @@ export function runtime(spec) {
     return decodeRows(entry.out,Array.isArray(value)?value:[{[label]:value}],entry.keyset);
    }
    const rows=await run(db,entry.key,await readParams(entry,input,state,x));
-   return decodeRows(entry.out,rows,entry.keyset);
+   return decodeRows(entry.out,rows,entry.keyset,pageSize(entry,input));
   },relation:relationCapability(db,state),async call(name,input) {
    try {
     if(state.connectors?.[name]) return await state.connectors[name](input);

@@ -372,6 +372,13 @@ A Service whose logic runs `step.commit` and continues after it (and is not a qu
 - **Shell:** the optional constant `stylesheets: List(String)` (`<link rel="stylesheet">` in `<head>`) (see Shell above).
 - Regenerating a face with no `frame_src` Page and no `stylesheets` is byte-identical (the framework code in the bundled `client.mjs` changes with the version, as with any version that changes `navigate.mjs`).
 
+0.12.2 fixes four holes that an app shaped unlike our in-house service fell into (an entrance named apart from its Host variant, no queue kind, no subject Entity, no hand-written FFI, a page size chosen by the caller), without changing the public types:
+
+- **The entrance host is looked up by the entrance's name.** The generated `hosts` table maps each entrance name to its `<ENTRY>_HOST` variable, and the runtime now reads it by name, so `Http(name: "api", hosts: [ApiHost], ..)` answers on `API_HOST` (0.12.1 looked it up by the variant's name, `api_host`, and answered 404 to every request). An entrance whose `hosts` list is empty is reached on no host and is left out of the allowed Origins, as before.
+- **`src/gen/verb.gleam` takes `stage` from the generated `src/gen/operations_ffi.mjs`** next to it. 0.12.1 pointed at `src/operations_ffi.mjs`, which only an app with a hand-written bridge had, so the Worker bundle stopped.
+- **An app with no queue kind gets a `src/gen/queue_runtime.mjs`** (`sweep` resolves to 0 without reading anything, `consume` does nothing), because `shell.mjs` and `cron_runtime.mjs` import it; it imports neither the outbox runtime nor its SQL. The file of an app with queue kinds is unchanged. **`src/gen/runtime.mjs` imports `./subject.mjs` only when a subject Entity exists** (the only case `src/gen/subject.gleam` is written).
+- **A page whose size is a hole (`Paged(size: Param(..), ..)`) is cut at the size of the request**, the value bound to the SQL's `LIMIT $n + 1` (the read's keyset carries `sizeArg`, the hole's place among the read's args). 0.12.1 cut every such page at 20, so a request for any other size got size + 1 items and no `next`. A constant size (`Paged(size: Num(n), ..)`) is cut at `n` as before.
+
 **Imports outside the package**
 
 | Import | Imported by | Provided by |

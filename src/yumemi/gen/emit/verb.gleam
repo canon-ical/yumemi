@@ -69,7 +69,8 @@ pub fn emit(app: model.App, hashes: hash.Hashes) -> List(File) {
         "\n",
         imports,
         "\n\n",
-        "@external(javascript, \"../operations_ffi.mjs\", \"stage\")\n",
+        // 隣の生成物 `src/gen/operations_ffi.mjs`(0.12.2)。`../` は src 直下の手書きの橋を指し、橋の無い app の bundle が止まった
+        "@external(javascript, \"./operations_ffi.mjs\", \"stage\")\n",
         "fn stage(ctx: Context, name: String, input: a) -> Promise(b)\n\n",
         body,
       ]),
