@@ -212,12 +212,15 @@ export function http(spec) {
   const s={...input,entries:[...entries],trace:[],setCookies:[],at:input.at??new Date().toISOString(),seed:crypto.randomUUID()};
   return check('entry',1,s=>{
    s.url=new URL(s.request.url);
-   const hostFor=value=>{
-    const variable=spec.hosts[c.tag(value)];
+   // 生成の `hosts` は入口の名 -> env の `<NAME>_HOST`(0.12.2)。Host の variant の名で引くと、variant が入口の名と
+   // 違う app(`ApiHost` と入口 `api`)では env に届かず全要求が 404 だった。Host の variant を 1 つも持たない入口は、
+   // 今までどおりどの host にも出ず、Origin にも入らない
+   const hostFor=entry=>{
+    const variable=[...entry.hosts].length?spec.hosts[entry.name]:undefined;
     return variable?s.env[variable]:undefined;
    };
-   s.hosts=s.entries.flatMap(e=>[...e.hosts].map(hostFor)).filter(Boolean);
-   s.entry=s.entries.find(e=>[...e.hosts].map(hostFor).includes(s.url.host));
+   s.hosts=s.entries.map(hostFor).filter(Boolean);
+   s.entry=s.entries.find(e=>hostFor(e)===s.url.host);
    if(!s.entry) fail('not_found',404);
    s.cookies=cookies(s.request.headers.get('cookie'));
   })(s);

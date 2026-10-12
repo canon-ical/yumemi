@@ -11,6 +11,7 @@
 import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
+import gleam/result
 import gleam/string
 import yumemi/gen/emit/accepted
 import yumemi/gen/emit/root
@@ -113,7 +114,12 @@ pub fn text(
     string.concat([
       "import { SQL } from './sql.mjs';\n",
       "import * as c from './codec.mjs';\n",
-      "import * as subject from './subject.mjs';\n",
+      // `gen/subject.gleam` は subject の Entity がある時だけ吐かれる(back の `subject_file`)。無い app で
+      // import すると bundle が解けずに止まった(0.12.2)
+      case list.any(app.entities, fn(entity) { entity.subject }) {
+        True -> "import * as subject from './subject.mjs';\n"
+        False -> ""
+      },
       "import { runtime } from '" <> framework <> "runtime.mjs';\n",
       list.map(allow_modules, fn(path) {
         "import * as "
@@ -739,6 +745,22 @@ fn keyset(app: App, select: model.Select) -> String {
     model.LPaged(size: model.OpNum(size), ..) -> size
     _ -> 20
   }
+  // size が穴(`Paged(size: Param(..))`)なら、その穴の args の番号と名(0.12.2)。runtime は SQL の `LIMIT $n + 1` に
+  // 渡したのと同じ値で頁を切る。固定の size で切ると limit≠20 で limit+1 件返り、next が null だった。
+  // 1 未満の size は SQL を流す前に 400 `invalid_argument`、field はこの名
+  let size_arg = case select.limit {
+    model.LPaged(size: model.OpParam(name), ..) -> {
+      let label = naming.snake(name)
+      typing.params(app, select)
+      |> list.index_map(fn(param, index) { #(param.label, index) })
+      |> list.key_find(label)
+      |> result.map(fn(index) {
+        ",sizeArg:" <> int.to_string(index) <> ",sizeField:'" <> label <> "'"
+      })
+      |> result.unwrap("")
+    }
+    _ -> ""
+  }
   let directions =
     list.filter_map(select.order, fn(order) {
       case order {
@@ -766,6 +788,7 @@ fn keyset(app: App, select: model.Select) -> String {
     )
   "{size:"
   <> int.to_string(size)
+  <> size_arg
   <> ",uniform:"
   <> bool(uniform)
   <> ",columns:["

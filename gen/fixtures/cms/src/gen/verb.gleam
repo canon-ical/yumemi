@@ -18,7 +18,7 @@ import yumemi/party.{type PartyId}
 import yumemi/time.{type Datetime}
 import yumemi/verb.{type Verb}
 
-@external(javascript, "../operations_ffi.mjs", "stage")
+@external(javascript, "./operations_ffi.mjs", "stage")
 fn stage(ctx: Context, name: String, input: a) -> Promise(b)
 
 pub fn create_article(

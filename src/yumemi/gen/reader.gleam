@@ -2261,6 +2261,7 @@ pub fn read(units: List(Unit)) -> Result(App, Error) {
     collection_list,
   ))
   use _ <- result.try(validate_order_columns(entity_list, types))
+  use _ <- result.try(validate_auto_keys(entity_list, types))
   use _ <- result.try(validate_relation_shapes(entity_list))
   use service_list <- result.try(services(units))
   use entry_list <- result.try(entry_declarations(units))
@@ -2396,6 +2397,49 @@ fn validate_order_columns(
       }
     }
   })
+}
+
+/// `auto_key` は runtime が要求の seed から UUID を採番する(0.12.2)。採番できる key は Uuid の値型 1 つだけなので、
+/// 複合の key と Uuid でない key(連番・文字列)は黙って壊さずに名指しで止める。
+fn validate_auto_keys(
+  entities: List(Entity),
+  types: List(ValueType),
+) -> Result(Nil, Error) {
+  list.try_each(entities, fn(entity) {
+    let where = "entity/" <> entity.module
+    case entity.auto_key, entity.key_props {
+      [], _ -> Ok(Nil)
+      [name], [_] ->
+        case model.prop_by_name(entity, name) {
+          Some(model.Prop(
+            optional: False,
+            repeated: False,
+            kind: model.ValueProp(type_ref: model.TypeRef(
+              module: Some("gen/types/" <> _),
+              name: type_name,
+              ..,
+            )),
+            ..,
+          )) ->
+            case model.value_type_by_name(types, type_name) {
+              Some(model.ValueType(spec: "Uuid", ..)) -> Ok(Nil)
+              _ -> Error(Unsupported(where, auto_key_not_uuid(name)))
+            }
+          _ -> Error(Unsupported(where, auto_key_not_uuid(name)))
+        }
+      _, _ ->
+        Error(Unsupported(
+          where,
+          "auto_key は 1 つの Property の key にだけ書ける(複合の key は採番しない)",
+        ))
+    }
+  })
+}
+
+fn auto_key_not_uuid(name: String) -> String {
+  "auto_key の key が Uuid でない: "
+  <> name
+  <> "(runtime が採番するのは UUID だけ。src/types.gleam で Uuid にするか、auto_key を外して作る Service が key を渡す)"
 }
 
 fn prop_type_label(prop: Prop) -> String {

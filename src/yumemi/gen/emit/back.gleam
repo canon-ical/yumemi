@@ -9,7 +9,7 @@
 //// | `src/gen/subject.gleam` | `subject: True` の Entity |
 //// | `src/gen/key.gleam` | key が値型 1 つの Entity |
 //// | `src/gen/<sum>.mjs` | payload を持つ sum の Property(`entity.visit.Source` -> `source.mjs`) |
-//// | `src/gen/queue_runtime.mjs` | Service が `queue.<kind>` で呼ぶ kind と、その Service の Args / root |
+//// | `src/gen/queue_runtime.mjs` | Service が `queue.<kind>` で呼ぶ kind と、その Service の Args / root(kind が無ければ空の口) |
 //// | `src/gen/cron_runtime.mjs` | `server.cron` |
 //// | `src/gen/shell.mjs` | `server.cron` / `server.durable_objects` |
 //// | `src/gen/attached.mjs` | `server.attached`(入口の検査が registry と並べて引く) |
@@ -884,7 +884,21 @@ fn queue_text(
   input: String,
 ) -> #(List(File), List(stop.Note)) {
   case kinds {
-    [] -> #([], [])
+    // queue の kind が無い app でも `gen/shell.mjs` と `gen/cron_runtime.mjs` は `sweep` / `consume` を import する
+    // (0.12.2)。送る kind が無いので sweep は何も読まずに 0。consume は、kind の表に無い行を受けた outbox と同じく
+    // 何もせずに返す(ack)。framework の outbox の SQL も runtime も import しない(kind の無い app に outbox の表を求めない)
+    [] -> #(
+      [
+        File(
+          path: "src/gen/queue_runtime.mjs",
+          text: js_header("service queue calls / framework outbox", input)
+            <> "export const registeredKinds=[];\n"
+            <> "export const sweep=async()=>0;\n"
+            <> "export const consume=async()=>{};\n",
+        ),
+      ],
+      [],
+    )
     _ -> {
       let rooted = fn(name) {
         list.any(queries, fn(pair) { pair.0 == name <> "/root" })
