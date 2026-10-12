@@ -3749,9 +3749,11 @@ pub fn front_emit_blob_fields_issue_tokens_and_upload_only_registered_tokens_tes
   |> list.each(fn(row) { string.contains(client, row) |> should.be_true })
   let assert Ok(runtime) = simplifile.read("src/yumemi/front/interactive.mjs")
   // 柏木 ゲート 2:上げ口(spec.upload)は送りそのものが file を上げるので先に上げない(期待の行を替えた。
-  // 振る舞いは yumemi_012_y3_test の runtime_uploads_a_chosen_file_once_test)
+  // 振る舞いは yumemi_012_y3_test の runtime_uploads_a_chosen_file_once_test)。0.13 r2:書きの送りは上げた
+  // File の key を保ち再送で上げ直さない(`uploadOnce`、振る舞いは yumemi_idem_test の client の check)
   [
-    "if (files.length > 0) { if (!spec.upload) raw = await upload(files[0]); }",
+    "if (files.length > 0) { if (!spec.upload) raw = await uploadOnce(files[0], uploaded); }",
+    "const key = await upload(file);",
     "if (!response.ok) throw new Error(\"blob upload failed\");",
   ]
   |> list.each(fn(row) { string.contains(runtime, row) |> should.be_true })

@@ -20,6 +20,13 @@
 // - `subjects`: session の主体になる Entity の module(作った行の party が session の party なら session に結ぶ)
 // - `connectorNames`: 口の名 -> 診断に出す connector の名
 // - `apiKeyLabel` / `claimLabel`: HMAC の label(★ の const)
+//
+// 冪等キー(0.13):入口が `state.idempotency`(`{party,key,hash,encode(outcome)}`)を置いた要求は、書きの
+// transaction の先頭に `framework/idempotency_record`(結果の応答)を足す。記録は書きと同じ transaction で、
+// 書きの無い要求(業務の失敗・読みだけ)は記録しない。commit した後に `recorded` に記録した応答を置く。
+// 並びの Entity を作る書き(生成の verb の `created` の 5 つ目が埋めの SQL)は、order が RETURNING まで分からない
+// ので、記録の本文の order を印にして組み、作る文の後に印を作った行の order に替える 1 文を同じ transaction に足す
+// ── commit した時点で記録が応答と同じになり、commit の後に応答を失っても再投稿は DB の order を返す(0.13 r2)。
 import * as step from '../step.mjs';
 import { value as secretValue } from '../secret_ffi.mjs';
 import { encrypt as seal } from '../sealed_ffi.mjs';
@@ -338,8 +345,9 @@ export function runtime(spec) {
   const out={key:verb.key,params};
   if(verb.before) out.before=verb.before.map(([key,tokens])=>({key,params:tokens.map(([kind,a,b])=>kind==='f'?encodeValue(input[a],b):encodeValue(values[a],b))}));
   if(verb.created) {
-   const [module,ctor,fields,scalar]=verb.created;
+   const [module,ctor,fields,scalar,orderFill]=verb.created;
    out.created=new spec.drafts[module][ctor](...fields.map(field=>field==='id'?c.parse(scalar,id):field==='=order'?c.parse('order',0):input[field]));
+   if(orderFill&&SQL[orderFill]) out.orderFill={key:orderFill,id};
    if(spec.subjects?.includes(module)) { out.subject=id; out.party=c.text(input.party); }
   }
   return out;
@@ -369,7 +377,7 @@ export function runtime(spec) {
    const out=await stageVerb(name,verb,input,x);
    for(const before of out.before??[]) pending.push(statement(before.key,before.params));
    const operation=statement(out.key,out.params);
-   if(out.created!==undefined) { operation.created=out.created; created.push(out); }
+   if(out.created!==undefined) { operation.created=out.created; if(out.orderFill) operation.orderFill=out.orderFill; created.push(out); }
    pending.push(operation);
    if(out.subject&&out.party===state.resolved?.party) ctx.onboard=out.subject;
    return out.created;
@@ -414,25 +422,37 @@ export function runtime(spec) {
     return true;
    }
    const parent=crypto.randomUUID(),value=c.encode(carry),fold=record.folded;
+   const accepted=new step.Accepted();
    state.committedCarry=value;
    pending.push(statement('framework/outbox_parent',[parent,record.name+':1',JSON.stringify({service:record.name,carry:value,args:c.encode(state.args)}),state.eventId??null,at,!!fold]));
    if(fold) for(const kind of fold.kinds) {
     const payload=spec.folds[kind](value,root);
     pending.push(statement('framework/outbox_child',[crypto.randomUUID(),kind,JSON.stringify(payload),parent,at]));
    }
-   await ctx.finish();
+   await ctx.finish(accepted);
    committed=true;
    return false;
   },async enqueue(kind,input) {
    if(!committed) throw new Error('write connector before commit');
    const payload=spec.enqueues[kind](c.encode(input));
    await db.transaction([statement('framework/outbox_child',[crypto.randomUUID(),kind,JSON.stringify(payload),state.eventId,at])]);
-  },async reject(stageRejected) {
+  },async reject(stageRejected,outcome) {
+   // 断りの verb だけの transaction。冪等の記録(`state.idempotency` は同じもの)は断りの応答でここに入る
    const isolated=makeContext({...state,eventId:null,seed:await seededId(state.seed,'reject')});
-   try {await stageRejected(isolated);await isolated.finish();}
+   try {await stageRejected(isolated);await isolated.finish(outcome);}
    catch(cause) {throw Object.assign(new Error('upstream_unavailable',{cause}),{status:503,connector:cause.connector??'neon'});}
-  },async finish() {
+  },async finish(outcome) {
    if(!pending.length&&!state.eventId) return;
+   // 結果(`outcome`)を添えない finish(★ の器・古い生成物)は記録しない ── キーの無い要求と同じ振る舞い
+   const keyed=state.idempotency;
+   let recording=null,marks=[];
+   if(keyed&&!keyed.recorded&&pending.length&&outcome!==undefined) {
+    recording=await keyed.encode(outcome);
+    [recording,marks]=await orderMarked(pending,keyed,outcome,recording);
+    const fills=marks.map(mark=>statement(mark.operation.orderFill.key,[keyed.party,keyed.key,mark.quoted,mark.operation.orderFill.id,mark.placeholder]));
+    pending.unshift(statement('framework/idempotency_record',[keyed.party,keyed.key,keyed.hash,JSON.stringify(recording),at]));
+    pending.push(...fills);
+   }
    if(ctx.onboard) pending.push(statement('framework/session_onboard',[state.resolved.id,state.resolved.party,ctx.onboard]));
    if(state.eventId) pending.push(statement('framework/outbox_done',[state.eventId]));
    for(const stage of ['entry','resolve','decode','judge','execute','commit']) pending.push(statement('framework/audit',[seed,stage,record.name,state.resolved?.party??null,'ok',at]));
@@ -454,9 +474,42 @@ export function runtime(spec) {
      else if(row?.order!==undefined&&'order' in value) value.order=c.parse('order',Number(row.order));
     }
    }
+   // `recorded` は commit の後に置く。落ちた transaction の記録は取り消されているので、★ の db_error が同じ要求で
+   // Service を走らせ直したとき、その書きの transaction にも記録を入れる。印は埋めの文が DB の order に替えたので、
+   // ここでも RETURNING の order に替えた本文を置く(入口が応答と比べて、同じなら直さない)。RETURNING に order の
+   // 列が無かった(値が元のまま)ときは印の本文のまま置き、入口が応答で直す
+   if(recording) {
+    let body=recording.body;
+    if(marks.every(mark=>mark.value.order!==mark.original))
+     for(const mark of marks) body=body.split(mark.quoted).join(JSON.stringify(c.encode(mark.value.order)));
+    keyed.recorded={...recording,body};
+   }
    pending.length=0;
   }};
   return ctx;
+ }
+ // 並びの Entity を作った書きの記録:作った値の order を印(`yumemi-idempotency-order:<UUID>` の字)に替えて組み直し、
+ // 印の外の字が order を置いた記録と同じとき(★ の api_encode・respond が order を加工していない)だけ印の記録を使う。
+ // 応答に出ない(印が本文に無い)作った値は埋めない。返すのは [記録, 埋める印]
+ async function orderMarked(pending,keyed,outcome,plain) {
+  const marks=[];
+  for(const operation of pending) {
+   const value=operation.created;
+   if(!operation.orderFill||!value||Array.isArray(value)||operation.returned||typeof value!=='object'||!('order' in value)) continue;
+   const token='yumemi-idempotency-order:'+crypto.randomUUID();
+   marks.push({operation,value,original:value.order,token,quoted:JSON.stringify(token),placeholder:JSON.stringify(c.encode(value.order))});
+  }
+  if(!marks.length) return [plain,[]];
+  let marked=null;
+  for(const mark of marks) mark.value.order=mark.token;
+  try { marked=await keyed.encode(outcome); } catch(_error) { marked=null; }
+  finally { for(const mark of marks) mark.value.order=mark.original; }
+  if(!marked||marked.status!==plain.status||typeof marked.body!=='string') return [plain,[]];
+  const shown=marks.filter(mark=>marked.body.includes(mark.quoted));
+  let back=marked.body;
+  for(const mark of marks) back=back.split(mark.quoted).join(mark.placeholder);
+  if(!shown.length||back!==plain.body) return [plain,[]];
+  return [marked,shown];
  }
  async function invoke(state) {
   await loadRoot(state);

@@ -14,6 +14,11 @@
 // - 逃げ道:`<yumemi-escape name>` の接続で `mount(element)` を呼び、外れたら戻りの関数を呼ぶ
 // - dialog:invoker commands(`command` / `commandfor`)の無い browser では click で `showModal()` / `close()` を代わる
 // - notice:After の文言を sessionStorage の 1 つの鍵に置き、移った先(読み直した先)の `[data-yumemi-notice]` に 1 回出す
+// - 冪等キー(0.13):書きの送り(GET でも読みでも上げ口でもない)は、送る Args にキー(UUID)を 1 つ作って
+//   `Idempotency-Key` に載せる。結果の分からない失敗(5xx・網の失敗)はキーと入力を保ち、失敗の After に移らない
+//   ── 同じ Args の再送は同じキーで、server は 1 本目の応答を返す。答えが出たら(2xx・4xx)キーを捨て、Args が
+//   変われば新しいキー。file の欄の上げは File ごとに上げた key を同じ間だけ保ち、再送では上げ直さない(key が
+//   変わると Args が変わり、キーも変わる)
 
 const noticeKey = "yumemi:notice";
 const stateNames = ["waiting", "ok", "error"];
@@ -171,7 +176,17 @@ function collect(controls, service) {
   return values;
 }
 
-async function buildArgs(spec, initial, controls, serviceName) {
+/// file の欄の上げ。上げた File の key を `uploaded`(File -> key)に保ち、同じ File の再送では上げ直さない
+/// ── 上げ口が上げるたびに新しい key を返すと、Args が変わって冪等キーも変わり、再送が別の書きになる
+async function uploadOnce(file, uploaded) {
+  const kept = uploaded?.get(file);
+  if (kept !== undefined) return kept;
+  const key = await upload(file);
+  uploaded?.set(file, key);
+  return key;
+}
+
+async function buildArgs(spec, initial, controls, serviceName, uploaded = null) {
   const collected = collect(controls, serviceName);
   const args = {};
   for (const arg of spec.args) {
@@ -181,7 +196,7 @@ async function buildArgs(spec, initial, controls, serviceName) {
       const items = collected.get(arg.name);
       const files = items.filter((item) => typeof File !== "undefined" && item instanceof File);
       // 上げ口(`spec.upload`)は送りそのものが file を本文で上げるので、ここで先に上げない(2 回上がる)
-      if (files.length > 0) { if (!spec.upload) raw = await upload(files[0]); }
+      if (files.length > 0) { if (!spec.upload) raw = await uploadOnce(files[0], uploaded); }
       else if (isList) raw = items;
       else if (items.length > 0) raw = items[items.length - 1];
       else if (!arg.blob) raw = "";
@@ -191,7 +206,36 @@ async function buildArgs(spec, initial, controls, serviceName) {
   return args;
 }
 
-async function call(spec, args, signal, uploadFile) {
+/// 書きの送りか(キーを載せる送り)。読みの Service・GET・上げ口は載せない
+function keyed(spec) {
+  return !spec.read && !spec.upload && spec.method !== "GET";
+}
+
+/// 送りの結果が分からない(server が書いたかどうか分からない)失敗か。キーと入力を保つ
+function unsettled(outcome) {
+  return outcome.network === true || outcome.status >= 500;
+}
+
+function newKey() {
+  if (typeof globalThis.crypto?.randomUUID === "function") return globalThis.crypto.randomUUID();
+  const bytes = globalThis.crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 15) | 64;
+  bytes[8] = (bytes[8] & 63) | 128;
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+/// 送りのキー。保っているキーの Args と同じならそのキー、違えば(入力が変わった)新しいキー
+function keyFor(pending, service, args) {
+  const body = JSON.stringify(args);
+  const kept = pending.get(service);
+  if (kept && kept.body === body) return kept.key;
+  const key = newKey();
+  pending.set(service, { body, key });
+  return key;
+}
+
+async function call(spec, args, signal, uploadFile, key = null) {
   if (spec.upload) {
     // 上げ口:file があれば本文に file、無ければ `from` の URL を写す(`{from}` を JSON で)
     if (uploadFile) {
@@ -224,10 +268,12 @@ async function call(spec, args, signal, uploadFile) {
     const text = query.toString();
     if (text !== "") path = `${path}?${text}`;
   }
+  const headers = { "content-type": "application/json", accept: "application/json" };
+  if (key !== null) headers["idempotency-key"] = key;
   return fetch(path, {
     method: spec.method,
     credentials: "same-origin",
-    headers: { "content-type": "application/json", accept: "application/json" },
+    headers,
     // attached の口で本文の欄が無いものは 0.11 と同じく null を送る
     body: spec.method === "GET" ? undefined : spec.entry && spec.args.length === 0 ? "null" : JSON.stringify(args),
     signal,
@@ -263,6 +309,10 @@ class YumemiInteractive extends ElementBase {
     this.yumemiReading = null;
     this.yumemiSending = false;
     this.yumemiCleanup = null;
+    // 書きの送りの保っているキー(Service の名 -> {body, key})。答えの出ない失敗の間だけ持つ
+    this.yumemiKeys = new Map();
+    // 書きの送りの file の欄の上げた key(Service の名 -> WeakMap(File -> key))。キーと同じ間だけ持つ
+    this.yumemiUploads = new Map();
   }
 
   get yumemiInitial() {
@@ -323,29 +373,44 @@ class YumemiInteractive extends ElementBase {
     this.yumemiReading = null;
     this.yumemiSending = true;
     const initial = this.yumemiInitial[service] ?? {};
+    const withKey = keyed(serviceSpec);
     let outcome;
     try {
       const fileControl = serviceSpec.upload ? controls.find((control) => control.type === "file") : null;
-      const args = await buildArgs(serviceSpec, initial, controls, service);
+      let uploaded = null;
+      if (withKey) {
+        uploaded = this.yumemiUploads.get(service) ?? new WeakMap();
+        this.yumemiUploads.set(service, uploaded);
+      }
+      const args = await buildArgs(serviceSpec, initial, controls, service, uploaded);
+      const key = withKey ? keyFor(this.yumemiKeys, service, args) : null;
       setStates(this, ["waiting", `sent-${service}`]);
       this.yumemiBusy(form, true);
-      outcome = await this.yumemiCall(serviceSpec, args, null, fileControl?.files?.[0]);
+      outcome = await this.yumemiCall(serviceSpec, args, null, fileControl?.files?.[0], key);
     } catch (error) {
-      outcome = { ok: false, value: { code: error?.code ?? "network_error" } };
+      // fetch が投げた(網の失敗)。code の付いた失敗(上げ口の `no file`)は送っていないので答えの出た失敗。
+      // file の欄の先の上げ(`upload`)の失敗は code が無く、網の失敗と同じに入力を保つ(キーはまだ作っていない)
+      outcome = { ok: false, network: error?.code === undefined, value: { code: error?.code ?? "network_error" } };
     } finally {
       this.yumemiSending = false;
       this.yumemiBusy(form, false);
     }
+    // 答えが出たらキーを捨てる。結果の分からない失敗はキーと入力を保ち、失敗の After(読み直し・移動)に移らない
+    const kept = withKey && !outcome.ok && unsettled(outcome);
+    if (withKey && !kept) {
+      this.yumemiKeys.delete(service);
+      this.yumemiUploads.delete(service);
+    }
     this.yumemiDone(service, serviceSpec, outcome);
     // 失敗の本文は Out でないので、error 側の穴は埋めない(生成器の第 15 条が穴のある route を止める)
-    if (!serviceSpec.read) follow(outcome.ok ? serviceSpec.ok : serviceSpec.error, outcome.ok ? outcome.value : null);
+    if (!serviceSpec.read && !kept) follow(outcome.ok ? serviceSpec.ok : serviceSpec.error, outcome.ok ? outcome.value : null);
   }
 
-  async yumemiCall(serviceSpec, args, signal, file) {
-    const response = await call(serviceSpec, args, signal, file);
+  async yumemiCall(serviceSpec, args, signal, file, key = null) {
+    const response = await call(serviceSpec, args, signal, file, key);
     let value = null;
     try { value = await response.json(); } catch (_error) { value = response.ok ? null : { code: "request_failed" }; }
-    return { ok: response.ok, value };
+    return { ok: response.ok, status: response.status, value };
   }
 
   yumemiDone(service, serviceSpec, outcome) {
@@ -479,4 +544,4 @@ export function start({ components = {}, escapes = {}, go = null, reload = null 
   globalThis.navigation?.addEventListener?.("navigatesuccess", () => showNotice());
 }
 
-export const internals = { setStates, currentStates, wireValue, fillPath, stateNames };
+export const internals = { setStates, currentStates, wireValue, fillPath, stateNames, keyed, unsettled, keyFor, call, uploadOnce };

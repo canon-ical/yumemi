@@ -24,7 +24,7 @@ const actors={
  widget_list:{kind:'sum',module:allow_article,variants:[['staff','StaffActor']],party:false,any:true},
 };
 const verbs={
- create_article:{key:'verb/create_article',tuple:false,params:[['id'],['f','title','title'],['f','body','body'],['f','version',null],['f','category',null],['at']],created:['article','ArticleCreated',['id','title','body','version','=order','category'],'slug'],before:[['verb/create_article_lock',[['f','category',null]]]]},
+ create_article:{key:'verb/create_article',tuple:false,params:[['id'],['f','title','title'],['f','body','body'],['f','version',null],['f','category',null],['at']],created:['article','ArticleCreated',['id','title','body','version','=order','category'],'slug','verb/create_article_idempotency_order'],before:[['verb/create_article_lock',[['f','category',null]]]]},
  delete_article_by_title:{key:'verb/delete_article_by_title',tuple:false,params:[['a',0,'title']]},
  create_articles:{key:'verb/create_articles',tuple:true,params:[['ja',0],['a',1,null]]},
  update_article_body:{key:'verb/update_article_body',tuple:true,params:[['a',0,'slug'],['a',1,null],['a',2,'body']]},
