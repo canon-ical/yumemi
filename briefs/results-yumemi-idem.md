@@ -21,7 +21,7 @@
 - **何を保存するか**:送った応答の status・content-type・本文の字だけ(`{status,type,body}`)。応答に出さない値は入らない。引くのは (party, key) で、party は session・API key の party、無ければ browser の印 `browser:<id>`、どちらも無ければ `anonymous` の 1 つの枠
 - **409 の比べ**:`request_hash` = Service の名と、decode の段の欄(query・JSON 本文・path の穴を合わせ、鍵を並べ替えた JSON)の SHA-256。違えば 409 `idempotency_conflict`(業務の `conflict` と分けた)
 - **失敗の後の引き直し**:キーのある書きが落ちたとき(23505・commit の後の 503・業務の失敗)は記録をもう 1 度引き、あれば 1 本目の応答を返す。引けなければ元の失敗。commit の後に応答だけ失った要求も、同じ要求の中で DB に届けば 200 になる(下の (d'))
-- **RETURNING で埋まる欄**(並びの Entity の `order`、★ の `returned`)は transaction の前には分からない。最終の応答が記録と違えば transaction の直後に `framework/idempotency_repair` で直す。**直しの前に落ちると、再投稿の応答の `order` は 0 のまま**(行は正しい)。README に書いた
+- **RETURNING で埋まる欄**(並びの Entity の `order`、★ の `returned`)は transaction の前には分からない。最終の応答が記録と違えば transaction の直後に `framework/idempotency_repair` で直す。**直しの前に落ちると、再投稿の応答の `order` は 0 のまま**(行は正しい)。README に書いた(r2:生成の `order` は同じ transaction で埋める形にした。下の「## r2」)
 - **client**:書きの送り(読み・GET・上げ口でない)は Args ごとに UUID を作って `Idempotency-Key` に載せる。5xx と網の失敗はキーと入力を保ち、**失敗の After(読み直し・移動)に移らない**(読み直すと入力が消えるため)。2xx・4xx でキーを捨て、Args が変われば新しいキー。保つのは要素の上(頁を読み直せば入力と一緒に消える)
 - **保持期間**:Worker の env `IDEMPOTENCY_RETENTION_HOURS`(正の数、既定 24)。消しは生成の `shell.mjs` の scheduled が式によらず起動のたびに呼ぶ `purgeIdempotency`。app の `db/queries/framework/idempotency_sweep.sql` が既定の文に勝つ
 - **接続先**:`neon()` は送り先を引数で受けない(1.0.2 の `index.mjs` は `neonConfig.fetchEndpoint` だけを読む)ので、env にあるときだけ `neonConfig.fetchEndpoint` を替え、無いときは触らない(test が `neonConfig` を自分で替える形も壊さない)
@@ -117,3 +117,82 @@ main `130635971`(yumemi 0.12.2 の lock)を `git archive` で `.scratch/musearch
 - client のキーは要素の上に持つ。頁を読み直す・tab を閉じると、入力と一緒にキーも消える(sessionStorage に保つ形は今回の外)。★ の逃げ道(musearch の編集器など、自前の fetch)はキーを持たない ── 載せるなら逃げ道の側で `Idempotency-Key` を作る
 - RETURNING で埋まる欄の記録の直しは transaction の外(上の「設計の選択」)
 - `anonymous` の枠は、同じキーと同じ本文を知る別の匿名の要求には記録の応答を返す(キーは client の UUID なので、知るのは送った本人だけの前提)
+
+## r2 ── 柏木の P1-1・P1-2(真壁、`BRIEF-yumemi-idem-r2.md`)
+
+基点 `2a68782`(BRIEF は `b7396ce`)。checkpoint は `6b41cb9`(P1-2)・`29ae0ea`(P1-1)。証跡は `build/idem-r2-*.txt`(git の外)、作業域は `.scratch/r2/`・`.scratch/notes-run/`(`worker-r2.mjs`・`wrangler-r2.jsonc` を足した)・`.scratch/musearch/`。
+
+### 贄川さんに確認が必要 ── ★ の `returned` は yumemi の側だけでは閉じられない
+
+P1-1 のうち、**生成の並びの `order` は閉じた**(下)。**★ の `returned`(musearch の `create_ledger_store`・`update_article_title`・`put_store_schedule`)は、commit の後に応答を失うと、再投稿は今までどおり直す前の値を返す**。理由は 2 つ:
+
+- 取引の中で埋められない:★ の値は JS の閉包(`operation.returned=(value,row)=>…`)が行から作る。transaction は非対話(Neon の HTTP・Dleam の前段とも 1 回で全文)なので、閉包を transaction の途中で走らせられない。★ の SQL は 3 本とも頭が `WITH … INSERT/UPDATE` で、外から CTE で包んで RETURNING を記録に写すこともできない(PG は data-modifying の WITH を入れ子にできない)
+- replay で組み直せない:閉包は 1 本目の要求の stage の中で作られ、再投稿の要求には無い。行を引き直す SQL も yumemi は知らない(`create_ledger_store` の鍵は DB が決める)
+
+選べる形:
+
+1. **0.13.0 は生成の `order` だけ閉じ、★ の `returned` は残りとして README に書く**(今の形。README の「What is recorded」に書いた)。応答を失わなければ 1 本目が直す
+2. ★ に任意の口を足す:★ が記録を埋める文を渡す(`operation.idempotencyFill = {key, params}`、生成の `_idempotency_order` と同じ印の置き換え)。★ の書き方を変えないで済むのは「足さない ★ は 1. のまま」という意味でだけで、musearch の 3 か所を閉じるには ★ に手が入る
+3. 直す前の記録の replay を 503 で返す ── 応答を失った形では直す人がいないので、その記録の再投稿が保持期間まで 503 になる。取らないほうがよい
+
+真壁の案は 1.(2. は musearch の便で要るときに)。決まるまで squash していない。
+
+### P1-2:file の欄の上げを File ごとに保つ(閉じた)
+
+- `interactive.mjs`:書きの送り(キーを載せる送り)の file の欄は `uploadOnce` で上げ、上げた key を `yumemiUploads`(Service の名 -> WeakMap(File -> key))に保つ。同じ File の再送は上げ直さず、同じ Args・同じキーで送る。答えが出たら(2xx・4xx)キーと一緒に捨てる。別の File を選べば上げて新しいキー。上げの途中で落ちた分は、上がった File の key だけ残る
+- **workerd(`build/idem-r2-blob-probe.txt`)**:notes を `wrangler dev --local`、shim を `DLEAM_SQL_ENDPOINT` に、`/api/blobs` は test の Worker が上げるたびに新しい `blob/<UUID>` を返す(musearch の R2 の上げ口と同じ振る舞い)。生成の client(`interactive.mjs` を node の偽の DOM で動かす)で、file の欄(`blob: true`、生成の `bind_file` と同じ spec)のある `POST /api/notes` を送る。1 回目は shim が COMMIT の後に応答を捨て(then=2、引き直しも届かない)、client に 503。同じ入力をもう 1 回送る
+
+```
+== before (2a68782 の interactive.mjs)
+#1 send: upload then POST -> 503; key=bf5bbc0a…; body={"title":"r2 file before","body":"blob/325554e6-…"}; reload followed=false; committed rows=1
+#2 resend, same input (same File) -> 200; same key false; same Args false; body={"title":"r2 file before","body":"blob/20245621-…"}
+rows with title 'r2 file before' = 2; uploads to /api/blobs = 2
+== after (本作業木の interactive.mjs)
+#1 send: upload then POST -> 503; key=f6cf6db5…; body={"title":"r2 file after","body":"blob/fb5775bc-…"}; reload followed=false; committed rows=1
+#2 resend, same input (same File) -> 200 (replayed); same key true; same Args true; body={"title":"r2 file after","body":"blob/fb5775bc-…"}
+rows with title 'r2 file after' = 1; uploads to /api/blobs = 1
+```
+
+- 柏木の読みどおり、直す前は 2 件・上げ 2 回・キーが変わる。直した後は 1 件・上げ 1 回・replay
+- client の check に 4 項(503 の後の再送で上げ直さない、同じ Args・同じキー、答えの後は上げ直して新しいキー、503 の後に別の File は上げて新しいキー)。14 項 ok(`build/idem-r2-check-client.txt`)、直す前の client で回すと 10 ok・4 NG(`build/idem-r2-check-client-control.txt`)
+- `yumemi_gen_test` の文字列の期待 1 行を `uploadOnce` に替えた(コメントに理由)。README の client の項を書き直した
+
+### P1-1:生成の並びの `order` を記録に同じ transaction で埋める
+
+選んだ形:**取引の中に入れる**。runtime は記録の本文で作った値の `order` を印(`"yumemi-idempotency-order:<UUID>"`)にして組み、作る文の後に生成の `verb/create_<entity>_idempotency_order` を 1 文足す。その文が記録の本文の印を作った行の `order` の字に替える。
+1. commit した時点で記録が応答と同じになる。応答を失っても直しの段が要らず、replay は記録を返すだけ(読みが増えない)
+2. replay で行から組み直すと、作った後に並べ替えた行は今の `order` を返す。同じ応答にならない。取引の中なら RETURNING と同じ値
+3. 生成の SQL は yumemi が表と鍵を知っている。★ の `returned` はどちらの形でも閉じない(上の確認)
+
+- 生成器(`verb.gleam`):並びの Entity の `create_<entity>` に `create_<entity>_idempotency_order` を 1 本(`UPDATE framework.idempotency SET result=jsonb_set(result,'{body}',to_jsonb(replace(result->>'body',$3,COALESCE((SELECT "order"::text FROM app.<表> WHERE <鍵>=$4),$5)))) WHERE party=$1 AND key=$2`)、verb の表の `created` の 5 つ目にその道。`create_<entity>` を ★ が手で持つ Entity には足さない(`emits`)。runtime は道の SQL が無ければ使わない(古い生成物は今までどおり)
+- runtime(`finish`・`orderMarked`):印を置いた本文と、印を元の `order`(0)の字に戻した本文が、元の記録と同じときだけ印の記録を使う(★ の `api_encode`・`respond` が `order` を加工していれば今までの直しの道)。応答に出ない作った値は埋めない。`recorded` は RETURNING の `order` で印を替えた本文にして、入口は応答と比べて同じなら直さない。RETURNING に `order` が無ければ印の本文のまま置き、入口が応答で直す
+- server の check:order の 2 項を 3 項に(作る文の後に埋めの文がある、commit の時点で記録が応答と同じで直しが走らない、**commit の後に応答を失った再投稿が DB の `order` を返す**)。30 項 ok(`build/idem-r2-check-server.txt`)。r1 の runtime に差し替えて回すと 27 ok・3 NG、応答を失った再投稿は `"order":0`(`build/idem-r2-check-server-control.txt`)
+- 生成器の test 1 本(article の生成物に埋めの SQL と `created` の 5 つ目、notes には無い)
+- **本物の PG**(`build/idem-r2-fill-pg.txt`):article の fixture の生成 SQL(`create_article_lock`・`create_article`・`create_article_idempotency_order`)を PG 16 の 1 つの transaction で runtime と同じ順に打った。表は create_article が触る列だけ作った(fixture に schema.sql が無い)
+
+```
+first: RETURNING order=0; record body={"slug":"first","title":"t first","order":0}; status=200; token left=false
+second: RETURNING order=1; record body={"slug":"second","title":"t second","order":1}; status=200; token left=false
+third: RETURNING order=2; record body={"slug":"third","title":"t third","order":2}; status=200; token left=false
+missing row: record body={"order":0}
+```
+
+- musearch の写しの埋めの 3 本(`create_link`・`create_link_import_candidate`・`create_roster`)は、DDL を当てた PG で `PREPARE` が通る(`build/idem-r2-ms-prepare.txt`)
+- workerd で並びの Entity の書きは叩いていない(notes に並びの Entity が無い)。生成 SQL の確かめは上の PG、応答を失う形は server の check
+
+## DDL(r2)
+
+無し。`framework.idempotency` の表・列・制約・索引は r1 のまま。足した `verb/create_<entity>_idempotency_order` は書きの transaction の中の UPDATE で、DDL ではない。
+
+## 確かめ(r2)
+
+- root:`npm ci` exit 0(`build/idem-r2-npm-ci.txt`、esbuild の allow-scripts の警告だけ)。`gleam test` **`471 passed, no failures`**(`build/idem-r2-test-final.txt`、末尾の字で見た。r1 の 470 + 生成器の test 1 本)。`gleam format --check src test` exit 0
+- 子の node の check:server 30・client 14・purge 3、全部 ok(`build/idem-r2-check-{server,client,purge}.txt`)
+- fixture の生成器:notes・article・cms とも 1 回目 exit 0、`git add` の後の 2 回目 exit 0・未 stage の差 0 行・未追跡 0(`build/idem-r2-gen-*-final-{1,2}.txt`)。生成物の差は article・cms の `sql.mjs` に埋めの 1 本、`runtime.mjs` の `created` の 5 つ目、`client.mjs`(同梱の interactive)
+- workerd(notes、`build/idem-r2-notes-probe-final.txt`):r1 の probe を最後の runtime で回し直した(表を空にしてから)。(a) 1 行・同じ応答、(b) 409、(c) キー無しは 2 行、(d) 応答を捨てた再投稿は commit 済みの id で 1 行、(d') 200 replay、並んだ 2 本は 1 行、(e) shim の数が 56 -> 57、env 無しは 503 で shim は 57 -> 57。r1 と同じ
+- musearch の写し:yumemi は本作業木への path 依存のまま、5 面の `src/gen` を消して api から生成。exit 0・停止コード 0・2104 ファイル、2 回目 exit 0・差 0 行・未追跡 0(`build/idem-r2-ms-gen-{1,2}.txt`)。r1 からの差は `api/src/gen/sql.mjs` に埋めの 3 本、`api/src/gen/runtime.mjs` の 3 行、4 面の `client.mjs`
+  - www:build exit 0、test **452/452**。muses:build exit 0、test **514/514**
+  - api:auth の build exit 0。PG 55955 に `api/db/framework/idempotency.sql`(`framework` 9 -> 10、`build/idem-r2-ms-ddl.txt`)、`npm test` **1768/1768**(`build/idem-r2-ms-api-test.txt`)。**1 回目は 1767/1768**:`SQL:staff_screen_rejects/given_up` の inside が落ちた。r1 の test の残りの chat(318 行)が同じ DB にあり、引数の無い一覧の頁から作った chat が外れた。DB を作り直して回すと 1768/1768。1 回の test で chat が 159 行残る。この SQL は今回触っていない
+- PG(notes 55952・musearch 55955)・shim・wrangler は止めた
+
+確かめていないこと:実際の browser での file の欄(node の偽の DOM と `File` で回した)。workerd での並びの Entity の書き。musearch の api の test はキーを送らないので、冪等の道(埋めの文を含む)は通っていない。
