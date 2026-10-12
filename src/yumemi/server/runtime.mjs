@@ -276,11 +276,13 @@ export function runtime(spec) {
  // 読みの穴の値の並び(args の順)
  const argValues=(entry,input)=>entry.args.length===0?[]:entry.args.length===1?[input]:[...input];
  // 頁の大きさ。size が穴(keyset の `sizeArg` は args の番号、0.12.2)なら、`readParams` が SQL の `LIMIT $n + 1` に
- // 渡すのと同じ値。定数の size は keyset の size のまま
+ // 渡すのと同じ値。定数の size は keyset の size のまま。穴の size が 1 未満なら 400(field は穴の名 `sizeField`)
  function pageSize(entry,input) {
   const index=entry.keyset?.sizeArg;
   if(index==null) return entry.keyset?.size;
-  return Number(encodeValue(argValues(entry,input)[index],entry.args[index][1]));
+  const size=Number(encodeValue(argValues(entry,input)[index],entry.args[index][1]));
+  if(!(size>=1)) throw Object.assign(new Error('invalid_argument'),{status:400,field:entry.keyset.sizeField??'size'});
+  return size;
  }
  async function readParams(entry,input,state,x) {
   const values=argValues(entry,input);
@@ -388,8 +390,10 @@ export function runtime(spec) {
     const label=entry.out[0]==='one'?entry.out[1][1]:null;
     return decodeRows(entry.out,Array.isArray(value)?value:[{[label]:value}],entry.keyset);
    }
+   // size は SQL より先に見る(1 未満を DB へ流さない)
+   const size=pageSize(entry,input);
    const rows=await run(db,entry.key,await readParams(entry,input,state,x));
-   return decodeRows(entry.out,rows,entry.keyset,pageSize(entry,input));
+   return decodeRows(entry.out,rows,entry.keyset,size);
   },relation:relationCapability(db,state),async call(name,input) {
    try {
     if(state.connectors?.[name]) return await state.connectors[name](input);

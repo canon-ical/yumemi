@@ -1,4 +1,4 @@
-//// GENERATED from service commit continuations / framework outbox [sha256:fe4ede23cb20] — 手で編集しない
+//// GENERATED from service commit continuations / framework outbox [sha256:54f6b8da8abb] — 手で編集しない
 
 import yumemi/io.{type Context, type Promise}
 import yumemi/step.{type Committed, type Outcome, type Step}

@@ -1,4 +1,4 @@
-//// GENERATED from service.note_create [sha256:0bbad745de36] — 手で編集しない
+//// GENERATED from service.note_create [sha256:88b4897017b3] — 手で編集しない
 
 import gen/allow/note as allow
 import yumemi/step

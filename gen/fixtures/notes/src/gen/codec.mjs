@@ -1,4 +1,4 @@
-//// GENERATED from entity / types declarations [sha256:fe4ede23cb20] — 手で編集しない
+//// GENERATED from entity / types declarations [sha256:54f6b8da8abb] — 手で編集しない
 import { Some, None } from '../../gleam_stdlib/gleam/option.mjs';
 import { toList, List } from '../gleam.mjs';
 import * as party from '../../yumemi/yumemi/party.mjs';

@@ -1,4 +1,4 @@
-//// GENERATED from entity declarations [sha256:1603a38d9df4] — 手で編集しない
+//// GENERATED from entity declarations [sha256:7e3f483b7578] — 手で編集しない
 
 import gen/draft/note as draft_note
 import gen/types/note_body.{type NoteBody}

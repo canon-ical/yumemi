@@ -745,15 +745,20 @@ fn keyset(app: App, select: model.Select) -> String {
     model.LPaged(size: model.OpNum(size), ..) -> size
     _ -> 20
   }
-  // size が穴(`Paged(size: Param(..))`)なら、その穴の args の番号(0.12.2)。runtime は SQL の `LIMIT $n + 1` に
-  // 渡したのと同じ値で頁を切る。固定の size で切ると limit≠20 で limit+1 件返り、next が null だった
+  // size が穴(`Paged(size: Param(..))`)なら、その穴の args の番号と名(0.12.2)。runtime は SQL の `LIMIT $n + 1` に
+  // 渡したのと同じ値で頁を切る。固定の size で切ると limit≠20 で limit+1 件返り、next が null だった。
+  // 1 未満の size は SQL を流す前に 400 `invalid_argument`、field はこの名
   let size_arg = case select.limit {
-    model.LPaged(size: model.OpParam(name), ..) ->
+    model.LPaged(size: model.OpParam(name), ..) -> {
+      let label = naming.snake(name)
       typing.params(app, select)
       |> list.index_map(fn(param, index) { #(param.label, index) })
-      |> list.key_find(naming.snake(name))
-      |> result.map(fn(index) { ",sizeArg:" <> int.to_string(index) })
+      |> list.key_find(label)
+      |> result.map(fn(index) {
+        ",sizeArg:" <> int.to_string(index) <> ",sizeField:'" <> label <> "'"
+      })
       |> result.unwrap("")
+    }
     _ -> ""
   }
   let directions =

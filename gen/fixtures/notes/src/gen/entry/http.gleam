@@ -1,4 +1,4 @@
-//// GENERATED from entry.gleam / service declarations [sha256:487ef1d2cce1] — 手で編集しない
+//// GENERATED from entry.gleam / service declarations [sha256:4551086290a7] — 手で編集しない
 
 import entry
 import yumemi/entry.{type Entry} as entry_types

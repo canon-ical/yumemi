@@ -1303,7 +1303,7 @@ fn create_many_sql(entity: model.Entity, app: model.App) -> String {
 }
 
 fn plain_create_many_sql(entity: model.Entity, app: model.App) -> String {
-  let fields = create_fields(entity)
+  let fields = many_create_fields(entity)
   case fields {
     [] -> create_sql(entity, app)
     _ -> {
@@ -1334,7 +1334,7 @@ fn ordered_create_many_sql(
   app: model.App,
   ordered: model.OrderedBy,
 ) -> String {
-  let fields = create_fields(entity)
+  let fields = many_create_fields(entity)
   let #(first_order, _lo, _hi) = order_span(entity, app, ordered)
   let first_order_text = int.to_string(first_order)
   let input_fields =
@@ -2055,15 +2055,19 @@ fn put_sql(entity: model.Entity, app: model.App) -> String {
   }
 }
 
+/// 1 件を作る INSERT の列。`auto_key` の key も列に入れる ── Draft には無く、runtime が要求の seed から
+/// UUID を採番して穴に渡す(0.12.2。DB の DEFAULT に任せると、commit の前に組む作った値の key が無く 400 だった)。
 fn create_fields(entity: model.Entity) -> List(model.FieldDef) {
-  list.append(base_create_fields(entity), initial_phase_fields(entity))
+  list.append(persisted_fields(entity), initial_phase_fields(entity))
 }
 
-fn base_create_fields(entity: model.Entity) -> List(model.FieldDef) {
+/// CreateMany の INSERT の列。入力 JSON は Draft の欄だけなので、`auto_key` の key は列に書かず DB の DEFAULT に任せる。
+fn many_create_fields(entity: model.Entity) -> List(model.FieldDef) {
   persisted_fields(entity)
   |> list.filter(fn(field) {
     !list.contains(entity.auto_key, prop_for_field(entity, field.name))
   })
+  |> list.append(initial_phase_fields(entity))
 }
 
 fn initial_phase_fields(entity: model.Entity) -> List(model.FieldDef) {
@@ -2656,10 +2660,7 @@ fn create_row(
                 ]),
               )
             _, _, _ ->
-              case
-                list.contains(entity.key_props, prop)
-                && !list.contains(entity.auto_key, prop)
-              {
+              case list.contains(entity.key_props, prop) {
                 True -> Ok(js_array([js_text("id")]))
                 False ->
                   case

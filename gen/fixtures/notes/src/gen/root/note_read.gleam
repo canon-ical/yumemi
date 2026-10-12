@@ -1,4 +1,4 @@
-//// GENERATED from service.note_read [sha256:b3e22ef37cf3] — 手で編集しない
+//// GENERATED from service.note_read [sha256:abe12db1dfce] — 手で編集しない
 
 import entity/note
 import gen/allow/note as allow

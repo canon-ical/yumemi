@@ -1,4 +1,4 @@
-//// Service note_create ── 覚え書きを 1 件足す。誰でも書ける。id は要求の seed(UUID)から作る。
+//// Service note_create ── 覚え書きを 1 件足す。誰でも書ける。id は渡さない(Note の `auto_key`)。
 
 // ★ src/service/note_create.gleam
 import gen/allow/note as allow
@@ -6,7 +6,6 @@ import gen/draft/note.{type NoteCreated, NoteDraft} as note_draft
 import gen/face.{type Face, Api}
 import gen/root/note_create.{type Actor, type Root, type Service, Service}
 import gen/types/note_body.{type NoteBody}
-import gen/types/note_id
 import gen/types/note_title.{type NoteTitle}
 import gen/verb
 import yumemi/effect.{type Effect, Write}
@@ -34,10 +33,8 @@ pub fn logic(
   it: Root,
   args: Args,
 ) -> Step(NoteCreated, Error, Start) {
-  let assert Ok(id) = note_id.parse(it.seed)
   use created <- step.apply(
     verb.create_note(NoteDraft(
-      id: id,
       title: args.title,
       body: args.body,
       created_at: it.at,

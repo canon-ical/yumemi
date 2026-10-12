@@ -1,4 +1,4 @@
-//// GENERATED from allow.note [sha256:0d6752b4a580] — 手で編集しない
+//// GENERATED from allow.note [sha256:31887c2b467d] — 手で編集しない
 
 import yumemi/party.{type PartyId}
 

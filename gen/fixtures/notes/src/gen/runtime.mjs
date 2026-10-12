@@ -1,4 +1,4 @@
-//// GENERATED from service Logic / verb / reads / outbox contracts [sha256:fe4ede23cb20] — 手で編集しない
+//// GENERATED from service Logic / verb / reads / outbox contracts [sha256:54f6b8da8abb] — 手で編集しない
 import { SQL } from './sql.mjs';
 import * as c from './codec.mjs';
 import { runtime } from '../../yumemi/yumemi/server/runtime.mjs';
@@ -24,7 +24,7 @@ const verbs={
 };
 const manualVerbs={names:new Set([]),stage:()=>{throw new Error('no manual verb')}};
 const reads={
- 'note_list/items':{key:'note_list/items',args:[['enc'],['cursor']],allow:[],out:['page',['entity','note']],keyset:{size:20,sizeArg:0,uniform:true,columns:[['created_at','timestamptz'],['id','value']]}},
+ 'note_list/items':{key:'note_list/items',args:[['enc'],['cursor']],allow:[],out:['page',['entity','note']],keyset:{size:20,sizeArg:0,sizeField:'limit',uniform:true,columns:[['created_at','timestamptz'],['id','value']]}},
 };
 const readAliases={
 };

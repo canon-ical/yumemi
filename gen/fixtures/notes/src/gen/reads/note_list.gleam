@@ -1,4 +1,4 @@
-//// GENERATED from service.note_list.items [sha256:66a620776caf] — 手で編集しない
+//// GENERATED from service.note_list.items [sha256:b5ae9fbf02b1] — 手で編集しない
 
 import entity/note
 import gen/root/note_list.{type Root}

@@ -1,4 +1,4 @@
-//// GENERATED from entry.entries / service declarations / framework dispatch [sha256:fe4ede23cb20] — 手で編集しない
+//// GENERATED from entry.entries / service declarations / framework dispatch [sha256:54f6b8da8abb] — 手で編集しない
 import { Ok, Error } from '../gleam.mjs';
 import { registry } from './registry.mjs';
 import { attached } from './attached.mjs';

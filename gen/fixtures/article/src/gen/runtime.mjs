@@ -47,7 +47,7 @@ const verbs={
 };
 const manualVerbs={names:new Set([]),stage:()=>{throw new Error('no manual verb')}};
 const reads={
- 'article_list/items':{key:'article_list/items',args:[['enc'],['cursor']],allow:['clauses'],out:['page',['tuple',[['entity','article'],['phase','article']]]],keyset:{size:20,sizeArg:0,uniform:true,columns:[['entered_published','timestamptz'],['slug','value']]}},
+ 'article_list/items':{key:'article_list/items',args:[['enc'],['cursor']],allow:['clauses'],out:['page',['tuple',[['entity','article'],['phase','article']]]],keyset:{size:20,sizeArg:0,sizeField:'limit',uniform:true,columns:[['entered_published','timestamptz'],['slug','value']]}},
  'article_list/counts':{key:'article_list/counts',args:[],allow:['clauses'],out:['list',['tuple',[['text','group'],['number','count']]]]},
  'widget_list/items':{key:'widget_list/items',args:[],allow:['clauses'],out:['list',['tuple',[['entity','article'],['phase','article']]]]},
 };

@@ -1,4 +1,4 @@
-//// GENERATED from entry.entries / server.gleam / framework Cloudflare adapter [sha256:fe4ede23cb20] — 手で編集しない
+//// GENERATED from entry.entries / server.gleam / framework Cloudflare adapter [sha256:54f6b8da8abb] — 手で編集しない
 import { handlers, appSystem, durableObject } from '../../yumemi/yumemi/server/worker.mjs';
 import { database } from '../../yumemi/yumemi/server/driver.mjs';
 import { dispatch } from './entry/http.mjs';

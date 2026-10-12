@@ -1,4 +1,4 @@
-//// GENERATED from service declarations / entry.gleam / server.gleam [sha256:fe4ede23cb20] — 手で編集しない
+//// GENERATED from service declarations / entry.gleam / server.gleam [sha256:54f6b8da8abb] — 手で編集しない
 import { validateWho } from '../../yumemi/yumemi/server/contracts.mjs';
 
 import * as note_create from '../service/note_create.mjs';

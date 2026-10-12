@@ -1300,19 +1300,20 @@ pub fn ordered_create_negative_range_is_accepted_and_starts_at_zero_test() {
 
 /// Draft の欄は呼び手の入力、create SQL の呼び手入力 placeholder はその数で揃える。
 /// ordered_by の採番欄を Draft に残す、または SQL 側だけ入力を増やすとこの比較が落ちる。
+/// `auto_key` の key は Draft に無く、runtime が採番して穴に渡す(0.12.2)ので、その数だけ穴が多い。
 pub fn draft_fields_match_create_sql_placeholders_test() {
   [
-    #(relation_fixture, "photo", "PhotoDraft"),
-    #(fixture, "article", "ArticleDraft"),
-    #(verb_fixture, "feature", "FeatureDraft"),
-    #(ordered_fixture, "child", "ChildDraft"),
-    #(flag_fixture, "widget", "WidgetDraft"),
+    #(relation_fixture, "photo", "PhotoDraft", 0),
+    #(fixture, "article", "ArticleDraft", 0),
+    #(verb_fixture, "feature", "FeatureDraft", 0),
+    #(ordered_fixture, "child", "ChildDraft", 0),
+    #(flag_fixture, "widget", "WidgetDraft", 1),
   ]
   |> list.each(fn(entry) {
-    let #(app_dir, module, draft_name) = entry
+    let #(app_dir, module, draft_name, auto_keys) = entry
     let draft = text_of(app_dir, "src/gen/draft/" <> module <> ".gleam")
     let create = text_of(app_dir, "db/queries/verb/create_" <> module <> ".sql")
-    draft_field_count(draft, draft_name)
+    { draft_field_count(draft, draft_name) + auto_keys }
     |> should.equal(create_sql_input_placeholder_count(create))
   })
 }
@@ -1521,6 +1522,8 @@ pub fn draft_keeps_input_keys_and_create_sql_arguments_test() {
   |> should.be_true
 }
 
+/// Draft から外すのは `auto_key` に書いた key だけ。外した key は INSERT の列に残り、runtime が採番して渡す(0.12.2。
+/// 0.12.1 は列から外して DB の DEFAULT に任せ、commit の前に組む作った値の key が無く 400 だった)。
 pub fn auto_key_is_excluded_only_by_explicit_declaration_test() {
   let draft = text_of(flag_fixture, "src/gen/draft/widget.gleam")
   string.contains(draft, "WidgetDraft(\n    name: WidgetName,")
@@ -1529,7 +1532,7 @@ pub fn auto_key_is_excluded_only_by_explicit_declaration_test() {
   let created = text_of(flag_fixture, "db/queries/verb/create_widget.sql")
   string.contains(
     created,
-    "INSERT INTO app.widget(name,place,visible,\"order\")",
+    "INSERT INTO app.widget(id,name,place,visible,\"order\")",
   )
   |> should.be_true
 }

@@ -1,4 +1,4 @@
-//// GENERATED from entity declarations [sha256:fe4ede23cb20] — 手で編集しない
+//// GENERATED from entity declarations [sha256:54f6b8da8abb] — 手で編集しない
 
 import entity/note
 import gen/types/note_id.{type NoteId}
