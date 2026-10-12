@@ -327,8 +327,9 @@ var YumemiInteractive = class extends ElementBase {
     } else {
       const code = outcome.value?.code;
       const names = ["error", `sent-${service}`];
-      if (typeof code === "string" && (serviceSpec.refused ?? []).includes(code)) names.push(`refused-${kebab(code)}`);
-      else names.push("failed");
+      const refused = typeof code === "string" && [...serviceSpec.refused ?? [], ...serviceSpec.requires ?? []].includes(code);
+      if (refused) names.push(`refused-${kebab(code)}`);
+      if (!refused || !this.querySelector?.(`[data-yumemi-when~="${service}.refused-${kebab(code)}"]`)) names.push("failed");
       setStates(this, names);
     }
   }

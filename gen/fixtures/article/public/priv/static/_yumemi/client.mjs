@@ -1,4 +1,4 @@
-// GENERATED from public/src/components/*.gleam, src/escapes/*.mjs and src/entry.gleam [sha256:34e9c810fd08] — 手で編集しない
+// GENERATED from public/src/components/*.gleam, src/escapes/*.mjs and src/entry.gleam [sha256:a5a42f5277cb] — 手で編集しない
 // public/build/dev/javascript/yumemi/yumemi/front/interactive.mjs
 var noticeKey = "yumemi:notice";
 function setStates(element, names) {
@@ -327,8 +327,9 @@ var YumemiInteractive = class extends ElementBase {
     } else {
       const code = outcome.value?.code;
       const names = ["error", `sent-${service}`];
-      if (typeof code === "string" && (serviceSpec.refused ?? []).includes(code)) names.push(`refused-${kebab(code)}`);
-      else names.push("failed");
+      const refused = typeof code === "string" && [...serviceSpec.refused ?? [], ...serviceSpec.requires ?? []].includes(code);
+      if (refused) names.push(`refused-${kebab(code)}`);
+      if (!refused || !this.querySelector?.(`[data-yumemi-when~="${service}.refused-${kebab(code)}"]`)) names.push("failed");
       setStates(this, names);
     }
   }
@@ -742,44 +743,44 @@ start({
   components: {
     "article-blob-copy": {
       "services": {
-        "blob_copy": { "method": "POST", "path": "/api/blobs", "read": false, "upload": true, "accepted": false, "entry": true, "args": [{ "name": "file", "wire": "text", "blob": true }, { "name": "from", "wire": "text", "blob": false }], "refused": [], "slots": { "key": "key" }, "ok": { "then": "stay" }, "error": { "then": "stay" } }
+        "blob_copy": { "method": "POST", "path": "/api/blobs", "read": false, "upload": true, "accepted": false, "entry": true, "args": [{ "name": "file", "wire": "text", "blob": true }, { "name": "from", "wire": "text", "blob": false }], "refused": [], "requires": [], "slots": { "key": "key" }, "ok": { "then": "stay" }, "error": { "then": "stay" } }
       },
       "reloads": null
     },
     "article-manage": {
       "services": {
-        "article_publish": { "method": "POST", "path": "/api/articles/:slug/publish", "read": false, "upload": false, "accepted": false, "entry": false, "args": [{ "name": "slug", "wire": "text", "blob": false }], "refused": ["already_published", "already_retracted"], "slots": { "slug": "slug", "title": "title", "body": "body", "version": "version", "order": "order", "category": "category", "tags": "tags" }, "ok": { "then": "goto", "path": "/article/:slug", "notice": "\u516C\u958B\u3057\u307E\u3057\u305F" }, "error": { "then": "stay" } },
-        "article_create": { "method": "POST", "path": "/api/articles", "read": false, "upload": false, "accepted": false, "entry": false, "args": [{ "name": "slug", "wire": "text", "blob": false }, { "name": "title", "wire": "text", "blob": false }, { "name": "body", "wire": "text", "blob": false }, { "name": "category", "wire": "text", "blob": false }, { "name": "tags", "wire": { "list": "text" }, "blob": false }], "refused": [], "slots": { "slug": "slug", "phase": "phase" }, "ok": { "then": "reload" }, "error": { "then": "stay" } }
+        "article_publish": { "method": "POST", "path": "/api/articles/:slug/publish", "read": false, "upload": false, "accepted": false, "entry": false, "args": [{ "name": "slug", "wire": "text", "blob": false }], "refused": ["already_published", "already_retracted"], "requires": [], "slots": { "slug": "slug", "title": "title", "body": "body", "version": "version", "order": "order", "category": "category", "tags": "tags" }, "ok": { "then": "goto", "path": "/article/:slug", "notice": "\u516C\u958B\u3057\u307E\u3057\u305F" }, "error": { "then": "stay" } },
+        "article_create": { "method": "POST", "path": "/api/articles", "read": false, "upload": false, "accepted": false, "entry": false, "args": [{ "name": "slug", "wire": "text", "blob": false }, { "name": "title", "wire": "text", "blob": false }, { "name": "body", "wire": "text", "blob": false }, { "name": "category", "wire": "text", "blob": false }, { "name": "tags", "wire": { "list": "text" }, "blob": false }], "refused": [], "requires": [], "slots": { "slug": "slug", "phase": "phase" }, "ok": { "then": "reload" }, "error": { "then": "stay" } }
       },
       "reloads": null
     },
     "blob-save": {
       "services": {
-        "article_blob_save": { "method": "POST", "path": "/api/articles/:slug/blob_save", "read": false, "upload": false, "accepted": false, "entry": false, "args": [{ "name": "slug", "wire": "text", "blob": false }, { "name": "blob", "wire": "text", "blob": true }, { "name": "existing", "wire": { "option": "text" }, "blob": true }], "refused": [], "slots": { "saved": "saved" }, "ok": { "then": "stay" }, "error": { "then": "stay" } }
+        "article_blob_save": { "method": "POST", "path": "/api/articles/:slug/blob_save", "read": false, "upload": false, "accepted": false, "entry": false, "args": [{ "name": "slug", "wire": "text", "blob": false }, { "name": "blob", "wire": "text", "blob": true }, { "name": "existing", "wire": { "option": "text" }, "blob": true }], "refused": [], "requires": [], "slots": { "saved": "saved" }, "ok": { "then": "stay" }, "error": { "then": "stay" } }
       },
       "reloads": null
     },
     "like-button": {
       "services": {
-        "article_publish": { "method": "POST", "path": "/api/articles/:slug/publish", "read": false, "upload": false, "accepted": false, "entry": false, "args": [{ "name": "slug", "wire": "text", "blob": false }], "refused": ["already_published", "already_retracted"], "slots": { "slug": "slug", "title": "title", "body": "body", "version": "version", "order": "order", "category": "category", "tags": "tags" }, "ok": { "then": "stay" }, "error": { "then": "stay" } }
+        "article_publish": { "method": "POST", "path": "/api/articles/:slug/publish", "read": false, "upload": false, "accepted": false, "entry": false, "args": [{ "name": "slug", "wire": "text", "blob": false }], "refused": ["already_published", "already_retracted"], "requires": [], "slots": { "slug": "slug", "title": "title", "body": "body", "version": "version", "order": "order", "category": "category", "tags": "tags" }, "ok": { "then": "stay" }, "error": { "then": "stay" } }
       },
       "reloads": null
     },
     "pick-tag": {
       "services": {
-        "article_create": { "method": "POST", "path": "/api/articles", "read": false, "upload": false, "accepted": false, "entry": false, "args": [{ "name": "slug", "wire": "text", "blob": false }, { "name": "title", "wire": "text", "blob": false }, { "name": "body", "wire": "text", "blob": false }, { "name": "category", "wire": "text", "blob": false }, { "name": "tags", "wire": { "list": "text" }, "blob": false }], "refused": [], "slots": { "slug": "slug", "phase": "phase" }, "ok": { "then": "reload", "notice": "\u30BF\u30B0\u3092\u4FDD\u5B58\u3057\u307E\u3057\u305F" }, "error": { "then": "stay" } }
+        "article_create": { "method": "POST", "path": "/api/articles", "read": false, "upload": false, "accepted": false, "entry": false, "args": [{ "name": "slug", "wire": "text", "blob": false }, { "name": "title", "wire": "text", "blob": false }, { "name": "body", "wire": "text", "blob": false }, { "name": "category", "wire": "text", "blob": false }, { "name": "tags", "wire": { "list": "text" }, "blob": false }], "refused": [], "requires": [], "slots": { "slug": "slug", "phase": "phase" }, "ok": { "then": "reload", "notice": "\u30BF\u30B0\u3092\u4FDD\u5B58\u3057\u307E\u3057\u305F" }, "error": { "then": "stay" } }
       },
       "reloads": null
     },
     "tag-filter": {
       "services": {
-        "widget_list": { "method": "GET", "path": "/api/widgets", "read": true, "upload": false, "accepted": false, "entry": false, "args": [{ "name": "widget", "wire": { "option": "text" }, "blob": false }, { "name": "slug", "wire": { "option": "text" }, "blob": false }], "refused": [], "slots": {}, "ok": { "then": "stay" }, "error": { "then": "stay" } }
+        "widget_list": { "method": "GET", "path": "/api/widgets", "read": true, "upload": false, "accepted": false, "entry": false, "args": [{ "name": "widget", "wire": { "option": "text" }, "blob": false }, { "name": "slug", "wire": { "option": "text" }, "blob": false }], "refused": [], "requires": [], "slots": {}, "ok": { "then": "stay" }, "error": { "then": "stay" } }
       },
       "reloads": { "read": "widget_list", "on": ["widget"], "list": true }
     },
     "title-lookup": {
       "services": {
-        "article_title": { "method": "GET", "path": "/api/articles/:slug/title", "read": true, "upload": false, "accepted": false, "entry": false, "args": [{ "name": "slug", "wire": "text", "blob": false }], "refused": [], "slots": { "title": "title", "version": "version" }, "ok": { "then": "stay" }, "error": { "then": "stay" } }
+        "article_title": { "method": "GET", "path": "/api/articles/:slug/title", "read": true, "upload": false, "accepted": false, "entry": false, "args": [{ "name": "slug", "wire": "text", "blob": false }], "refused": [], "requires": [], "slots": { "title": "title", "version": "version" }, "ok": { "then": "stay" }, "error": { "then": "stay" } }
       },
       "reloads": { "read": "article_title", "on": ["slug"], "list": false }
     }
