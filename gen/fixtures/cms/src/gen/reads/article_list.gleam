@@ -8,8 +8,8 @@ import yumemi/io.{type Context, type Promise}
 import yumemi/page.{type Cursor, type Page}
 import yumemi/step.{type Step}
 
-@external(javascript, "../operations_ffi.mjs", "read")
-fn query(ctx: Context, name: String, input: a) -> Promise(b)
+@external(javascript, "../operations_ffi.mjs", "read_of")
+fn query(ctx: Context, owner: String, name: String, input: a) -> Promise(b)
 
 pub fn items(
   limit limit: Int,
@@ -18,7 +18,7 @@ pub fn items(
     Step(out, err, state),
 ) -> Step(out, err, state) {
   step.read(
-    fn(ctx) { query(ctx, "article_list/items", #(limit, cursor)) },
+    fn(ctx) { query(ctx, "article_list", "items", #(limit, cursor)) },
     then,
   )
 }
@@ -26,5 +26,5 @@ pub fn items(
 pub fn counts(
   then then: fn(List(#(category.Category, Int))) -> Step(out, err, state),
 ) -> Step(out, err, state) {
-  step.read(fn(ctx) { query(ctx, "article_list/counts", Nil) }, then)
+  step.read(fn(ctx) { query(ctx, "article_list", "counts", Nil) }, then)
 }
