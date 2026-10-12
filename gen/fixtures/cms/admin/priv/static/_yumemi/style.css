@@ -44,3 +44,5 @@
 }
 [data-yumemi-badge][data-count=""],
 [data-yumemi-badge][data-count="0"] { display: none; }
+dialog:not([open]) { display: none !important; }
+@layer yumemi-closed-dialog { dialog:not([open]) { display: none !important; } }

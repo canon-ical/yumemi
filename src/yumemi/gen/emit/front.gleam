@@ -1525,6 +1525,56 @@ fn service_error_variants(
   }
 }
 
+/// 要件(`requires`)が断るときの構成子(0.12.1)。`Declared` は `DeclarationMissing`、`Consented` /
+/// `ConsentedFor` は `ConsentMissing` ── 403 の `code`(`declaration_missing` / `consent_missing`)を
+/// live module の `Error` に載せ、Component が `when(Refused(ConsentMissing), ..)` で同意の欠けだけの枝を書ける。
+fn requirement_codes(units: List(Unit), service: String) -> List(String) {
+  cms.requirements(units)
+  |> list.filter(fn(requirement) { requirement.service == service })
+  |> list.filter_map(fn(requirement) {
+    case requirement.constructor {
+      "Declared" -> Ok("DeclarationMissing")
+      "Consented" | "ConsentedFor" -> Ok("ConsentMissing")
+      _ -> Error(Nil)
+    }
+  })
+  |> list.unique
+}
+
+/// attached の口の役 `NeedsDeclared` が断るときの構成子(`declaration_missing`)。口の名は model では
+/// `BlobCopy`、役の表では `blob_copy` の綴りなので snake で突き合わせる。
+fn attached_requirement_codes(app: model.App, name: String) -> List(String) {
+  case
+    list.any(app.server.attached_roles, fn(role) {
+      naming.snake(role.attached) == naming.snake(name)
+      && role.role == "needs_declared"
+    })
+  {
+    True -> ["DeclarationMissing"]
+    False -> []
+  }
+}
+
+/// 要件の構成子のうち、★ が Service の `Error` に同じ名で書いていないもの(書いていればそれを使う)。
+fn without_star_errors(
+  variants: List(glance.Variant),
+  codes: List(String),
+) -> List(String) {
+  list.filter(codes, fn(code) {
+    !list.any(variants, fn(variant) { variant.name == code })
+  })
+}
+
+/// live module の `Error` の構成子:Service の `Error` の後ろに要件の構成子。
+fn live_errors(target: LiveTarget) -> List(glance.Variant) {
+  list.append(
+    target.errors,
+    list.map(target.requires, fn(name) {
+      glance.Variant(name: name, fields: [], attributes: [])
+    }),
+  )
+}
+
 fn error_variant_text(variant: glance.Variant) -> String {
   case variant.fields {
     [] -> "  " <> variant.name <> "\n"
@@ -4204,6 +4254,7 @@ fn style_text(package: face.Package, front: reader_front.Front) -> String {
 
 fn generated_front_css(front: reader_front.Front) -> String {
   badge_css()
+  <> closed_dialog_css()
   <> case front_has_overlay(front) {
     True -> "[popover]::backdrop { background: rgba(0, 0, 0, 0.45); }\n"
     False -> ""
@@ -4323,6 +4374,14 @@ fn is_ident_char(char: String) -> Bool {
     }
     _ -> False
   }
+}
+
+/// 閉じた `<dialog>` を出さない(0.12.1)。UA の `dialog:not([open]) { display: none }` は作り手の Style の
+/// `display`(`Flow` ほか)に負けるので、`!important` で、`@layer` の中にも置く ── 層の中の `!important` は層の
+/// 外の `!important` より強い(`@layer` の無い browser は層の外の 1 行が効く)。
+fn closed_dialog_css() -> String {
+  "dialog:not([open]) { display: none !important; }\n"
+  <> "@layer yumemi-closed-dialog { dialog:not([open]) { display: none !important; } }\n"
 }
 
 fn badge_css() -> String {
@@ -8357,6 +8416,9 @@ type LiveTarget {
     path: String,
     args: List(LiveArg),
     errors: List(glance.Variant),
+    /// 要件(`requires`・attached の `NeedsDeclared`)が断るときの構成子の名で、`errors` に無いもの(0.12.1)。
+    /// live module の `Error` には足し、client の表では `refused`(Service の `Error`)と分けて `requires` に置く
+    requires: List(String),
     /// Slot の構成子の名 → Out の欄の道
     slots: List(#(String, String)),
     read: Bool,
@@ -8442,6 +8504,10 @@ fn live_target(
               )
             }),
             errors: service_error_variants(units, service),
+            requires: without_star_errors(
+              service_error_variants(units, service),
+              requirement_codes(units, service.module),
+            ),
             slots: fields
               |> list.filter(fn(field) { !gl_type_has_list(field.1) })
               |> list.map(fn(field) {
@@ -8505,6 +8571,7 @@ fn live_target(
                 })
             },
             errors: [],
+            requires: attached_requirement_codes(app, route.name),
             slots: case upload {
               True -> [#("OutKey", "key")]
               False -> []
@@ -8676,7 +8743,7 @@ fn live_module_text(target: LiveTarget) -> String {
     }
   }
   let error_codes =
-    list.map(target.errors, fn(variant) {
+    list.map(live_errors(target), fn(variant) {
       #(
         case variant.fields {
           [] -> variant.name
@@ -8698,7 +8765,7 @@ fn live_module_text(target: LiveTarget) -> String {
   <> "\n"
   <> field_type
   <> "\n"
-  <> service_error_type_text(target.errors)
+  <> service_error_type_text(live_errors(target))
   <> "pub type When {\n  Idle\n  Waiting\n  Succeeded\n  Failed\n  Refused(Error)\n}\n\n"
   <> slot_type
   <> "\n"
@@ -9087,6 +9154,11 @@ fn interactive_table(
               }),
               ", ",
             )
+            <> "], \"requires\": ["
+            <> string.join(
+              list.map(target.requires, fn(name) { quoted(naming.snake(name)) }),
+              ", ",
+            )
             <> "], \"slots\": { "
             <> string.join(
               list.map(target.slots, fn(slot) {
@@ -9160,8 +9232,9 @@ fn interactive_state_css(
               #(svc <> ".idle", [sent], True),
               #(svc <> ".waiting", ["waiting", sent], False),
               #(svc <> ".succeeded", ["ok", sent], False),
-              #(svc <> ".failed", ["error", sent], False),
-              ..list.map(target.errors, fn(variant) {
+              // Failed は断り(Refused の符号)でない失敗だけ(0.12.1)── runtime が `failed` を立てる
+              #(svc <> ".failed", ["failed", sent], False),
+              ..list.map(live_errors(target), fn(variant) {
                 let code = "refused-" <> kebab(variant.name)
                 #(svc <> "." <> code, [code, sent], False)
               })

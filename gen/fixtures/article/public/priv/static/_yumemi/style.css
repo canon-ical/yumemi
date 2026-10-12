@@ -168,6 +168,8 @@
 }
 [data-yumemi-badge][data-count=""],
 [data-yumemi-badge][data-count="0"] { display: none; }
+dialog:not([open]) { display: none !important; }
+@layer yumemi-closed-dialog { dialog:not([open]) { display: none !important; } }
 [popover]::backdrop { background: rgba(0, 0, 0, 0.45); }
 [data-yumemi-island] > form > fieldset { border: 0; margin: 0; padding: 0; min-inline-size: 0; }
 [data-yumemi-when] { display: contents; }
@@ -175,75 +177,75 @@
   article-blob-copy:state(sent-blob_copy) [data-yumemi-when~="blob_copy.idle"] { display: none; }
   article-blob-copy:not(:state(waiting):state(sent-blob_copy)) [data-yumemi-when~="blob_copy.waiting"] { display: none; }
   article-blob-copy:not(:state(ok):state(sent-blob_copy)) [data-yumemi-when~="blob_copy.succeeded"] { display: none; }
-  article-blob-copy:not(:state(error):state(sent-blob_copy)) [data-yumemi-when~="blob_copy.failed"] { display: none; }
+  article-blob-copy:not(:state(failed):state(sent-blob_copy)) [data-yumemi-when~="blob_copy.failed"] { display: none; }
   article-manage:state(sent-article_publish) [data-yumemi-when~="article_publish.idle"] { display: none; }
   article-manage:not(:state(waiting):state(sent-article_publish)) [data-yumemi-when~="article_publish.waiting"] { display: none; }
   article-manage:not(:state(ok):state(sent-article_publish)) [data-yumemi-when~="article_publish.succeeded"] { display: none; }
-  article-manage:not(:state(error):state(sent-article_publish)) [data-yumemi-when~="article_publish.failed"] { display: none; }
+  article-manage:not(:state(failed):state(sent-article_publish)) [data-yumemi-when~="article_publish.failed"] { display: none; }
   article-manage:not(:state(refused-already-published):state(sent-article_publish)) [data-yumemi-when~="article_publish.refused-already-published"] { display: none; }
   article-manage:not(:state(refused-already-retracted):state(sent-article_publish)) [data-yumemi-when~="article_publish.refused-already-retracted"] { display: none; }
   article-manage:state(sent-article_create) [data-yumemi-when~="article_create.idle"] { display: none; }
   article-manage:not(:state(waiting):state(sent-article_create)) [data-yumemi-when~="article_create.waiting"] { display: none; }
   article-manage:not(:state(ok):state(sent-article_create)) [data-yumemi-when~="article_create.succeeded"] { display: none; }
-  article-manage:not(:state(error):state(sent-article_create)) [data-yumemi-when~="article_create.failed"] { display: none; }
+  article-manage:not(:state(failed):state(sent-article_create)) [data-yumemi-when~="article_create.failed"] { display: none; }
   blob-save:state(sent-article_blob_save) [data-yumemi-when~="article_blob_save.idle"] { display: none; }
   blob-save:not(:state(waiting):state(sent-article_blob_save)) [data-yumemi-when~="article_blob_save.waiting"] { display: none; }
   blob-save:not(:state(ok):state(sent-article_blob_save)) [data-yumemi-when~="article_blob_save.succeeded"] { display: none; }
-  blob-save:not(:state(error):state(sent-article_blob_save)) [data-yumemi-when~="article_blob_save.failed"] { display: none; }
+  blob-save:not(:state(failed):state(sent-article_blob_save)) [data-yumemi-when~="article_blob_save.failed"] { display: none; }
   like-button:state(sent-article_publish) [data-yumemi-when~="article_publish.idle"] { display: none; }
   like-button:not(:state(waiting):state(sent-article_publish)) [data-yumemi-when~="article_publish.waiting"] { display: none; }
   like-button:not(:state(ok):state(sent-article_publish)) [data-yumemi-when~="article_publish.succeeded"] { display: none; }
-  like-button:not(:state(error):state(sent-article_publish)) [data-yumemi-when~="article_publish.failed"] { display: none; }
+  like-button:not(:state(failed):state(sent-article_publish)) [data-yumemi-when~="article_publish.failed"] { display: none; }
   like-button:not(:state(refused-already-published):state(sent-article_publish)) [data-yumemi-when~="article_publish.refused-already-published"] { display: none; }
   like-button:not(:state(refused-already-retracted):state(sent-article_publish)) [data-yumemi-when~="article_publish.refused-already-retracted"] { display: none; }
   pick-tag:state(sent-article_create) [data-yumemi-when~="article_create.idle"] { display: none; }
   pick-tag:not(:state(waiting):state(sent-article_create)) [data-yumemi-when~="article_create.waiting"] { display: none; }
   pick-tag:not(:state(ok):state(sent-article_create)) [data-yumemi-when~="article_create.succeeded"] { display: none; }
-  pick-tag:not(:state(error):state(sent-article_create)) [data-yumemi-when~="article_create.failed"] { display: none; }
+  pick-tag:not(:state(failed):state(sent-article_create)) [data-yumemi-when~="article_create.failed"] { display: none; }
   tag-filter:state(sent-widget_list) [data-yumemi-when~="widget_list.idle"] { display: none; }
   tag-filter:not(:state(waiting):state(sent-widget_list)) [data-yumemi-when~="widget_list.waiting"] { display: none; }
   tag-filter:not(:state(ok):state(sent-widget_list)) [data-yumemi-when~="widget_list.succeeded"] { display: none; }
-  tag-filter:not(:state(error):state(sent-widget_list)) [data-yumemi-when~="widget_list.failed"] { display: none; }
+  tag-filter:not(:state(failed):state(sent-widget_list)) [data-yumemi-when~="widget_list.failed"] { display: none; }
   title-lookup:state(sent-article_title) [data-yumemi-when~="article_title.idle"] { display: none; }
   title-lookup:not(:state(waiting):state(sent-article_title)) [data-yumemi-when~="article_title.waiting"] { display: none; }
   title-lookup:not(:state(ok):state(sent-article_title)) [data-yumemi-when~="article_title.succeeded"] { display: none; }
-  title-lookup:not(:state(error):state(sent-article_title)) [data-yumemi-when~="article_title.failed"] { display: none; }
+  title-lookup:not(:state(failed):state(sent-article_title)) [data-yumemi-when~="article_title.failed"] { display: none; }
 }
 @supports not selector(:state(x)) {
   article-blob-copy[data-yumemi-state~="sent-blob_copy"] [data-yumemi-when~="blob_copy.idle"] { display: none; }
   article-blob-copy:not([data-yumemi-state~="waiting"][data-yumemi-state~="sent-blob_copy"]) [data-yumemi-when~="blob_copy.waiting"] { display: none; }
   article-blob-copy:not([data-yumemi-state~="ok"][data-yumemi-state~="sent-blob_copy"]) [data-yumemi-when~="blob_copy.succeeded"] { display: none; }
-  article-blob-copy:not([data-yumemi-state~="error"][data-yumemi-state~="sent-blob_copy"]) [data-yumemi-when~="blob_copy.failed"] { display: none; }
+  article-blob-copy:not([data-yumemi-state~="failed"][data-yumemi-state~="sent-blob_copy"]) [data-yumemi-when~="blob_copy.failed"] { display: none; }
   article-manage[data-yumemi-state~="sent-article_publish"] [data-yumemi-when~="article_publish.idle"] { display: none; }
   article-manage:not([data-yumemi-state~="waiting"][data-yumemi-state~="sent-article_publish"]) [data-yumemi-when~="article_publish.waiting"] { display: none; }
   article-manage:not([data-yumemi-state~="ok"][data-yumemi-state~="sent-article_publish"]) [data-yumemi-when~="article_publish.succeeded"] { display: none; }
-  article-manage:not([data-yumemi-state~="error"][data-yumemi-state~="sent-article_publish"]) [data-yumemi-when~="article_publish.failed"] { display: none; }
+  article-manage:not([data-yumemi-state~="failed"][data-yumemi-state~="sent-article_publish"]) [data-yumemi-when~="article_publish.failed"] { display: none; }
   article-manage:not([data-yumemi-state~="refused-already-published"][data-yumemi-state~="sent-article_publish"]) [data-yumemi-when~="article_publish.refused-already-published"] { display: none; }
   article-manage:not([data-yumemi-state~="refused-already-retracted"][data-yumemi-state~="sent-article_publish"]) [data-yumemi-when~="article_publish.refused-already-retracted"] { display: none; }
   article-manage[data-yumemi-state~="sent-article_create"] [data-yumemi-when~="article_create.idle"] { display: none; }
   article-manage:not([data-yumemi-state~="waiting"][data-yumemi-state~="sent-article_create"]) [data-yumemi-when~="article_create.waiting"] { display: none; }
   article-manage:not([data-yumemi-state~="ok"][data-yumemi-state~="sent-article_create"]) [data-yumemi-when~="article_create.succeeded"] { display: none; }
-  article-manage:not([data-yumemi-state~="error"][data-yumemi-state~="sent-article_create"]) [data-yumemi-when~="article_create.failed"] { display: none; }
+  article-manage:not([data-yumemi-state~="failed"][data-yumemi-state~="sent-article_create"]) [data-yumemi-when~="article_create.failed"] { display: none; }
   blob-save[data-yumemi-state~="sent-article_blob_save"] [data-yumemi-when~="article_blob_save.idle"] { display: none; }
   blob-save:not([data-yumemi-state~="waiting"][data-yumemi-state~="sent-article_blob_save"]) [data-yumemi-when~="article_blob_save.waiting"] { display: none; }
   blob-save:not([data-yumemi-state~="ok"][data-yumemi-state~="sent-article_blob_save"]) [data-yumemi-when~="article_blob_save.succeeded"] { display: none; }
-  blob-save:not([data-yumemi-state~="error"][data-yumemi-state~="sent-article_blob_save"]) [data-yumemi-when~="article_blob_save.failed"] { display: none; }
+  blob-save:not([data-yumemi-state~="failed"][data-yumemi-state~="sent-article_blob_save"]) [data-yumemi-when~="article_blob_save.failed"] { display: none; }
   like-button[data-yumemi-state~="sent-article_publish"] [data-yumemi-when~="article_publish.idle"] { display: none; }
   like-button:not([data-yumemi-state~="waiting"][data-yumemi-state~="sent-article_publish"]) [data-yumemi-when~="article_publish.waiting"] { display: none; }
   like-button:not([data-yumemi-state~="ok"][data-yumemi-state~="sent-article_publish"]) [data-yumemi-when~="article_publish.succeeded"] { display: none; }
-  like-button:not([data-yumemi-state~="error"][data-yumemi-state~="sent-article_publish"]) [data-yumemi-when~="article_publish.failed"] { display: none; }
+  like-button:not([data-yumemi-state~="failed"][data-yumemi-state~="sent-article_publish"]) [data-yumemi-when~="article_publish.failed"] { display: none; }
   like-button:not([data-yumemi-state~="refused-already-published"][data-yumemi-state~="sent-article_publish"]) [data-yumemi-when~="article_publish.refused-already-published"] { display: none; }
   like-button:not([data-yumemi-state~="refused-already-retracted"][data-yumemi-state~="sent-article_publish"]) [data-yumemi-when~="article_publish.refused-already-retracted"] { display: none; }
   pick-tag[data-yumemi-state~="sent-article_create"] [data-yumemi-when~="article_create.idle"] { display: none; }
   pick-tag:not([data-yumemi-state~="waiting"][data-yumemi-state~="sent-article_create"]) [data-yumemi-when~="article_create.waiting"] { display: none; }
   pick-tag:not([data-yumemi-state~="ok"][data-yumemi-state~="sent-article_create"]) [data-yumemi-when~="article_create.succeeded"] { display: none; }
-  pick-tag:not([data-yumemi-state~="error"][data-yumemi-state~="sent-article_create"]) [data-yumemi-when~="article_create.failed"] { display: none; }
+  pick-tag:not([data-yumemi-state~="failed"][data-yumemi-state~="sent-article_create"]) [data-yumemi-when~="article_create.failed"] { display: none; }
   tag-filter[data-yumemi-state~="sent-widget_list"] [data-yumemi-when~="widget_list.idle"] { display: none; }
   tag-filter:not([data-yumemi-state~="waiting"][data-yumemi-state~="sent-widget_list"]) [data-yumemi-when~="widget_list.waiting"] { display: none; }
   tag-filter:not([data-yumemi-state~="ok"][data-yumemi-state~="sent-widget_list"]) [data-yumemi-when~="widget_list.succeeded"] { display: none; }
-  tag-filter:not([data-yumemi-state~="error"][data-yumemi-state~="sent-widget_list"]) [data-yumemi-when~="widget_list.failed"] { display: none; }
+  tag-filter:not([data-yumemi-state~="failed"][data-yumemi-state~="sent-widget_list"]) [data-yumemi-when~="widget_list.failed"] { display: none; }
   title-lookup[data-yumemi-state~="sent-article_title"] [data-yumemi-when~="article_title.idle"] { display: none; }
   title-lookup:not([data-yumemi-state~="waiting"][data-yumemi-state~="sent-article_title"]) [data-yumemi-when~="article_title.waiting"] { display: none; }
   title-lookup:not([data-yumemi-state~="ok"][data-yumemi-state~="sent-article_title"]) [data-yumemi-when~="article_title.succeeded"] { display: none; }
-  title-lookup:not([data-yumemi-state~="error"][data-yumemi-state~="sent-article_title"]) [data-yumemi-when~="article_title.failed"] { display: none; }
+  title-lookup:not([data-yumemi-state~="failed"][data-yumemi-state~="sent-article_title"]) [data-yumemi-when~="article_title.failed"] { display: none; }
 }

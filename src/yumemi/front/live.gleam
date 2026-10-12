@@ -142,6 +142,11 @@ pub fn send(
 
 /// interactive Component の殻。タグ(module 名の `_` を `-`)の中に form と fieldset を置き、
 /// Args の初期値を `data-yumemi-args` の JSON に持つ。
+///
+/// form は `method="dialog"`(0.12.1)。JS の無い送りは持たない(51 v6)ので、runtime が submit を取らない
+/// とき(JS が無い・読み込みの途中・JS の失敗)の送りは何も外へ出さない ── method の無い form は GET で
+/// 本文を URL・履歴・アクセスログに載せる。dialog の中なら dialog が閉じるだけ。★ が `html.form` で書く
+/// GET の頁送りの form には掛からない。
 @internal
 pub fn component(tag: String, args_json: String, view: Element) -> Element {
   el.element(
@@ -150,7 +155,11 @@ pub fn component(tag: String, args_json: String, view: Element) -> Element {
       el.attribute("data-yumemi-island", ""),
       el.attribute("data-yumemi-args", args_json),
     ],
-    [el.element("form", [], [el.element("fieldset", [], [view])])],
+    [
+      el.element("form", [el.attribute("method", "dialog")], [
+        el.element("fieldset", [], [view]),
+      ]),
+    ],
   )
 }
 

@@ -8,7 +8,7 @@
 // - submit:submitter の `data-yumemi-send` で Service を決め、その Service の control(name が `<service>.`)だけに
 //   制約検証を掛け、Args を組み(初期値に control の値を重ねる、0.11.2 の送り方)、route を 1 回叩く。送りの間は
 //   `waiting` と `sent-<service>` を立て、fieldset を止め、`aria-busy`
-// - Done:`ok` か `error`(と `refused-<code>`)を立て、`data-yumemi-out` に Out の欄を textContent で入れ、After に従う
+// - Done:`ok` か `error`(と `refused-<code>`、断りの枝の無い失敗は `failed`)を立て、`data-yumemi-out` に Out の欄を textContent で入れ、After に従う
 // - `reloads`:単一の値は読みを叩いて out に入れる(前の読みは中断)、一覧は query を替えた URL へ履歴を積まずに移る
 // - 状態は `ElementInternals.states`(`:state()`)に立て、無ければ `data-yumemi-state` に同じ名を書く
 // - 逃げ道:`<yumemi-escape name>` の接続で `mount(element)` を呼び、外れたら戻りの関数を呼ぶ
@@ -42,6 +42,12 @@ function currentStates(element) {
 
 function kebab(code) {
   return String(code).replaceAll("_", "-").toLowerCase();
+}
+
+/// 断り `code` の枝が、同じ Service の Failed の枝の外に 1 つでもあるか
+function refusalShown(element, service, code) {
+  const branches = element.querySelectorAll?.(`[data-yumemi-when~="${service}.refused-${kebab(code)}"]`) ?? [];
+  return [...branches].some((branch) => !branch.parentElement?.closest(`[data-yumemi-when~="${service}.failed"]`));
 }
 
 /// 0.11.2 の送り方:欄の文字列を Args の型の JSON に。読めない綴りは文字列のまま(back が invalid_argument で返す)。
@@ -354,9 +360,16 @@ class YumemiInteractive extends ElementBase {
         place.textContent = textOf(readPath(outcome.value, path));
       }
     } else {
+      // 断り(Service の `Error` の符号 `refused` と要件の符号 `requires`)は `refused-<code>`。`failed`
+      // (`when(Failed)`)は、その断りの枝(`when(Refused(..))`)が Component に無い失敗にだけ立てる ── 断りの
+      // 枝が出るときに汎用の失敗の枝を並べず、枝の無い断りは今までどおり Failed で出す(0.12.1)。`error` は常に。
+      // 同じ Service の Failed の枝の中にある断りの枝は数えない ── Failed の枝が隠れると一緒に隠れるので、
+      // 入れ子の形は 0.12.0 のとおり両方の字を出す
       const code = outcome.value?.code;
       const names = ["error", `sent-${service}`];
-      if (typeof code === "string" && (serviceSpec.refused ?? []).includes(code)) names.push(`refused-${kebab(code)}`);
+      const refused = typeof code === "string" && [...(serviceSpec.refused ?? []), ...(serviceSpec.requires ?? [])].includes(code);
+      if (refused) names.push(`refused-${kebab(code)}`);
+      if (!refused || !refusalShown(this, service, code)) names.push("failed");
       setStates(this, names);
     }
   }

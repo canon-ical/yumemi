@@ -35,7 +35,7 @@ pub type Front {
     page_service_args: List(PageServiceArgs),
     violations: List(Violation),
     overlay_calls: List(OverlayCall),
-    /// 記述面と Css の条文(第 1〜3・7・8・23〜25・31 条)の停止。
+    /// 記述面と Css の条文(第 1〜3・7・8・23〜25・31・44 条)の停止。
     surface_notes: List(stop.Note),
     /// `el.static_sheet` の path(第 28〜30 条の file の検査と規則の数えは emit が持つ)。
     static_sheets: List(#(String, String)),
@@ -436,7 +436,11 @@ fn read_with_package_and_warning(
       list.map(units, fn(unit) { unit_violations(unit, components) }),
     )
   let overlay_calls = overlay_calls(units)
-  let surface_notes = list.flat_map(units, surface_unit_notes(face, _))
+  let surface_notes =
+    list.append(
+      list.flat_map(units, surface_unit_notes(face, _)),
+      component_in_form_notes(face, units),
+    )
   let static_sheets = list.flat_map(units, static_sheet_paths)
   Ok(Front(
     face: face,
@@ -1795,35 +1799,113 @@ fn out_in_control(module: glance.Module) -> Bool {
       _ -> False
     }
   }
+  placed_inside(module, is_out, is_control)
+}
+
+/// 第 44 条:★ の `html.form` / `form_` の中に interactive Component(`gen/interactive.<名>(..)`)を置く。HTML の
+/// parser は form の中の form を捨てるので、Component の欄は ★ の form に属し、runtime は送りを取れず ★ の form の
+/// method で送られる(GET なら本文が URL に載る)。この入れ子は 0.12.0 でも動いていない。直に・pipe で・変数で
+/// 置くのも、Component に届く関数(他の module の関数も、呼び合いを不動点まで)を通して置くのも辿る。
+fn component_in_form_notes(face: String, units: List(Unit)) -> List(stop.Note) {
+  let modules =
+    list.map(units, fn(unit) { #(unit.path, g.in_order(unit.module)) })
+  // Component に届く関数の `<module の道>.<関数名>`
+  let places = fn(module: glance.Module, reaching: List(String)) {
+    fn(expression) {
+      case resolve_callee(expression, module.imports) {
+        Some(#("gen/interactive", _)) | Some(#("gen/islands", _)) -> True
+        Some(#(path, name)) -> list.contains(reaching, path <> "." <> name)
+        None -> False
+      }
+    }
+  }
+  let reaching =
+    fixpoint([], fn(reaching) {
+      list.flat_map(modules, fn(item) {
+        let #(path, module) = item
+        reaching_functions(module, places(module, reaching))
+        |> list.map(fn(name) { path <> "." <> name })
+      })
+    })
+  let is_form = fn(module: glance.Module) {
+    fn(expression) {
+      case resolve_callee(expression, module.imports) {
+        Some(#("yumemi/front/html", "form"))
+        | Some(#("yumemi/front/html", "form_")) -> True
+        _ -> False
+      }
+    }
+  }
+  list.filter_map(modules, fn(item) {
+    let #(path, module) = item
+    case placed_inside(module, places(module, reaching), is_form(module)) {
+      True ->
+        Ok(stop.Note(
+          class: stop.Conflict,
+          text: face
+            <> "/"
+            <> path
+            <> ": ★ の html.form の中に interactive Component を置いている(第 44 条、HTML は form の中の form を捨てるので、Component の欄が ★ の form の method で送られる ── GET なら本文が URL に載る。Component は form の外に置く)",
+        ))
+      False -> Error(Nil)
+    }
+  })
+}
+
+/// `is_target` の式に届く同じ module の関数の名(呼び合いを不動点まで)。
+fn reaching_functions(
+  module: glance.Module,
+  is_target: fn(glance.Expression) -> Bool,
+) -> List(String) {
   let bodies =
     list.map(module.functions, fn(definition) {
       #(definition.definition.name, definition.definition.body)
     })
-  // out に届く同じ module の関数(呼び合いを不動点まで)
-  let reaches = fn(expression, names) {
-    all_expressions(expression)
-    |> list.any(fn(found) {
-      is_out(found)
-      || case found {
-        glance.Variable(name: name, ..) -> list.contains(names, name)
-        _ -> False
+  fixpoint([], fn(names) {
+    list.filter_map(bodies, fn(body) {
+      case
+        list.any(list.flat_map(body.1, statement_expressions), reaches(
+          _,
+          is_target,
+          names,
+        ))
+      {
+        True -> Ok(body.0)
+        False -> Error(Nil)
       }
     })
-  }
-  let tainted_functions =
-    fixpoint([], fn(names) {
-      list.filter_map(bodies, fn(body) {
-        case
-          list.any(list.flat_map(body.1, statement_expressions), reaches(
-            _,
-            names,
-          ))
-        {
-          True -> Ok(body.0)
-          False -> Error(Nil)
-        }
-      })
+  })
+}
+
+/// 式の中に `is_target` の式か、`names` の変数が現れる。
+fn reaches(
+  expression: glance.Expression,
+  is_target: fn(glance.Expression) -> Bool,
+  names: List(String),
+) -> Bool {
+  all_expressions(expression)
+  |> list.any(fn(found) {
+    is_target(found)
+    || case found {
+      glance.Variable(name: name, ..) -> list.contains(names, name)
+      _ -> False
+    }
+  })
+}
+
+/// `is_container` の呼び出し・capture・pipe の中に、`is_target` の式、それを含む値を束ねた変数、それに届く
+/// 同じ module の関数が現れる。変数は関数ごとに `let`・`use`・`case` の束ねを辿る(入れ子の Block と fn も)。
+fn placed_inside(
+  module: glance.Module,
+  is_target: fn(glance.Expression) -> Bool,
+  is_container: fn(glance.Expression) -> Bool,
+) -> Bool {
+  let bodies =
+    list.map(module.functions, fn(definition) {
+      #(definition.definition.name, definition.definition.body)
     })
+  let reaches = fn(expression, names) { reaches(expression, is_target, names) }
+  let tainted_functions = reaching_functions(module, is_target)
   list.any(bodies, fn(body) {
     let statements = nested_statements(body.1)
     let expressions =
@@ -1875,12 +1957,12 @@ fn out_in_control(module: glance.Module) -> Bool {
     list.any(expressions, fn(expression) {
       let control = case expression {
         glance.Call(function: function, ..)
-        | glance.FnCapture(function: function, ..) -> is_control(function)
+        | glance.FnCapture(function: function, ..) -> is_container(function)
         glance.BinaryOperator(name: glance.Pipe, right: right, ..) ->
           case right {
             glance.Call(function: function, ..)
-            | glance.FnCapture(function: function, ..) -> is_control(function)
-            _ -> is_control(right)
+            | glance.FnCapture(function: function, ..) -> is_container(function)
+            _ -> is_container(right)
           }
         _ -> False
       }

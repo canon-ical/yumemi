@@ -62,8 +62,8 @@ fn with_manual(
   let port = case string.contains(file.text, "fn query(ctx: Context") {
     True -> ""
     False ->
-      "\n@external(javascript, \"../operations_ffi.mjs\", \"read\")\n"
-      <> "fn query(ctx: Context, name: String, input: a) -> Promise(b)\n"
+      "\n@external(javascript, \"../operations_ffi.mjs\", \"read_of\")\n"
+      <> "fn query(ctx: Context, owner: String, name: String, input: a) -> Promise(b)\n"
   }
   let functions =
     manual
@@ -84,6 +84,8 @@ fn with_manual(
       <> "  then then: fn("
       <> read.returns
       <> ") -> Step(out, err, state),\n) -> Step(out, err, state) {\n  step.read(fn(ctx) { query(ctx, \""
+      <> read.service
+      <> "\", \""
       <> read.query
       <> "\", "
       <> input
@@ -202,7 +204,8 @@ fn one(app: model.App, service: model.Service, input_hash: String) -> File {
   let body =
     list.append(
       list.map(service.queries, fn(query) {
-        picked_record(app, style, query) <> function(app, style, query)
+        picked_record(app, style, query)
+        <> function(app, style, service.module, query)
       }),
       list.map(arrows, arrow_function(
         app,
@@ -223,8 +226,8 @@ fn one(app: model.App, service: model.Service, input_hash: String) -> File {
       case service.queries {
         [] -> ""
         _ ->
-          "@external(javascript, \"../operations_ffi.mjs\", \"read\")\n"
-          <> "fn query(ctx: Context, name: String, input: a) -> Promise(b)\n"
+          "@external(javascript, \"../operations_ffi.mjs\", \"read_of\")\n"
+          <> "fn query(ctx: Context, owner: String, name: String, input: a) -> Promise(b)\n"
       },
       "\n",
       "\n",
@@ -463,7 +466,14 @@ fn record(
   ])
 }
 
-fn function(app: model.App, style: Style, query: model.NamedQuery) -> String {
+/// 読みの口は名と持ち主の Service(`owner`)を運ぶ ── 他の Service の読みの module を 2 本 import して同じ名の
+/// 読みが並んでも、runtime が名だけで引いて取り違えない(0.12.1)。
+fn function(
+  app: model.App,
+  style: Style,
+  owner: String,
+  query: model.NamedQuery,
+) -> String {
   let params = typing.params(app, query.select)
   let out = typing.out(app, query)
   let arguments =
@@ -491,6 +501,8 @@ fn function(app: model.App, style: Style, query: model.NamedQuery) -> String {
     ") -> Step(out, err, state),\n",
     ") -> Step(out, err, state) {\n",
     "  step.read(fn(ctx) { query(ctx, \"",
+    owner,
+    "\", \"",
     query.name,
     "\", ",
     input,
