@@ -90,6 +90,93 @@ pub fn star_get_form_keeps_its_method_test() {
   string.contains(text, "post") |> should.be_false
 }
 
+const summary = "public/src/blocks/summary.gleam"
+
+const like = "interactive.like_button(article_publish.Args(slug: it.article.slug)),\n"
+
+fn stops_on_component_in_form(lines: List(String)) -> Bool {
+  list.any(lines, fn(line) {
+    string.contains(line, "[exit 4") && string.contains(line, "第 44 条")
+  })
+}
+
+/// ★ の `html.form` の中の Component は止める(第 44 条)── HTML の parser が Component の form を捨て、欄が ★ の
+/// form の method で送られる(GET なら本文が URL に載る)。直に・pipe で・同じ module の関数を通しても。
+pub fn component_inside_a_star_form_stops_test() {
+  let #(code, lines, _) =
+    generated([
+      #(
+        summary,
+        like,
+        "html.form_([attr.method(\"get\")], [\n        "
+          <> like
+          <> "      ]),\n",
+      ),
+    ])
+  code |> should.equal(4)
+  stops_on_component_in_form(lines) |> should.be_true
+  list.any(lines, string.contains(_, "public/blocks/summary: ★ の html.form"))
+  |> should.be_true
+  // pipe と同じ module の関数を通す
+  let #(code, lines, _) =
+    generated([
+      #(
+        summary,
+        like,
+        "[liked(it.article.slug)] |> html.form_([attr.method(\"get\")], _),\n",
+      ),
+      #(
+        summary,
+        "pub fn view(",
+        "fn liked(slug: String) -> el.Element {\n  interactive.like_button(article_publish.Args(slug: slug))\n}\n\npub fn view(",
+      ),
+    ])
+  code |> should.equal(4)
+  stops_on_component_in_form(lines) |> should.be_true
+}
+
+/// 他の module の関数を通して置くのも辿る(Component に届く関数を module をまたいで)。
+pub fn component_through_another_module_inside_a_form_stops_test() {
+  let #(code, lines, _) =
+    generated([
+      #(
+        summary,
+        "pub fn view(",
+        "pub fn liked(slug: String) -> el.Element {\n  interactive.like_button(article_publish.Args(slug: slug))\n}\n\npub fn view(",
+      ),
+      #(
+        "public/src/blocks/article.gleam",
+        "import gen/escapes\n",
+        "import gen/escapes\nimport blocks/summary as summary_block\n",
+      ),
+      #(
+        "public/src/blocks/article.gleam",
+        "      html.div_([], [\n        interactive.like_button(",
+        "      html.form_([attr.method(\"get\")], [summary_block.liked(\"x\")]),\n      html.div_([], [\n        interactive.like_button(",
+      ),
+    ])
+  code |> should.equal(4)
+  list.any(lines, fn(line) {
+    string.contains(line, "public/blocks/article: ★ の html.form")
+  })
+  |> should.be_true
+}
+
+/// form の隣に置く Component と、Component の無い ★ の form は止めない。
+pub fn component_beside_a_star_form_passes_test() {
+  let #(code, lines, _) =
+    generated([
+      #(
+        summary,
+        like,
+        "html.form_([attr.method(\"get\")], [html.input_([attr.name(\"page\")])]),\n      "
+          <> like,
+      ),
+    ])
+  code |> should.equal(0)
+  stops_on_component_in_form(lines) |> should.be_false
+}
+
 // ── 2 同じ名の読み ──────────────────────────────────────────────────────
 
 /// 生成の読みの口は名と持ち主の Service を運ぶ(`read_of`)── 名だけだと、同じ名の読みを 2 本 import した Service で
@@ -125,7 +212,7 @@ pub fn generated_reads_carry_the_owner_test() {
 
 /// runtime は持ち主の Service の表を直に引く。添えの無い口・名だけで引く ctx は今までどおり。
 pub fn runtime_reads_the_qualified_query_test() {
-  ok_lines(runtime_read(), 7)
+  ok_lines(runtime_read(), 9)
 }
 
 // ── 3 閉じた dialog ─────────────────────────────────────────────────────
@@ -160,7 +247,7 @@ pub fn failed_branch_is_not_shown_on_a_refusal_test() {
   )
   |> should.be_true
   string.contains(style, ":not(:state(error):state(sent-") |> should.be_false
-  ok_lines(runtime_states(), 7)
+  ok_lines(runtime_states(), 9)
 }
 
 // ── 5 要件の符号 ────────────────────────────────────────────────────────
@@ -221,7 +308,7 @@ pub fn requirement_codes_ride_on_refused_test() {
 
 /// `Declared` は `DeclarationMissing`。★ が同じ名の構成子を書いていればそれを使い、重ねない。
 pub fn declared_and_a_star_constructor_of_the_same_name_test() {
-  let #(_, _, files) =
+  let #(code, _, files) =
     generated([
       #(
         publish,
@@ -238,11 +325,29 @@ pub fn declared_and_a_star_constructor_of_the_same_name_test() {
         "  AlreadyRetracted\n}",
         "  AlreadyRetracted\n  ConsentMissing\n}",
       ),
+      #(
+        "src/server.gleam",
+        "Anyone, Attached, Get, Hook, ImageVariant, Media, Party, Post, ReadSession,",
+        "Anyone, Attached, BrowserCookie, Declaration, Get, Hook, ImageVariant, Media, Party, Post, ReadSession,",
+      ),
+      #(
+        "src/server.gleam",
+        "pub const attached: List(server.Attached) = [",
+        "pub const consents: List(String) = [\"use\"]\n\npub const browser: server.BrowserCookie = BrowserCookie(cookie: \"_fx\", key_binding: \"FX_KEY\", max_age_days: 30, declarations: [Declaration(kind: \"adult\", claim: \"declared_at\", max_age_days: 30)])\n\npub const attached: List(server.Attached) = [",
+      ),
     ])
   let live = text_of(files, "public/src/gen/live/article_publish.gleam")
   string.contains(
     live,
     "pub type Error {\n  AlreadyPublished\n  AlreadyRetracted\n  ConsentMissing\n  DeclarationMissing\n}\n",
+  )
+  |> should.be_true
+  code |> should.equal(0)
+  // ★ の構成子は Service の `Error` の符号なので `refused` に入り、`requires` には重ねない
+  let client = text_of(files, "public/priv/static/_yumemi/client.mjs")
+  string.contains(
+    client,
+    "\"refused\": [\"already_published\", \"already_retracted\", \"consent_missing\"], \"requires\": [\"declaration_missing\"]",
   )
   |> should.be_true
 }

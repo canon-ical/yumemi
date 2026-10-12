@@ -18,6 +18,10 @@ function setStates(element, names) {
 function kebab(code) {
   return String(code).replaceAll("_", "-").toLowerCase();
 }
+function refusalShown(element, service, code) {
+  const branches = element.querySelectorAll?.(`[data-yumemi-when~="${service}.refused-${kebab(code)}"]`) ?? [];
+  return [...branches].some((branch) => !branch.parentElement?.closest(`[data-yumemi-when~="${service}.failed"]`));
+}
 function scalar(kind, value) {
   switch (kind) {
     case "bool":
@@ -329,7 +333,7 @@ var YumemiInteractive = class extends ElementBase {
       const names = ["error", `sent-${service}`];
       const refused = typeof code === "string" && [...serviceSpec.refused ?? [], ...serviceSpec.requires ?? []].includes(code);
       if (refused) names.push(`refused-${kebab(code)}`);
-      if (!refused || !this.querySelector?.(`[data-yumemi-when~="${service}.refused-${kebab(code)}"]`)) names.push("failed");
+      if (!refused || !refusalShown(this, service, code)) names.push("failed");
       setStates(this, names);
     }
   }

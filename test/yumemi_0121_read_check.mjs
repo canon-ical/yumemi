@@ -30,6 +30,13 @@ check("bare read still follows readAliases", (await read(ctx, "rows", 5)).label 
 let missing = null;
 try { await read_of(ctx, "feed_c", "nothing", 6); } catch (error) { missing = String(error?.message); }
 check("unknown read names the owner", missing === "unregistered read: feed_c/nothing");
+// 持ち主の表に無い名は、import した表(`readAliases`)や 1 本だけの名に落とさない
+let fallen = null;
+try { fallen = await read_of(ctx, "feed_c", "rows", 8); } catch (error) { fallen = String(error?.message); }
+check("an owner without the name does not fall back to readAliases", fallen === "unregistered read: feed_c/rows");
+let unique = null;
+try { unique = await read_of(ctx, "feed_a", "own", 9); } catch (error) { unique = String(error?.message); }
+check("an owner without the name does not fall back to the only read of that name", unique === "unregistered read: feed_a/own");
 // 名だけで引く ctx(★ の Durable Object・test の偽の ctx)には名がそのまま届く
 const seen = [];
 await read_of({ read: (name, input) => { seen.push([name, input]); return null; } }, "feed_a", "rows", 7);

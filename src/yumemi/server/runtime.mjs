@@ -363,10 +363,11 @@ export function runtime(spec) {
    return out.created;
   },async read(name,input,owner) {
    // 生成の読みの口は持ち主の Service を添える(`read_of`、0.12.1)── 他の Service の読みを同じ名で 2 本 import
-   // しても、その Service の表を直に引く。添えの無い口(0.12.0 までの生成物・手書きの FFI)は今までどおり、自分の表、
-   // import した Service の表(`readAliases`)、表の中で 1 本だけの名の順に引く
-   const entry=(owner?spec.reads[owner+'/'+name]:undefined)
-    ??[record.name,...(spec.readAliases?.[record.name]??[])].map(owner=>spec.reads[owner+'/'+name]).find(Boolean)??uniqueRead(name);
+   // しても、その Service の表を直に引く。持ち主の表に無ければ名だけの道に落とさず止める(同じ名の別の読みを引かない)。
+   // 添えの無い口(0.12.0 までの生成物・手書きの FFI)は今までどおり、自分の表、import した Service の表
+   // (`readAliases`)、表の中で 1 本だけの名の順に引く
+   const entry=owner?spec.reads[owner+'/'+name]
+    :[record.name,...(spec.readAliases?.[record.name]??[])].map(owner=>spec.reads[owner+'/'+name]).find(Boolean)??uniqueRead(name);
    if(!entry) throw new Error('unregistered read: '+(owner??record.name)+'/'+name);
    if(entry.hook) return entry.hook(input,x);
    // 畳みは root の Service 自身の読みにだけ掛かる

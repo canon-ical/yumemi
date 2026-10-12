@@ -44,6 +44,12 @@ function kebab(code) {
   return String(code).replaceAll("_", "-").toLowerCase();
 }
 
+/// 断り `code` の枝が、同じ Service の Failed の枝の外に 1 つでもあるか
+function refusalShown(element, service, code) {
+  const branches = element.querySelectorAll?.(`[data-yumemi-when~="${service}.refused-${kebab(code)}"]`) ?? [];
+  return [...branches].some((branch) => !branch.parentElement?.closest(`[data-yumemi-when~="${service}.failed"]`));
+}
+
 /// 0.11.2 の送り方:欄の文字列を Args の型の JSON に。読めない綴りは文字列のまま(back が invalid_argument で返す)。
 function scalar(kind, value) {
   switch (kind) {
@@ -356,12 +362,14 @@ class YumemiInteractive extends ElementBase {
     } else {
       // 断り(Service の `Error` の符号 `refused` と要件の符号 `requires`)は `refused-<code>`。`failed`
       // (`when(Failed)`)は、その断りの枝(`when(Refused(..))`)が Component に無い失敗にだけ立てる ── 断りの
-      // 枝が出るときに汎用の失敗の枝を並べず、枝の無い断りは今までどおり Failed で出す(0.12.1)。`error` は常に
+      // 枝が出るときに汎用の失敗の枝を並べず、枝の無い断りは今までどおり Failed で出す(0.12.1)。`error` は常に。
+      // 同じ Service の Failed の枝の中にある断りの枝は数えない ── Failed の枝が隠れると一緒に隠れるので、
+      // 入れ子の形は 0.12.0 のとおり両方の字を出す
       const code = outcome.value?.code;
       const names = ["error", `sent-${service}`];
       const refused = typeof code === "string" && [...(serviceSpec.refused ?? []), ...(serviceSpec.requires ?? [])].includes(code);
       if (refused) names.push(`refused-${kebab(code)}`);
-      if (!refused || !this.querySelector?.(`[data-yumemi-when~="${service}.refused-${kebab(code)}"]`)) names.push("failed");
+      if (!refused || !refusalShown(this, service, code)) names.push("failed");
       setStates(this, names);
     }
   }

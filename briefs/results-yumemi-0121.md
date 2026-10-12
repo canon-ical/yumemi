@@ -59,10 +59,11 @@
 ## 51 v6 に足す行
 
 - interactive Component の form は `method="dialog"`。runtime が取らない submit は外へ何も送らない(JS の無い送りを持たないことの実装)。★ の `html.form` は書いた method のまま
-- `When.Failed` は「その Component に Refused の枝の無い失敗」。Refused の枝が出る断りでは Failed を出さない。状態は `error` に加えて `refused-<code>` か `failed`。`css.State(Failed)` は `error` のまま
+- `When.Failed` は「その Component に、同じ Service の Failed の枝の外の Refused の枝が無い失敗」。兄弟に並べた Refused の枝が出る断りでは Failed を出さない。Failed の枝の中に入れ子にした Refused の枝は数えない(Failed と一緒に隠れるので、入れ子の形は 0.12.0 のとおり汎用の字と断りの字の両方が出る)。状態は `error` に加えて `refused-<code>` か `failed`。`css.State(Failed)` は `error` のまま(r2)
 - live module の `Error` は、Service の `Error` に要件の構成子(`DeclarationMissing` / `ConsentMissing`、attached の `NeedsDeclared` は `DeclarationMissing`)を足したもの。client の表は `refused`(Service の `Error`)と `requires`(要件)の 2 欄
-- 生成の読みは `read_of(ctx, owner, name, input)`。ctx の `read(name, input, owner?)` の 3 つ目は省いてよく、名だけで引く ctx を壊さない
+- 生成の読みは `read_of(ctx, owner, name, input)`。ctx の `read(name, input, owner?)` の 3 つ目は省いてよく、名だけで引く ctx を壊さない。持ち主を添えた読みが表(`<owner>/<name>`)に無ければ `unregistered read` で止め、名だけの道(`readAliases`・1 本だけの名)に落とさない(r2)
 - 生成の CSS は閉じた dialog を `!important` と `@layer` で隠す
+- 第 44 条:★ の `html.form` / `form_` の中に interactive Component を置かない(exit 4)。HTML の parser が form の中の form を捨て、Component の欄が ★ の form の method で送られる。直に・pipe・変数・Component に届く関数(他の module の関数も)を通す形を辿る(r2)
 
 ## 次の版へ(触っていない)
 
@@ -74,3 +75,45 @@
 ## DDL
 
 無し。
+
+## r2(真壁、BRIEF `BRIEF-yumemi-0121-r2.md`、基点 `fd6cbf6`)
+
+### ゲート 2 の所見(柏木、写し)
+
+- **P0-1 入れ子の Refused の枝を持つ断りで、何も出なくなる**(`interactive.mjs:364`)。runtime は断りの枝が Component の**どこかに**あれば `failed` を立てない。`when(Failed, [p("取り込めませんでした。", when(Refused(NothingExtracted), ..), "…")])` の形では、外の Failed の枝と一緒に中の Refused の枝も隠れ、0.12.1 で何も出ない。musearch の muses に 14 か所(`heaven_refresh:46`・`schedule_timeline:441/470/500/519/582/652`・`roster_unclaim:40`・`heaven_link:219/238`・`schedule_add:119`・`claim_button:43`・`link_import:62`・`setting_edit:66`)、断りの符号で約 45 本。直し方の方向:数える断りの枝を同じ Service の `failed` の枝の外のものだけにする。state_check に入れ子を足し、README 133・137 行と「51 v6 に足す行」を合わせ、写しで muses・console を回し直す
+- **P1-1 ★ の `html.form` の中に Component を置くと本文が外へ出る**(0.12.0 からの穴)。HTML の parser が Component の `<form method="dialog">` を捨て、control は ★ の form に属する。runtime は `:scope > form` を見つけられず、★ の form の method(GET なら URL)で送られる。生成器は止めない。生成器の条で止めるのがよい(この入れ子はもともと動いていない)
+- **P1-2 `runtime.mjs:368-369`:`owner` を付けた読みが表に無いと名だけの道に落ちる。**`storage.in_object_named` で表から外した読みで、`readAliases` の先の同じ名をまた引く余地。`owner` があるときは `unregistered read` にする方が合う。test は無い
+- **P1-3 `When.Failed`(`failed`)と `css.State(Failed)`(`error`)のずれ。**黙る害は無い(README の注記は柏木が `fd6cbf6` で足した)
+- **P1-4 要件の符号が載らない形:**`requires` が literal の list でない(別の定数・連結)、Service が `service/` の下の階層にある。どちらも Failed に落ちるので黙りはしない
+- **P1-5 `declared_and_a_star_constructor_of_the_same_name_test` が見ていないもの:**停止コードと、client の表で `refused` に `consent_missing` が入り `requires` に入らないこと
+
+### やったこと
+
+1. **P0-1**(`front/interactive.mjs` の `refusalShown`):断り `code` の枝を `querySelectorAll` で拾い、`branch.parentElement?.closest('[data-yumemi-when~="<svc>.failed"]')` の無い枝が 1 つでもあれば `failed` を立てない。兄弟に並べた形(BRIEF 4、onboard_wizard)は断りの字だけ、入れ子の形は 0.12.0 のとおり両方の字。README の live module の `Failed` と状態の `failed` の 2 か所を合わせた。fixture の `client.mjs` 2 本が変わる(生成し直した)
+2. **P1-1 第 44 条**(`gen/reader/front.gleam` の `component_in_form_notes`、`surface_notes` に足す):★ の `html.form` / `form_` の呼び出し・capture・pipe の中に、`gen/interactive.<名>`(と `gen/islands`)、それを束ねた変数、それに届く関数が現れれば exit 4。Component に届く関数は module をまたいで不動点まで辿る(`<module の道>.<関数名>`)。第 21 条の `out_in_control` の中身を `placed_inside` / `reaching_functions` / `reaches` に分けて両方で使う(第 21 条の判定は変えていない)。README の「Placing it.」に 1 文
+3. **P1-2**(`server/runtime.mjs` の `read`):`owner` があれば `spec.reads["<owner>/<name>"]` だけを引き、無ければ `unregistered read: <owner>/<name>`。添えの無い口は今までどおり
+4. **P1-5**:同じ名の構成子の test が停止コード 0 と client の表 `"refused": [..., "consent_missing"], "requires": ["declaration_missing"]` を見る。停止コード 0 にするため、写しの `server.gleam` に `consents` と `browser`(`Declaration(kind: "adult")`)を足した(足さないと第 32・40 条で exit 4 だった)
+
+### 確かめ
+
+- **root**:`npm ci` exit 0(`build/r2-npm-ci.txt`、esbuild の allow-scripts の警告だけ)。`gleam test` は **`454 passed, no failures`**(`build/test-r2-final.txt`、r1 の 451 + 第 44 条の 3 本)。`gleam format --check src test` 0
+- **新しい test・検査**
+  - state_check 9 項(r1 の 7 + `a refusal branch nested in Failed also shows Failed`・`a nested refusal branch and a sibling one: refused only`)。偽の DOM は `querySelectorAll` と枝の `parentElement.closest` を持つ形にした
+  - read_check 9 項(r1 の 7 + `an owner without the name does not fall back to readAliases`・`… to the only read of that name`)
+  - `component_inside_a_star_form_stops_test`(直に・pipe と同じ module の関数で、exit 4 と `public/blocks/summary: ★ の html.form` の行)、`component_through_another_module_inside_a_form_stops_test`(article が summary の `pub fn liked` を form に入れる)、`component_beside_a_star_form_passes_test`(form の隣の Component と Component の無い form は 0)
+  - 他の module を辿る分の効き:`Some(#(path, name)) -> list.contains(reaching, ..)` を `False` にすると `component_through_another_module_inside_a_form_stops_test` だけが落ちる(`build/test-r2-mut.txt`、453 passed 1 failures)。戻してある
+- **fixture**:article・cms を生成して停止コード 0、差は `public/priv/static/_yumemi/client.mjs` 2 本(`refusalShown`)。`git add` の後にもう 1 回、停止コード 0・未 stage の差 0 行(`build/r2-gen-{article,cms}-{1,2}.txt`)。面の node_modules の symlink は消した
+- **musearch の写し**(`.scratch/musearch`、r1 と同じ path 依存):
+  - 生成器:**停止コード 0**、2 回目も 0(`build/r2-ms-gen-{1,2}.txt`)。第 44 条は当たらない。r1 の生成物からの差は 4 面の `client.mjs` だけ
+  - **muses 508/512、console 88/90**(`build/r2-ms-{muses,console}-test.txt`)。build は exit 0。落ちるのは **r1 の 6 本と同じ 6 本で、新しく落ちたものは無い**
+    - form の 4 本(`li-1-link-import:67`・`guard-2-islands:107`・`cn-3-ssr:59`・`live-islands:146`):`<form>` の字を縛る test。残る
+    - onboard_wizard の 2 本(`3-2m-retire:102`・`3-8c-phone:70`):兄弟に並べた形で、断りの字だけが出る(BRIEF 4 と裁きのとおり)。test 自身が状態の並びを置いて SSR の枝を見ている。残る
+  - 入れ子の実例:muses の `link_import` を harness で描き、枝の入れ子を辿った。`link_import.refused-nothing-extracted` は `link_import.failed` の中にだけあり、直した数えでは `nothing_extracted` で `failed` が立つ(両方の字が出る)。scratch の script で見た(git の外)
+  - **api 1756/1756**(新しい PG、port 55922。回した後に止めた、`build/r2-ms-api-test.txt`)。P1-2 で読みの道を変えたので回した。**www 446/446・admin 21/21**(`build/r2-ms-{www,admin}-test.txt`)
+
+### 次の版へ(r2 で触っていない)
+
+- P1-3:`When.Failed`(`failed`)と `css.State(css.Failed)`(`error`)のずれ。合わせるかは次の版
+- P1-4:`requires` が literal の list でない形(別の定数の参照・連結)と、`service/` の下の階層の Service では要件の構成子が足されない(Failed に落ちるので黙りはしない)
+- 第 44 条は、form を描く関数が children を引数で受け、呼ぶ側が Component を渡す形(`wrapper.box([interactive.x(..)])` で `box` の中が `html.form_([], children)`)は辿らない。引数の流れを追う検査は無い
+- 同じ Service の Failed の枝の外でも、他の Service の Failed の枝の中にある断りの枝は「外」と数える(その Service が失敗していなければ隠れたまま)。そう書いた ★ は musearch に無い
