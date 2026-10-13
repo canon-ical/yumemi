@@ -80,7 +80,7 @@ yumemi の test には、(a) の `ed-2-rule-ssr`・`ed-1-article-format`(往復�
 |---|---|---|
 | README | 5580 字 | 差 3(斜体 1 対、言語名の無い塊 1) |
 | writing-gleam | 6340 字 | 差 2(斜体 1 対) |
-| install | 10971 字 | 差 33(言語名の無い塊 33) |
+| install | 10971 字 | 差 33(言語名の無い塊 32、`ol` の `value` 1) |
 | documentation/index | 2681 字 | 差 2(斜体 1 対) |
 | documentation/command-line-reference | 11762 字 | 差 1(言語名の無い塊 1) |
 | documentation/compatibility-reference | 2347 字 | 同じ |
@@ -115,7 +115,7 @@ yumemi の test には、(a) の `ed-2-rule-ssr`・`ed-1-article-format`(往復�
 ## 5 穴 2・3・6・9・10
 
 - **2 静的資料**:`static_source.load_present` が 2 つの file をあるものだけ読み、無い file の写し(`gen/external.gleam`・`gen/doc/api_v1.gleam`)を出さない。あって形の違う file は今までどおり止める(exit 2)。`gen/doc/api_v1.gleam` は面の `src/style.gleam` が `body`・`ink`・`heading` を pub で持たなければ class 無し(`css.class([])`)で出す。`load` と `emit` は残した(今までの test が使う)。test:`static_materials_are_optional_test`(2 つとも無い・片方だけ無いの 3 通り)、`malformed_external_hosts_still_stops_test`、`api_v1_names_the_face_style_only_when_it_has_them_test`。写しで style の 3 名の無い面の `api_v1.gleam`(`#####`・`######` を含む)が `gleam build` exit 0(`build/0131-docsite-build2.txt`)。両方ある fixture(article・cms)の生成物は byte 同じ
-- **3 Paged の整数の列**:向きのそろった keyset(`uniform_keyset`)の頭の穴と key の穴の型を `uniform_cast` に(integer・bigint・boolean・double precision を足し、それ以外は今までの `cast_of`)。PG 18 で、基点の形 `($2 IS NULL OR (n.rank,n.id)<($2,$3::uuid))` は型の分からない穴で PREPARE が落ち(`build/0131-paged-pg-base.txt`:「パラメータ$2のデータ型が特定できませんでした」)、生成した 0.13.1 の SQL は integer・bigint・boolean・double precision の 4 表で 1 頁目と次の頁(カーソルを text で渡す)が正しい行を返した(`build/0131-paged-pg.txt`)。bigint は Gleam の型から出ないので SQL を手で 1 語替えて見た。test:`paged_by_integer_casts_the_cursor_test` ほか 3 本(text の列は型を書かない今のまま)
+- **3 Paged の整数の列**:向きのそろった keyset(`uniform_keyset`)の頭の穴の型を `uniform_cast` に(key の穴は今までの `cast_of` のまま ── 行の比較の中だけに在り列から型が決まる。r1 は key の穴も `uniform_cast` にしていて、key が整数の entity の動いていた一覧の SQL が `$3` → `$3::integer` に変わったので、柏木 ゲート 2 で戻した)(integer・bigint・boolean・double precision を足し、それ以外は今までの `cast_of`)。PG 18 で、基点の形 `($2 IS NULL OR (n.rank,n.id)<($2,$3::uuid))` は型の分からない穴で PREPARE が落ち(`build/0131-paged-pg-base.txt`:「パラメータ$2のデータ型が特定できませんでした」)、生成した 0.13.1 の SQL は integer・bigint・boolean・double precision の 4 表で 1 頁目と次の頁(カーソルを text で渡す)が正しい行を返した(`build/0131-paged-pg.txt`)。bigint は Gleam の型から出ないので SQL を手で 1 語替えて見た。test:`paged_by_integer_casts_the_cursor_test` ほか 3 本(text の列は型を書かない今のまま)
 - **6 一意の制約の違反の log**:`http.mjs` の `failure` が `unavailable` に畳む 5xx の前に `{"yumemi":"request.unavailable","service","code","constraint","table","column","name","message"}` を `console.error` に 1 行。`detail`(鍵の値)は出さない。子の node の check 8 項(`test/yumemi_0131_check.mjs`)が全部 ok、基点の `http.mjs` に差し替えると 2 項が NG(`build/0131-check-unavailable-base.txt`)。応答の status は替えていない(503 `unavailable` のまま)
 - **9 タグ**:`html` に `caption`・`del`・`em`・`h5`・`h6`・`i`・`kbd`・`sup`(class を取る形と `_` の形)
 - **10 Style**:`css.Center`(`margin-left/right: auto`)、`css.OverflowX(Overflow)`、`css.Spaces(WhiteSpace)`、`css.Slant(FontSlant)`、`BorderEdge` に `LeftEdge`・`RightEdge`
@@ -134,8 +134,9 @@ fixture:28 本を写しに置き、基点の生成器と本作業木の生成器
 
 - `css.Style` に 4 つ、`css.BorderEdge` に 2 つの構成子が足された。app が `css.Style` か `BorderEdge` を `case` で網羅していれば compile が止まる(足すだけの型の変更だが、網羅の `case` には破壊的)
 - 新しい公開 module `yumemi/front/markdown`、`yumemi/gen/static_source` に `Present`・`Hosts`・`ApiV1`・`load_present`、`yumemi/gen/emit/static` に `emit_present`
+- `css` に新しい公開の型 `Overflow`・`WhiteSpace`・`FontSlant`(構成子 `OverflowAuto` ほか 11)、`html` に 8 つのタグの関数 16(`caption`・`del`・`em`・`h5`・`h6`・`i`・`kbd`・`sup` と `_` の形)。足すだけ
 - 面を置いた app で `src/external_hosts.mjs` か `docs/api-v1.md` が無いとき、exit 3 で止めずに通る(その写しは出ない)。両方ある app の出力は同じ
-- 向きのそろった Paged の一覧が integer・bigint・boolean・double precision の列で並ぶとき、SQL の頭の穴と key の穴に型が付く(その一覧は今まで 503 で、動いていた app の SQL は変わらない)
+- 向きのそろった Paged の一覧が integer・bigint・boolean・double precision の列で並ぶとき、SQL の頭の穴に型が付く(その一覧は今まで 503 で、動いていた app の SQL は変わらない。key の穴は今までの型のまま)
 - 内部の失敗の 503 の前に log が 1 行増える(応答は同じ 503 `{"code":"unavailable"}`。409 には替えていない)
 
 ## DDL

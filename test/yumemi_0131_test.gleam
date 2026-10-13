@@ -61,8 +61,8 @@ fn ordered_by(gleam_type: String) -> List(#(String, String, String)) {
   ]
 }
 
-/// keyset の頭の穴(`$2 IS NULL`)に型が無いと、PostgreSQL は穴を text と読み、整数の列との行の比較
-/// `(t.rank,t.id)<($2,$3::uuid)` が `operator does not exist: integer < text` で落ちて 503 だった。
+/// keyset の頭の穴(`$2 IS NULL`)に型が無いと、型の無い穴を送る経路(Neon の HTTP)で PostgreSQL が穴の型を
+/// 決められず(`could not determine data type of parameter $2`)、整数の列の一覧は 503 だった。
 pub fn paged_by_integer_casts_the_cursor_test() {
   let #(code, files) = generated(notes, ordered_by("Int"))
   code |> should.equal(0)
