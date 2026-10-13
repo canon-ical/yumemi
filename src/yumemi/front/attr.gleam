@@ -76,7 +76,8 @@ pub fn safe_url(value: String) -> Bool {
     |> string.to_graphemes
     |> list.filter(fn(char) { char != "\t" && char != "\n" && char != "\r" })
     |> string.concat
-    |> string.trim
+    |> string.trim_start
+    |> trim_end
   case string.split_once(cleaned, ":") {
     Error(_) -> True
     Ok(#(scheme, _)) ->
@@ -93,6 +94,12 @@ pub fn safe_url(value: String) -> Bool {
           }
       }
   }
+}
+
+/// `string.trim_end` と同じ(JS の stdlib の正規表現は、字の中の長い空白の連なりで長さの 2 乗かかる)。
+@external(javascript, "./text_ffi.mjs", "trim_end")
+fn trim_end(text: String) -> String {
+  string.trim_end(text)
 }
 
 pub fn role(role: Role) -> Attribute {

@@ -160,6 +160,17 @@ pub fn to_sketch(style: css.Style) -> List(sketch_css.Style) {
     ]
     css.Flow(flow) -> flow_style(flow)
     css.TextAlign(align) -> [sketch_css.text_align(text_align(align))]
+    css.Center -> [
+      sketch_css.margin_left_("auto"),
+      sketch_css.margin_right_("auto"),
+    ]
+    css.OverflowX(overflow:) -> [
+      sketch_css.overflow_x(overflow_value(overflow)),
+    ]
+    css.Spaces(white_space:) -> [
+      sketch_css.white_space(white_space_value(white_space)),
+    ]
+    css.Slant(slant:) -> [sketch_css.font_style(slant_value(slant))]
     css.State(state, styles) -> state_style(state, styles)
     css.Responsive(at, styles) -> {
       let #(hovers, styles) = list.partition(styles, is_hover_capable)
@@ -203,6 +214,34 @@ fn border(
     css.AllEdges -> sketch_css.border(value)
     css.TopEdge -> sketch_css.border_top(value)
     css.BottomEdge -> sketch_css.border_bottom(value)
+    css.LeftEdge -> sketch_css.border_left(value)
+    css.RightEdge -> sketch_css.border_right(value)
+  }
+}
+
+fn overflow_value(value: css.Overflow) -> String {
+  case value {
+    css.OverflowAuto -> "auto"
+    css.OverflowHidden -> "hidden"
+    css.OverflowVisible -> "visible"
+    css.OverflowScroll -> "scroll"
+  }
+}
+
+fn white_space_value(value: css.WhiteSpace) -> String {
+  case value {
+    css.SpaceNormal -> "normal"
+    css.Pre -> "pre"
+    css.PreWrap -> "pre-wrap"
+    css.PreLine -> "pre-line"
+    css.NoWrap -> "nowrap"
+  }
+}
+
+fn slant_value(value: css.FontSlant) -> String {
+  case value {
+    css.Upright -> "normal"
+    css.Italic -> "italic"
   }
 }
 

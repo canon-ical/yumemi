@@ -1,6 +1,7 @@
 //// 面へ写す back 側の静的資料。面 package の Gleam 走査とは別の口で読む。
 
 import gleam/list
+import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
 import simplifile
@@ -56,6 +57,54 @@ pub fn load(app_dir: String) -> Result(Sources, Error) {
     api_v1: api_v1,
     api_v1_hash: digest.short("docs/api-v1.md\n" <> api_v1),
   ))
+}
+
+/// `load` の 2 つの file を、あるものだけ読む(0.13.1、穴 2)。無い file は `None` で、その写し
+/// (`gen/external.gleam`・`gen/doc/api_v1.gleam`)を面に出さない。あっても読めない・形の違う file は
+/// 今までどおり止める。両方ある app の生成物は `load` と同じ。
+pub type Present {
+  Present(app_name: String, hosts: Option(Hosts), api_v1: Option(ApiV1))
+}
+
+pub type Hosts {
+  Hosts(hosts: List(Host), hash: String)
+}
+
+pub type ApiV1 {
+  ApiV1(text: String, hash: String)
+}
+
+pub fn load_present(app_dir: String) -> Result(Present, Error) {
+  let hosts_path = app_dir <> "/src/external_hosts.mjs"
+  let api_v1_path = parent(app_dir) <> "/docs/api-v1.md"
+  use hosts_text <- result.try(read_optional(hosts_path))
+  use api_v1 <- result.try(read_optional(api_v1_path))
+  use hosts <- result.try(case hosts_text {
+    Some(text) ->
+      parse_external_hosts_at(hosts_path, text)
+      |> result.map(fn(hosts) {
+        Some(Hosts(
+          hosts: hosts,
+          hash: digest.short("src/external_hosts.mjs\n" <> text),
+        ))
+      })
+    None -> Ok(None)
+  })
+  Ok(Present(
+    app_name: last_segment(app_dir),
+    hosts: hosts,
+    api_v1: option.map(api_v1, fn(text) {
+      ApiV1(text: text, hash: digest.short("docs/api-v1.md\n" <> text))
+    }),
+  ))
+}
+
+fn read_optional(path: String) -> Result(Option(String), Error) {
+  case read_required(path) {
+    Ok(text) -> Ok(Some(text))
+    Error(Missing(_)) -> Ok(None)
+    Error(error) -> Error(error)
+  }
 }
 
 /// JS ファイルから EXTERNAL_HOSTS の6欄だけを読む。shape が違えば Error。

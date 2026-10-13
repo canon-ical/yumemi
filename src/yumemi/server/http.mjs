@@ -195,7 +195,23 @@ export function http(spec) {
   const business=typeof error.message==='string'&&/^[a-z][a-z0-9_]*$/.test(error.message)&&(error.status===422||error.status===400||error.code==='P0001');
   const name=allowed.includes(error.message)||business?error.message:'unavailable';
   const detail=name==='declaration_missing'||name==='consent_missing'?(error.detail??{}):{};
-  return response(s,{code:name,...(name==='invalid_argument'?{field:error.field??'body'}:{}),...detail},error.status??(name==='unavailable'?503:422));
+  const status=error.status??(name==='unavailable'?503:422);
+  if(name==='unavailable'&&status>=500) unavailableLog(s,error);
+  return response(s,{code:name,...(name==='invalid_argument'?{field:error.field??'body'}:{}),...detail},status);
+ }
+ // 0.13.1(穴 6):内部の失敗を unavailable に畳む前に 1 行出す。SQLSTATE と、PostgreSQL が添える制約・表・列の名
+ // (一意の制約の違反 23505 なら制約の名)。値を含む `detail` は出さない。応答は今までどおり 503 unavailable。
+ // `message` は文言に値を含まない SQLSTATE の類(接続・制約・transaction・SQL・資源・上限・中断)のときだけ。22(データの
+ // 例外)は入力の値を(`invalid input syntax for type uuid: "…"`)、JS の例外は入力の切れ端を(JSON.parse など)文言に
+ // 含むことがあるので出さない(柏木 ゲート 2 の P1-3)
+ const quietSqlstate=/^(08|23|25|40|42|53|54|57)[0-9A-Z]{3}$/;
+ function unavailableLog(s,error) {
+  try {
+   const code=typeof error?.code==='string'?error.code:null;
+   console.error(JSON.stringify({yumemi:'request.unavailable',service:s.record?.name??null,code:error?.code??null,
+    constraint:error?.constraint??null,table:error?.table??null,column:error?.column??null,name:error?.name??null,
+    message:code&&quietSqlstate.test(code)?String(error?.message??'').slice(0,500):null}));
+  } catch {}
  }
  function failed(s,outcome) {
   const code=c.tag(outcome[0]);
