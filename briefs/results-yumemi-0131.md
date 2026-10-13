@@ -259,3 +259,14 @@ fixture:28 本を写しに置き、基点の生成器と本作業木の生成器
 ### DDL
 
 無し。
+
+## 0.13.1 の後に見つかったもの(次の版へ、鷹野 2026-10-13)
+
+文書サイトの PoC を 0.13.1 に乗り換えた窓と、事業 app の取り込みの便(柏木のゲート 2)から:
+
+1. **(バグ)`q.Pick` の一覧が実行時に 503。**SQL は列を絞り、reads の型(ItemsRow)も出るが、生成の `gen/runtime.mjs` の `out` が `['entity', <名>]` のままで、Pick した行を Entity として decode して `invalid stored phase` で落ちる
+2. **冪等の記録を Service ごとに外す手が無い。**秘密を一度だけ返す書き(API 鍵・発行のコード)の応答の平文が `framework.idempotency.result` に残り、同じキーの再送で同じ平文がもう一度返る(0.13.0 から)。事業 app は `early` hook で該当の Service だけ `Idempotency-Key` を外して塞いだ ── 手が入ったら外す
+3. `Center` を grid・flex の子に掛けると左右の margin auto で幅が縮む。`Width` に割合が無く 100% と併せられない
+4. markdown の `Look` に言語ごとの口が無い(言語名ごとにコードの枠を変えるには木を自分で歩く)
+5. `Cond` に `Or` が無い
+6. markdown の読みと描きが 1 つの module で、読みだけ import する client の束にも描く側(`el`・`css`・`sketch` ほか)が入る(事業 app の編集器の束が 239KB → 342KB)
