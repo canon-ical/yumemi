@@ -1,4 +1,5 @@
 //// タグ(0.12、51 v6「html と el」)。業務の CMS の ★ が使う 53 種と SVG の `svg` / `path`、殻の部品。
+//// 0.13.1 で文書の 8 種(`caption`・`del`・`em`・`h5`・`h6`・`i`・`kbd`・`sup`)を足した。
 //// sketch_lustre の `html` と同じ名前・同じ引数の順(class を取る形と `_` の付く取らない形)。
 //// `style`・`script`・`link` は置かない(生の CSS は `el.stylesheet`)。
 
@@ -83,6 +84,21 @@ pub fn button_(
   el.element("button", attributes, children)
 }
 
+pub fn caption(
+  class: Class,
+  attributes: List(Attribute),
+  children: List(Element),
+) -> Element {
+  tag("caption", class, attributes, children)
+}
+
+pub fn caption_(
+  attributes: List(Attribute),
+  children: List(Element),
+) -> Element {
+  el.element("caption", attributes, children)
+}
+
 pub fn code(
   class: Class,
   attributes: List(Attribute),
@@ -105,6 +121,18 @@ pub fn dd(
 
 pub fn dd_(attributes: List(Attribute), children: List(Element)) -> Element {
   el.element("dd", attributes, children)
+}
+
+pub fn del(
+  class: Class,
+  attributes: List(Attribute),
+  children: List(Element),
+) -> Element {
+  tag("del", class, attributes, children)
+}
+
+pub fn del_(attributes: List(Attribute), children: List(Element)) -> Element {
+  el.element("del", attributes, children)
 }
 
 pub fn details(
@@ -171,6 +199,18 @@ pub fn dt(
 
 pub fn dt_(attributes: List(Attribute), children: List(Element)) -> Element {
   el.element("dt", attributes, children)
+}
+
+pub fn em(
+  class: Class,
+  attributes: List(Attribute),
+  children: List(Element),
+) -> Element {
+  tag("em", class, attributes, children)
+}
+
+pub fn em_(attributes: List(Attribute), children: List(Element)) -> Element {
+  el.element("em", attributes, children)
 }
 
 pub fn fieldset(
@@ -263,6 +303,30 @@ pub fn h4_(attributes: List(Attribute), children: List(Element)) -> Element {
   el.element("h4", attributes, children)
 }
 
+pub fn h5(
+  class: Class,
+  attributes: List(Attribute),
+  children: List(Element),
+) -> Element {
+  tag("h5", class, attributes, children)
+}
+
+pub fn h5_(attributes: List(Attribute), children: List(Element)) -> Element {
+  el.element("h5", attributes, children)
+}
+
+pub fn h6(
+  class: Class,
+  attributes: List(Attribute),
+  children: List(Element),
+) -> Element {
+  tag("h6", class, attributes, children)
+}
+
+pub fn h6_(attributes: List(Attribute), children: List(Element)) -> Element {
+  el.element("h6", attributes, children)
+}
+
 pub fn header(
   class: Class,
   attributes: List(Attribute),
@@ -284,6 +348,18 @@ pub fn hr(class: Class, attributes: List(Attribute)) -> Element {
 
 pub fn hr_(attributes: List(Attribute)) -> Element {
   el.element("hr", attributes, [])
+}
+
+pub fn i(
+  class: Class,
+  attributes: List(Attribute),
+  children: List(Element),
+) -> Element {
+  tag("i", class, attributes, children)
+}
+
+pub fn i_(attributes: List(Attribute), children: List(Element)) -> Element {
+  el.element("i", attributes, children)
 }
 
 pub fn iframe(
@@ -315,6 +391,18 @@ pub fn input(class: Class, attributes: List(Attribute)) -> Element {
 
 pub fn input_(attributes: List(Attribute)) -> Element {
   el.element("input", attributes, [])
+}
+
+pub fn kbd(
+  class: Class,
+  attributes: List(Attribute),
+  children: List(Element),
+) -> Element {
+  tag("kbd", class, attributes, children)
+}
+
+pub fn kbd_(attributes: List(Attribute), children: List(Element)) -> Element {
+  el.element("kbd", attributes, children)
 }
 
 pub fn label(
@@ -558,6 +646,18 @@ pub fn summary_(
   children: List(Element),
 ) -> Element {
   el.element("summary", attributes, children)
+}
+
+pub fn sup(
+  class: Class,
+  attributes: List(Attribute),
+  children: List(Element),
+) -> Element {
+  tag("sup", class, attributes, children)
+}
+
+pub fn sup_(attributes: List(Attribute), children: List(Element)) -> Element {
+  el.element("sup", attributes, children)
 }
 
 pub fn table(

@@ -293,6 +293,15 @@ fn cast_of(kind: String) -> String {
   }
 }
 
+/// 向きのそろった keyset の穴の型。`$1 IS NULL` が先に現れると PostgreSQL は穴を text と読み、整数・真偽・
+/// 浮動小数の列との行の比較が型で落ちる(0.13.1、穴 3)。text の列は今までどおり型を書かない。
+fn uniform_cast(kind: String) -> String {
+  case kind {
+    "integer" | "bigint" | "boolean" | "double precision" -> "::" <> kind
+    _ -> cast_of(kind)
+  }
+}
+
 type Column {
   Column(reference: String, kind: String, optional: Bool)
 }
@@ -1596,11 +1605,11 @@ fn uniform_keyset(
     range(first, count)
     |> list.map(fn(index) { "$" <> int.to_string(index) })
   let places = case list.reverse(places) {
-    [last, ..rest] -> list.reverse([last <> cast_of(key_kind), ..rest])
+    [last, ..rest] -> list.reverse([last <> uniform_cast(key_kind), ..rest])
     [] -> []
   }
   let head_cast = case columns {
-    [head, ..] -> cast_of(head.kind)
+    [head, ..] -> uniform_cast(head.kind)
     [] -> ""
   }
   let operator = case way {

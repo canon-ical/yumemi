@@ -51,6 +51,10 @@ pub type BorderEdge {
   AllEdges
   TopEdge
   BottomEdge
+  /// 左の辺だけ(0.13.1)。見出しの帯・引用の縦線など。
+  LeftEdge
+  /// 右の辺だけ(0.13.1)。
+  RightEdge
 }
 
 pub type BorderStyle {
@@ -96,6 +100,31 @@ pub type OverflowWrap {
   Anywhere
   BreakWord
   WrapNormal
+}
+
+/// はみ出した中身の扱い(`overflow-x`、0.13.1)。`OverflowAuto` は溢れたときだけ横に送れる
+/// (幅の広い表・コードの塊を本文の幅に収める)。
+pub type Overflow {
+  OverflowAuto
+  OverflowHidden
+  OverflowVisible
+  OverflowScroll
+}
+
+/// 空白と改行の扱い(`white-space`、0.13.1)。`Pre` は空白も改行もそのまま描いて折らない(コードの塊)。
+/// `PreWrap` はそのまま描いて行の幅で折る。`PreLine` は改行だけ残す。`NoWrap` は折らない。
+pub type WhiteSpace {
+  SpaceNormal
+  Pre
+  PreWrap
+  PreLine
+  NoWrap
+}
+
+/// 字の傾き(`font-style`、0.13.1)。
+pub type FontSlant {
+  Upright
+  Italic
 }
 
 pub type Interaction {
@@ -176,6 +205,15 @@ pub type Style {
   )
   Flow(flow: Flow)
   TextAlign(align: TextAlignment)
+  /// 箱を親の幅の中で横の中央に置く(`margin-left` と `margin-right` を `auto`、0.13.1)。`MaxWidth` と組む。
+  /// 上下の margin は触らない。
+  Center
+  /// 横にはみ出した中身の扱い(`overflow-x`、0.13.1)。
+  OverflowX(overflow: Overflow)
+  /// 空白と改行の扱い(`white-space`、0.13.1)。
+  Spaces(white_space: WhiteSpace)
+  /// 字の傾き(`font-style`、0.13.1)。
+  Slant(slant: FontSlant)
   State(state: Interaction, styles: List(Style))
   Responsive(at: Breakpoint, styles: List(Style))
 }

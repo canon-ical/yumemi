@@ -71,7 +71,7 @@ pub fn view(it: In) -> Element {
 ```
 
 - `el.Element` and `el.Attribute` are opaque and take no type parameter. `el.text` / `el.each` / `el.none` / `el.fragment`, the framework words (`el.opener` / `el.closer` / `el.badge` / `el.each_modal` / `el.img` / `el.notice` / `el.dialog` / `el.dialog_opener` / `el.dialog_closer` / `el.stylesheet`) and `el.to_string` (for tests) are public; the rest of `el` is `@internal` and a ★ calling it stops the generator (article 3).
-- `html` has 53 tags a business CMS uses plus `svg` / `path`, each as `tag(class, attributes, children)` and `tag_(attributes, children)`, with sketch_lustre's names and argument order. There is no `style`, `script` or `link`.
+- `html` has 53 tags a business CMS uses, the 8 a document needs (0.13.1: `caption`, `del`, `em`, `h5`, `h6`, `i`, `kbd`, `sup`) plus `svg` / `path`, each as `tag(class, attributes, children)` and `tag_(attributes, children)`, with sketch_lustre's names and argument order. There is no `style`, `script` or `link`.
 - `attr` has typed attributes with lustre's names, `data(name, value)`, `aria(name, value)` and `role(attr.Status | ..)`. There is no free-name attribute, no `class` (a class is the tag's first argument, `css.class(styles)`), no `style` and no event.
 - Rendering never fails a page: a `data` / `aria` name that is not `[a-z][a-z0-9-]*` drops that attribute (a literal one stops the generator, article 7); `href` / `src` / `action` are dropped unless the scheme is `http`, `https`, `mailto`, `tel` or none (a relative URL); the same attribute written twice keeps the last one (written twice literally in one list stops the generator, article 8); `</` and `<!--` inside the generated `<style>` become `<\/` and `<\!--`. Fragments leave no comment markers, and a `textarea` / `pre` whose text starts with a newline keeps it.
 - `el.img(class, src, alt, attributes)` (0.12). `src` is an `el.Src`, made only by the generated `media.src(blob, media.W800)` (`src/gen/media.gleam`, from the app's media table) or `el.static_src("logo.png")` (a file under `priv/static/`: the path must be a string literal, exit 4, and the file must exist, exit 3; article 43). An `attr.src` in `attributes` does not override it.
@@ -87,6 +87,41 @@ pub fn view(it: In) -> Element {
 - no selector may name generated output — `[data-yumemi-…]`, a generated class `.css-<8 hex>`, a `[class…]` selector whose value holds `css`, or an element whose name starts with `yumemi-` (exit 4, article 29). CSS escapes and spaces inside brackets are undone before the check, and at-rule preludes (`@scope (..)`) are checked too. An interactive Component's own tag (`like-button`) and its `:state()` are fine, and so is reading `var(--yumemi-theme-*)` in a declaration;
 - no `@import` (exit 4, article 30);
 - the rules are counted per face — each top-level block is one rule, an `@media` block is one, and a file read from two places counts once — in the face's escape line (below).
+
+## `yumemi/front` ── Markdown (0.13.1)
+
+`yumemi/front/markdown` reads Markdown held in the database at run time and draws it with yumemi's elements: a plain view-function Component a Block calls. A face can depend on nothing but yumemi and `el` takes no raw HTML, so the Markdown is read into a tree (`Block` / `Inline`) and built from `html` tags. HTML written in the Markdown stays text and is escaped; there is no raw-HTML path.
+
+```gleam
+import yumemi/front/css
+import yumemi/front/el.{type Element}
+import yumemi/front/html
+import yumemi/front/markdown
+
+fn look() -> markdown.Look {
+  markdown.Look(
+    ..markdown.bare(),
+    paragraph: markdown.Part(css.class(style.para), []),
+    code: markdown.Part(css.class([css.OverflowX(css.OverflowAuto), css.Spaces(css.Pre)]), []),
+    link: markdown.Part(css.class(style.link), []),
+  )
+}
+
+pub fn view(it: In) -> Element {
+  html.article(css.class(style.page), [], [
+    markdown.view(it.article.body, markdown.document(), look()),
+  ])
+}
+```
+
+- **What is read is chosen by `Options`.** Three are provided, and any field can be changed (`markdown.Options(..markdown.document(), tables: False)`):
+  - `document()` — headings `#`–`######` (h1–h6), paragraphs (lines joined), fenced code with the language name, tables (`|` rows with a `|---|` separator line; `|` inside code and `\|` do not split), quotes (`>`, read as blocks), nested bullet (`-` `*` `+`) and numbered (`1.` `1)`) lists, rules (`---` `***` `___`); inside a line code (`` `x` ``, `<code>x</code>`), `**strong**`, `*emphasis*`, `[links](/relative/too)`, `<https://autolinks>`, `\` escapes and `&lt;` `&gt;` `&amp;` `&quot;` `&#n;`.
+  - `post()` — what a user writes in a post: `#` and `##` are level 2, `###` is level 3, paragraphs keep their line breaks (`br`), blank lines are kept and counted (`Blanks(count)`, drawn as that many empty lines), `- ` / `* ` bullets and `1. ` numbers one line each (written at the start of the line), a line of exactly `---` (spaces around allowed) is a rule, and inside a line only `**strong**` and `http(s)` links. Anything else (tables, quotes, code, emphasis, nesting) stays text.
+  - `outline()` — a terms-like document: front matter (`---` … `---`, read with `markdown.field(doc, "status")`), lines trimmed, `#`–`###` are levels 1–3, `- ` bullets and `1. ` numbers (the start is not kept), paragraph lines joined with nothing between them, no marks inside a line.
+- **Links pass a fence or stay text.** `Links`: `WebLinks` takes only `http://` / `https://` URLs without spaces, `"`, `<` or `>`; `SafeLinks` takes what `attr.safe_url` takes (http, https, mailto, tel and relative URLs); `NoLinks` reads none. A `[text](url)` whose URL does not pass is left as text, so a `javascript:` link never becomes an `<a>`. A link's text may not hold `[` or `]`. `![alt](src)` is not read (no images).
+- **The tree is public.** `markdown.parse(text, options)` gives a `Document(meta, blocks)`, `markdown.blocks` the blocks; an app that draws with its own Blocks walks `Heading` / `Paragraph(lines)` / `Code(lang, text)` / `Quote` / `Bullets(items)` / `Numbered(start, items)` / `Table(header, rows)` / `Rule` / `Blanks(count)` and `Plain` / `Strong` / `Emphasis` / `CodeSpan` / `Link(href, label)`. A list item is a list of blocks; a one-line item is one `Paragraph`. `markdown.render(blocks, look)` and `markdown.render_inlines(items, look)` draw a tree, `markdown.inline_text` and `markdown.plain(text, options)` give the text without marks (`plain` keeps the line count and order, drops rule lines and keeps a number's `1. `; for excerpts), `markdown.rule(line, options)` tells a rule line.
+- **How it is drawn is chosen by `Look`.** Each kind of element takes a `Part(class, attributes)`; `bare()` gives none. `heading` is a function of the level, `code_frame` / `table_frame` wrap the `pre` / `table` in a `div` when `Some`, `link` carries e.g. `attr.rel("nofollow ugc noopener")`, and `spaces: KeepSpaces` keeps leading spaces and runs of two or more as U+00A0 (`CollapseSpaces` leaves the text as is). The heading tag follows the level (`h1`–`h6`); a numbered list that does not start at 1 puts the start on its first `li` as `value`; a code block's language goes to `data-lang` on the `pre`; header cells get `scope="col"`; emphasis is `em`; a list item whose first block is a paragraph has the paragraph's text directly in the `li`. There is no syntax highlighting.
+- The code that reads and draws is the same in the Worker and in an interactive Component's client bundle. In node, a 29,000-character document (`gleam-for-php-users`) is read and drawn in about 48 ms.
 
 ## `yumemi/front` ── Interactive Components (0.12)
 
@@ -235,8 +270,12 @@ Colours are a closed type, `css.Paint` (0.12; before, a string passed straight t
 |---|---|
 | `Color(value)` | `color` |
 | `Background(value)` | `background-color` |
-| `Border(edge: AllEdges / TopEdge / BottomEdge, width, style: Solid / Dashed / Dotted, color)` | `border` / `border-top` (0.12) / `border-bottom` (e.g. the 2px tab underline) |
+| `Border(edge: AllEdges / TopEdge / BottomEdge / LeftEdge / RightEdge, width, style: Solid / Dashed / Dotted, color)` | `border` / `border-top` (0.12) / `border-bottom` (e.g. the 2px tab underline), and (0.13.1) `LeftEdge` / `RightEdge` — `border-left` / `border-right` (a heading's side band, a quote's rule) |
 | `TextAlign(align: TextStart / TextCenter / TextEnd)` | (0.12) `text-align: start / center / end` |
+| `Center` | (0.13.1) `margin-left: auto; margin-right: auto` — centres a box in its parent; pair it with `Space(MaxWidth, ..)` for a reading column. The vertical margins are left alone |
+| `OverflowX(overflow: OverflowAuto / OverflowHidden / OverflowVisible / OverflowScroll)` | (0.13.1) `overflow-x` — `OverflowAuto` lets a wide table or code block scroll sideways inside the text column |
+| `Spaces(white_space: SpaceNormal / Pre / PreWrap / PreLine / NoWrap)` | (0.13.1) `white-space` |
+| `Slant(slant: Upright / Italic)` | (0.13.1) `font-style: normal` / `italic` |
 | `Outline(width, offset, color)` | `outline-style: solid` / `outline-width` / `outline-offset` / `outline-color` — the focus ring, inside `State(FocusVisible, ..)` (0.11.14; `State(Focus, ..)` also keeps it after a tap) |
 | `Space(property:, value:)` | `margin` / `padding` / `gap` / `width` / `height` / `border-radius`, and (0.11.7) `min-width` / `min-height` / `max-width` |
 | `Text(family:, size:, weight:, line_height:)` | `font-family` (`System` / `SansSerif` / `Serif` / `Monospace`, or `Named("var(--ma-font-ui)")` / `Named("\"Noto Sans JP\", sans-serif")`; each comma-separated `Named` item must be `var(--<name>)`, a quoted family name or bare words of `[A-Za-z0-9_-]`, else the value is `unset`), `font-size`, `font-weight` (`Normal` 400 / `Medium` 500 / `SemiBold` 600 / `Bold` 700), `line-height` |
@@ -391,6 +430,12 @@ A Service whose logic runs `step.commit` and continues after it (and is not a qu
 - **The DDL is generated, not applied.** Every app with `src/server.gleam` gets `db/framework/idempotency.sql`: the table `framework.idempotency (party text, key text, request_hash text, result jsonb, created_at timestamptz)` with the primary key `idempotency_pkey (party, key)` and the index `idempotency_created_at (created_at)`. Applying it is the app's DDL step. Until it is applied, a keyed write fails (503 `unavailable`) and requests without a key are unaffected.
 - **The SQL endpoint comes from the env.** `driver.mjs` sets `neonConfig.fetchEndpoint` to `DLEAM_SQL_ENDPOINT` (a full URL such as `https://dleam.example/sql`) when the Worker env has it, and leaves the driver's own endpoint (derived from `DATABASE_URL`'s host) when it does not; removing the variable goes back. It is set in `database(env)`, so every database handle of the app's generated Worker (fetch, queue, cron, `AppSystem`) uses it. A Worker that calls `neon()` itself instead of `database(env)` calls `useSqlEndpoint(env)` (exported by `driver.mjs`) before `neon()`.
 - The generator adds default `framework/idempotency_find`, `_record`, `_repair` and `_sweep` statements to `src/gen/sql.mjs`; an app's own `db/queries/framework/<name>.sql` wins (to change the purge condition, for example).
+
+0.13.1 adds the runtime Markdown Component, the 8 document tags and the document Style words (all above), and closes three holes a document site fell into. Public types only gain variants and modules; an app that does not hit the holes gets byte-identical generated output:
+
+- **A face no longer needs the back's static materials.** `src/external_hosts.mjs` and `<repo root>/docs/api-v1.md` are each optional: when one is missing its copy (`src/gen/external.gleam`, `src/gen/doc/api_v1.gleam`) is not written to the faces, instead of stopping with exit 3. A file that is there and cannot be read, or whose `EXTERNAL_HOSTS` has another shape, still stops. `gen/doc/api_v1.gleam` names the face's `style.body`, `style.ink` and `style.heading`; for a face whose `src/style.gleam` does not define all three as `pub`, it is written with no class (`css.class([])`). An app with both files and those names gets byte-identical output.
+- **A `Paged` list ordered by an integer, boolean or floating column reads.** The keyset's first placeholder (`$n IS NULL`) of a list ordered in one direction gets the column's type (`::integer`, `::bigint`, `::boolean`, `::double precision`), as the uuid / time ones already did; without it PostgreSQL read the placeholder as text, the row comparison failed and every page answered 503. Text columns stay without a cast.
+- **An internal failure is logged before it becomes `503 unavailable`.** When a request's failure is folded into `{"code":"unavailable"}` (not a business failure, not a connector failure, not answered by the app's `db_error` hook), `console.error` gets one JSON line `{"yumemi":"request.unavailable","service":…,"code":<SQLSTATE>,"constraint":…,"table":…,"column":…,"name":…,"message":…}`: a unique violation names its constraint (`"code":"23505","constraint":"note_title_key"`). The `detail` (which holds the key's value) is not logged. The response is still 503 `unavailable`.
 
 **Imports outside the package**
 

@@ -254,7 +254,8 @@ fn generate_with_faces(
       list.flat_map(front_models, fn(item) {
         let #(package, model) = item
         let static_files = case static_sources {
-          Some(sources) -> static_emit.emit(package.name, sources)
+          Some(sources) ->
+            static_emit.emit_present(package.name, sources, package.units)
           None -> []
         }
         list.append(
@@ -325,11 +326,11 @@ fn source_note(error: source.Error) -> Note {
 fn static_sources_for_faces(
   app_dir: String,
   packages: List(face.Package),
-) -> Result(Option(static_source.Sources), Note) {
+) -> Result(Option(static_source.Present), Note) {
   case packages {
     [] -> Ok(None)
     _ ->
-      static_source.load(app_dir)
+      static_source.load_present(app_dir)
       |> result.map(Some)
       |> result.map_error(static_source.note)
   }
