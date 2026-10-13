@@ -84,9 +84,18 @@ async function unavailable() {
   check("unique: one log line names the constraint, the table and the SQLSTATE", dup.lines.length === 1 && line?.constraint === "note_title_key" && line?.table === "note" && line?.code === "23505" && line?.service === "note_create", dup.lines);
   check("unique: the log line leaves out the detail (the key's value)", !dup.lines.join("\n").includes("秘密の題"), dup.lines);
 
+  check("unique: the message of a constraint (no value in it) stays in the log", line?.message === 'duplicate key value violates unique constraint "note_title_key"', dup.lines);
+
   const odd = await post(thrown);
   const oddLine = odd.lines.map((x) => { try { return JSON.parse(x); } catch { return null; } }).find((x) => x?.yumemi === "request.unavailable");
-  check("thrown: a plain exception is 503 with its name and message in the log", odd.status === 503 && oddLine?.name === "TypeError" && oddLine?.message.includes("cannot read") && oddLine?.code === null, odd);
+  check("thrown: a plain exception is 503 with its name and no message in the log", odd.status === 503 && oddLine?.name === "TypeError" && oddLine?.message === null && oddLine?.code === null, odd);
+
+  // r2(柏木 ゲート 2 の P1-3):22 の類の文言は入力の値を含む。JS の例外も入力の切れ端を含むことがある
+  const malformed = await post(() => Object.assign(new Error('invalid input syntax for type uuid: "秘密の鍵"'), { code: "22P02", name: "error" }));
+  const malformedLine = malformed.lines.map((x) => { try { return JSON.parse(x); } catch { return null; } }).find((x) => x?.yumemi === "request.unavailable");
+  check("data: a 22 class error logs its SQLSTATE but not the message with the value", malformed.status === 503 && malformedLine?.code === "22P02" && malformedLine?.message === null && !malformed.lines.join("\n").includes("秘密の鍵"), malformed.lines);
+  const parsed = await post(() => { try { JSON.parse("秘密の本文"); } catch (error) { return error; } });
+  check("thrown: a JSON.parse error does not carry the input into the log", parsed.status === 503 && !parsed.lines.join("\n").includes("秘密の本文") && parsed.lines.length === 1, parsed.lines);
 
   const business = await post(raised);
   check("business: a RAISE (P0001) keeps its name and 422, no log", business.status === 422 && JSON.parse(business.body).code === "title_taken" && business.lines.length === 0, business);

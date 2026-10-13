@@ -11,7 +11,10 @@
 //// - 描き方は `Look`(要素の種類ごとの class と属性)で選ぶ。`view` は塊の並びを 1 つの断片で返し、包む要素は
 ////   app が置く。木を app の Block で描くなら `parse` / `blocks` だけを使う
 //// - 構文の色付けはしない。コードの塊の言語名は `pre` の `data-lang` に残す
+//// - 書き手を信用しない本文も毎回読んでよい:読む時間は本文の長さに線形。引用と箇条の項目の入れ子は `max_depth`(16)段
+////   までで、それより深い `>` と箇条の印は字のまま
 
+import gleam/bool
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -217,10 +220,10 @@ pub fn parse(text: String, options: Options) -> Document {
     False -> #([], lines)
   }
   let lines = case options.trim_lines {
-    True -> list.map(lines, string.trim)
+    True -> list.map(lines, trim)
     False -> lines
   }
-  Document(meta: meta, blocks: read(lines, options, []))
+  Document(meta: meta, blocks: read(lines, options, 0, []))
 }
 
 /// 本文を塊の並びに読む(前書きは捨てる)。
@@ -240,7 +243,7 @@ pub fn field(document: Document, name: String) -> Result(String, Nil) {
 
 /// 行の中の記法を読む。
 pub fn inlines(text: String, options: Options) -> List(Inline) {
-  scan(string.to_graphemes(text), "", [], Scope(options, True, True))
+  scan_all(string.to_graphemes(text), Scope(options, True, True))
 }
 
 /// 行の中の字だけ(記法の印を落とす。リンクは字、コードは中身)。
@@ -257,7 +260,7 @@ pub fn inline_text(items: List(Inline)) -> String {
 
 /// 区切り線の行か(`Options.rules`)。
 pub fn rule(line: String, options: Options) -> Bool {
-  is_rule(string.trim(string.replace(line, "\r", "")), options.rules)
+  is_rule(trim(string.replace(line, "\r", "")), options.rules)
 }
 
 /// 記法の印を落とした字(一覧の抜粋)。行ごとに読み、行の数と順を変えない ── 区切り線の行だけを落とす。
@@ -289,8 +292,8 @@ fn plain_line(line: String, options: Options) -> String {
 fn clean_line(line: String, options: Options) -> String {
   let line = string.replace(line, "\r", "")
   case options.trim_lines {
-    True -> string.trim(line)
-    False -> string.trim_end(line)
+    True -> trim(line)
+    False -> trim_end(line)
   }
 }
 
@@ -301,9 +304,9 @@ fn front_matter(
 ) -> #(List(#(String, String)), List(String)) {
   case lines {
     [first, ..rest] ->
-      case string.trim(first) == "---" {
+      case trim(first) == "---" {
         True ->
-          case list.split_while(rest, fn(line) { string.trim(line) != "---" }) {
+          case list.split_while(rest, fn(line) { trim(line) != "---" }) {
             #(head, [_, ..body]) -> #(list.filter_map(head, meta_pair), body)
             #(_, []) -> #([], lines)
           }
@@ -315,14 +318,20 @@ fn front_matter(
 
 fn meta_pair(line: String) -> Result(#(String, String), Nil) {
   case string.split_once(line, ":") {
-    Ok(#(key, value)) -> Ok(#(string.trim(key), string.trim(value)))
+    Ok(#(key, value)) -> Ok(#(trim(key), trim(value)))
     Error(_) -> Error(Nil)
   }
 }
 
 // ── 塊 ──────────────────────────────────────────────────────────────────
 
-fn read(lines: List(String), o: Options, acc: List(Block)) -> List(Block) {
+/// 塊の並びを読む。`depth` は外の引用と箇条の項目の段の数。
+fn read(
+  lines: List(String),
+  o: Options,
+  depth: Int,
+  acc: List(Block),
+) -> List(Block) {
   case lines {
     [] -> list.reverse(acc)
     [line, ..rest] ->
@@ -331,20 +340,66 @@ fn read(lines: List(String), o: Options, acc: List(Block)) -> List(Block) {
           case o.count_blanks {
             True -> {
               let #(count, after) = take_blanks(lines, 0)
-              read(after, o, [Blanks(count), ..acc])
+              read(after, o, depth, [Blanks(count), ..acc])
             }
-            False -> read(rest, o, acc)
+            False -> read(rest, o, depth, acc)
           }
         False -> {
-          let #(block, after) = block_at(line, rest, o)
-          read(after, o, [block, ..acc])
+          let #(block, after) = block_at(line, rest, o, depth)
+          read(after, o, depth, [block, ..acc])
         }
       }
   }
 }
 
+/// 入れ子(引用と箇条の項目)の段の上限。これより深い `>` と箇条の印は字のまま読む。
+const max_depth: Int = 16
+
+/// `string.trim_end` と同じ空白を落とす。JS の stdlib は正規表現 `[空白]*$` で、字の中に長い空白の連なりが
+/// あると長さの 2 乗かかる(3 万字の空白で 1 回 270 ms)ので、尻から読む。
+@external(javascript, "./text_ffi.mjs", "trim_end")
+fn trim_end(text: String) -> String {
+  string.trim_end(text)
+}
+
+/// 頭の字下げ(`string.length` の差と同じ数)。頭が ASCII の空白なら code unit で数える(字に割らない)。
+fn indent_of(line: String) -> Int {
+  case ascii_indent(line) {
+    -1 -> string.length(line) - string.length(string.trim_start(line))
+    count -> count
+  }
+}
+
+@external(javascript, "./text_ffi.mjs", "ascii_indent")
+fn ascii_indent(_text: String) -> Int {
+  -1
+}
+
+/// `string.drop_start` と同じ。頭の字が ASCII なら code unit で落とす(stdlib は行の全部を UTF-8 に直す)。
+fn drop(text: String, count: Int) -> String {
+  case count > 0 && ascii_head(text, count) {
+    True -> drop_units(text, count)
+    False -> string.drop_start(text, count)
+  }
+}
+
+@external(javascript, "./text_ffi.mjs", "ascii_head")
+fn ascii_head(_text: String, _count: Int) -> Bool {
+  False
+}
+
+@external(javascript, "./text_ffi.mjs", "drop_units")
+fn drop_units(text: String, count: Int) -> String {
+  string.drop_start(text, count)
+}
+
+/// `string.trim` と同じ(尻は `trim_end`)。
+fn trim(text: String) -> String {
+  trim_end(string.trim_start(text))
+}
+
 fn is_blank(line: String) -> Bool {
-  string.trim(line) == ""
+  trim(line) == ""
 }
 
 fn take_blanks(lines: List(String), count: Int) -> #(Int, List(String)) {
@@ -363,8 +418,9 @@ fn block_at(
   line: String,
   rest: List(String),
   o: Options,
+  depth: Int,
 ) -> #(Block, List(String)) {
-  let clean = string.trim_end(line)
+  let clean = trim_end(line)
   case fence_open(line, o) {
     Ok(lang) -> {
       let #(body, after) = take_fenced(rest, [])
@@ -374,21 +430,22 @@ fn block_at(
       case heading_of(clean, o) {
         Ok(#(level, text)) -> #(Heading(level, inlines(text, o)), rest)
         Error(_) ->
-          case is_rule(string.trim(clean), o.rules) {
+          case is_rule(trim(clean), o.rules) {
             True -> #(Rule, rest)
             False ->
-              case quote_start(line, o) {
+              case quote_start(line, o, depth) {
                 True -> {
                   let #(quoted, after) = take_quote([line, ..rest], [])
-                  #(Quote(read(quoted, o, [])), after)
+                  #(Quote(read(quoted, o, depth + 1, [])), after)
                 }
                 False ->
                   case table_start([line, ..rest], o) {
                     True -> take_table(line, rest, o)
                     False ->
-                      case marker_of(clean, o) {
-                        Ok(marker) -> take_list([line, ..rest], marker, o)
-                        Error(_) -> take_paragraph([line, ..rest], [], o)
+                      case list_start(clean, o, depth) {
+                        Ok(marker) ->
+                          take_list([line, ..rest], marker, o, depth)
+                        Error(_) -> take_paragraph([line, ..rest], [], o, depth)
                       }
                   }
               }
@@ -398,17 +455,17 @@ fn block_at(
 }
 
 /// その行から塊が始まるか(段落を閉じる・項目の続きを止める)。
-fn starts_block(lines: List(String), o: Options) -> Bool {
+fn starts_block(lines: List(String), o: Options, depth: Int) -> Bool {
   case lines {
     [] -> False
     [line, ..] -> {
-      let clean = string.trim_end(line)
+      let clean = trim_end(line)
       result_ok(fence_open(line, o))
       || result_ok(heading_of(clean, o))
-      || is_rule(string.trim(clean), o.rules)
-      || quote_start(line, o)
+      || is_rule(trim(clean), o.rules)
+      || quote_start(line, o, depth)
       || table_start(lines, o)
-      || result_ok(marker_of(clean, o))
+      || result_ok(list_start(clean, o, depth))
     }
   }
 }
@@ -424,7 +481,7 @@ fn result_ok(value: Result(a, b)) -> Bool {
 fn fence_open(line: String, o: Options) -> Result(String, Nil) {
   case o.code_blocks, string.trim_start(line) {
     True, "```" <> rest ->
-      case string.split(string.trim(rest), " ") {
+      case string.split(trim(rest), " ") {
         [first, ..] -> Ok(first)
         [] -> Ok("")
       }
@@ -450,20 +507,20 @@ fn take_fenced(
 /// 行頭の `#` の数(対に在るもの)、空白、字。戻りは #(段, 字)。
 fn heading_of(clean: String, o: Options) -> Result(#(Int, String), Nil) {
   let count = count_hashes(clean, 0)
-  case count, list.key_find(o.headings, count) {
-    0, _ -> Error(Nil)
-    _, Ok(level) -> {
-      let rest = string.drop_start(clean, count)
+  use <- bool.guard(count == 0, Error(Nil))
+  case list.key_find(o.headings, count) {
+    Ok(level) -> {
+      let rest = drop(clean, count)
       case string.starts_with(rest, " ") {
         True ->
-          case string.trim(rest) {
+          case trim(rest) {
             "" -> Error(Nil)
             text -> Ok(#(level, text))
           }
         False -> Error(Nil)
       }
     }
-    _, Error(_) -> Error(Nil)
+    Error(_) -> Error(Nil)
   }
 }
 
@@ -479,18 +536,21 @@ fn is_rule(trimmed: String, rules: Rules) -> Bool {
     NoRules -> False
     OnlyDashes -> trimmed == "---"
     ThematicBreaks -> {
+      // 空白を除いて 1 種の印だけが 3 つ以上(行を字に割らずに見る)
       let compact = string.replace(trimmed, " ", "")
-      let size = string.length(compact)
-      size >= 3
-      && list.any(["-", "*", "_"], fn(char) {
-        compact == string.repeat(char, size)
+      list.any(["-", "*", "_"], fn(char) {
+        string.starts_with(compact, string.repeat(char, 3))
+        && string.replace(compact, char, "") == ""
       })
     }
   }
 }
 
-fn quote_start(line: String, o: Options) -> Bool {
-  o.quotes && string.starts_with(string.trim_start(line), ">")
+/// 引用の始まりの行か。入れ子が `max_depth` 段に達した所では読まない(字のまま)。
+fn quote_start(line: String, o: Options, depth: Int) -> Bool {
+  o.quotes
+  && depth < max_depth
+  && string.starts_with(string.trim_start(line), ">")
 }
 
 fn take_quote(
@@ -517,6 +577,7 @@ fn take_paragraph(
   lines: List(String),
   acc: List(String),
   o: Options,
+  depth: Int,
 ) -> #(Block, List(String)) {
   let done = fn(after) {
     let lines = list.reverse(acc)
@@ -530,9 +591,9 @@ fn take_paragraph(
   case lines {
     [] -> done([])
     [line, ..rest] ->
-      case is_blank(line) || { acc != [] && starts_block(lines, o) } {
+      case is_blank(line) || { acc != [] && starts_block(lines, o, depth) } {
         True -> done(lines)
-        False -> take_paragraph(rest, [string.trim_end(line), ..acc], o)
+        False -> take_paragraph(rest, [trim_end(line), ..acc], o, depth)
       }
   }
 }
@@ -542,13 +603,13 @@ fn take_paragraph(
 fn table_start(lines: List(String), o: Options) -> Bool {
   case o.tables, lines {
     True, [head, separator, ..] ->
-      string.starts_with(string.trim(head), "|") && is_separator(separator)
+      string.starts_with(trim(head), "|") && is_separator(separator)
     _, _ -> False
   }
 }
 
 fn is_separator(line: String) -> Bool {
-  let trimmed = string.trim(line)
+  let trimmed = trim(line)
   string.starts_with(trimmed, "|")
   && string.contains(trimmed, "-")
   && list.all(string.to_graphemes(trimmed), fn(char) {
@@ -563,15 +624,13 @@ fn take_table(
 ) -> #(Block, List(String)) {
   let rest = list.drop(rest, 1)
   let #(rows, after) =
-    list.split_while(rest, fn(line) {
-      string.starts_with(string.trim(line), "|")
-    })
+    list.split_while(rest, fn(line) { string.starts_with(trim(line), "|") })
   #(Table(row_cells(head, o), list.map(rows, row_cells(_, o))), after)
 }
 
 /// 行を `|` で割ってセルにする。コードの中の `|` と `\|` は割らない。
 fn row_cells(line: String, o: Options) -> List(List(Inline)) {
-  let trimmed = string.trim(line)
+  let trimmed = trim(line)
   let inner = case trimmed {
     "|" <> more -> more
     _ -> trimmed
@@ -583,7 +642,7 @@ fn row_cells(line: String, o: Options) -> List(List(Inline)) {
     False -> inner
   }
   split_cells(string.to_graphemes(inner), "", False, [])
-  |> list.map(fn(cell) { inlines(string.trim(cell), o) })
+  |> list.map(fn(cell) { inlines(trim(cell), o) })
 }
 
 fn split_cells(
@@ -612,9 +671,17 @@ type Marker {
   Marker(indent: Int, width: Int, ordered: Bool, number: Int)
 }
 
+/// 箇条の始まりの行か。入れ子が `max_depth` 段に達した所では読まない(字のまま)。
+fn list_start(clean: String, o: Options, depth: Int) -> Result(Marker, Nil) {
+  case depth < max_depth {
+    True -> marker_of(clean, o)
+    False -> Error(Nil)
+  }
+}
+
 fn marker_of(clean: String, o: Options) -> Result(Marker, Nil) {
   let stripped = string.trim_start(clean)
-  let indent = string.length(clean) - string.length(stripped)
+  let indent = indent_of(clean)
   case o.nesting || indent == 0 {
     False -> Error(Nil)
     True ->
@@ -634,12 +701,15 @@ fn number_marker(
   indent: Int,
   o: Options,
 ) -> Result(Marker, Nil) {
-  let digits = take_digits(string.to_graphemes(stripped), "")
+  // 数字で始まらない行は字に割らない。数字は 9 桁まで:頭の 10 字だけを見る
+  use <- bool.guard(!starts_with_digit(stripped), Error(Nil))
+  let digits =
+    take_digits(string.to_graphemes(string.slice(stripped, 0, 10)), "")
   let size = string.length(digits)
   case size >= 1 && size <= 9 {
     False -> Error(Nil)
     True -> {
-      let after = string.drop_start(stripped, size)
+      let after = drop(stripped, size)
       case
         list.find(o.number_marks, fn(mark) {
           string.starts_with(after, mark <> " ")
@@ -651,6 +721,22 @@ fn number_marker(
         _, _ -> Error(Nil)
       }
     }
+  }
+}
+
+fn starts_with_digit(text: String) -> Bool {
+  case text {
+    "0" <> _
+    | "1" <> _
+    | "2" <> _
+    | "3" <> _
+    | "4" <> _
+    | "5" <> _
+    | "6" <> _
+    | "7" <> _
+    | "8" <> _
+    | "9" <> _ -> True
+    _ -> False
   }
 }
 
@@ -667,18 +753,19 @@ fn take_digits(chars: List(String), acc: String) -> String {
 
 /// 1 行の項目の字(印の後ろ、頭と尻の空白を落とす)。
 fn item_text(clean: String, marker: Marker) -> String {
-  string.trim(string.drop_start(clean, marker.indent + marker.width))
+  trim(drop(clean, marker.indent + marker.width))
 }
 
 fn take_list(
   lines: List(String),
   marker: Marker,
   o: Options,
+  depth: Int,
 ) -> #(Block, List(String)) {
   let #(items, after) = case o.nesting {
     True -> {
-      let #(items, after) = collect_items(lines, marker, o, [])
-      #(list.map(items, read(_, o, [])), after)
+      let #(items, after) = collect_items(lines, marker, o, depth, [])
+      #(list.map(items, read(_, o, depth + 1, [])), after)
     }
     False -> flat_items(lines, marker, o, [])
   }
@@ -701,7 +788,7 @@ fn flat_items(
 ) -> #(List(List(Block)), List(String)) {
   case lines {
     [line, ..rest] -> {
-      let clean = string.trim_end(line)
+      let clean = trim_end(line)
       case marker_of(clean, o) {
         Ok(found) if found.ordered == marker.ordered -> {
           let text = item_text(clean, found)
@@ -719,21 +806,25 @@ fn collect_items(
   lines: List(String),
   marker: Marker,
   o: Options,
+  depth: Int,
   acc: List(List(String)),
 ) -> #(List(List(String)), List(String)) {
   case lines {
     [line, ..rest] ->
-      case marker_of(string.trim_end(line), o) {
+      case marker_of(trim_end(line), o) {
         Ok(found)
           if found.indent == marker.indent && found.ordered == marker.ordered
         -> {
-          let first = string.drop_start(string.trim_start(line), found.width)
+          let first = drop(string.trim_start(line), found.width)
           let #(more, after) =
-            take_item_body(rest, marker.indent + found.width, o, [])
-          collect_items(skip_blank_before_marker(after, marker, o), marker, o, [
-            [first, ..more],
-            ..acc
-          ])
+            take_item_body(rest, marker.indent + found.width, o, depth, [])
+          collect_items(
+            skip_blank_before_marker(after, marker, o),
+            marker,
+            o,
+            depth,
+            [[first, ..more], ..acc],
+          )
         }
         _ -> #(list.reverse(acc), lines)
       }
@@ -753,7 +844,7 @@ fn skip_blank_before_marker(
         True ->
           case next_nonblank(rest) {
             Ok(next) ->
-              case marker_of(string.trim_end(next), o) {
+              case marker_of(trim_end(next), o) {
                 Ok(found)
                   if found.indent == marker.indent
                   && found.ordered == marker.ordered
@@ -785,6 +876,7 @@ fn take_item_body(
   lines: List(String),
   content_indent: Int,
   o: Options,
+  depth: Int,
   acc: List(String),
 ) -> #(List(String), List(String)) {
   case lines {
@@ -795,7 +887,8 @@ fn take_item_body(
           case next_nonblank(rest) {
             Ok(next) ->
               case indent_of(next) >= content_indent {
-                True -> take_item_body(rest, content_indent, o, ["", ..acc])
+                True ->
+                  take_item_body(rest, content_indent, o, depth, ["", ..acc])
                 False -> #(list.reverse(acc), lines)
               }
             Error(_) -> #(list.reverse(acc), lines)
@@ -803,18 +896,18 @@ fn take_item_body(
         False ->
           case indent_of(line) >= content_indent {
             True ->
-              take_item_body(rest, content_indent, o, [
-                string.drop_start(line, content_indent),
+              take_item_body(rest, content_indent, o, depth, [
+                drop(line, content_indent),
                 ..acc
               ])
             False ->
-              case starts_block(lines, o), acc {
+              case starts_block(lines, o, depth), acc {
                 True, _ | _, [] -> #(list.reverse(acc), lines)
                 False, [previous, ..] ->
                   case is_blank(previous) {
                     True -> #(list.reverse(acc), lines)
                     False ->
-                      take_item_body(rest, content_indent, o, [
+                      take_item_body(rest, content_indent, o, depth, [
                         string.trim_start(line),
                         ..acc
                       ])
@@ -825,15 +918,52 @@ fn take_item_body(
   }
 }
 
-fn indent_of(line: String) -> Int {
-  string.length(line) - string.length(string.trim_start(line))
-}
-
 // ── 行の中 ──────────────────────────────────────────────────────────────
 
 /// 読んでいる所。太字の中では太字を、リンクの字の中ではリンクを読まない(読む字は必ず短くなり、回り続けない)。
 type Scope {
   Scope(options: Options, strong: Bool, link: Bool)
+}
+
+/// 1 回の `scan` の間の覚え(中の字を読む `scan` は新しく持つ)。閉じの印を先へ探した結果を覚え、同じ所を開きの
+/// 印ごとに読み直さない ── 閉じない開きの印(`[`・`<code>`・`<http`・逆引用符など)が並ぶと、覚えが無ければ印
+/// ごとに行の尻まで読み、長さの 2 乗で遅くなる。位置は `scan` が読んだ字(grapheme)の数で、`\` と次の字の
+/// 対を割らない所だけを読むので、先で見た結果はその間のどこから読んでも同じ。
+type Seen {
+  Seen(
+    /// この先に閉じが無い:`**`・`*`・`</code>`
+    no_strong: Bool,
+    no_emphasis: Bool,
+    no_code_tag: Bool,
+    /// この数以上の逆引用符の連なりがこの先に無い(0 は分からない)
+    no_ticks: Int,
+    /// リンクの URL の先で最初に当たる字(閉じの `)` か、柵の決まる字)と、閉じの `)`
+    url: Ahead,
+    url_close: Ahead,
+    /// 自動リンクの先で最初に当たる字(閉じの `>`・空白・柵の決まる字)と、閉じの `>` か空白
+    autolink: Ahead,
+    autolink_close: Ahead,
+  )
+}
+
+/// 先で最初に当たる字の覚え。`from` から読んで最初に当たった字の位置が `at`(当たらなければ -1)、その字が
+/// `char`(`\` の次の字なら `escaped`)。`from` から `at` までのどこから読んでも最初に当たるのは同じ字。
+type Ahead {
+  Unknown
+  Ahead(from: Int, at: Int, char: String, escaped: Bool)
+}
+
+fn fresh() -> Seen {
+  Seen(
+    no_strong: False,
+    no_emphasis: False,
+    no_code_tag: False,
+    no_ticks: 0,
+    url: Unknown,
+    url_close: Unknown,
+    autolink: Unknown,
+    autolink_close: Unknown,
+  )
 }
 
 fn has(scope: Scope, mark: Mark) -> Bool {
@@ -847,163 +977,249 @@ fn flush(acc: List(Inline), buffer: String) -> List(Inline) {
   }
 }
 
-/// 左から読む。開いた印が閉じなければ印を字として出し、その後ろから読み直す。
+/// 字の並びを頭から読む(中の字を読む所も)。
+fn scan_all(chars: List(String), scope: Scope) -> List(Inline) {
+  scan(chars, 0, "", [], scope, fresh())
+}
+
+/// 左から読む。開いた印が閉じなければ印を字として出し、その後ろから読み直す。`pos` は `chars` の頭の位置。
+/// 自分だけを末尾で呼ぶ(JS では自分の末尾の呼び出しだけが loop になり、stack を積まない)。
 fn scan(
   chars: List(String),
+  pos: Int,
   buffer: String,
   acc: List(Inline),
   scope: Scope,
+  seen: Seen,
 ) -> List(Inline) {
   case chars {
     [] -> list.reverse(flush(acc, buffer))
     ["\\", next, ..rest] ->
       case has(scope, EscapeMark) {
-        True -> scan(rest, buffer <> next, acc, scope)
-        False -> scan([next, ..rest], buffer <> "\\", acc, scope)
+        True -> scan(rest, pos + 2, buffer <> next, acc, scope, seen)
+        False -> scan([next, ..rest], pos + 1, buffer <> "\\", acc, scope, seen)
       }
     // 画像の記法(`![`)はリンクとして読まない
-    ["!", "[", ..rest] -> scan(rest, buffer <> "![", acc, scope)
+    ["!", "[", ..rest] -> scan(rest, pos + 2, buffer <> "![", acc, scope, seen)
     ["`", ..rest] ->
       case has(scope, CodeMark) {
-        True -> code_span(rest, buffer, acc, scope)
-        False -> scan(rest, buffer <> "`", acc, scope)
+        True -> {
+          let #(ticks, after_ticks) = take_ticks(rest, 1)
+          let opened = pos + ticks
+          let found = case seen.no_ticks > 0 && ticks >= seen.no_ticks {
+            True -> Error(Nil)
+            False ->
+              split_count(
+                after_ticks,
+                list.repeat("`", ticks),
+                has(scope, EscapeMark),
+              )
+          }
+          case found {
+            Ok(#(inner, after, count)) ->
+              scan(
+                after,
+                opened + count + ticks,
+                "",
+                [
+                  CodeSpan(pipe_entity(trim_code(string.concat(inner)))),
+                  ..flush(acc, buffer)
+                ],
+                scope,
+                seen,
+              )
+            Error(_) -> {
+              let no_ticks = case seen.no_ticks {
+                0 -> ticks
+                known -> int.min(known, ticks)
+              }
+              scan(
+                after_ticks,
+                opened,
+                buffer <> string.repeat("`", ticks),
+                acc,
+                scope,
+                Seen(..seen, no_ticks: no_ticks),
+              )
+            }
+          }
+        }
+        False -> scan(rest, pos + 1, buffer <> "`", acc, scope, seen)
       }
     ["*", "*", ..rest] ->
       case scope.strong && has(scope, StrongMark) {
-        True ->
-          case split_at(rest, ["*", "*"], has(scope, EscapeMark)) {
-            Ok(#(inner, after)) ->
-              case
-                inner != []
-                && string.trim(string.concat(inner)) == string.concat(inner)
-              {
+        True -> {
+          let found = case seen.no_strong {
+            True -> Error(Nil)
+            False -> split_count(rest, ["*", "*"], has(scope, EscapeMark))
+          }
+          case found {
+            Ok(#(inner, after, count)) -> {
+              let text = string.concat(inner)
+              case inner != [] && trim(text) == text {
                 True ->
                   scan(
                     after,
+                    pos + 2 + count + 2,
                     "",
                     [
-                      Strong(scan(inner, "", [], Scope(..scope, strong: False))),
+                      Strong(scan_all(inner, Scope(..scope, strong: False))),
                       ..flush(acc, buffer)
                     ],
                     scope,
+                    seen,
                   )
-                False -> scan(rest, buffer <> "**", acc, scope)
+                False -> scan(rest, pos + 2, buffer <> "**", acc, scope, seen)
               }
-            Error(_) -> scan(rest, buffer <> "**", acc, scope)
+            }
+            Error(_) ->
+              scan(
+                rest,
+                pos + 2,
+                buffer <> "**",
+                acc,
+                scope,
+                Seen(..seen, no_strong: True),
+              )
           }
+        }
         False ->
           case has(scope, EmphasisMark) {
-            True -> scan(rest, buffer <> "**", acc, scope)
-            False -> scan(["*", ..rest], buffer <> "*", acc, scope)
+            True -> scan(rest, pos + 2, buffer <> "**", acc, scope, seen)
+            False ->
+              scan(["*", ..rest], pos + 1, buffer <> "*", acc, scope, seen)
           }
       }
     ["*", next, ..rest] if next != " " && next != "*" ->
       case has(scope, EmphasisMark) {
-        True ->
-          case split_at([next, ..rest], ["*"], has(scope, EscapeMark)) {
-            Ok(#(inner, after)) ->
+        True -> {
+          let found = case seen.no_emphasis {
+            True -> Error(Nil)
+            False -> split_count([next, ..rest], ["*"], has(scope, EscapeMark))
+          }
+          case found {
+            Ok(#(inner, after, count)) ->
               scan(
                 after,
+                pos + 1 + count + 1,
                 "",
-                [Emphasis(scan(inner, "", [], scope)), ..flush(acc, buffer)],
+                [Emphasis(scan_all(inner, scope)), ..flush(acc, buffer)],
                 scope,
+                seen,
               )
-            Error(_) -> scan([next, ..rest], buffer <> "*", acc, scope)
+            Error(_) ->
+              scan(
+                [next, ..rest],
+                pos + 1,
+                buffer <> "*",
+                acc,
+                scope,
+                Seen(..seen, no_emphasis: True),
+              )
           }
-        False -> scan([next, ..rest], buffer <> "*", acc, scope)
+        }
+        False -> scan([next, ..rest], pos + 1, buffer <> "*", acc, scope, seen)
       }
     ["[", ..rest] ->
       case scope.link && scope.options.links != NoLinks {
-        True ->
-          case anchor(rest, scope) {
-            Ok(#(label, href, after)) ->
+        True -> {
+          let #(found, seen) = anchor(rest, pos + 1, scope, seen)
+          case found {
+            Ok(#(label, href, after, at)) ->
               scan(
                 after,
+                at,
                 "",
                 [
-                  Link(href, scan(label, "", [], Scope(..scope, link: False))),
+                  Link(href, scan_all(label, Scope(..scope, link: False))),
                   ..flush(acc, buffer)
                 ],
                 scope,
+                seen,
               )
-            Error(_) -> scan(rest, buffer <> "[", acc, scope)
+            Error(_) -> scan(rest, pos + 1, buffer <> "[", acc, scope, seen)
           }
-        False -> scan(rest, buffer <> "[", acc, scope)
+        }
+        False -> scan(rest, pos + 1, buffer <> "[", acc, scope, seen)
       }
     ["<", "c", "o", "d", "e", ">", ..rest] ->
-      case
-        has(scope, CodeMark),
-        split_at(rest, string.to_graphemes("</code>"), has(scope, EscapeMark))
-      {
-        True, Ok(#(inner, after)) ->
+      case has(scope, CodeMark) {
+        True -> {
+          let found = case seen.no_code_tag {
+            True -> Error(Nil)
+            False -> split_count(rest, code_close, has(scope, EscapeMark))
+          }
+          case found {
+            Ok(#(inner, after, count)) ->
+              scan(
+                after,
+                pos + 6 + count + 7,
+                "",
+                [
+                  CodeSpan(pipe_entity(string.concat(inner))),
+                  ..flush(acc, buffer)
+                ],
+                scope,
+                seen,
+              )
+            Error(_) ->
+              scan(
+                rest,
+                pos + 6,
+                buffer <> "<code>",
+                acc,
+                scope,
+                Seen(..seen, no_code_tag: True),
+              )
+          }
+        }
+        False ->
           scan(
-            after,
-            "",
-            [CodeSpan(pipe_entity(string.concat(inner))), ..flush(acc, buffer)],
+            ["c", "o", "d", "e", ">", ..rest],
+            pos + 1,
+            buffer <> "<",
+            acc,
             scope,
+            seen,
           )
-        True, Error(_) -> scan(rest, buffer <> "<code>", acc, scope)
-        False, _ ->
-          scan(["c", "o", "d", "e", ">", ..rest], buffer <> "<", acc, scope)
       }
     ["<", "h", "t", "t", "p", ..rest] -> {
       let after_angle = ["h", "t", "t", "p", ..rest]
       case has(scope, AutolinkMark) && scope.link {
-        True ->
-          case split_at(after_angle, [">"], has(scope, EscapeMark)) {
-            Ok(#(url, after)) -> {
-              let href = string.concat(url)
-              case !string.contains(href, " ") && link_allowed(href, scope) {
-                True ->
-                  scan(
-                    after,
-                    "",
-                    [Link(href, [Plain(href)]), ..flush(acc, buffer)],
-                    scope,
-                  )
-                False -> scan(after_angle, buffer <> "<", acc, scope)
-              }
-            }
-            Error(_) -> scan(after_angle, buffer <> "<", acc, scope)
+        True -> {
+          let #(found, seen) = autolink(after_angle, pos + 1, scope, seen)
+          case found {
+            Ok(#(href, after, at)) ->
+              scan(
+                after,
+                at,
+                "",
+                [Link(href, [Plain(href)]), ..flush(acc, buffer)],
+                scope,
+                seen,
+              )
+            Error(_) ->
+              scan(after_angle, pos + 1, buffer <> "<", acc, scope, seen)
           }
-        False -> scan(after_angle, buffer <> "<", acc, scope)
+        }
+        False -> scan(after_angle, pos + 1, buffer <> "<", acc, scope, seen)
       }
     }
     ["&", ..rest] ->
       case has(scope, EntityMark) {
         True ->
           case entity(rest) {
-            Ok(#(text, after)) -> scan(after, buffer <> text, acc, scope)
-            Error(_) -> scan(rest, buffer <> "&", acc, scope)
+            Ok(#(text, after, count)) ->
+              scan(after, pos + 1 + count, buffer <> text, acc, scope, seen)
+            Error(_) -> scan(rest, pos + 1, buffer <> "&", acc, scope, seen)
           }
-        False -> scan(rest, buffer <> "&", acc, scope)
+        False -> scan(rest, pos + 1, buffer <> "&", acc, scope, seen)
       }
-    [char, ..rest] -> scan(rest, buffer <> char, acc, scope)
+    [char, ..rest] -> scan(rest, pos + 1, buffer <> char, acc, scope, seen)
   }
 }
 
-fn code_span(
-  rest: List(String),
-  buffer: String,
-  acc: List(Inline),
-  scope: Scope,
-) -> List(Inline) {
-  let #(ticks, after_ticks) = take_ticks(rest, 1)
-  case split_at(after_ticks, list.repeat("`", ticks), has(scope, EscapeMark)) {
-    Ok(#(inner, after)) ->
-      scan(
-        after,
-        "",
-        [
-          CodeSpan(pipe_entity(trim_code(string.concat(inner)))),
-          ..flush(acc, buffer)
-        ],
-        scope,
-      )
-    Error(_) ->
-      scan(after_ticks, buffer <> string.repeat("`", ticks), acc, scope)
-  }
-}
+const code_close: List(String) = ["<", "/", "c", "o", "d", "e", ">"]
 
 fn take_ticks(chars: List(String), count: Int) -> #(Int, List(String)) {
   case chars {
@@ -1022,46 +1238,298 @@ fn trim_code(text: String) -> String {
   case
     string.starts_with(text, " ")
     && string.ends_with(text, " ")
-    && string.trim(text) != ""
+    && trim(text) != ""
   {
-    True -> text |> string.drop_start(1) |> string.drop_end(1)
+    True -> text |> drop(1) |> string.drop_end(1)
     False -> text
   }
 }
 
 /// `[` の後ろ:`字](URL)`。字は空白だけでなく、`[`・`]` を含まない。URL は `links` の柵を通るもの。
+/// `pos` は `rest` の頭の位置。戻りは #(字, URL, 閉じの後ろ, その位置)。
 fn anchor(
   rest: List(String),
+  pos: Int,
   scope: Scope,
-) -> Result(#(List(String), String, List(String)), Nil) {
+  seen: Seen,
+) -> #(Result(#(List(String), String, List(String), Int), Nil), Seen) {
+  case label_of(rest, has(scope, EscapeMark), [], 0) {
+    Error(_) -> #(Error(Nil), seen)
+    Ok(#(label, after, count)) ->
+      case trim(string.concat(label)) != "" {
+        False -> #(Error(Nil), seen)
+        True -> {
+          let #(found, seen) = url_of(after, pos + count + 2, scope, seen)
+          case found {
+            Ok(#(href, tail, at)) -> #(Ok(#(label, href, tail, at)), seen)
+            Error(_) -> #(Error(Nil), seen)
+          }
+        }
+      }
+  }
+}
+
+/// リンクの字:最初の `](` の前。`[`・`]` を含む字はリンクにならないので、それに当たれば先を読まない
+/// (読めば `[` の並びが印ごとに行の尻まで読む)。戻りは #(字, `(` の後ろ, 字の数)。
+fn label_of(
+  chars: List(String),
+  escapes: Bool,
+  acc: List(String),
+  count: Int,
+) -> Result(#(List(String), List(String), Int), Nil) {
+  case chars, escapes {
+    ["]", "(", ..rest], _ -> Ok(#(list.reverse(acc), rest, count))
+    ["\\", next, ..rest], True ->
+      case bracket(next) {
+        True -> Error(Nil)
+        False -> label_of(rest, escapes, [next, "\\", ..acc], count + 2)
+      }
+    [char, ..rest], _ ->
+      case bracket(char) {
+        True -> Error(Nil)
+        False -> label_of(rest, escapes, [char, ..acc], count + 1)
+      }
+    [], _ -> Error(Nil)
+  }
+}
+
+fn bracket(char: String) -> Bool {
+  string.contains(char, "[") || string.contains(char, "]")
+}
+
+/// `(` の後ろの URL:最初の `)` の前。`links` の柵を通らなければ Error。柵で落ちると先で分かる URL は、閉じまで
+/// 読まずに落とす(`Seen.url`)。`start` は `chars` の頭の位置。戻りは #(URL, 閉じの後ろ, その位置)。
+fn url_of(
+  chars: List(String),
+  start: Int,
+  scope: Scope,
+  seen: Seen,
+) -> #(Result(#(String, List(String), Int), Nil), Seen) {
   let escapes = has(scope, EscapeMark)
-  case split_at(rest, ["]", "("], escapes) {
-    Error(_) -> Error(Nil)
-    Ok(#(label, after)) -> {
-      let text = string.concat(label)
-      case
-        string.trim(text) != ""
-        && !string.contains(text, "[")
-        && !string.contains(text, "]")
-      {
-        False -> Error(Nil)
-        True ->
-          case split_at(after, [")"], escapes) {
-            Error(_) -> Error(Nil)
-            Ok(#(url, tail)) -> {
-              let href = case scope.options.links {
-                SafeLinks -> string.trim(string.concat(url))
-                _ -> string.concat(url)
-              }
-              case link_allowed(href, scope) {
-                True -> Ok(#(label, href, tail))
-                False -> Error(Nil)
+  let close = fn(char, escaped) { char == ")" && !escaped }
+  let accept = fn(at) {
+    let #(url, tail, after) = cut(chars, start, at)
+    let href = case scope.options.links {
+      SafeLinks -> trim(string.concat(url))
+      _ -> string.concat(url)
+    }
+    case link_allowed(href, scope) {
+      True -> Ok(#(href, tail, after))
+      False -> Error(Nil)
+    }
+  }
+  case scope.options.links {
+    NoLinks -> #(Error(Nil), seen)
+    WebLinks ->
+      case web_prefix(chars, escapes, ")") {
+        Near -> #(near(chars, start, ")", escapes, accept), seen)
+        Fails -> #(Error(Nil), seen)
+        Fits -> {
+          let ahead =
+            look(chars, start, escapes, seen.url, fn(char, escaped) {
+              close(char, escaped) || string.contains(forbidden, char)
+            })
+          let seen = Seen(..seen, url: ahead)
+          case ahead {
+            Ahead(at: at, char: ")", escaped: False, ..) -> #(accept(at), seen)
+            _ -> #(Error(Nil), seen)
+          }
+        }
+      }
+    SafeLinks -> {
+      let ahead =
+        look(chars, start, escapes, seen.url, fn(char, escaped) {
+          close(char, escaped) || special(char)
+        })
+      let seen = Seen(..seen, url: ahead)
+      case ahead {
+        Ahead(at: at, char: ")", escaped: False, ..) -> #(accept(at), seen)
+        Ahead(at: at, char: char, ..) if at >= 0 ->
+          case scheme_ok(chars, start, at, char, "", 0) {
+            False -> #(Error(Nil), seen)
+            True -> {
+              let ahead = look(chars, start, escapes, seen.url_close, close)
+              let seen = Seen(..seen, url_close: ahead)
+              case ahead {
+                Ahead(at: at, ..) if at >= 0 -> #(accept(at), seen)
+                _ -> #(Error(Nil), seen)
               }
             }
           }
+        _ -> #(Error(Nil), seen)
       }
     }
   }
+}
+
+/// `<` の後ろの自動リンク(`http` から):最初の `>` の前。空白を含まず、`links` の柵を通るもの。柵で落ちると
+/// 先で分かるものは閉じまで読まない(`Seen.autolink`)。`start` は `chars` の頭の位置。
+fn autolink(
+  chars: List(String),
+  start: Int,
+  scope: Scope,
+  seen: Seen,
+) -> #(Result(#(String, List(String), Int), Nil), Seen) {
+  let escapes = has(scope, EscapeMark)
+  let close = fn(char, escaped) {
+    { char == ">" && !escaped } || string.contains(char, " ")
+  }
+  let accept = fn(at) {
+    let #(url, tail, after) = cut(chars, start, at)
+    let href = string.concat(url)
+    case !string.contains(href, " ") && link_allowed(href, scope) {
+      True -> Ok(#(href, tail, after))
+      False -> Error(Nil)
+    }
+  }
+  case scope.options.links {
+    NoLinks -> #(Error(Nil), seen)
+    WebLinks ->
+      case web_prefix(chars, escapes, ">") {
+        Near -> #(near(chars, start, ">", escapes, accept), seen)
+        Fails -> #(Error(Nil), seen)
+        Fits -> {
+          let ahead =
+            look(chars, start, escapes, seen.autolink, fn(char, escaped) {
+              close(char, escaped) || string.contains(forbidden, char)
+            })
+          let seen = Seen(..seen, autolink: ahead)
+          case ahead {
+            Ahead(at: at, char: ">", escaped: False, ..) -> #(accept(at), seen)
+            _ -> #(Error(Nil), seen)
+          }
+        }
+      }
+    SafeLinks -> {
+      let ahead =
+        look(chars, start, escapes, seen.autolink, fn(char, escaped) {
+          close(char, escaped) || special(char)
+        })
+      let seen = Seen(..seen, autolink: ahead)
+      case ahead {
+        Ahead(at: at, char: ">", escaped: False, ..) -> #(accept(at), seen)
+        Ahead(at: at, char: char, ..) if at >= 0 ->
+          case
+            !string.contains(char, " ")
+            && scheme_ok(chars, start, at, char, "", 0)
+          {
+            False -> #(Error(Nil), seen)
+            True -> {
+              let ahead =
+                look(chars, start, escapes, seen.autolink_close, close)
+              let seen = Seen(..seen, autolink_close: ahead)
+              case ahead {
+                Ahead(at: at, char: ">", escaped: False, ..) -> #(
+                  accept(at),
+                  seen,
+                )
+                _ -> #(Error(Nil), seen)
+              }
+            }
+          }
+        _ -> #(Error(Nil), seen)
+      }
+    }
+  }
+}
+
+/// 頭から `at` の前までを URL、`at` の字を閉じとして割る。戻りは #(URL, 閉じの後ろ, その位置)。
+fn cut(
+  chars: List(String),
+  start: Int,
+  at: Int,
+) -> #(List(String), List(String), Int) {
+  let size = at - start
+  #(list.take(chars, size), list.drop(chars, size + 1), at + 1)
+}
+
+/// `http(s)://` の柵の URL の頭。頭の 9 字の中に閉じがあれば `Near`(短いので閉じまで読む)、無ければ頭の
+/// 8 字で決まる(`http://`・`https://` で始まらない URL は柵を通らない)。
+type Prefix {
+  Near
+  Fits
+  Fails
+}
+
+fn web_prefix(chars: List(String), escapes: Bool, close: String) -> Prefix {
+  case split_at(list.take(chars, 9), [close], escapes) {
+    Ok(_) -> Near
+    Error(_) -> {
+      let head = string.lowercase(string.concat(list.take(chars, 8)))
+      case
+        string.starts_with(head, "http://")
+        || string.starts_with(head, "https://")
+      {
+        True -> Fits
+        False -> Fails
+      }
+    }
+  }
+}
+
+/// 閉じが近い URL を割って `accept` に渡す。
+fn near(
+  chars: List(String),
+  start: Int,
+  close: String,
+  escapes: Bool,
+  accept: fn(Int) -> Result(a, Nil),
+) -> Result(a, Nil) {
+  case split_count(chars, [close], escapes) {
+    Ok(#(_, _, count)) -> accept(start + count)
+    Error(_) -> Error(Nil)
+  }
+}
+
+/// `attr.safe_url` の scheme の区切りになる字を含むか。
+fn special(char: String) -> Bool {
+  string.contains(char, ":")
+  || string.contains(char, "/")
+  || string.contains(char, "?")
+  || string.contains(char, "#")
+}
+
+/// URL の頭から、最初に区切りの字を含む字(`char`、位置 `at`)までで、`attr.safe_url` が通すか。区切りの前の字は
+/// 区切りを含まない。前に空白でも制御文字でもない ASCII の字が 7 つあれば scheme は 7 字以上(許す scheme は
+/// 6 字まで)なので、`char` の中で `:` が他の区切りより先なら通さない ── 前を全部は読まない。それまでは前の字を
+/// 集め、`attr.safe_url` にそのまま聞く(前の字の頭の空白は、URL の頭の空白と同じく落ちる)。
+fn scheme_ok(
+  chars: List(String),
+  pos: Int,
+  at: Int,
+  char: String,
+  before: String,
+  plain: Int,
+) -> Bool {
+  case plain >= 7, chars {
+    True, _ -> !colon_first(char)
+    False, [head, ..rest] if pos < at ->
+      scheme_ok(rest, pos + 1, at, char, before <> head, case printable(head) {
+        True -> plain + 1
+        False -> plain
+      })
+    False, _ -> attr.safe_url(string.trim_start(before) <> char)
+  }
+}
+
+/// 空白でも制御文字でもない ASCII の 1 字(`!` から `~`)。
+fn printable(char: String) -> Bool {
+  case string.to_utf_codepoints(char) {
+    [point] -> {
+      let code = string.utf_codepoint_to_int(point)
+      code >= 0x21 && code <= 0x7e
+    }
+    _ -> False
+  }
+}
+
+/// 区切りの字(`:`・`/`・`?`・`#`)のうち、`:` が最初に現れる。
+fn colon_first(char: String) -> Bool {
+  let first =
+    string.to_utf_codepoints(char)
+    |> list.map(fn(point) { string.from_utf_codepoints([point]) })
+    |> list.find(special)
+  first == Ok(":")
 }
 
 fn link_allowed(href: String, scope: Scope) -> Bool {
@@ -1090,21 +1558,23 @@ fn web_url(href: String) -> Bool {
 
 const forbidden: String = " \t\n\r\u{0B}\u{0C}\u{A0}\u{3000}\u{2028}\u{2029}\u{FEFF}\"<>"
 
-/// `&lt;` `&gt;` `&amp;` `&quot;` と `&#数;` を字に戻す。
-fn entity(chars: List(String)) -> Result(#(String, List(String)), Nil) {
+/// `&lt;` `&gt;` `&amp;` `&quot;` と `&#数;` を字に戻す。戻りは #(字, 後ろ, 読んだ字の数)。
+fn entity(chars: List(String)) -> Result(#(String, List(String), Int), Nil) {
   case split_at(list.take(chars, 8), [";"], False) {
     Ok(#(name, _)) -> {
-      let after = list.drop(chars, list.length(name) + 1)
+      let count = list.length(name) + 1
+      let after = list.drop(chars, count)
       case string.concat(name) {
-        "lt" -> Ok(#("<", after))
-        "gt" -> Ok(#(">", after))
-        "amp" -> Ok(#("&", after))
-        "quot" -> Ok(#("\"", after))
+        "lt" -> Ok(#("<", after, count))
+        "gt" -> Ok(#(">", after, count))
+        "amp" -> Ok(#("&", after, count))
+        "quot" -> Ok(#("\"", after, count))
         "#" <> digits ->
           case int.parse(digits) {
             Ok(code) ->
               case string.utf_codepoint(code) {
-                Ok(point) -> Ok(#(string.from_utf_codepoints([point]), after))
+                Ok(point) ->
+                  Ok(#(string.from_utf_codepoints([point]), after, count))
                 Error(_) -> Error(Nil)
               }
             Error(_) -> Error(Nil)
@@ -1122,7 +1592,19 @@ fn split_at(
   marker: List(String),
   escapes: Bool,
 ) -> Result(#(List(String), List(String)), Nil) {
-  split_loop(chars, marker, escapes, [])
+  case split_count(chars, marker, escapes) {
+    Ok(#(before, after, _)) -> Ok(#(before, after))
+    Error(_) -> Error(Nil)
+  }
+}
+
+/// `split_at` と同じで、前の字の数も返す。
+fn split_count(
+  chars: List(String),
+  marker: List(String),
+  escapes: Bool,
+) -> Result(#(List(String), List(String), Int), Nil) {
+  split_loop(chars, marker, escapes, [], 0)
 }
 
 fn split_loop(
@@ -1130,15 +1612,18 @@ fn split_loop(
   marker: List(String),
   escapes: Bool,
   before: List(String),
-) -> Result(#(List(String), List(String)), Nil) {
+  count: Int,
+) -> Result(#(List(String), List(String), Int), Nil) {
   case starts_with_list(chars, marker) {
-    True -> Ok(#(list.reverse(before), list.drop(chars, list.length(marker))))
+    True ->
+      Ok(#(list.reverse(before), list.drop(chars, list.length(marker)), count))
     False ->
       case chars, escapes {
         [], _ -> Error(Nil)
         ["\\", next, ..rest], True ->
-          split_loop(rest, marker, escapes, [next, "\\", ..before])
-        [char, ..rest], _ -> split_loop(rest, marker, escapes, [char, ..before])
+          split_loop(rest, marker, escapes, [next, "\\", ..before], count + 2)
+        [char, ..rest], _ ->
+          split_loop(rest, marker, escapes, [char, ..before], count + 1)
       }
   }
 }
@@ -1149,6 +1634,50 @@ fn starts_with_list(chars: List(String), marker: List(String)) -> Bool {
     [char, ..rest], [mark, ..more] if char == mark ->
       starts_with_list(rest, more)
     _, _ -> False
+  }
+}
+
+/// 先で最初に `stop` に当たる字(覚えが使えればそれ)。`pos` は `chars` の頭の位置。
+fn look(
+  chars: List(String),
+  pos: Int,
+  escapes: Bool,
+  memo: Ahead,
+  stop: fn(String, Bool) -> Bool,
+) -> Ahead {
+  let known = case memo {
+    Ahead(from: from, at: at, ..) -> from <= pos && { at < 0 || pos <= at }
+    Unknown -> False
+  }
+  case known {
+    True -> memo
+    False -> find(chars, pos, pos, escapes, stop)
+  }
+}
+
+fn find(
+  chars: List(String),
+  from: Int,
+  pos: Int,
+  escapes: Bool,
+  stop: fn(String, Bool) -> Bool,
+) -> Ahead {
+  case chars, escapes {
+    [], _ -> Ahead(from: from, at: -1, char: "", escaped: False)
+    ["\\", next, ..rest], True ->
+      case stop("\\", False) {
+        True -> Ahead(from: from, at: pos, char: "\\", escaped: False)
+        False ->
+          case stop(next, True) {
+            True -> Ahead(from: from, at: pos + 1, char: next, escaped: True)
+            False -> find(rest, from, pos + 2, escapes, stop)
+          }
+      }
+    [char, ..rest], _ ->
+      case stop(char, False) {
+        True -> Ahead(from: from, at: pos, char: char, escaped: False)
+        False -> find(rest, from, pos + 1, escapes, stop)
+      }
   }
 }
 

@@ -294,12 +294,13 @@ fn cast_of(kind: String) -> String {
 }
 
 /// 向きのそろった keyset の頭の穴の型。型の無い穴(Neon の HTTP)が `$1 IS NULL` に先に現れると、PostgreSQL は
-/// 穴の型を決められず(「could not determine data type of parameter」)、整数・真偽・浮動小数の列の一覧が落ちる
-/// (0.13.1、穴 3)。text の列は今までどおり型を書かない。key の穴は行の比較の中だけに在り列から型が決まるので、
-/// 今までどおり `cast_of`(動いていた一覧の SQL を変えない)。
+/// 穴の型を決められず(「could not determine data type of parameter」)、整数・真偽・浮動小数・text の列の一覧が
+/// 落ちる(0.13.1、穴 3 と柏木 ゲート 2 の P1-2)。それ以外の列(時刻・uuid など)は今までどおり `cast_of`。key の
+/// 穴は行の比較の中だけに在り列から型が決まるので、今までどおり `cast_of`(動いていた一覧の SQL を変えない)。
 fn uniform_cast(kind: String) -> String {
   case kind {
-    "integer" | "bigint" | "boolean" | "double precision" -> "::" <> kind
+    "integer" | "bigint" | "boolean" | "double precision" | "text" ->
+      "::" <> kind
     _ -> cast_of(kind)
   }
 }

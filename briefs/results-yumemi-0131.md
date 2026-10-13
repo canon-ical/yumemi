@@ -154,3 +154,108 @@ fixture:28 本を写しに置き、基点の生成器と本作業木の生成器
 - `~~取り消し~~`(`del` はある)・見出しの id(頁の中のリンク)・表の列の揃え(`:---:`)
 - 生成器は写しの場の外の古い生成物(`gen/external.gleam` など)を消さない。静的資料を外した app は手で消す
 - 穴 1・4・5・7・8・12〜15 は外(BRIEF のとおり触っていない)
+
+## r2
+
+便: yumemi-0131 r2 / 基点: `9d95d4f`(r1 + 柏木 ゲート 2 の P2)/ 真壁[IM] / 2026-10-13
+証拠:`build/r2-*.txt`(作業木の `build/`、git の外)、道具は `.scratch/r2/`(同じく git の外)。版の行は替えていない。P1-4・5・6 は直していない(下の「残したもの」)。
+
+### 1〜5 の充足
+
+| # | どこまで | 結果 | 証拠 |
+|---|---|---|---|
+| 1 | P1-1:柏木の挙げた入力で 3 つの既定が投げずに返り、30KB が node で 1 回 100 ms 以内 | 全部返る。柏木の入力は冷えた 1 回目で 40 ms 以内、温まって 2〜15 ms。入れ子の上限 16(根拠は下)。病的な入力の test 3 本 | 下の表、`build/r2-bench-{before,before-extra,after,cold-after}.txt`、`build/r2-bench-table.md` |
+| 2 | (a)(b) の互換と 21 頁が r1 と同じ | `.scratch/cmp-ab` の出力が r1 の記録と全文同じ(表 47・乱数 30000、(b) 表 4)。21 頁は表が同じ、出した 84 file が byte 同じ。r1 の読みとの突き合わせの乱数 42 万件が全部同じ | `build/r2-cmp-ab.txt`、`build/r2-cmp-c.txt`・`r2-cmp-c-out-vs-r1.txt`、`build/r2-fuzz-r1-vs-r2.txt` |
+| 3 | P1-2:頭が text の向きのそろった keyset に型、PG で 1 頁目と次の頁が正しい | 頭の穴に `::text`。PG 18 で r1 の形は PREPARE が落ち、r2 の形は 1 頁目・次の頁とも答えの並びどおり。時刻・uuid の頭の SQL は byte 同じ | `build/r2-paged-text-pg.txt`、fixture・事業 app の写しの差 0 |
+| 4 | P1-3:log から入力の値が出ない、check を足す | `message` は値を含まない SQLSTATE の類だけ。check 3 項を足して 11 項全部 ok、r1 の `http.mjs` では 3 項 NG | `build/r2-check-unavailable{,-r1}.txt` |
+| 5 | fixture と事業 app の写しが r1 と同じ、`gleam test` | fixture 28 本が r1 の生成器と停止コード・出力とも同じ。notes・article・cms の場で 2 回 exit 0・差 0。事業 app の写しは 2372 file が r1 の出力と差 0(2 回とも) | `build/r2-fixcmp.txt`、`build/r2-gen-*-status.txt`、`build/r2-ms-gen-{1,2}.txt`・`r2-ms-gen-diff.txt` |
+
+`gleam test`:**`500 passed, no failures`**(`build/r2-test-final.txt`、末尾の字で見た)。r1 の 497 に test を 3 本足し、`paged_by_text_and_time_is_unchanged_test` を `paged_by_time_is_unchanged_and_text_casts_the_cursor_test` に替えた。`gleam format --check src test` exit 0。
+
+### P1-1 読みの速さと stack
+
+直したもの(`src/yumemi/front/markdown.gleam`、木と HTML の読み方は r1 と同じ):
+
+- **行の中の読みは長さに線形。** 閉じの印を先へ探した結果を 1 回の `scan` の間覚える(`Seen`)。閉じの無い `**`・`*`・`</code>`・逆引用符の連なりは 1 度見たら先を探さない。リンクの字は `[`・`]` に当たった所で止める(含めばリンクにならない)。URL と自動リンクは、柵で落ちると先で決まる字(閉じの `)`・`>`、空白、`http(s)://` の柵の禁じ字、`attr.safe_url` の scheme の区切り)の位置を覚え、開きの印ごとに行の尻まで読み直さない。scheme が ASCII の 7 字以上なら区切りまで読まずに落とす(許す scheme は 6 字まで)。位置は読んだ字の数で、`\` と次の字の対を割らない所だけを読むので、覚えはその間のどこから読んでも同じ
+- **code span は stack を積まない。** `scan` と `code_span` の相互の呼び出しを `scan` の中に畳んだ(JS で loop になるのは自分の末尾の呼び出しだけ)。`<code>` の閉じは `CodeMark` のときだけ探す(r1 は case の主語で先に探していた)
+- **入れ子(引用と箇条の項目)は 16 段まで。** 17 段目からの `>` と箇条の印は字のまま(段落の字)。段を数えるのは `document()` のような `quotes` か `nesting` の読み方だけで、`post()`・`outline()` の読みには効かない(どちらも入れ子を読まず、塊を読む深さは 0 のまま)
+- **字の中の長い空白で遅くならない。** gleam_stdlib の JS の `trim_end` は正規表現 `[空白]*$` で、字の中の空白の連なりに長さの 2 乗かかる(3 万字の空白で 1 回 270 ms、行ごとに何度も呼ぶ)。同じ空白の集合を尻から読む `trim_end` を `src/yumemi/front/text_ffi.mjs` に置き、markdown と `attr.safe_url` が使う。行ごとの字下げと印の頭は、頭が ASCII なら code unit で数える(stdlib は Intl.Segmenter で行の全部を字に割り、`drop_start` は行の全部を UTF-8 に直す)。番号・見出し・区切り線の行も字に割らずに見る。どれも stdlib と同じ値を返す ── 乱数 20 万件で stdlib の `string.length` の差・`drop_start`・`trim_end` と比べて違い 0(`.scratch/r2/ffi-fuzz.mjs`)
+
+**入れ子の上限 16 の根拠:**
+
+- stack:node 24 で `--stack-size` を絞って、16 段の引用・箇条・混ぜたものを読んで描くのに要る stack は 70〜80 KB(module を読んで `x` 1 字を描くだけで 60 KB)。既定の約 984 KB に対して 16 段の分は 20 KB 前後で、app の Block の再帰に残りを残す。r1 は 1480 段前後で尽きていた(柏木の実測)
+- 時間:字下げした入れ子は段ごとに深い行の字下げを読み直すので、段 × 行の数かかる。170 段の字下げの箇条(29KB)が冷えた 1 回目で 33 ms
+- 文書:21 頁の入れ子はどれも 16 段に届かない(21 頁の出力が r1 と byte 同じ)。markdown-it の CommonMark の既定(`maxNesting` 20)と同じ桁
+
+**速さ(node 24、30KB 前後、ms):** r1 は同じ process の中の 1 回目(冷えていない)、r2 は入力と読み方ごとに node を新しく起こした 1 回目と、同じ process の 5 回の最小。全行は `build/r2-bench-table.md`(40 種)。
+
+| 入力(柏木の挙げたもの) | r1 document / post / outline | r2 冷えた 1 回目 | r2 温まった最小 |
+|---|---|---|---|
+| `[` × 30000 | 3488 / 2904 / 7 | 22 / 19 / 11 | 8 / 9 / 2 |
+| code span `` `a` `` × 7500 | 投げる / 8 / 7 | 30 / 12 / 10 | 10 / 3 / 2 |
+| `` `` x ` `` × 4285 | 投げる / 7 / 22 | 40 / 14 / 10 | 14 / 2 / 2 |
+| `>` × 30000 | 投げる(2.2 s の後)/ 6 / 6 | 13 / 11 / 12 | 2 / 2 / 2 |
+| `- ` × 15000(1 行の入れ子) | 投げる(5.6 s の後)/ 7 / 7 | 16 / 10 / 10 | 6 / 2 / 2 |
+| `1. ` × 10000 | 投げる(13.5 s の後)/ 10 / 11 | 15 / 11 / 10 | 4 / 2 / 2 |
+| `> - ` × 7500 | 投げる(5.7 s の後)/ 7 / 6 | 16 / 10 / 10 | 4 / 2 / 2 |
+| 閉じない `<code>` × 5000 | 639 / 560 / 580 | 13 / 12 / 11 | 3 / 2 / 2 |
+| 閉じない `<http` × 6000 | 708 / 8 / 6 | 18 / 12 / 11 | 7 / 2 / 2 |
+| 字下げの箇条 170 段 | 161 / 9 / 2 | 33 / 11 / 7 | 3 / 2 / 0 |
+
+| 入力(r2 で足した同じ類) | r1 document / post / outline | r2 冷えた 1 回目 | r2 温まった最小 |
+|---|---|---|---|
+| `[a](x` × 5999 + `:)`(scheme が長い) | 8806 / 1408 / 7 | 29 / 21 / 10 | 12 / 7 / 2 |
+| `[a](http://x` × 2499 + ` )`(空白で落ちる) | 25 / 2994 / 7 | 21 / 17 / 11 | 6 / 6 / 2 |
+| `[a](` × 7499 + `)` | 26 / 1632 / 6 | 22 / 23 / 11 | 7 / 11 / 2 |
+| `<httpx:` × 4284 + `>` | 6079 / 8 / 8 | 28 / 12 / 11 | 13 / 2 / 2 |
+| `<http://x` × 3332 + ` >` | 1004 / 8 / 6 | 29 / 12 / 10 | 13 / 2 / 2 |
+| `x` + 空白 29998 + `x` | 1412 / 1352 / 1986 | 10 / 10 / 10 | 2 / 2 / 2 |
+| `- a\nb\n` × 5000 | 485 / 326 / 333 | 79 / 70 / 72 | 56 / 50 / 51 |
+| `- a\n` × 7500 | 355 / 175 / 44 | 58 / 43 / 50 | 26 / 15 / 15 |
+
+- 40 種 × 3 の冷えた 1 回目の最大は、1 行に 15000 セルの表(`document()`、出力 330KB)の 101 ms、次が 5000 行の表の 90 ms。どちらも線形で、出力が本文の 5〜11 倍。r1 はそれぞれ 125 ms・50 ms(冷えていない)。それ以外は 81 ms 以内
+- 投げた入力は 0(r2 の 240 回の計測の全部)。描いた HTML の字数は、入れ子が 16 段を越える 6 種(うち 4 種は r1 が投げた)と r1 が投げた code span の 2 種のほかは r1 と同じ
+- Worker の上では測っていない
+
+**病的な入力の test**(`test/yumemi_0131_markdown_test.gleam`、時間は `test/yumemi_0131_markdown_test_ffi.mjs` で測る):
+
+- `hostile_text_returns_in_time_test`:上の類の 18 種(30KB 前後)× 3 つの読み方が投げずに空でない HTML を返し、1 回 1000 ms 以内(目安 100 ms の 10 倍で緩く縛る)
+- `nesting_stops_at_sixteen_test`:16 段までは今までどおり、20 段の `>`・`- ` は 16 段の後ろが字(`>>>> x`・`- - - - x`)、`post()` の木は替わらない
+- `links_decided_ahead_read_as_before_test`:先で決めたリンクの読みが r1 と同じ(scheme の長い URL は字、後ろの印から始まる `tel:` は通る、空白で落ちた URL の後ろの印も通る)
+- r1 の `markdown.gleam` に差し替えて `gleam test` を回すと、前の 2 本が落ちる(`RangeError: Maximum call stack size exceeded`、498 passed・2 failures、`build/r2-test-with-r1-markdown.txt`)。3 本目は r1 でも通る(読みが同じことを縛る test)
+
+**r1 の読みとの突き合わせ**(`.scratch/r2/diff`、r1 の `markdown.gleam` を `old_markdown` として置いた):木(`string.inspect`)・`bare()` の HTML・`inlines`・`plain`・`rule` を、7 つの読み方(3 つの既定、`document()` を `WebLinks` に、`post()` に行の中の印を全部と `SafeLinks`、`\` 無しの `document()`、入れ子無しで前後の空白を落とす `document()`)で比べた。乱数は 3 種(記法の全般 100 種の印、リンクと自動リンクとコードの閉じの印、`http(s)://` の柵の印)を 20000 件ずつ、**140000/140000 × 3 が同じ**(`build/r2-fuzz-r1-vs-r2.txt`)。柏木の (a) の乱数(種 131、50000 件)も r1 の記録と全文同じ(`build/r2-kashiwagi-fuzz-a.txt`)。
+
+### P1-2 頭が text の Paged
+
+`uniform_cast`(`src/yumemi/gen/emit/sql.gleam`)に `text` を足した。向きのそろった keyset の頭の穴が `($2::text IS NULL OR (n.rank,n.id)<($2,$3::uuid))` になる。key の穴は今までの `cast_of` のまま。時刻・uuid・整数ほかの頭は r1 と同じ。
+
+- PG 18(`.scratch/r2/pgdata`、試した後に止めた):notes の fixture の一覧を text の列 `rank` の降順に替えて生成した SQL で、r1 の形は「パラメータ$2のデータ型が特定できませんでした」で PREPARE が落ち、r2 の形は 1 頁目(e・d と次の有無の c)、次の頁(カーソル `d` と id を text で渡して c・c・b)が全件の並びのとおり(`build/r2-paged-text-pg.txt`)
+- SQL が変わるのは頭が text の向きのそろった一覧だけで、その一覧は r1 まで必ず 503 だった。fixture 28 本と事業 app の写しの生成物は r1 と差 0
+- test:`paged_by_time_is_unchanged_and_text_casts_the_cursor_test`(`$2::text IS NULL` が出て、型の無い `$2 IS NULL` は出ない、key の穴は `$3::uuid` のまま)
+
+### P1-3 log の message
+
+`src/yumemi/server/http.mjs` の `unavailableLog`:`message` は SQLSTATE が 08・23・25・40・42・53・54・57 の類のときだけ出し、それ以外は `null`。
+
+- 23(一意・外部キー・NOT NULL・CHECK の違反)の文言は制約・表・列の名だけで、値は `detail` に入る(出さない)。08・25・40・53・54・57 は接続・transaction・資源・上限・中断、42 は生成した SQL と型の名(`could not determine data type of parameter $2` もここ)
+- 22 の類は入力の値を文言に含む(`invalid input syntax for type uuid: "…"`)ので出さない。SQLSTATE の無い JS の例外も出さない ── `JSON.parse` は入力の切れ端を文言に含む(`Unexpected token '秘', "秘密の本文" is not valid JSON`)。`name` と `code` は今までどおり出る
+- check(`test/yumemi_0131_check.mjs`)に 3 項:一意の違反の文言は残る、22P02 の文言(値入り)は出ない、`JSON.parse` の切れ端は出ない。平の例外の項は「message が出る」から「出ない」に替えた。11 項全部 ok、r1 の `http.mjs` に差し替えると 3 項 NG(`build/r2-check-unavailable{,-r1}.txt`)。応答は今までどおり 503 `unavailable`
+
+### 外から見える契約の差(r2 の分)
+
+- `document()` のように引用か入れ子を読む読み方で、17 段目からの `>` と箇条の印は字になる(r1 は読んだ。1480 段前後で stack が尽きていた)。`post()`・`outline()` の木は替わらない
+- 向きのそろった Paged の一覧が text の列で並ぶとき、頭の穴が `::text` になる(r1 まで 503 だった一覧だけ)
+- `request.unavailable` の log の `message` が、上の類のほかは `null` になる
+- `yumemi/front/text_ffi.mjs` が増えた(内部、公開の関数は無い)。`attr.safe_url` の答えは替わらない
+- README:Markdown の項に書き手を信用しない本文の速さと入れ子の上限、0.13.1 の Paged の項に text、log の項に `message` の出し方
+
+### 残したもの
+
+- P1-4(`Options`・`Block`・`Inline` の公開の形が次の版の追加を破壊的にする)、P1-5(`css.Style`・`BorderEdge` の網羅の case)、P1-6(基点から在る事業名 10 件):鷹野さんの裁きのとおり直していない
+- 1 行に 15000 セルの表は冷えた 1 回目で 101 ms(出力 330KB)。線形で、この巡では詰めていない
+- 「次の版へ」の項は r1 のまま
+
+### DDL
+
+無し。

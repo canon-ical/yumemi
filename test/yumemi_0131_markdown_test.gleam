@@ -468,3 +468,104 @@ pub fn document_styles_test() {
   ]
   |> list.each(fn(rule) { string.contains(css_text, rule) |> should.be_true })
 }
+
+// ── 書き手を信用しない本文(r2、柏木 ゲート 2 の P1-1)──────────────────────────────────
+
+@external(javascript, "./yumemi_0131_markdown_test_ffi.mjs", "timed")
+fn timed(run: fn() -> a) -> #(a, Float)
+
+/// 30KB 前後の病的な本文。r1 は stack が尽きる(code span・引用・1 行の入れ子の箇条)か、長さの 2 乗で 0.5〜13 s
+/// かかった(閉じない `[`・`<code>`・`<http`、柵で落ちる URL、字の中の長い空白の連なり)。
+fn hostile() -> List(#(String, String)) {
+  [
+    #("code spans", string.repeat("`a` ", 7500)),
+    #("code spans of two", string.repeat("`` x ` ", 4285)),
+    #("nested quotes", string.repeat(">", 30_000) <> " x"),
+    #("nested bullets on a line", string.repeat("- ", 15_000) <> "x"),
+    #("nested numbers on a line", string.repeat("1. ", 10_000) <> "x"),
+    #("quote and list", string.repeat("> - ", 7500) <> "x"),
+    #(
+      "nested bullets indented",
+      list.repeat("- x", 170)
+        |> list.index_map(fn(item, depth) { string.repeat("  ", depth) <> item })
+        |> string.join("\n"),
+    ),
+    #("brackets", string.repeat("[", 30_000)),
+    #("open links", string.repeat("[a](", 7500)),
+    #("open links closed late", string.repeat("[a](", 7499) <> ")"),
+    #("web links with a space", string.repeat("[a](http://x", 2499) <> " )"),
+    #("links with a long scheme", string.repeat("[a](x", 5999) <> ":)"),
+    #("open code tags", string.repeat("<code>", 5000)),
+    #("open autolinks", string.repeat("<http", 6000)),
+    #("autolinks with a space", string.repeat("<http://x", 3332) <> " >"),
+    #("autolinks with a long scheme", string.repeat("<httpx:", 4284) <> ">"),
+    #("spaces in a line", "x" <> string.repeat(" ", 29_998) <> "x"),
+    #("lazy items", string.repeat("- a\nb\n", 5000)),
+  ]
+}
+
+pub fn hostile_text_returns_in_time_test() {
+  use #(name, text) <- list.each(hostile())
+  use options <- list.each([
+    markdown.document(),
+    markdown.post(),
+    markdown.outline(),
+  ])
+  let #(html, ms) =
+    timed(fn() { markdown.view(text, options, markdown.bare()) |> el.to_string })
+  // 目安は node で 1 回 100 ms。test は緩く 10 倍で縛る(r1 は stack が尽きるか 0.5〜13 s)
+  case ms <. 1000.0 && html != "" {
+    True -> Nil
+    False -> panic as { name <> " が遅いか空:" <> string.inspect(ms) <> " ms" }
+  }
+}
+
+fn quotes(depth: Int, inner: List(markdown.Block)) -> List(markdown.Block) {
+  case depth {
+    0 -> inner
+    _ -> [Quote(quotes(depth - 1, inner))]
+  }
+}
+
+fn bullets(depth: Int, inner: List(markdown.Block)) -> List(markdown.Block) {
+  case depth {
+    0 -> inner
+    _ -> [Bullets([bullets(depth - 1, inner)])]
+  }
+}
+
+pub fn nesting_stops_at_sixteen_test() {
+  // 16 段までは今までどおり。17 段目からの `>` と箇条の印は字のまま
+  doc(string.repeat(">", 16) <> " x")
+  |> should.equal(quotes(16, [line([Plain("x")])]))
+  doc(string.repeat(">", 20) <> " x")
+  |> should.equal(quotes(16, [line([Plain(">>>> x")])]))
+  doc(string.repeat("- ", 16) <> "x")
+  |> should.equal(bullets(16, [line([Plain("x")])]))
+  doc(string.repeat("- ", 20) <> "x")
+  |> should.equal(bullets(16, [line([Plain("- - - - x")])]))
+  // 書き手の投稿は入れ子を読まないので、段は替わらない
+  post(string.repeat("- ", 20) <> "x")
+  |> should.equal([Bullets([[line([Plain(string.repeat("- ", 19) <> "x")])]])])
+}
+
+pub fn links_decided_ahead_read_as_before_test() {
+  // scheme が長い URL は閉じまで読まずに落とす。後ろの印から始まる短い scheme は通る
+  doc(string.repeat("[a](x", 3) <> ":)")
+  |> should.equal([line([Plain("[a](x[a](x[a](x:)")])])
+  doc("[a](ht[b](tel:1)")
+  |> should.equal([line([Plain("[a](ht"), Link("tel:1", [Plain("b")])])])
+  doc("<httpx:<http://e>")
+  |> should.equal([
+    line([Plain("<httpx:"), Link("http://e", [Plain("http://e")])]),
+  ])
+  // 空白で落ちた URL の後ろの印も、閉じが空白より前なら通る
+  post("[a](http://x [b](http://y) z)")
+  |> should.equal([
+    line([
+      Plain("[a](http://x "),
+      Link("http://y", [Plain("b")]),
+      Plain(" z)"),
+    ]),
+  ])
+}

@@ -82,15 +82,18 @@ pub fn paged_by_boolean_and_float_casts_the_cursor_test() {
   |> should.be_true
 }
 
-/// text・時刻の列は今までどおり(text は型を書かない、timestamptz は書く)。
-pub fn paged_by_text_and_time_is_unchanged_test() {
+/// 時刻の列は今までどおり(timestamptz を書く)。text の列も頭の穴に型が無いと同じ理由で落ちていたので、
+/// `::text` を書く(柏木 ゲート 2 の P1-2)。key の穴は今までどおり。
+pub fn paged_by_time_is_unchanged_and_text_casts_the_cursor_test() {
   let #(_, files) = generated(notes, [])
   text_of(files, "src/gen/sql.mjs")
   |> string.contains("($2::timestamptz IS NULL OR (")
   |> should.be_true
   let #(_, files) = generated(notes, ordered_by("String"))
   let sql = text_of(files, "src/gen/sql.mjs")
-  sql |> string.contains("($2 IS NULL OR (") |> should.be_true
+  sql |> string.contains("($2::text IS NULL OR (") |> should.be_true
+  sql |> string.contains("<($2,$3::uuid))") |> should.be_true
+  sql |> string.contains("($2 IS NULL OR (") |> should.be_false
 }
 
 // ── 2 静的資料(`src/external_hosts.mjs`・`docs/api-v1.md`)の無い app ───────────────────
@@ -192,9 +195,10 @@ pub fn api_v1_names_the_face_style_only_when_it_has_them_test() {
 fn check(which: String) -> String
 
 /// 内部の失敗は全部 log 無しの 503 unavailable に畳まれていた。畳む前に SQLSTATE と制約・表の名を 1 行出す(応答は替えない)。
+/// 文言は値を含まない SQLSTATE の類だけ(22 の類と JS の例外の文言は出さない、r2)。
 pub fn unavailable_logs_the_constraint_test() {
   let out = check("unavailable")
   string.contains(out, "NG ") |> should.be_false
   string.contains(out, "STDERR") |> should.be_false
-  string.split(out, "\n") |> list.length |> should.equal(8)
+  string.split(out, "\n") |> list.length |> should.equal(11)
 }
