@@ -270,3 +270,7 @@ fixture:28 本を写しに置き、基点の生成器と本作業木の生成器
 4. markdown の `Look` に言語ごとの口が無い(言語名ごとにコードの枠を変えるには木を自分で歩く)
 5. `Cond` に `Or` が無い
 6. markdown の読みと描きが 1 つの module で、読みだけ import する client の束にも描く側(`el`・`css`・`sketch` ほか)が入る(事業 app の編集器の束が 239KB → 342KB)
+7. `css.Length` に割合(%)が無く `max-width: 100%` を書けない。文書サイトの図は viewBox だけの SVG と、実行時に組んだ MinWidth・MaxWidth で避けた
+8. markdown に画像の記法(`![](…)`)が無く、`Inline` にも無い。コードの囲みの言語名は最初の語しか残らないので、文書サイトは info string に `mermaid:<id>:<幅>` と載せて避けた
+9. `html` に `figure`・`figcaption` が無い(div で組んだ)
+10. `img` に自然な寸法を持たせて場所を取る手が無く、図の読み込みで高さが動く(測っていない)
