@@ -24,8 +24,19 @@
 // そのまま返し、違う本文なら 409 `idempotency_conflict`。無ければ Service を走らせ、runtime が書きの transaction の
 // 先頭に記録を入れる。並んで来た 2 本目は一意の制約で transaction ごと落ちるので、落ちた後に引き直して 1 本目の
 // 応答を返す。キーの無い要求・読みの Service・attached の口・port は今までどおり。
+// `request_hash` は env の鍵(`IDEMPOTENCY_HASH_KEY`)の HMAC-SHA256 に版の印 `h1:` を付けたもの(0.13.2)。鍵が
+// 無ければキーを持つ書きを 503 で断る(鍵の無い hash に戻らない)。比べは前の鍵(`_PREVIOUS`)と 0.13.1 までの印の無い
+// SHA-256 の行にも当てる(残すのは今の鍵の HMAC だけ)。
 import * as framework_entry from '../entry.mjs';
 import * as color from '../front/color.mjs';
+
+// request_hash の鍵の env の名。app は宣言しない(`IDEMPOTENCY_RETENTION_HOURS` と同じ)
+const idempotencyHashKey='IDEMPOTENCY_HASH_KEY';
+const idempotencyHashKeyPrevious='IDEMPOTENCY_HASH_KEY_PREVIOUS';
+// 鍵の最短の長さ(字)。短い鍵は総当たりで割れるので、無いのと同じに断る
+const idempotencyHashKeyMin=32;
+// 鍵の値 -> 取り込んだ鍵(の Promise)。isolate の中で使い回す。差し替えの間は今と前の 2 つで、増えすぎたら捨てる
+const idempotencyHashKeys=new Map();
 
 export function http(spec) {
  const { c, registry, attached } = spec;
@@ -424,6 +435,7 @@ export function http(spec) {
    if(port) return await port(s,{c,response,emptyResponse,fail,run:spec.runtime.run});
    if(hook('early')?.(s)) return emptyResponse(s,202);
    const keyed=await idempotencyOf(s);
+   if(keyed===idempotencyUnkeyed) return response(s,{code:'unavailable'},503);
    if(keyed) {
     const prior=await idempotentReplay(s,keyed);
     if(prior) return prior;
@@ -463,8 +475,59 @@ export function http(spec) {
   const key=s.request.headers.get('idempotency-key');
   if(key===null||!s.record?.module||c.tag(s.record.module.effect)!=='write') return null;
   if(!idempotencyKeyShape.test(key)) fail('invalid_argument',400,'idempotency_key');
-  const hash=await sha256(s.record.name+'\n'+canonical(s.rawArgs??{}));
-  return {party:idempotencyParty(s),key,hash,recorded:null,encode:outcome=>storedResponse(outcomeResponse(s,outcome))};
+  const current=await idempotencyHashKeyOf(s.env,idempotencyHashKey);
+  if(current.missing) {
+   idempotencyKeyLog(s,idempotencyHashKey,current.missing);
+   return idempotencyUnkeyed;
+  }
+  const input=s.record.name+'\n'+canonical(s.rawArgs??{});
+  const hash=await hmacHash(current.key,input);
+  // 記録の値と同じ本文か。今の鍵、前の鍵(差し替えの間)、0.13.1 までの印の無い SHA-256 の行(比べるだけ)の順。
+  // 知らない形の値は比べられないので違う本文(409、2 件目の書きにはしない)
+  async function same(stored) {
+   if(typeof stored!=='string') return false;
+   if(stored===hash) return true;
+   if(stored.startsWith(hmacMark)) {
+    const previous=await idempotencyHashKeyOf(s.env,idempotencyHashKeyPrevious);
+    if(previous.key) return stored===await hmacHash(previous.key,input);
+    if(previous.missing!=='absent') idempotencyKeyLog(s,idempotencyHashKeyPrevious,previous.missing);
+    return false;
+   }
+   if(/^[0-9a-f]{64}$/.test(stored)) return stored===await sha256(input);
+   return false;
+  }
+  return {party:idempotencyParty(s),key,hash,same,recorded:null,encode:outcome=>storedResponse(outcomeResponse(s,outcome))};
+ }
+ // 鍵の無い書きの印(`execute` が 503 `unavailable` で断る)
+ const idempotencyUnkeyed=Symbol('yumemi.idempotency.unkeyed');
+ const hmacMark='h1:';
+ async function hmacHash(key,text) {
+  const bytes=new Uint8Array(await crypto.subtle.sign('HMAC',key,encoder.encode(text)));
+  return hmacMark+Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('');
+ }
+ // env の鍵。Secret Store の binding(`.get()` が字を返す)か、素の字の secret。`{key}` か `{missing}`
+ // (`absent` 無い・`short` 32 字より短い・`unreadable` `.get()` が落ちた・字でない)
+ async function idempotencyHashKeyOf(env,name) {
+  const binding=env?.[name];
+  if(binding===undefined||binding===null||binding==='') return {missing:'absent'};
+  let value;
+  try { value=typeof binding==='string'?binding:typeof binding.get==='function'?await binding.get():null; }
+  catch { return {missing:'unreadable'}; }
+  if(value===null||value===undefined||value==='') return {missing:'absent'};
+  if(typeof value!=='string') return {missing:'unreadable'};
+  if(value.length<idempotencyHashKeyMin) return {missing:'short'};
+  let key=idempotencyHashKeys.get(value);
+  if(!key) {
+   if(idempotencyHashKeys.size>=4) idempotencyHashKeys.clear();
+   key=crypto.subtle.importKey('raw',encoder.encode(value),{name:'HMAC',hash:'SHA-256'},false,['sign']);
+   idempotencyHashKeys.set(value,key);
+   key.catch(()=>idempotencyHashKeys.delete(value));
+  }
+  return {key:await key};
+ }
+ // 鍵の不足を 1 行。binding の名と理由だけ(値・HMAC の入力は出さない)
+ function idempotencyKeyLog(s,binding,reason) {
+  try { console.error(JSON.stringify({yumemi:'idempotency.key_missing',binding,reason,service:s.record?.name??null})); } catch {}
  }
  async function storedResponse(r) {
   return {status:r.status,type:r.headers.get('content-type'),body:r.status===204||r.body===null?null:await r.clone().text()};
@@ -485,7 +548,7 @@ export function http(spec) {
   catch(error) { if(quiet) return null; throw error; }
   const row=rows?.[0];
   if(!row) return null;
-  if(row.request_hash!==keyed.hash) return response(s,{code:'idempotency_conflict'},409);
+  if(!await keyed.same(row.request_hash)) return response(s,{code:'idempotency_conflict'},409);
   const stored=typeof row.result==='string'?JSON.parse(row.result):row.result;
   return replayedResponse(s,stored);
  }

@@ -124,8 +124,10 @@ pub fn app_sql_wins_over_the_default_test() {
 /// commit の後に応答を捨てた再投稿は 1 件、並んだ 2 本は一意の制約で 1 本、party で引く、断りも記録、order は同じ
 /// transaction で記録に埋める(r2、応答を失った再投稿も DB の order)、
 /// ★ の db_error が走らせ直した書きも記録する。
+/// 0.13.2:request_hash は env の鍵の HMAC(`h1:`)。鍵が無い・短い・読めない env はキーを持つ書きを 503 で断り
+/// 何も書かない、前の鍵(`_PREVIOUS`)と 0.13.1 の印の無い行にも比べて 2 件目の書きにしない。
 pub fn server_replays_and_conflicts_test() {
-  idem_check("server") |> all_ok(30)
+  idem_check("server") |> all_ok(75)
 }
 
 /// client:書きの送りにキー、503・網の失敗はキーと入力を保って失敗の After に移らない、答えが出たら捨てる。
