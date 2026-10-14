@@ -126,13 +126,20 @@ async function server() {
   };
   const h = http({ c, registry: [], attached: [], Ok, Error: Er, hosts: {}, runtime: rt, roles: {}, ports: {}, accepted: {}, args: {}, hooks });
 
+  // request_hash の鍵(0.13.2)。既定の env は今の鍵だけ
+  const KEY_A = "test-hash-key-A-0123456789abcdef0123456789";
+  const KEY_B = "test-hash-key-B-fedcba9876543210fedcba9876";
+  const keyed = { IDEMPOTENCY_HASH_KEY: KEY_A };
+  const logged = [];
+  const consoleError = console.error;
+  console.error = (...args) => logged.push(args.map(String).join(" "));
   let seeds = 0;
-  async function post({ service = "note_create", title, key, party = "party-a", db = database() }) {
+  async function post({ service = "note_create", title, key, party = "party-a", db = database(), env = keyed }) {
     const headers = new Headers({ "content-type": "application/json" });
     if (key !== undefined) headers.set("idempotency-key", key);
     const request = new Request("https://api.test/api/notes", { method: "POST", headers, body: JSON.stringify({ title }) });
     const record = records[service];
-    const s = { request, env: {}, db, trace: [], setCookies: [], record, args: new Args(title), rawArgs: { title },
+    const s = { request, env, db, trace: [], setCookies: [], record, args: new Args(title), rawArgs: { title },
       resolved: party ? { party } : null, clauses: [], at: "2026-10-13T00:00:00.000Z", seed: "seed-" + ++seeds };
     const response = await h.execute(s);
     return { status: response.status, body: await response.text(), replayed: response.headers.get("idempotency-replayed") === "true" };
@@ -238,6 +245,95 @@ async function server() {
   const rerun = await post({ service: "note_flaky", title: "rerun", key: "k-rerun" });
   const rerunAgain = await post({ service: "note_flaky", title: "rerun", key: "k-rerun" });
   check("rerun: the hook's second run records in its own transaction, the retry is replayed", rerun.status === 200 && data.idem.has("party-a\u0000k-rerun") && rerunAgain.replayed && rerunAgain.body === rerun.body && rows() === 1, [rerun, rerunAgain, log.filter((x) => x.startsWith("tx:"))]);
+
+  // ── 鍵付きの request_hash(0.13.2)──────────────────────────────────────
+  const hex = (bytes) => Array.from(new Uint8Array(bytes), (b) => b.toString(16).padStart(2, "0")).join("");
+  const enc = new TextEncoder();
+  const sha = async (text) => hex(await crypto.subtle.digest("SHA-256", enc.encode(text)));
+  const hmac = async (secret, text) => {
+    const key = await crypto.subtle.importKey("raw", enc.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+    return "h1:" + hex(await crypto.subtle.sign("HMAC", key, enc.encode(text)));
+  };
+  // canonical な欄の JSON(欄が 1 つなら JSON.stringify と同じ)
+  const input = (service, title) => service + "\n" + JSON.stringify({ title });
+  const hashOf = (key) => data.idem.get("party-a\u0000" + key)?.request_hash;
+
+  // (c) 記録の値は鍵の HMAC に印 h1:。鍵の無い SHA-256 と一致しない。鍵を替えると値が替わる。binding と素の字は同じ値
+  reset();
+  await post({ title: "secret 090-1234-5678", key: "k-h1" });
+  await post({ title: "secret 090-1234-5678", key: "k-h2", env: { IDEMPOTENCY_HASH_KEY: KEY_B } });
+  await post({ title: "secret 090-1234-5678", key: "k-h3", env: { IDEMPOTENCY_HASH_KEY: { get: async () => KEY_A } } });
+  const plainHash = await sha(input("note_create", "secret 090-1234-5678"));
+  check("hmac: the record is h1: and 64 hex", /^h1:[0-9a-f]{64}$/.test(hashOf("k-h1") ?? ""), hashOf("k-h1"));
+  check("hmac: the record is not sha256(name + \\n + canonical)", hashOf("k-h1") !== plainHash && !hashOf("k-h1").includes(plainHash), [hashOf("k-h1"), plainHash]);
+  check("hmac: the record is HMAC-SHA256 under the env key", hashOf("k-h1") === await hmac(KEY_A, input("note_create", "secret 090-1234-5678")), hashOf("k-h1"));
+  check("hmac: another key gives another value", hashOf("k-h2") && hashOf("k-h2") !== hashOf("k-h1"), [hashOf("k-h1"), hashOf("k-h2")]);
+  check("hmac: a Secret Store binding (.get()) gives the same value as the plain secret", hashOf("k-h3") === hashOf("k-h1"), [hashOf("k-h1"), hashOf("k-h3")]);
+  const record = JSON.stringify([...data.idem.values()]);
+  check("hmac: no record holds the key or the body's value in the hash", !record.includes(KEY_A) && !record.includes(KEY_B) && ![...data.idem.values()].some((x) => x.request_hash.includes("090")), record);
+
+  // (a)(b) 鍵付きでも同じ本文は replay、違う本文は 409
+  reset();
+  const keyedFirst = await post({ title: "same", key: "k-same" });
+  const keyedAgain = await post({ title: "same", key: "k-same", env: { IDEMPOTENCY_HASH_KEY: { get: async () => KEY_A } } });
+  const keyedOther = await post({ title: "other", key: "k-same" });
+  check("hmac a: same key, same body replays", keyedAgain.replayed && keyedAgain.body === keyedFirst.body && rows() === 1, [keyedFirst, keyedAgain]);
+  check("hmac b: same key, other body is 409", keyedOther.status === 409 && JSON.parse(keyedOther.body).code === "idempotency_conflict" && rows() === 1, keyedOther);
+
+  // (d) 鍵の無い env:キーを持つ書きは 503 unavailable で何も書かない。キーの無い書き・読みは通る。log は binding の名だけ
+  for (const [label, env] of [["no key", {}], ["empty", { IDEMPOTENCY_HASH_KEY: "" }], ["short", { IDEMPOTENCY_HASH_KEY: "short-key" }],
+    ["store returns null", { IDEMPOTENCY_HASH_KEY: { get: async () => null } }], ["store throws", { IDEMPOTENCY_HASH_KEY: { get: async () => { throw new Error("secret not found"); } } }],
+    ["only the previous key", { IDEMPOTENCY_HASH_KEY_PREVIOUS: KEY_A }]]) {
+    reset();
+    logged.length = 0;
+    const refused = await post({ title: "unkeyed " + label, key: "k-unkeyed", env });
+    check(`missing key (${label}): a keyed write is 503 unavailable`, refused.status === 503 && JSON.parse(refused.body).code === "unavailable" && !refused.replayed, refused);
+    check(`missing key (${label}): nothing is read or written`, rows() === 0 && data.idem.size === 0 && data.audit === 0 && log.length === 0, [data.notes, log]);
+    const line = logged.find((x) => x.includes("idempotency.key_missing"));
+    check(`missing key (${label}): one log line names the binding, not a value`, logged.length === 1 && JSON.parse(line).binding === "IDEMPOTENCY_HASH_KEY" && !line.includes("unkeyed " + label) && !line.includes("short-key") && !line.includes(KEY_A), logged);
+    const plain = await post({ title: "plain " + label, env });
+    const peek = await post({ service: "note_peek", title: "peek " + label, key: "k-peek", env });
+    check(`missing key (${label}): a write without a key and a read with one still run`, plain.status === 200 && peek.status === 200 && rows() === 2 && data.idem.size === 0, [plain, peek]);
+  }
+
+  // (e) 鍵の差し替え:前の鍵で記録した行に、新しい鍵 + PREVIOUS で replay・違う本文は 409。PREVIOUS が無ければ 409(2 件目の書きにならない)
+  reset();
+  logged.length = 0;
+  const oldKeyed = await post({ title: "rotate", key: "k-rotate" });
+  const rotated = { IDEMPOTENCY_HASH_KEY: KEY_B, IDEMPOTENCY_HASH_KEY_PREVIOUS: { get: async () => KEY_A } };
+  const rotatedAgain = await post({ title: "rotate", key: "k-rotate", env: rotated });
+  const rotatedOther = await post({ title: "rotate other", key: "k-rotate", env: rotated });
+  check("rotate: a record under the previous key replays under the new key", rotatedAgain.replayed && rotatedAgain.body === oldKeyed.body && rows() === 1, [oldKeyed, rotatedAgain]);
+  check("rotate: another body against the previous key's record is 409", rotatedOther.status === 409 && rows() === 1, rotatedOther);
+  const fresh = await post({ title: "after rotate", key: "k-fresh", env: rotated });
+  check("rotate: a new record is written under the new key", fresh.status === 200 && hashOf("k-fresh") === await hmac(KEY_B, input("note_create", "after rotate")), hashOf("k-fresh"));
+  const prepared = await post({ title: "rotate", key: "k-rotate", env: { IDEMPOTENCY_HASH_KEY: KEY_A, IDEMPOTENCY_HASH_KEY_PREVIOUS: KEY_A } });
+  check("rotate: step 1 (the previous key set to the current one) changes nothing", prepared.replayed && rows() === 2, prepared);
+  const dropped = await post({ title: "rotate", key: "k-rotate", env: { IDEMPOTENCY_HASH_KEY: KEY_B } });
+  check("rotate: without the previous key the old record is 409, not a second write", dropped.status === 409 && rows() === 2, dropped);
+  const shortPrevious = await post({ title: "rotate", key: "k-rotate", env: { IDEMPOTENCY_HASH_KEY: KEY_B, IDEMPOTENCY_HASH_KEY_PREVIOUS: "short" } });
+  check("rotate: a short previous key is not used and is logged by name", shortPrevious.status === 409 && rows() === 2 && logged.some((x) => x.includes('"binding":"IDEMPOTENCY_HASH_KEY_PREVIOUS"') && x.includes('"reason":"short"')), [shortPrevious, logged]);
+
+  // (f) 0.13.1 の形の行(印の無い SHA-256)への再投稿:同じ本文は replay、違う本文は 409。どちらも 2 件目の書きにならない
+  reset();
+  const legacyResult = { status: 200, type: "application/json", body: JSON.stringify({ id: "legacy-1", title: "legacy" }) };
+  data.notes.push({ id: "legacy-1", title: "legacy" });
+  data.idem.set("party-a\u0000k-legacy", { request_hash: await sha(input("note_create", "legacy")), result: JSON.stringify(legacyResult), created_at: "2026-10-12T00:00:00.000Z" });
+  const legacyAgain = await post({ title: "legacy", key: "k-legacy" });
+  const legacyOther = await post({ title: "legacy changed", key: "k-legacy" });
+  const legacyRotated = await post({ title: "legacy", key: "k-legacy", env: { IDEMPOTENCY_HASH_KEY: KEY_B } });
+  check("legacy: a 0.13.1 row with the same body replays", legacyAgain.replayed && legacyAgain.body === legacyResult.body && rows() === 1, legacyAgain);
+  check("legacy: a 0.13.1 row with another body is 409", legacyOther.status === 409 && rows() === 1, legacyOther);
+  check("legacy: the 0.13.1 row compares under any key", legacyRotated.replayed && rows() === 1, legacyRotated);
+  check("legacy: the 0.13.1 row is left as it was (not rewritten)", hashOf("k-legacy") === await sha(input("note_create", "legacy")), hashOf("k-legacy"));
+  const legacyNew = await post({ title: "legacy", key: "k-legacy-new" });
+  check("legacy: a new record is never the plain SHA-256", /^h1:/.test(hashOf("k-legacy-new") ?? ""), hashOf("k-legacy-new"));
+  data.idem.set("party-a\u0000k-unknown", { request_hash: "h9:" + "0".repeat(64), result: JSON.stringify(legacyResult), created_at: "2026-10-12T00:00:00.000Z" });
+  const unknown = await post({ title: "legacy", key: "k-unknown" });
+  check("legacy: a value of an unknown form is 409, not a second write", unknown.status === 409 && rows() === 2, unknown);
+
+  check("log: no line holds a key", !logged.some((x) => x.includes(KEY_A) || x.includes(KEY_B)), logged);
+  console.error = consoleError;
 }
 
 // ── client ────────────────────────────────────────────────────────────────
