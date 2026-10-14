@@ -57,3 +57,14 @@
 - 実の Workers(workerd)と Secret Store の binding での動き。test は `.get()` を持つ偽の binding と素の字
 - 実の PG での replay・409(偽の DB だけ)。事業 app の写しでの生成と test は回していない(生成器の出力は基点と差 0 で、変えたのは runtime の http.mjs だけ)
 - 版・tag・publish はしていない(鷹野)
+
+## ゲート 2 と検収(鷹野)
+
+柏木 opus のゲート 2(`ff9ff18..ed27658`)は P0 0。所見は run `kashiwagi-20261015-043902-505106-6392`。
+
+- P1-1 生成の DDL の注記「request_hash は … SHA-256」は直さない(header の `[sha256:…]` が動く)。次に DDL を触る便で直す
+- P1-2 比べは前向きにしか効かない(新しい鍵の記録を古い鍵だけの isolate が見る・0.13.1 の isolate が `h1:` を見ると 409、2 件目の書きにはならない)。README の差し替えの項に 1 文足した(鷹野)
+- P1-3 src・README の事業名 2 行は 0.11 からある `entry.gleam` の行で、本便の追加は 0
+- P2-1 binding が字でも `.get()` を持つものでもないとき log の `reason` が `absent`(`unreadable` が正しい)。503 は同じ。次の版で直す
+
+検収:`gleam test` は末尾の字で `500 passed, no failures`。`node test/yumemi_idem_check.mjs server` は NG 0。diff を読み、残す値は `keyed.hash`(`h1:` の HMAC)だけ、素の SHA-256 は 0.13.1 の行との比べだけと確かめた。
