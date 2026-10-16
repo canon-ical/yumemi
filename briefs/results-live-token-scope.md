@@ -63,3 +63,58 @@ test の写しの変更:`yumemi_live2_test.gleam` の `emitted` は `article_rea
 ## DDL
 
 無し。
+
+## r2
+
+真壁[IM]、2026-10-17。基点 `7c52679`(`f9cd66b` + BRIEF r2)。親は柏木のゲート 2 の P1-1。証跡は `build/r2-*.txt`(git の外)。push・tag・Hex・柏木の起動はしていない。DDL 無し。
+
+### 1〜6 の充足
+
+| # | 中身 | 置き場 | 充足 |
+|---|---|---|---|
+| 1 | `Live` の Block の読みの allow に `Party` × `NoOwner` の句(略記 `allow.Party`・小文字の `allow.party`・`Clause(who: Party, at: <どの相でも>, owner: NoOwner)`)があれば停止コード 4。`public_read` を句ごとの判定 `live_reach` に広げ、`Anyone` と同じ所(`live_block_notes`)で止め、`live_reads`(札の表)からも外す | `src/yumemi/gen/emit/front.gleam` の `Reach`・`live_reach`・`clause_reach`・`stops_live`・`reach_note` | 済 |
+| 2 | Entity の主体 × `NoOwner`(`Staff`・`AsFan`、`gen/allow` の略記 `allow.staff` も頭を大文字に揃えて同じ)は警告(停止コード 0)で名指し、札の表には載せる | 同上 | 済 |
+| 3 | 読めない句(定数の参照・spread・List でない allow、reader の `UnreadClause`)は停止コード 4。Service に allow の句の行が無いときも読めない扱い | 同上 | 済 |
+| 4 | musearch の `chat_read` の allow(`~/yumemism_repo/musearch` main `9e80e40fb` の `api/src/service/chat_read.gleam` 75〜82 行)を test に写し、名指し 0・表に載ることを見た。musearch は読むだけ | `live_allow_of_parties_passes_test` | 済 |
+| 5 | test(下の表)。既存の検査 5 本は通ったまま | `test/yumemi_live2_test.gleam` | 済 |
+| 6 | README の「A read carries a token」に通る条件・止める条件と限界の 1 文、「What the generator stops」に Party × NoOwner と読めない句(停止)、Entity × NoOwner(警告)。CHANGELOG 0.14.1 の 2 項目目に同じ条件と限界、musearch の `chat_read` が通ること | `README.md`、`CHANGELOG.md` | 済 |
+
+判定は句の `owner` だけで見る:`NoOwner` 以外(`Self`・`Via<Entity>Party`)は通す。`NoOwner` の句は `who` で分ける ── `Anyone` 停止(従来)、`Party` 停止、`System` 何もしない(browser から来ない)、それ以外(Entity の主体)警告。`at`(相)は見ない。
+
+### 文言
+
+```
+[exit 4 宣言の矛盾] <面> <Page>: Live(block: <B>) の Block の Service <s> の allow の句 Party(owner: NoOwner)は session があれば誰でも root のどの行も通す(ログインした第三者が同じ root の書きの時刻を聞ける。owner を Self か Via<Entity>Party にする)
+[exit 4 宣言の矛盾] <面> <Page>: Live(block: <B>) の Block の Service <s> の allow の句が読めない: <reader の名指し>(root の当事者だけが通る読みか判定できない。Live の Block の読みの allow は句を literal で書く)
+[exit 0 警告] <面> <Page>: Live(block: <B>) の Block の Service <s> の allow の句 <Who>(owner: NoOwner)は <Who> なら誰でも root のどの行も通す(<Who> が誰でも登録できる役なら、同じ root の書きの時刻を聞ける。当事者に絞るなら owner を Self か Via<Entity>Party にする)
+```
+
+`Anyone` の文言は r1 のまま。`<reader の名指し>` は `allow の句 party_only`・`allow の spread(..)`・`allow が List の literal でない` など。
+
+### test の表と証拠
+
+| # | 何を | 結果 | 証拠 |
+|---|---|---|---|
+| 1 | `gleam test` | **`526 passed, no failures`**(r1 の 521 + 5) | `build/r2-test-4.txt` |
+| 2 | 写しの `article_read` の `Anyone` の句を `Party` に替えて reader から通す:停止は Party の 1 行だけ、表は `[]` | ok | `live_on_any_party_read_stops_test` |
+| 3 | `Party` × `NoOwner` の 4 形(`allow.Party`・`allow.party`・`Clause(.., Only([Published]), NoOwner)`・当事者の句と並べた `allow.Party`)は停止 1 行・表 `[]`。`allow.anyone` は Anyone の停止 | ok | `live_allow_of_anyone_in_the_session_stops_test` |
+| 4 | 読めない句 3 形(定数 `party_only`・spread `..other.clauses`・`allow: other.clauses`)は停止・表 `[]` | ok | `live_allow_unread_stops_test` |
+| 5 | Entity × NoOwner(`allow.staff`、`AsFan` × `NoOwner` と `AsMuse` × `ViaMuseParty`)は警告 1 行、停止 0、表に載る | ok | `live_allow_warns_test` |
+| 6 | 当事者の句は名指し 0・表に載る:musearch `chat_read` の写し、`Party` × `Self`、`Staff` × `ViaStaffParty`(相付き)、`allow.System` | ok | `live_allow_of_parties_passes_test` |
+| 7 | 既存:`live_warnings_test` は写しの `allow.staff` の新しい警告を除いて Block の警告だけを見るようにした(他の主張は変えていない) | ok | #1 |
+| 8 | `node test/yumemi_live_check.mjs` / `yumemi_live2_check` / `yumemi_live2_shell_check` / `yumemi_block_door_check` / `yumemi_block_door_shell_check` | **ok 93 / 48 / 25 / 17 / 18、NG 0**、どれも rc=0 | `build/r2-run-*.txt` |
+| 9 | mutation:`"Party" -> Some(AnyParty)` を `None` に | 2 件落ちる(#2・#3)。戻して build し直した | `build/r2-mut-1.txt` |
+| 10 | `gleam format --check`(触った gleam 2 file) | exit 0 | このセッション |
+
+test #3〜#6 は `allow_notes`:fixture の App の `clauses` の `article_read` の行だけを `reader/clauses.read` で読んだ句に差し替え、`live_notes`・`live_reads` を本物の道で通す(musearch の `AsFan` などの Entity は article に無いため、reader 全体は通さない)。
+
+### しなかったこと
+
+- **P1-2(`registry.mjs` の 1 行目の注記)は直していない。**生成物の header の字を変えると fixture の registry 3 本の生成し直しが要り、注記だけでは収まらないため。直すなら `emit/back.gleam` の header と fixture の生成し直しを 1 便で
+- 札の形・socket の口・runtime は触っていない
+
+### 確かめていないこと
+
+- 生成器を写しで本当に走らせての Party の停止(shell の検査)は足していない。gleam の test は `live_notes` と reader を本物で通しているが、`gen.gleam` の停止コードの集計を経た exit 4 は r1 の Anyone の shell 検査(同じ `live_notes` の Conflict)からの推定
+- musearch の api・面での生成は回していない。`chat_read` は allow の写しで判定だけ見た
+- 実の e2e・ブラウザの walk は回していない

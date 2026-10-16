@@ -3429,7 +3429,8 @@ pub fn live_notes(
 }
 
 /// 札を出す読みの Service の名(0.14.1、registry の `live` の読みの行)。Page の sp の Frame で `Live` に置かれた
-/// Block の読みのうち、root の Entity を持ち公開でないもの(そうでない `Live` は `live_notes` が exit 4 で止める)。
+/// Block の読みのうち、root の Entity を持ち、allow が root の当事者に絞るもの(そうでない `Live` は `live_notes` が
+/// exit 4 で止める ── `live_reach`)。
 pub fn live_reads(app: model.App, front: reader_front.Front) -> List(String) {
   list.flat_map(front.pages, page_lives)
   |> list.filter_map(fn(row) {
@@ -3438,7 +3439,7 @@ pub fn live_reads(app: model.App, front: reader_front.Front) -> List(String) {
         case
           service.effect,
           root.root_for(app, service),
-          public_read(app, service)
+          stops_live(live_reach(app, service))
         {
           model.ReadEffect, Some(_), False -> Ok(service.module)
           _, _, _ -> Error(Nil)
@@ -3462,18 +3463,92 @@ fn live_service(
   })
 }
 
-/// Service の allow に `Anyone` の句があるか(公開の読み)。
-fn public_read(app: model.App, service: model.Service) -> Bool {
-  list.contains(service.subjects, model.SubjectAnonymous)
-  || case list.key_find(app.clauses, service.module) {
-    Ok(clauses) ->
-      list.any(clauses, fn(clause) {
-        case clause {
-          model.Clause(who: "Anyone", ..) -> True
-          _ -> False
-        }
-      })
-    Error(_) -> False
+/// `Live` の Block の読みの allow が、root の誰まで通すか(0.14.1)。札を持つ人はその root の書きの時刻を聞けるので、
+/// root の当事者(`owner` が `Self`・`Via<Entity>Party`)に絞らない句を名指しする。`Warned` の他は exit 4。
+type Reach {
+  /// `Anyone` の句(公開の読み)。
+  Public
+  /// `Party` × `NoOwner`(session があれば誰でも root のどの行も通る)。
+  AnyParty
+  /// 中身を読めない句(定数の参照・spread など)。絞るかが分からない。
+  Unread(text: String)
+  /// Entity の主体 × `NoOwner`。その役が誰でも登録できる役かは生成器には分からないので警告。
+  Warned(who: String)
+}
+
+fn live_reach(app: model.App, service: model.Service) -> List(Reach) {
+  let public = case list.contains(service.subjects, model.SubjectAnonymous) {
+    True -> [Some(Public)]
+    False -> []
+  }
+  let clauses = case list.key_find(app.clauses, service.module) {
+    Ok(clauses) -> list.map(clauses, clause_reach)
+    Error(_) -> [Some(Unread("allow"))]
+  }
+  list.append(public, clauses)
+  |> list.filter_map(option.to_result(_, Nil))
+  |> list.unique
+}
+
+/// 句 1 つ。略記の `allow.staff`(`gen/allow` の句、いつも `NoOwner`)は who が小文字で来るので頭を大文字に揃える。
+fn clause_reach(clause: model.Clause) -> Option(Reach) {
+  case clause {
+    model.UnreadClause(text) -> Some(Unread(text))
+    model.Clause(owner: "NoOwner", who: who, ..) ->
+      case naming.capitalise(who) {
+        "Anyone" -> Some(Public)
+        "Party" -> Some(AnyParty)
+        "System" -> None
+        who -> Some(Warned(who))
+      }
+    model.Clause(..) -> None
+  }
+}
+
+fn stops_live(reach: List(Reach)) -> Bool {
+  list.any(reach, fn(item) {
+    case item {
+      Warned(_) -> False
+      _ -> True
+    }
+  })
+}
+
+fn reach_note(at: String, service: String, reach: Reach) -> stop.Note {
+  let at = at <> " の Block の Service " <> service <> " の allow"
+  case reach {
+    Public ->
+      stop.Note(
+        class: stop.Conflict,
+        text: at
+          <> " に Anyone がある(公開の読みの札では、ログインしていない人も同じ root の非公開の書きの時刻を聞ける。Live の Block は root の当事者だけが通る読みにする)",
+      )
+    AnyParty ->
+      stop.Note(
+        class: stop.Conflict,
+        text: at
+          <> " の句 Party(owner: NoOwner)は session があれば誰でも root のどの行も通す(ログインした第三者が同じ root の書きの時刻を聞ける。owner を Self か Via<Entity>Party にする)",
+      )
+    Unread(text) ->
+      stop.Note(
+        class: stop.Conflict,
+        text: at
+          <> " の句が読めない: "
+          <> text
+          <> "(root の当事者だけが通る読みか判定できない。Live の Block の読みの allow は句を literal で書く)",
+      )
+    Warned(who) ->
+      stop.Note(
+        class: stop.Warning,
+        text: at
+          <> " の句 "
+          <> who
+          <> "(owner: NoOwner)は "
+          <> who
+          <> " なら誰でも root のどの行も通す("
+          <> who
+          <> " が誰でも登録できる役なら、同じ root の書きの時刻を聞ける。当事者に絞るなら owner を Self か Via<Entity>Party にする)",
+      )
   }
 }
 
@@ -3525,18 +3600,7 @@ fn live_block_notes(
           ),
         ]
         _, Some(_) ->
-          case public_read(app, service) {
-            True -> [
-              stop.Note(
-                class: stop.Conflict,
-                text: at
-                  <> " の Block の Service "
-                  <> service.module
-                  <> " の allow に Anyone がある(公開の読みの札では、ログインしていない人も同じ root の非公開の書きの時刻を聞ける。Live の Block は root の当事者だけが通る読みにする)",
-              ),
-            ]
-            False -> []
-          }
+          list.map(live_reach(app, service), reach_note(at, service.module, _))
       }
   }
   let text =
