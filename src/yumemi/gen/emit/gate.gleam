@@ -67,6 +67,17 @@ pub fn csp_routes(
 }
 
 pub fn text(header: String, gate: Gate, route_paths: List(String)) -> String {
+  text_live(header, gate, route_paths, False)
+}
+
+/// `live`(0.15、面に `Live` の Block がある):断片の口の要求(header `x-yumemi-block`)には数える印を差さない。
+/// 門の判定(成人の申告・同意・session)は頁と同じに掛かる。
+pub fn text_live(
+  header: String,
+  gate: Gate,
+  route_paths: List(String),
+  live: Bool,
+) -> String {
   let reads_session = reads_session(gate)
   let #(pageview_routes, pageview_only) = case gate.pageview {
     Some(pageview) -> #(
@@ -114,11 +125,23 @@ pub fn text(header: String, gate: Gate, route_paths: List(String)) -> String {
   <> "const pageviewRoutes = "
   <> js_list(list.map(pageview_routes, quoted), " ")
   <> ";\n"
+  <> case live {
+    True -> "const blockHeader = \"x-yumemi-block\";\n"
+    False -> ""
+  }
   <> "const pageviewOnly = "
   <> js_list(pageview_only, " ")
   <> ";\n"
   <> "\n"
-  <> runtime_for(gate)
+  <> case live {
+    True ->
+      string.replace(
+        runtime_for(gate),
+        "if (!tracksPageview(context) ||",
+        "if (request.headers.has(blockHeader) || !tracksPageview(context) ||",
+      )
+    False -> runtime_for(gate)
+  }
 }
 
 fn when_js(when: model.GateWhen) -> String {
@@ -168,11 +191,13 @@ fn runtime_for(gate: Gate) -> String {
 
 const failed_tail = "  return redirectTo(302, fail.location);\n}\n"
 
-const redirect_back_branch = "  if (fail.type === \"redirect-back\") return redirectBack(fail, request);\n"
+const redirect_back_branch =
+  "  if (fail.type === \"redirect-back\") return redirectBack(fail, request);\n"
 
 const redirect_for_head = "function redirectFor(redirect, session, url) {\n"
 
-const redirect_back_fn = "// 面の中の location へ、要求の path + search を param に付けて返す。面の中の path でなければ付けない(safeParam の判定)
+const redirect_back_fn =
+  "// 面の中の location へ、要求の path + search を param に付けて返す。面の中の path でなければ付けない(safeParam の判定)
 function redirectBack(fail, request) {
   const url = new URL(request.url);
   const back = safeParam(url.pathname + url.search, null);
@@ -185,7 +210,8 @@ function redirectBack(fail, request) {
 
 const fixed_location = "    ? redirect.to.location\n    : safeParam("
 
-const fixed_keep_location = "    ? redirect.to.location\n    : redirect.to.type === \"fixed-keep\"\n    ? redirect.to.location + url.search\n    : safeParam("
+const fixed_keep_location =
+  "    ? redirect.to.location\n    : redirect.to.type === \"fixed-keep\"\n    ? redirect.to.location + url.search\n    : safeParam("
 
 fn expand(matches: List(Match), route_paths: List(String)) -> List(String) {
   route_paths
@@ -311,7 +337,8 @@ fn quoted(value: String) -> String {
   <> "\""
 }
 
-const runtime = "const contexts = new WeakMap();
+const runtime =
+  "const contexts = new WeakMap();
 const pageviewMark = \"<meta name=\\\"yumemi-pageview\\\">\";
 
 function literalMatches(segment, value) {

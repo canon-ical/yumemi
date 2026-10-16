@@ -218,6 +218,7 @@ fn generate_with_faces(
           front_emit.gate_notes(app, units, package, model),
           front_emit.interactive_notes(app, units, package, model, hashes),
           front_emit.surface_notes(app, units, package, model),
+          front_emit.live_notes(app, package, model),
         ])
       }),
     )
