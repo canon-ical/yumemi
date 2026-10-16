@@ -39,7 +39,13 @@ const state = {
   tokens: new Set(),
   sockets: new Set(),
   opened: [],
+  openedAt: [],
+  fragmentLog: [],
   refusals: 0,
+  closeOnOpen: null,
+  banner: false,
+  sibling: false,
+  upgradeDelay: 0,
 };
 let seq = 0;
 function reset(count = 5) {
@@ -53,6 +59,12 @@ function reset(count = 5) {
   state.fragments = 0;
   state.refusals = 0;
   state.opened = [];
+  state.openedAt = [];
+  state.fragmentLog = [];
+  state.closeOnOpen = null;
+  state.banner = false;
+  state.sibling = false;
+  state.upgradeDelay = 0;
 }
 function addLine(body, { front = false, fresh = false } = {}) {
   seq += 1;
@@ -63,8 +75,8 @@ function addLine(body, { front = false, fresh = false } = {}) {
 }
 
 const b64 = (value) => Buffer.from(value).toString("base64url");
-function issue() {
-  const token = `${b64(JSON.stringify({ to: "chat:1", party: null, exp: Math.floor(Date.now() / 1000) + state.ttl }))}.${crypto.randomBytes(8).toString("base64url")}`;
+function issue(ttl = state.ttl) {
+  const token = `${b64(JSON.stringify({ to: "chat:1", party: null, exp: Math.floor(Date.now() / 1000) + ttl }))}.${crypto.randomBytes(8).toString("base64url")}`;
   state.tokens.add(token);
   return token;
 }
@@ -76,13 +88,18 @@ function blockHtml(edge, token) {
     `<li class="c-line${line.fresh ? " c-new" : ""}" data-yumemi-key="${line.id}"><p>${escapeHtml(line.body)}</p>`
     + `<details data-r="${line.id}"><summary>通報</summary><report-file data-yumemi-island data-yumemi-args="${escapeHtml(JSON.stringify({ report_file: { message: line.id } }))}"><form method="dialog"><fieldset><textarea name="report_file.reason"></textarea></fieldset></form></report-file></details></li>`).join("");
   const nameArgs = escapeHtml(JSON.stringify({ name_edit: { name: state.title } }));
+  // banner:条件で出る `<p>`(後ろにも `<p class="c-foot">` がある)。sibling:鍵の無い同じ tag の兄弟が前に入る
   return `<yumemi-live name="thread" token="${token}" edge="${edge}"><section class="c-shell"><h1 class="c-title">${escapeHtml(state.title)}</h1>`
+    + (state.banner ? `<p class="c-banner">相手が退会しました</p>` : "")
     + `<name-edit data-yumemi-island data-yumemi-args="${nameArgs}"><form method="dialog"><fieldset><input id="name" name="name_edit.name" value="${escapeHtml(state.title)}"></fieldset></form></name-edit>`
     + `<ol class="c-lines">${lines}</ol>`
     + `<button type="button" class="c-fresh" data-yumemi-fresh hidden>新しい発言があります</button>`
     + `<yumemi-escape name="probe"></yumemi-escape>`
-    + `<chat-compose data-yumemi-island data-yumemi-args="${escapeHtml(JSON.stringify({ message_send: { chat: "1" } }))}"><form method="dialog"><fieldset><textarea id="compose" name="message_send.body"></textarea><button type="submit" data-yumemi-send="message_send">送る</button></fieldset></form></chat-compose>`
-    + `<a href="/chat/1">新着を読み込む</a></section></yumemi-live>`;
+    + (state.sibling ? `<div class="c-x">X</div>` : "")
+    + `<div class="c-note">送りの注意</div>`
+    + `<div class="c-send"><chat-compose data-yumemi-island data-yumemi-args="${escapeHtml(JSON.stringify({ message_send: { chat: "1" } }))}"><form method="dialog"><fieldset><textarea id="compose" name="message_send.body"></textarea><button type="submit" data-yumemi-send="message_send">送る</button></fieldset></form></chat-compose></div>`
+    + `<input id="memo" name="memo" value="">`
+    + `<a href="/chat/1">新着を読み込む</a><p class="c-foot">foot</p></section></yumemi-live>`;
 }
 
 // 頁の `<style>`(頁を描いた間に使った class だけ)。`.c-new` の規則は新着の行がある断片にしか無い
@@ -91,7 +108,7 @@ const fragmentCss = (edge) => (state.lines.some((line) => line.fresh) ? ".c-new{
 
 function pageHtml(edge) {
   return `<!doctype html><html lang="ja"><head><meta charset="utf-8"><title>chat</title><script type="module" src="/_yumemi/client.mjs"></script></head>`
-    + `<body><style>${pageCss}</style>${blockHtml(edge, issue())}</body></html>`;
+    + `<body><style>${pageCss}</style>${blockHtml(edge, issue(state.pageTtl ?? state.ttl))}</body></html>`;
 }
 
 const clientMjs = `import { start as startInteractive } from "/src/interactive.mjs";
@@ -143,6 +160,15 @@ const server = http.createServer(async (request, response) => {
       return response.end(pageHtml(edge));
     }
     state.fragments += 1;
+    state.fragmentLog.push({ t: Date.now(), search: url.search });
+    if (state.gate === "unavailable") {
+      response.writeHead(503, { "content-type": "text/plain" });
+      return response.end("unavailable");
+    }
+    if (state.gate === "drop") {
+      request.socket.destroy();
+      return;
+    }
     if (state.gate === "redirect") {
       response.writeHead(302, { location: "/login" });
       return response.end();
@@ -170,7 +196,8 @@ const server = http.createServer(async (request, response) => {
   response.writeHead(404);
   response.end();
 });
-server.on("upgrade", (request, socket) => {
+server.on("upgrade", async (request, socket) => {
+  if (state.upgradeDelay > 0) await sleep(state.upgradeDelay);
   const url = new URL(request.url, "http://localhost");
   const token = url.searchParams.get("token");
   const origin = request.headers.origin;
@@ -183,8 +210,14 @@ server.on("upgrade", (request, socket) => {
   }
   const accept = crypto.createHash("sha1").update(request.headers["sec-websocket-key"] + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").digest("base64");
   socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
-  state.sockets.add(socket);
   state.opened.push(token);
+  state.openedAt.push(Date.now());
+  if (state.closeOnOpen !== null) {
+    socket.write(closeFrame(state.closeOnOpen));
+    socket.end();
+    return;
+  }
+  state.sockets.add(socket);
   socket.on("data", (data) => {
     if ((data[0] & 0x0f) === 0x8) {
       state.sockets.delete(socket);
@@ -200,14 +233,25 @@ const base = `http://127.0.0.1:${port}`;
 
 // ── 頁の道具 ───────────────────────────────────────────────────────────────────
 
-async function open(browser, { edge = "bottom", viewport = { width: 420, height: 520 }, js = true } = {}) {
+/// 頁を開き、socket が開いて最初の取り直し(繋がったら毎回 1 回)が当たるまで待つ。
+async function open(browser, { edge = "bottom", viewport = { width: 420, height: 520 }, js = true, init = null } = {}) {
   const context = await browser.newContext({ viewport, javaScriptEnabled: js });
+  if (js) {
+    await context.addInitScript(() => {
+      globalThis.__appliedCount = 0;
+      document.addEventListener("yumemi-live-applied", () => { globalThis.__appliedCount += 1; }, true);
+    });
+  }
+  if (init) await context.addInitScript(init);
   const page = await context.newPage();
   const errors = [];
   page.on("pageerror", (error) => errors.push(String(error)));
   const before = state.opened.length;
   await page.goto(`${base}/chat/1?edge=${edge}`);
-  if (js) await until(() => state.opened.length > before);
+  if (js) {
+    await until(() => state.opened.length > before);
+    await until(() => page.evaluate(() => globalThis.__appliedCount > 0));
+  }
   return { context, page, errors };
 }
 /// 次の当て(`yumemi-live-applied`)を待つ約束を頁に置く
@@ -441,15 +485,16 @@ try {
     const opened2 = state.opened.length;
     const fragments2 = state.fragments;
     closeAll(4001);
-    const again2 = await until(() => state.opened.length > opened2, 5000);
+    const again2 = await until(() => state.opened.length > opened2, 8000);
     const code = await a.page.evaluate(() => document.querySelector("yumemi-live").yumemiLastClose);
     check("reconnect: a 4001 close refreshes first and reopens with a new token", again2 && state.fragments > fragments2 && state.opened.at(-1) !== lastToken && code === 4001, JSON.stringify({ again2, code, fragments: state.fragments - fragments2, same: state.opened.at(-1) === lastToken }));
-    // 張れない(server が札を忘れた)→ 取り直して来た札で張る
+    // 張れない(server が札を忘れた)→ 取り直して来た札で張る(開いた後の取り直しが札を出し終えるのを待つ)
+    await sleep(700);
     state.tokens.clear();
     const refusals = state.refusals;
     const opened3 = state.opened.length;
     closeAll(1001);
-    const again3 = await until(() => state.opened.length > opened3, 8000);
+    const again3 = await until(() => state.opened.length > opened3, 16000);
     check("reconnect: a refused socket refreshes the Block and opens with the new token", again3 && state.refusals > refusals, JSON.stringify({ again3, refusals: state.refusals - refusals }));
     // 頁が見えるようになった
     const fragments4 = state.fragments;
@@ -471,13 +516,13 @@ try {
   // 11. 札の期限の前:期限が 1 分を切った札では張らず、先に取り直して来た札で張る
   reset();
   {
-    state.ttl = 30;
+    state.pageTtl = 30;
     const context = await chrome.newContext();
     const page = await context.newPage();
     const opened = state.opened.length;
     const fragments = state.fragments;
     await page.goto(`${base}/chat/1`);
-    state.ttl = 3600;
+    state.pageTtl = null;
     const ok = await until(() => state.opened.length > opened, 4000);
     const token = state.opened.at(-1);
     const exp = JSON.parse(Buffer.from(token.split(".")[0], "base64url")).exp;
@@ -504,6 +549,161 @@ try {
     const missing = await a.page.evaluate(async () => (await globalThis.__yumemi.block("nothing", { href: "/chat/1?x=1" })) === null);
     check("yumemi.block: a name the page does not serve gives null", missing);
     await a.context.close();
+  }
+
+  // ── r2(柏木 ゲート 2 の P2・P1)──────────────────────────────────────────────
+
+  // P2-2:client の時計が 2 時間進んでいても、取り直しが輪にならない(取り直して来た札は期限を見ずに張る)
+  reset();
+  {
+    const opened = state.opened.length;
+    const a = await open(chrome, { init: () => { const real = Date.now.bind(Date); Date.now = () => real() + 2 * 3600 * 1000; } });
+    // 頁の札は期限を過ぎて見えるので 1 回取り直して張り、開いた後に 1 回取り直す。その後は止まる
+    await sleep(1000);
+    const fragments = state.fragments;
+    await sleep(3000);
+    check("clock ahead (P2-2): a client clock 2h ahead opens the socket and stops refreshing", state.opened.length > opened && fragments <= 3 && state.fragments - fragments === 0 && state.sockets.size >= 1, JSON.stringify({ opened: state.opened.length - opened, settled: fragments, later: state.fragments - fragments }));
+    await a.context.close();
+  }
+
+  // P2-2:開いてすぐ閉じられる socket(4001)の輪も倍々で待つ
+  reset();
+  {
+    const a = await open(chrome);
+    const opened = state.opened.length;
+    state.closeOnOpen = 4001;
+    closeAll(4001);
+    await sleep(6000);
+    const attempts = state.opened.length - opened;
+    state.closeOnOpen = null;
+    check("backoff (P2-2): a socket closed right after opening is retried with doubling waits", attempts >= 2 && attempts <= 4, JSON.stringify({ attempts, fragments: state.fragments }));
+    await a.context.close();
+  }
+
+  // P2-3:断片の 5xx と通信の失敗は頁ごとにせず、倍々の待ちで取り直す(書きかけは残る)
+  for (const gate of ["unavailable", "drop"]) {
+    reset();
+    const a = await open(chrome);
+    await a.page.click("#compose");
+    await a.page.keyboard.type("書きかけ");
+    const loads = state.pageLoads;
+    const fragments = state.fragments;
+    state.gate = gate;
+    addLine("落ちている間の発言");
+    signal();
+    await until(() => state.fragments > fragments + 1, 4000);
+    state.gate = "pass";
+    const healed = await until(() => a.page.evaluate(() => [...document.querySelectorAll(".c-line p")].at(-1).textContent === "落ちている間の発言"), 8000);
+    const r = await a.page.evaluate(() => ({ value: document.querySelector("#compose").value, active: document.activeElement?.id }));
+    const label = gate === "unavailable" ? "503" : "a network failure";
+    check(`retry (P2-3): ${label} does not reload the page and retries until the Block arrives`, state.pageLoads === loads && healed && r.value === "書きかけ" && r.active === "compose", JSON.stringify({ reloads: state.pageLoads - loads, healed, r, fragments: state.fragments - fragments }));
+    await a.context.close();
+  }
+
+  // P2-4:client 遷移で頁の `<style>` が外れたら、断片の規則を足し直す(在る規則の表を頁をまたいで持たない)
+  reset();
+  {
+    const a = await open(chrome);
+    await a.page.evaluate(() => document.querySelector("body > style").remove());
+    await push(a.page, "遷移の後");
+    const minHeight = await a.page.evaluate(() => getComputedStyle(document.querySelector(".c-line")).minHeight);
+    check("css (P2-4): a rule whose page <style> went away is added again", minHeight === "120px", minHeight);
+    await a.context.close();
+  }
+
+  // P2-5:前へ探す照合が、focus と書きかけのある節を消さない
+  for (const shape of ["banner", "sibling"]) {
+    reset();
+    const a = await open(chrome);
+    await a.page.fill("#memo", "メモの書きかけ");
+    await a.page.click("#compose");
+    await a.page.keyboard.type("送りの書きかけ");
+    const before = await a.page.evaluate(() => document.querySelector("#compose") !== null);
+    await a.page.evaluate(() => { globalThis.__compose = document.querySelector("#compose"); globalThis.__memo = document.querySelector("#memo"); });
+    state[shape] = true;
+    await push(a.page, "前に兄弟が入った");
+    const r = await a.page.evaluate((shape) => ({
+      value: document.querySelector("#compose").value,
+      memo: document.querySelector("#memo").value,
+      active: document.activeElement?.id,
+      same: document.querySelector("#compose") === globalThis.__compose && document.querySelector("#memo") === globalThis.__memo,
+      inserted: Boolean(document.querySelector(shape === "banner" ? ".c-banner" : ".c-x")),
+      last: [...document.querySelectorAll(".c-line p")].at(-1).textContent,
+    }), shape);
+    const label = shape === "banner" ? "a conditional <p> before (and a <p> after)" : "a keyless sibling <div> before";
+    check(`morph (P2-5): ${label} keeps the focused draft and the plain control's draft`, before && r.value === "送りの書きかけ" && r.memo === "メモの書きかけ" && r.active === "compose" && r.same && r.inserted && r.last === "前に兄弟が入った", JSON.stringify(r));
+    await a.context.close();
+  }
+
+  // P2-6:`yumemi.block` が別の URL から返した要素は、置かれた後もその URL から取り直す
+  reset();
+  {
+    const a = await open(chrome);
+    await a.page.evaluate(async () => {
+      const element = await globalThis.__yumemi.block("thread", { href: "/chat/1?edge=anywhere" });
+      globalThis.__placed = element;
+      document.querySelector("yumemi-live").replaceWith(element);
+    });
+    const href = await a.page.evaluate(() => globalThis.__placed.getAttribute("href"));
+    await until(() => a.page.evaluate(() => globalThis.__appliedCount > 1));
+    const log = state.fragmentLog.length;
+    await a.page.evaluate(() => {
+      globalThis.__placedApplied = new Promise((resolve) => globalThis.__placed.addEventListener("yumemi-live-applied", () => resolve(true), { once: true }));
+    });
+    addLine("別の日の発言");
+    signal();
+    await a.page.evaluate(() => Promise.race([globalThis.__placedApplied, new Promise((resolve) => setTimeout(resolve, 3000))]));
+    const viaSignal = state.fragmentLog.slice(log).map((row) => row.search);
+    const log2 = state.fragmentLog.length;
+    await a.page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    await until(() => state.fragmentLog.length > log2, 3000);
+    const viaVisible = state.fragmentLog.slice(log2).map((row) => row.search);
+    const again = await a.page.evaluate(async () => (await globalThis.__yumemi.block("thread", { href: "/chat/1?edge=anywhere" })) === globalThis.__placed);
+    check("yumemi.block (P2-6): a Block from another URL keeps that href and refreshes from it on a signal and visibilitychange", String(href).endsWith("/chat/1?edge=anywhere") && viaSignal.length >= 1 && viaSignal.every((q) => q === "?edge=anywhere") && viaVisible.length >= 1 && viaVisible.every((q) => q === "?edge=anywhere") && again, JSON.stringify({ href, viaSignal, viaVisible, again }));
+    await a.context.close();
+  }
+
+  // P1-2:頁を描いてから socket が開くまでの書きを、開いたときの取り直しで拾う(最初も、張り直しも)
+  reset();
+  {
+    state.upgradeDelay = 400;
+    const context = await chrome.newContext();
+    const page = await context.newPage();
+    const opened = state.opened.length;
+    await page.goto(`${base}/chat/1`);
+    addLine("開くまでの発言");
+    await until(() => state.opened.length > opened);
+    const first = await until(() => page.evaluate(() => [...document.querySelectorAll(".c-line p")].at(-1).textContent === "開くまでの発言"), 3000);
+    state.upgradeDelay = 0;
+    const fragments = state.fragments;
+    const opened2 = state.opened.length;
+    closeAll(4001);
+    await until(() => state.opened.length > opened2, 8000);
+    const renewed = await until(() => state.fragments >= fragments + 2, 3000);
+    check("open (P1-2): every open refreshes once, the first one and the reopen after 4001", first && renewed, JSON.stringify({ first, renewed, fragments: state.fragments - fragments }));
+    await context.close();
+  }
+
+  // P1-3:繋ぎ直しの待ちと開いた後の取り直しに揺らぎ(Math.random を 0 と 0.999 にした 2 枚で時が違う)
+  reset();
+  {
+    const low = await open(chrome, { init: () => { Math.random = () => 0; } });
+    const high = await open(chrome, { init: () => { Math.random = () => 0.999; } });
+    const t0 = Date.now();
+    const log = state.fragmentLog.length;
+    const opened = state.opened.length;
+    closeAll(1001);
+    await until(() => state.opened.length >= opened + 2, 4000);
+    await until(() => state.fragmentLog.length >= log + 2, 3000);
+    const opens = state.openedAt.slice(opened).map((t) => t - t0).sort((x, y) => x - y);
+    const fetches = state.fragmentLog.slice(log).map((row) => row.t - t0).sort((x, y) => x - y);
+    // 待ちは 1 秒の半分(500ms)〜全部(1000ms)。開いた後の取り直しは 0〜500ms
+    const spreadOpen = opens.length === 2 && opens[0] < 800 && opens[1] >= 900;
+    const lagLow = fetches[0] - opens[0];
+    const lagHigh = fetches[1] - opens[1];
+    check("jitter (P1-3): reconnect waits and the refresh after open are spread", spreadOpen && lagLow < 250 && lagHigh >= 300, JSON.stringify({ opens, fetches }));
+    await low.context.close();
+    await high.context.close();
   }
 } finally {
   await chrome.close();

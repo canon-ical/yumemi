@@ -6,27 +6,36 @@
 // - 合図は `1` の 1 字だけ(本文も差分も載らない)。受けたら 0〜500ms の揺らぎの後、今の URL を header
 //   `x-yumemi-block: <name>` で取り直し、返った断片(`<style>` と `<yumemi-live>`)を今の Block に当てる。取っている
 //   最中の合図は「終わったらもう 1 回」の 1 つに畳む。client は本文を組まない ── 当てるのは server の描いた HTML
-// - 断片が 200 の HTML でない(門の redirect・403・404、root の 404)なら頁ごと取り直す(navigate の `reload`、
-//   無ければ頁の読み込み)
-// - 断片の `<style>` の規則のうち document に無いものを、構築した 1 枚の sheet に足す(sched-css の穴)
+// - 門の redirect・403・404(root の 404 を含む)、200 でも断片の形でないなら頁ごと取り直す(navigate の `reload`、
+//   無ければ頁の読み込み)。5xx・その他の status・通信の失敗は頁に触らず、倍々の待ち(揺らぎつき)で取り直す
+// - 断片の `<style>` の規則のうち document の今の sheet に無いものを、構築した 1 枚の sheet に足す(sched-css の穴)。
+//   在る規則の表は取るたびに今の sheet から作り直す(client 遷移で頁の `<style>` が外れたら足し直す)
 // - 当て方の 4 規則(87):1. 一致した節は動かさない(前へ進むだけの照合。節を動かす操作が無いので、focus と変換中
 //   の文字を持つ節は document から一度も外れない) 2. interactive Component は tag と `data-yumemi-args` が同じなら
 //   中に触らない。違えば、接続した時の control の値の写しと今の値が同じで focus も無いときだけ差し替え、そうで
 //   なければ残して `:state(stale)` 3. 利用者の持ち物の属性は古い側を残す(`details` / `dialog` の `open`、focus の
 //   ある control の値、`el.fresh` の `hidden`)。逃げ道は属性が同じなら中に触らない 4. 鍵は `data-yumemi-key`、
-//   無ければ Component は tag+Args(当たらなければ同じ tag の Component)、それ以外は tag
+//   無ければ Component は tag+Args(当たらなければ同じ tag の Component)、それ以外は tag。前へ探す照合は、focus
+//   のある節・書きかけのある Component / control を含む節を飛ばして消さない ── 後ろの新しい節がそれを受けられる
+//   (同じ鍵で、中に同じ Component / control がある)なら、今の新しい節は新しく挿す
 // - スクロール:`bottom` は当てる前に端にいれば当てた後も端へ追い、上を読んでいれば留まって `el.fresh` を出す。
 //   `top` は頭にいれば頭のまま、読んでいれば留まって印。`anywhere` は留まる。留まるときは、見えていた先頭の節の
 //   位置を当てる前と同じに戻す(browser の scroll anchoring の無いときの代わり)
-// - 繋ぎ直し:切れたら 1 秒から倍々(上限 30 秒)で張り直し、張り直して繋がったら 1 回取り直す。頁が見えるように
-//   なったら(`visibilitychange`)待たずに張り直して 1 回取り直す。札の期限(payload の `exp`)の 1 分前に取り直し、
-//   来た札で張り直す。server が期限で閉じた(`4001`)・張れなかったときも、先に取り直して新しい札で張る
+// - 繋ぎ直し:切れたら 1 秒から倍々(上限 30 秒、揺らぎつき)で張り直す。繋がったら毎回(最初も)揺らぎの後に
+//   1 回取り直す(描いてから開くまで・切れていた間の合図を拾う)。倍々の待ちは開いて 30 秒続いた socket で戻す
+//   (開いてすぐ閉じられる輪も倍々で待つ)。頁が見えるようになったら(`visibilitychange`)待たずに張り直すか取り直す。
+//   頁に描かれた札だけは期限(payload の `exp`)を見て、1 分を切っていれば先に取り直し、そうでなければ期限の 1 分前に
+//   取り直して来た札で張り直す。取り直して来た札は期限を見ずに張り、期限は server の `4001` に任せる(client の時計が
+//   ずれていても輪にならない)。`4001`・張れなかったときは、倍々で待ってから取り直して新しい札で張る
+// - `yumemi.block` が別の URL から返した `<yumemi-live>` は取った URL を `href` に持ち、合図・`visibilitychange` の
+//   取り直しはその URL から取る
 
 const blockHeader = "x-yumemi-block";
 const minDelay = 1000;
 const maxDelay = 30000;
 const jitterMs = 500;
 const renewBeforeMs = 60000;
+const stableMs = 30000;
 const atEdgePx = 8;
 
 let options = { socket: "/_yumemi/live", reload: null, jitter: jitterMs };
@@ -34,29 +43,27 @@ let options = { socket: "/_yumemi/live", reload: null, jitter: jitterMs };
 // ── 断片の取りと CSS ──────────────────────────────────────────────────────────
 
 let adopted = null;
-const knownRules = new Set();
-let knownSheets = new WeakSet();
 
 function sheetRules(sheet) {
   try { return [...sheet.cssRules]; } catch (_error) { return []; }
 }
 
-function noteDocumentRules() {
+/// document の今の sheet(頁の `<style>`・`<link>`・足した sheet)の規則。取るたびに作り直す ── 頁をまたいで
+/// 持ち越すと、client 遷移で外れた `<style>` の規則を「在る」と見て足さない。
+function documentRules() {
+  const rules = new Set();
   for (const sheet of [...globalThis.document.styleSheets, ...globalThis.document.adoptedStyleSheets]) {
-    if (sheet === adopted || knownSheets.has(sheet)) continue;
-    knownSheets.add(sheet);
-    for (const rule of sheetRules(sheet)) knownRules.add(rule.cssText);
+    for (const rule of sheetRules(sheet)) rules.add(rule.cssText);
   }
+  return rules;
 }
 
-/// 断片の `<style>` の規則のうち document に無いものを足す。足した数を返す。
+/// 断片の `<style>` の規則のうち document の今の sheet に無いものを足す。足した数を返す。
 export function adopt(text) {
   const document = globalThis.document;
-  if (!adopted) {
-    adopted = new CSSStyleSheet();
-    document.adoptedStyleSheets = [...document.adoptedStyleSheets, adopted];
-  }
-  noteDocumentRules();
+  if (!adopted) adopted = new CSSStyleSheet();
+  if (!document.adoptedStyleSheets.includes(adopted)) document.adoptedStyleSheets = [...document.adoptedStyleSheets, adopted];
+  const knownRules = documentRules();
   const incoming = new CSSStyleSheet();
   try { incoming.replaceSync(text); } catch (_error) { return 0; }
   let added = 0;
@@ -72,7 +79,8 @@ export function adopt(text) {
 }
 
 /// `href` の頁の `name` の Block を取る。断片が来れば `{element, adopted}`(element は document の外の
-/// `<yumemi-live>`、`<style>` の規則は足し済み)、門が頁を返さなければ null。
+/// `<yumemi-live>`、`<style>` の規則は足し済み)。門が頁を返さない(redirect・403・404)・200 でも断片の形でないなら
+/// null(頁ごと取り直す)。5xx・その他の status・通信の失敗は `{error}`(待って取り直す)。
 export async function fetchBlock(name, href = globalThis.location.href) {
   let response;
   try {
@@ -86,9 +94,14 @@ export async function fetchBlock(name, href = globalThis.location.href) {
     return { error };
   }
   const type = response.headers.get("content-type") ?? "";
-  if (response.type === "opaqueredirect" || response.status !== 200 || !type.startsWith("text/html")) return null;
+  const status = response.status;
+  if (response.type === "opaqueredirect" || (status >= 300 && status < 400) || status === 403 || status === 404) return null;
+  if (status !== 200) return { error: new Error(`fragment ${status}`), status };
+  if (!type.startsWith("text/html")) return null;
+  let text;
+  try { text = await response.text(); } catch (error) { return { error }; }
   const template = globalThis.document.createElement("template");
-  template.innerHTML = await response.text();
+  template.innerHTML = text;
   let added = 0;
   for (const style of template.content.querySelectorAll("style")) {
     added += adopt(style.textContent ?? "");
@@ -198,7 +211,7 @@ function morphComponent(old, incoming, log) {
   log.changed += 1;
 }
 
-function morphNode(old, incoming, log) {
+function morphNode(old, incoming, log, guards) {
   if (old.nodeType === 3 || old.nodeType === 8) {
     if (old.nodeValue !== incoming.nodeValue) {
       old.nodeValue = incoming.nodeValue;
@@ -216,7 +229,74 @@ function morphNode(old, incoming, log) {
   syncAttributes(old, incoming, log);
   // focus のある textarea の字(子の text)は利用者の持ち物
   if (old.localName === "textarea" && focused(old)) return;
-  morphChildren(old, incoming, log);
+  morphChildren(old, incoming, log, guards);
+}
+
+// ── 守る節(前へ探す照合で消さない)──────────────────────────────────────────────
+
+function isControl(node) {
+  return /^(input|textarea|select)$/.test(node.localName);
+}
+
+function controlDirty(control) {
+  if (control.localName === "select") return [...control.options].some((option) => option.selected !== option.defaultSelected);
+  if (control.type === "checkbox" || control.type === "radio") return control.checked !== control.defaultChecked;
+  if (control.type === "file") return (control.files?.length ?? 0) > 0;
+  return control.value !== control.defaultValue;
+}
+
+function componentDirty(component) {
+  const before = snapshots.get(component);
+  return before !== undefined && before !== snapshot(component);
+}
+
+/// 今の Block の中で利用者の持ち物を持つ節:focus のある要素、書きかけのある Component、Component の外の書きかけの
+/// control。それぞれ「新しい側で受けられる節」の目印(selector)を持つ。
+function guardsOf(live) {
+  const guards = [];
+  const document = globalThis.document;
+  const active = document.activeElement;
+  for (const component of live.querySelectorAll("[data-yumemi-island]")) {
+    if (componentDirty(component) || focused(component)) guards.push({ node: component, selector: guardSelector(component) });
+  }
+  for (const control of live.querySelectorAll("input,textarea,select")) {
+    if (control.closest("[data-yumemi-island]")) continue;
+    if (controlDirty(control) || control === active) guards.push({ node: control, selector: guardSelector(control) });
+  }
+  if (active && active !== document.body && live.contains(active) && !active.closest("[data-yumemi-island]") && !isControl(active)) {
+    guards.push({ node: active, selector: guardSelector(active) });
+  }
+  return guards;
+}
+
+function guardSelector(node) {
+  const escape = globalThis.CSS?.escape ?? ((value) => value.replace(/["\\]/g, "\\$&"));
+  let selector = node.localName;
+  const key = node.getAttribute("data-yumemi-key");
+  if (key !== null) selector += `[data-yumemi-key="${escape(key)}"]`;
+  if (isComponent(node)) selector += "[data-yumemi-island]";
+  else if (node.hasAttribute("name")) selector += `[name="${escape(node.getAttribute("name"))}"]`;
+  else if (node.id) selector += `#${escape(node.id)}`;
+  return selector;
+}
+
+/// 新しい節 `incoming` が、古い節 `old` の中の守る節をみな受けられる(同じ鍵で、中に同じ目印の節がある)。
+function receives(old, incoming, guards) {
+  if (incoming.nodeType !== 1 || keyOf(old) !== keyOf(incoming)) return false;
+  return guards.every((guard) => !old.contains(guard.node) || incoming.matches(guard.selector) || incoming.querySelector(guard.selector) !== null);
+}
+
+/// `olds[at..found]` を当てに使うと、守る節を持つ古い節が消えるか、守る節を受けられない新しい節に当たる。しかも
+/// 後ろの新しい節(`later`)にその古い節を受けられるものがある。そのときは今の新しい節を新しく挿す。
+function dropsGuarded(olds, at, found, incoming, later, guards) {
+  if (guards.length === 0) return false;
+  for (let index = at; index <= found; index += 1) {
+    const old = olds[index];
+    if (old.nodeType !== 1 || !guards.some((guard) => old.contains(guard.node))) continue;
+    if (index === found && receives(old, incoming, guards)) continue;
+    if (later.some((other) => receives(old, other, guards))) return true;
+  }
+  return false;
 }
 
 function findAhead(olds, from, key) {
@@ -229,23 +309,26 @@ function findLoose(olds, from, loose) {
   return -1;
 }
 
-function morphChildren(oldParent, newParent, log) {
+function morphChildren(oldParent, newParent, log, guards) {
   const olds = [...oldParent.childNodes];
+  const news = [...newParent.childNodes];
   let at = 0;
-  for (const incoming of [...newParent.childNodes]) {
+  for (const [position, incoming] of news.entries()) {
     let found = findAhead(olds, at, keyOf(incoming));
     const loose = looseKey(incoming);
     if (found < 0 && loose !== null) {
       found = findLoose(olds, at, loose);
       // 当たった古い Component が、新しい側で鍵(tag+Args)どおりに後で当たるなら、ここでは使わない
-      if (found >= 0 && [...newParent.childNodes].some((other) => other !== incoming && keyOf(other) === keyOf(olds[found]))) found = -1;
+      if (found >= 0 && news.some((other) => other !== incoming && keyOf(other) === keyOf(olds[found]))) found = -1;
     }
+    // 守る節を飛ばして消す・受けられない新しい節に当てる当たりは使わない(後ろで受けられるとき)
+    if (found >= 0 && dropsGuarded(olds, at, found, incoming, news.slice(position + 1), guards)) found = -1;
     if (found >= 0) {
       for (let index = at; index < found; index += 1) {
         olds[index].remove();
         log.changed += 1;
       }
-      morphNode(olds[found], incoming, log);
+      morphNode(olds[found], incoming, log, guards);
       at = found + 1;
     } else {
       oldParent.insertBefore(incoming, olds[at] ?? null);
@@ -263,7 +346,7 @@ function morphChildren(oldParent, newParent, log) {
 /// 来た `<yumemi-live>`(document の外)を今の `<yumemi-live>` に当てる。何を変えたかの記録を返す。
 export function morph(current, incoming) {
   const log = { changed: 0, inserted: 0, kept: [], stale: [], replaced: [] };
-  morphChildren(current, incoming, log);
+  morphChildren(current, incoming, log, guardsOf(current));
   return log;
 }
 
@@ -333,6 +416,11 @@ function expiry(token) {
   }
 }
 
+/// 倍々の待ちの揺らぎ(待ちの半分から全部の間)。deploy で全員の socket が落ちても同じ時に来ない。
+function jittered(delay) {
+  return delay / 2 + Math.random() * (delay / 2);
+}
+
 function reloadPage() {
   if (typeof options.reload === "function") options.reload();
   else globalThis.location.reload();
@@ -346,13 +434,15 @@ class YumemiLive extends ElementBase {
     this.yumemiSocket = null;
     this.yumemiDelay = minDelay;
     this.yumemiRetry = null;
+    this.yumemiRetryRenew = false;
     this.yumemiRenew = null;
     this.yumemiFetching = null;
+    this.yumemiFetchDelay = minDelay;
+    this.yumemiRefetch = null;
     this.yumemiAgain = false;
     this.yumemiWaiting = null;
     this.yumemiOpened = false;
-    this.yumemiReopen = false;
-    this.yumemiStale = false;
+    this.yumemiOpenedAt = 0;
     this.yumemiCleanup = null;
   }
 
@@ -361,11 +451,11 @@ class YumemiLive extends ElementBase {
     queueMicrotask(() => remember(this));
     const onVisible = () => {
       if (globalThis.document.visibilityState !== "visible") return;
-      this.yumemiDelay = minDelay;
-      if (!this.yumemiSocket) {
+      if (this.yumemiRetry !== null) {
+        // 繋ぎ直しを待っている:待たずに今やる(倍々の待ちは戻さない)
         clearTimeout(this.yumemiRetry);
         this.yumemiRetry = null;
-        this.yumemiConnect(true);
+        void this.yumemiReconnect(this.yumemiRetryRenew);
       } else void this.refresh();
     };
     const onClick = (event) => {
@@ -387,7 +477,7 @@ class YumemiLive extends ElementBase {
       this.removeEventListener("click", onClick);
       target.removeEventListener("scroll", onScroll);
     };
-    this.yumemiConnect(false);
+    this.yumemiConnect(true);
   }
 
   disconnectedCallback() {
@@ -396,7 +486,8 @@ class YumemiLive extends ElementBase {
     clearTimeout(this.yumemiRetry);
     clearTimeout(this.yumemiRenew);
     clearTimeout(this.yumemiWaiting);
-    this.yumemiRetry = this.yumemiRenew = this.yumemiWaiting = null;
+    clearTimeout(this.yumemiRefetch);
+    this.yumemiRetry = this.yumemiRenew = this.yumemiWaiting = this.yumemiRefetch = null;
     this.yumemiClose();
   }
 
@@ -409,22 +500,26 @@ class YumemiLive extends ElementBase {
     }
   }
 
-  /// 札で socket を張る。`refreshOnOpen` は繋がったら 1 回取り直す(切れていた間の合図を拾う)。
-  yumemiConnect(refreshOnOpen) {
+  /// 札で socket を張る。繋がったら毎回、揺らぎの後に 1 回取り直す(描いてから・切れていた間の合図を拾う)。
+  /// `lookAhead` は頁に描かれた札のときだけ:期限が 1 分を切っていれば先に取り直し、そうでなければ期限の 1 分前に
+  /// 取り直す timer を置く。取り直して来た札は期限を見ずに張る(期限は server の `4001`。時計のずれで輪にしない)。
+  yumemiConnect(lookAhead) {
     if (!this.isConnected) return;
     this.yumemiClose();
+    clearTimeout(this.yumemiRenew);
+    this.yumemiRenew = null;
     const token = this.getAttribute("token");
     if (!token) return;
-    const exp = expiry(token);
-    clearTimeout(this.yumemiRenew);
+    const exp = lookAhead ? expiry(token) : null;
     if (exp !== null) {
       if (exp - Date.now() <= renewBeforeMs) {
-        // 期限の近い・過ぎた札では張らない。取り直して来た札で張る
-        void this.refresh().then(() => this.yumemiConnectAfterRefresh(token));
+        // 期限の近い・過ぎた札では張らない。取り直して来た札で張る(来なければ倍々で待つ)
+        void this.yumemiReconnect(true);
         return;
       }
-      // 期限の 1 分前に取り直し、来た札で張り直す(server が期限で閉じる前に替える)
+      // 期限の 1 分前に取り直し、来た札で張り直す(server が期限で閉じる前に替える)。1 回だけ
       this.yumemiRenew = setTimeout(() => {
+        this.yumemiRenew = null;
         void this.refresh().then(() => {
           if (this.isConnected && this.getAttribute("token") !== token) this.yumemiConnect(false);
         });
@@ -443,9 +538,9 @@ class YumemiLive extends ElementBase {
     this.yumemiOpened = false;
     socket.onopen = () => {
       this.yumemiOpened = true;
-      this.yumemiDelay = minDelay;
+      this.yumemiOpenedAt = globalThis.performance?.now?.() ?? Date.now();
       this.dispatchEvent(new CustomEvent("yumemi-live-open"));
-      if (refreshOnOpen) void this.refresh();
+      this.signal();
     };
     socket.onmessage = (event) => {
       if (event.data === "1") this.signal();
@@ -454,15 +549,26 @@ class YumemiLive extends ElementBase {
       this.yumemiLastClose = event.code;
       if (this.yumemiSocket !== socket) return;
       this.yumemiSocket = null;
+      // 倍々の待ちは、開いて続いた socket が切れたときだけ戻す(開いてすぐ閉じられる輪も倍々で待つ)
+      const now = globalThis.performance?.now?.() ?? Date.now();
+      if (this.yumemiOpened && now - this.yumemiOpenedAt >= stableMs) this.yumemiDelay = minDelay;
       // 期限(4001)・張れなかった(開く前に閉じた)は札を替えてから張る
       this.yumemiScheduleRetry(event.code === 4001 || !this.yumemiOpened);
     };
   }
 
-  yumemiConnectAfterRefresh(previous) {
+  /// 張り直す。`renew` なら先に取り直して来た札で張る(札が替わらなければ倍々で待ってやり直す)。
+  async yumemiReconnect(renew) {
     if (!this.isConnected || this.yumemiSocket) return;
+    if (!renew) {
+      this.yumemiConnect(false);
+      return;
+    }
+    const before = this.getAttribute("token");
+    await this.refresh();
+    if (!this.isConnected || this.yumemiSocket || this.yumemiRetry !== null) return;
     const token = this.getAttribute("token");
-    if (!token || token === previous) {
+    if (!token || token === before) {
       // 札が替わらなかった(断片が来なかった・api に鍵が無い)。倍々で待って取り直しからやり直す
       this.yumemiScheduleRetry(true);
       return;
@@ -473,20 +579,12 @@ class YumemiLive extends ElementBase {
   yumemiScheduleRetry(renew) {
     if (!this.isConnected) return;
     clearTimeout(this.yumemiRetry);
-    const delay = this.yumemiDelay;
-    this.yumemiDelay = Math.min(delay * 2, maxDelay);
-    this.yumemiRetry = setTimeout(async () => {
+    const delay = jittered(this.yumemiDelay);
+    this.yumemiDelay = Math.min(this.yumemiDelay * 2, maxDelay);
+    this.yumemiRetryRenew = renew;
+    this.yumemiRetry = setTimeout(() => {
       this.yumemiRetry = null;
-      if (renew) {
-        const before = this.getAttribute("token");
-        await this.refresh();
-        if (!this.isConnected || this.yumemiSocket) return;
-        if (this.getAttribute("token") === before) {
-          this.yumemiScheduleRetry(true);
-          return;
-        }
-        this.yumemiConnect(false);
-      } else this.yumemiConnect(true);
+      void this.yumemiReconnect(renew);
     }, delay);
   }
 
@@ -504,16 +602,23 @@ class YumemiLive extends ElementBase {
     }, wait);
   }
 
-  /// 今の URL の Block を取り直して当てる。取っている最中に呼ばれたら、終わった後にもう 1 回。
+  /// 取る URL:`yumemi.block` が別の URL から返した要素は取った `href`、それ以外は今の URL。
+  yumemiHref() {
+    return this.getAttribute("href") ?? globalThis.location.href;
+  }
+
+  /// この Block を取り直して当てる。取っている最中に呼ばれたら、終わった後にもう 1 回。
   refresh() {
     if (this.yumemiFetching) {
       this.yumemiAgain = true;
       return this.yumemiFetching;
     }
+    clearTimeout(this.yumemiRefetch);
+    this.yumemiRefetch = null;
     const run = async () => {
       do {
         this.yumemiAgain = false;
-        await this.yumemiApply(globalThis.location.href);
+        await this.yumemiApply(this.yumemiHref());
       } while (this.yumemiAgain && this.isConnected);
     };
     this.yumemiFetching = run().finally(() => { this.yumemiFetching = null; });
@@ -530,7 +635,19 @@ class YumemiLive extends ElementBase {
       reloadPage();
       return null;
     }
-    if (result.error) return null;
+    if (result.error) {
+      // 5xx・その他の status・通信の失敗:頁に触らず、倍々の待ち(揺らぎつき)で取り直す
+      clearTimeout(this.yumemiRefetch);
+      const delay = jittered(this.yumemiFetchDelay);
+      this.yumemiFetchDelay = Math.min(this.yumemiFetchDelay * 2, maxDelay);
+      this.yumemiRefetch = setTimeout(() => {
+        this.yumemiRefetch = null;
+        void this.refresh();
+      }, delay);
+      this.dispatchEvent(new CustomEvent("yumemi-live-failed", { detail: { status: result.status ?? null, delay } }));
+      return null;
+    }
+    this.yumemiFetchDelay = minDelay;
     return this.yumemiPut(result.element);
   }
 
@@ -563,20 +680,28 @@ class YumemiLive extends ElementBase {
 // ── 口 ───────────────────────────────────────────────────────────────────────
 
 /// 逃げ道の口(`mount(element, yumemi)` の `yumemi.block`)。`name` の Block を `href`(既定は今の URL)から取る。
-/// 今の URL の Block で、頁にその `<yumemi-live>` があれば取り直して当て(合図と同じ当て方)、その要素を返す。
-/// 別の URL なら当てずに、規則を足した `<yumemi-live>`(document の外)を返す ── 逃げ道が置く(`replaceWith` など)。
-/// 門が頁を返さなければ null(今の URL なら頁ごと取り直す)。
+/// 頁にその URL のその `<yumemi-live>` があれば取り直して当て(合図と同じ当て方)、その要素を返す。
+/// 無ければ当てずに、規則を足した `<yumemi-live>`(document の外)を返す ── 逃げ道が置く(`replaceWith` など)。
+/// 別の URL から返した要素は取った URL を `href` に持ち、置かれた後の合図・`visibilitychange` もその URL から取る。
+/// 門が頁を返さなければ null(頁にある要素なら頁ごと取り直す)。
 export async function block(name, { href = globalThis.location.href } = {}) {
-  const target = new URL(href, globalThis.location.href);
-  const here = new URL(globalThis.location.href);
-  const current = [...globalThis.document.querySelectorAll("yumemi-live")].find((item) => item.getAttribute("name") === name);
-  if (current && target.pathname === here.pathname && target.search === here.search && typeof current.refresh === "function") {
+  const here = globalThis.location.href;
+  const target = new URL(href, here);
+  const same = (element) => {
+    const at = new URL(element.getAttribute("href") ?? here, here);
+    return at.pathname === target.pathname && at.search === target.search;
+  };
+  const current = [...globalThis.document.querySelectorAll("yumemi-live")].find((item) => item.getAttribute("name") === name && same(item));
+  if (current && typeof current.refresh === "function") {
     await current.refresh();
     return current.isConnected ? current : null;
   }
   const result = await fetchBlock(name, target.href);
   if (result === null || result.error) return null;
-  return globalThis.document.importNode(result.element, true);
+  const element = globalThis.document.importNode(result.element, true);
+  const local = new URL(here);
+  if (target.pathname !== local.pathname || target.search !== local.search) element.setAttribute("href", target.href);
+  return element;
 }
 
 export function start({ socket = "/_yumemi/live", reload = null, jitter = jitterMs } = {}) {

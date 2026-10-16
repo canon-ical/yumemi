@@ -1,5 +1,5 @@
 // yumemi-live-2(0.15)── 生成した面の shell の断片の口を node で叩く。article の fixture の写しの頁の
-// `Fixed(.., blocks.Article, ..)` を `Live(.., edge: Bottom)` に替え、生成器を走らせ(compile 済みの
+// `Fixed(.., blocks.Article, ..)` を `Live(.., cell: Span(..), edge: Bottom)` に替え、生成器を走らせ(compile 済みの
 // `build/dev/javascript/yumemi/yumemi/gen.mjs`)、面を `gleam build` し、生成の `shell.mjs` を偽の APP で叩く。
 // 1 行 1 件の ok / NG。写しは `build/live2-fx`(git の外)。
 import fs from "node:fs";
@@ -26,8 +26,8 @@ fs.rmSync(path.join(app, "public/build"), { recursive: true, force: true });
 const pageFile = path.join(app, "public/src/pages/article/arg_slug/page.gleam");
 const pageText = fs.readFileSync(pageFile, "utf8");
 fs.writeFileSync(pageFile, pageText
-  .replace('Fixed(area: "page", block: blocks.Article, cell: Flow)', 'Live(area: "page", block: blocks.Article, cell: Flow, edge: Bottom)')
-  .replace("SubjectHandle, Var, Widget,", "SubjectHandle, Var, Widget, Live, Bottom,"));
+  .replace('Fixed(area: "page", block: blocks.Article, cell: Flow)', 'Live(area: "page", block: blocks.Article, cell: Span(cols: 2, rows: 1), edge: Bottom)')
+  .replace("SubjectHandle, Var, Widget,", "SubjectHandle, Var, Widget, Live, Bottom, Span,"));
 for (const face of ["public", "admin"]) {
   fs.mkdirSync(path.join(app, face, "node_modules/.bin"), { recursive: true });
   fs.symlinkSync(path.join(root, "node_modules/.bin/esbuild"), path.join(app, face, "node_modules/.bin/esbuild"));
@@ -104,6 +104,9 @@ check("fragment: reads the session (the Vars) and the Block's Service only (no L
 check("fragment: no-store, vary x-yumemi-block, no counting mark", frag.headers.get("cache-control") === "no-store" && frag.headers.get("vary") === "x-yumemi-block" && !frag.text.includes("yumemi-pageview"));
 const inner = (text) => text.slice(text.indexOf("<yumemi-live"), text.lastIndexOf("</yumemi-live>"));
 check("fragment: the Block's HTML is the same as in the page", inner(page.text).length > 0 && inner(page.text) === inner(frag.text), `${inner(page.text).length} / ${inner(frag.text).length}`);
+// r2(柏木 P2-1):`Span` の cell の包みが頁と断片の両方にある
+const cellWrap = '<div style="grid-column: span 2; grid-row: span 1;">';
+check("fragment: the Span cell's wrapper is in both the page and the fragment", inner(page.text).includes(cellWrap) && inner(frag.text).includes(cellWrap), inner(frag.text).slice(0, 200));
 
 const unknown = await get("/article/42", { "x-yumemi-block": "summary" });
 check("fragment: a Block that is not Live on the page is 404", unknown.status === 404, String(unknown.status));

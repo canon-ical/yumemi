@@ -19,8 +19,8 @@
 - **断片は loader の別の関数 `live_<name>(vars, <Block の読み>)`。**頁の `Data` は全部の読みを要るので、Block の読みと `Vars` だけの record(`LiveArticle(vars:, article_read:)`)を置き、置き場の本文は頁と同じ字(`fixed_placement_body`)を使う。断片と頁で Block の HTML が同じこと(札を除く)を shell の検査で見た。退けた形:断片でも頁の読みを全部叩いて `render` から切り出す(BRIEF の「その Block の sources だけ」に反し、Layout の読みも走る)
 - **札は shell が `<yumemi-live>` の開きの tag に差す**(loader は札を知らない)。SSR は属性を名の順に並べるので、tag の中の ` name="…"` で当てて先頭に `token` を足す。最初に `<yumemi-live name="` の字で当てる形で書き、生成した shell の検査で札が付かないのを見つけて直した
 - **断片の名は Block の名の snake**(`article`)。同じ Block の `Live` が 1 頁に 2 つは exit 4(名が重なる)
-- **断片で読むのは Block の Service と root(`!optional` の source)と、Vars が要れば session。**root の読みは status だけ見て本文を捨てる。Layout の widget と givens は叩かない
-- **門の印:**`Live` のある面の `gate.mjs` だけ `if (request.headers.has(blockHeader) || !tracksPageview(context) ||`。`Live` の無い面の `gate.mjs`・`shell.mjs`・`client.mjs` は今の字のまま(fixture の admin の shell・gate と byte で同じを見た。fixture は生成し直していない)
+- **断片で読むのは Block の Service と、頁と Layout の `!optional` の読み全部(root の印)と、Vars が要れば session。**root の読みは status だけ見て本文を捨てる。Layout の `optional` の読み(widget)と givens は叩かない(r2 で訂正:r1 は「Layout の読みは叩かない」と書いていたが、Layout の `!optional` の読みも叩く。`front.gleam` の `root: !optional`)
+- **門の印:**`Live` のある面の `gate.mjs` だけ `if (request.headers.has(blockHeader) || !tracksPageview(context) ||`。`Live` の無い面の `gate.mjs`・`shell.mjs` は今の字のまま(fixture の admin の shell・gate と byte で同じを見た)。束ねた `client.mjs` は `interactive.mjs` の `yumemiApi`(`mount` の 2 つ目の引数)で変わる(r2 で訂正、`gen/fixtures/{article,cms}` の `client.mjs` を r2 で生成し直した)
 - **client は `<template>` に断片を入れて読む**(中の custom element は起きない)。`<style>` の規則は cssText で document の規則と比べ、無いものだけを構築した 1 枚の sheet に足す(PoC の形。2 回当てても 1 本)
 - **morph の鍵:**`data-yumemi-key` → Component は tag+Args → tag。Args の替わった Component は tag+Args では当たらないので、同じ tag の Component に緩く当て(新しい側で鍵どおりに後で当たるものは使わない)、4 規則の 2 の「差し替えか stale」に回す。PoC は Component の鍵を tag だけにしていた
 - **持ち物の属性:**`details`/`dialog` の `open`、focus のある control の `value`/`checked`/`selected`(と focus のある textarea の字)、`el.fresh` の `hidden`。逃げ道は「来た側の属性が全部今の側に同じ値」なら触らない ── 最初は属性の数まで比べ、逃げ道の JS が自分に足した属性(試験の `data-mounted`)で毎回 mount し直していたのを検査で見つけて直した
@@ -80,3 +80,78 @@
 ## DDL
 
 無し。
+
+## r2(柏木 ゲート 2 の P2 と P1、2026-10-17)
+
+真壁[IM]、基点 `6e4c12e`(`04d1e2d` + BRIEF r2)。指示 `briefs/BRIEF-yumemi-live-2-r2.md`。ゲート 2 は掛け直していない。証跡は `build/r2-*.txt`(git の外)。DDL 無し。
+
+### 1〜10 の充足
+
+| # | 中身 | 置き場 | 充足 |
+|---|---|---|---|
+| 1 | P2-1:断片も置き場の `cell` で包む。`page_live_cell` が Page の sp の `Live` の cell を引き、`page_live_text` が `Flow` でなくその cell で `fixed_placement_body` を描く | `gen/emit/front.gleam` | 済(`Span` の頁と断片で包みと HTML が同じ) |
+| 2 | P2-2:頁に描かれた札だけ期限を見る(1 分を切れば先に取り直し、でなければ 1 分前の timer を 1 回)。取り直して来た札は期限を見ずに張り、期限は server の `4001` に任せる。繋ぎ直しの倍々の待ちは「開いて 30 秒続いた socket」で戻す(開いてすぐ閉じられる輪も倍々)。札が替わらない取り直しの輪も倍々 | `live_block.mjs` の `yumemiConnect(lookAhead)`・`yumemiReconnect`・`yumemiScheduleRetry` | 済 |
+| 3 | P2-3:頁ごとは redirect(3xx・opaqueredirect)・403・404 と、200 でも断片の形でない(HTML でない・その名の `<yumemi-live>` が無い)ときだけ。5xx・その他の status・通信の失敗は `{error}` で、頁に触らず倍々(1 秒から、上限 30 秒、揺らぎつき)で取り直す。取れたら待ちを戻す | `fetchBlock`・`yumemiApply` | 済 |
+| 4 | P2-4:在る規則の表を持たず、取るたびに document の今の sheet(`styleSheets` と `adoptedStyleSheets`、足した sheet も)から作り直す。足した sheet が外れていれば付け直す | `documentRules`・`adopt` | 済 |
+| 5 | P2-5:当てる前に「守る節」を集める(focus のある要素、写しと値の違う・focus のある Component、Component の外の書きかけ・focus の control)。前へ探す照合で、`olds[at..found]` のうち守る節を持つ古い節が飛ばされる(か、受けられない新しい節に当たる)とき、後ろの新しい節に受けられるもの(同じ鍵で、中に同じ目印の Component / control がある)があれば、その当たりを使わず今の新しい節を新しく挿す。README:497 の言い切りは「後ろに受け手がある限り飛ばさない、新しい HTML に受け手が無いときだけ外れる」に直した | `guardsOf`・`receives`・`dropsGuarded`・`morphChildren`、`README.md` | 済 |
+| 6 | P2-6:`yumemi.block` が別の URL から返した `<yumemi-live>` は取った URL(絶対)を `href` に持つ。`refresh` は `href` があればそこから取る(合図・`visibilitychange`・開いた後)。`yumemi.block(name, {href})` は `href` の合う置かれた要素があれば、それをその場で取り直す。root の属性は morph で同期しないので `href` は当てで消えない | `block`・`yumemiHref` | 済 |
+| 7 | P2-7:README の断片の読み(`!optional` の読みは Layout の分も叩く)・`client.mjs` の差(`Live` の無い面も束ねた client.mjs は変わる)・r1 の results の 2 行を事実に。`gen/fixtures/{article,cms}/public/priv/static/_yumemi/client.mjs` を写しで生成し直して書き戻した(差は `yumemiApi` の 4 か所だけ) | `README.md`、本 file の r1 の節、fixture | 済 |
+| 8 | P1-2・P1-3:socket が開くたび(最初も、張り直しも)に `signal()` で 0〜500ms の揺らぎの後 1 回取り直す。繋ぎ直しの待ちは待ちの半分〜全部の揺らぎ | `socket.onopen`、`jittered` | 済 |
+| 9 | P1-4:警告を鍵の無い並び全体に広げた:`el.each(`・`list.map(`・`list.index_map(`・`list.flat_map(` の引数の字(と、そこから名で辿る同じ module の関数)が `interactive.` か素の `details`(`html.details`・`el.element("details"`)を持つ。広げられない形(別の module の関数、再帰・`list.fold` で組む並び、値として渡す Component・details)は README の警告の段に書いた | `unkeyed_list_with_state`・`holds_user_state`・`unkeyed_list_texts`、`README.md` | 済 |
+| 10 | P1-8:1〜6 と P1-2・P1-3 を捕まえる test(柏木の probe の形を移した)。mutation で 1〜6 を戻すとどれも NG ≥ 1(下の表) | `test/yumemi_live2_check.mjs`(+10 件)、`test/yumemi_live2_shell_check.mjs`(+1 件)、`test/yumemi_live2_test.gleam`(+1 件、警告の 3 形) | 済 |
+
+### 採った形と退けた形(r2)
+
+- **守る節の受け手は「同じ鍵 + 中に同じ目印」。**目印は Component なら tag と `data-yumemi-island`(鍵があれば鍵)、control なら tag と `name`(無ければ `id`)。退けた形:守る節を持つ古い節をいつも残す(server が本当に消した Component が残り続ける)。受け手が後ろに無いときは今までどおり当てる ── 新しい HTML にその Component が無いなら外れる
+- **頁に描かれた札の期限だけ見る。**退けた形:期限の前を見るのを全部やめる(BRIEF r1 の「札の期限の前の取り直し」が消える)。取り直して来た札にも 1 分前の timer を置く(client の時計が進んでいると timer が即時になり、輪に戻る)
+- **倍々の待ちを戻すのは開いて 30 秒続いた socket が切れたとき。**r1 は開いたら戻していたので、開いてすぐ `4001` で閉じられる輪は 1 秒おきに回っていた
+- **200 でも断片の形でないものは頁ごとのまま。**`x-yumemi-block` を知らない古い shell が頁を返した形で、待って取り直しても直らない。BRIEF の「頁ごとは redirect・403・404 だけ」からの差としてここに書く
+- **`href` は `<yumemi-live>` の属性。**SSR の要素は持たず、`yumemi.block` が document の外の要素に足す。morph は root の属性を同期しない(札だけ替える)ので消えない
+- `visibilitychange` は倍々の待ちを戻さない(待っている繋ぎ直しを今やるだけ)。r1 は 1 秒に戻していた
+
+### test の表と証拠(r2)
+
+| # | 何を | 結果 | 証拠 |
+|---|---|---|---|
+| 1 | `gleam test` | **`512 passed, no failures`**(r1 の 511 + 生成器の cell の 1 件。警告の 3 形は既存の件に足した) | `build/r2-test-2.txt` |
+| 2 | `node test/yumemi_live2_check.mjs` | **ok 48、NG 0**(r1 の 38 + 10)。単独で 3 回続けて 48/0 | `build/r2-check-2.txt`、`build/r2-check-rep-{1,2,3}.txt` |
+| 3 | `node test/yumemi_live2_shell_check.mjs` | **ok 22、NG 0**(頁の置き場を `Span(cols: 2, rows: 1)` にして、頁と断片の `<yumemi-live>` の中身が同じ + 包みの div が両方にある) | `build/r2-shell-1.txt`、#1 にも含む |
+| 4 | P2-1 | 生成器:loader の `"grid-column: span 2; grid-row: span 1;"` が頁の helper と `live_article_view` の 2 か所 | `live_fragment_keeps_the_cell_test` |
+| 5 | P2-2 | 時計を 2 時間進めた頁:socket が開き、落ち着いた後の 3 秒で断片 0 本(落ち着くまで ≤ 3 本。r1 は 3 秒で 5778 本)。開くとすぐ `4001` で閉じる server:6 秒で張り 2〜4 回 | `clock ahead (P2-2)`・`backoff (P2-2)` |
+| 6 | P2-3 | 503 と通信の切断(`socket.destroy`)で:頁の読み込み 0、送りの欄の書きかけと focus が残り、server が戻ると合図無しで新しい発言が当たる | `retry (P2-3)` 2 件 |
+| 7 | P2-4 | 頁の `<style>` を外した後の断片で `.c-line` の `min-height: 120px` が効く | `css (P2-4)` |
+| 8 | P2-5 | 条件で出る `<p>` が前に入る(後ろに `<p class="c-foot">`)・鍵の無い同じ tag の `<div>` が前に入る、の 2 形で:送りの欄の値と focus、Component の外の `<input name="memo">` の書きかけが残り、要素も同じ物、入った節は描かれる | `morph (P2-5)` 2 件 |
+| 9 | P2-6 | `?edge=anywhere` の Block を `replaceWith` で置く:`href` を持ち、合図と `visibilitychange` の取り直しはどちらも `?edge=anywhere`(頁は `?edge=bottom`)。同じ href の `yumemi.block` は置いた要素を返す | `yumemi.block (P2-6)` |
+| 10 | P1-2 | socket の upgrade を 400ms 遅らせ、その間の発言が開いた後の取り直しで見える。`4001` の後も張り直して開いた後にもう 1 本 | `open (P1-2)` |
+| 11 | P1-3 | `Math.random` を 0 と 0.999 にした 2 枚:繋ぎ直しは約 500ms と約 1000ms、開いた後の取り直しは 0ms と約 500ms 後 | `jitter (P1-3)` |
+| 12 | P1-4 | 警告:`list.map` の並びの Component・`el.each` の行の素の `details`(関数を名で辿る)で出る、`list.map` で `el.text` だけなら出ない | `live_warnings_test` |
+| 13 | r1 の件 | 時間の掛かる 2 件の待ちを延ばした(繋ぎ直しの待ちが倍々のまま続くため。`4001` 5→8 秒、張れない札 8→16 秒)。張れない札の件は開いた後の取り直しが札を出し終えるのを待ってから札を消す。期限の件は頁の札だけ 30 秒(`pageTtl`)にした ── 断片の札も 30 秒だと、r2 では期限を見ずに張るので | 同上 |
+| 14 | `gleam format --check`(触った gleam 2 file) | exit 0 | このセッションの実行 |
+
+| mutation(戻したもの) | NG | 捕まえた件 |
+|---|---|---|
+| M1 P2-1:断片を `Flow` で描く | 2 | 頁と断片の HTML が違う(5031 / 4973)・包みが断片に無い |
+| M2a P2-2:取り直して来た札でも期限を見る | 1 | 時計 2 時間進み:socket が開かず、最初の 1 秒で 1316 本・その後の 3 秒で 2174 本 |
+| M2b P2-2:開いたら倍々の待ちを戻す | 1 | 開いてすぐ閉じる輪が 6 秒で 7 回 |
+| M3 P2-3:200 でなければ頁ごと | 1 | 503 で頁の読み込み 2、書きかけが消える(通信の切断の件は別の道なので通る) |
+| M4 P2-4:在る規則の表を頁で持ち越す | 1 | `min-height` が 0px |
+| M5 P2-5:守る節を見ない | 2 | 2 形とも送りの欄の値と focus が消える(`<p>` の形は memo も) |
+| M6 P2-6:別の URL の要素に `href` を付けない | 1 | 合図・`visibilitychange` が `?edge=bottom` から取る |
+| M6b P2-6:`href` を見ずに今の URL から取る | 1 | 同上 |
+| M7 P1-2:開いたときに取り直さない | 3 | 切れた後の 1 回・開くまでの発言・揺らぎの件 |
+| M8 P1-3:繋ぎ直しの待ちに揺らぎが無い | 1 | 2 枚とも 1001ms |
+| M9 P1-3:開いた後の取り直しに揺らぎが無い | 1 | 2 枚とも開いて 1〜2ms で取る |
+
+証拠:`build/r2-mut-*.txt`、まとめ `build/r2-mut-summary.txt`。走らせた mutation の script は作業木の外(`/tmp/claude-1000/-home-yumemism-yumemism-repo-yumemi-live-2/669a1f00-2df6-405b-ac4c-f4d4653beda8/scratchpad/mut.py`、file を書き換えて回し、元に戻す)。P1-4 の警告の mutation は回していない(gleam の件が出る形と出ない形の両方を見ている)。
+
+### 確かめていないこと(r2)
+
+- **P1-1(直さない):**断片の読みが 87 の「Block の Service と root の 1 本」より多い(頁と Layout の `!optional` の読みを全部叩く)。断片は `optional` の読みの 403 を見ないので、その場合だけ status が頁とずれる。README は事実に合わせて書いた
+- **P1-5(直さない):**断片から足す規則は document の全 sheet の後ろに入るので、同じ詳細度の規則の勝ち負けが SSR の順と変わりうる。`@media` の塊は塊ごとに比べるので、同じ規則を重ねて足すことがある
+- **P1-6(直さない):**逃げ道を当てるかの判定は来た側の属性しか見ないので、server が属性を外しても逃げ道に届かない
+- **P1-7(直さない):**門の印は gate の字の `string.replace` に頼っていて、字が変わると黙って外れる
+- **鍵の無い並びの素の `details` の開閉**は runtime では守らない(P1-4 は警告だけ)。守る節は focus と書きかけだけで、開いた `details` は前に行が入ると別の行へ移りうる
+- **守る節の受け手の判定の粗さ:**目印は tag と `name`(か `id`)なので、同じ `name` の control が複数の行にある鍵の無い並びでは、別の行を受け手と見ることがある。鍵があれば鍵で決まる
+- **時計のずれの件は進んだ時計だけ**を見た(遅れた時計は、頁の札が長く見えて 1 分前の timer が遅れるだけで、server の `4001` で張り直す道に入る。走らせていない)
+- **倍々の待ちを戻す 30 秒**は試験で 30 秒続く socket を作っていないので、戻る側は走らせていない(戻らない側は `backoff (P2-2)` と M2b で見た)
+- r1 の「確かめていないこと」(Android の Gboard・iOS の日本語入力、実の api と面の e2e、WebKit のスクロール、Firefox、`@media` の中の規則、day_swipe の形の実地)はそのまま残る。別の URL の Block を置いた後の取り直しは試験の server で見た(M2 の day_swipe の実地は未)

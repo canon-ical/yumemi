@@ -3118,6 +3118,26 @@ fn page_lives(page: reader_front.Page) -> List(#(String, String)) {
   }
 }
 
+/// `Live` の Block の置き場の cell(断片も頁と同じ包みで描く)。
+fn page_live_cell(page: reader_front.Page, block: String) -> reader_front.Cell {
+  let cells = case page.sp {
+    Some(frame) ->
+      list.filter_map(frame.placements, fn(placement) {
+        case placement {
+          reader_front.Fixed(block: name, cell: cell, live: Some(_), ..)
+            if name == block
+          -> Ok(cell)
+          _ -> Error(Nil)
+        }
+      })
+    None -> []
+  }
+  case cells {
+    [cell, ..] -> cell
+    [] -> reader_front.Flow
+  }
+}
+
 fn front_has_live(front: reader_front.Front) -> Bool {
   list.any(front.pages, fn(page) { page_lives(page) != [] })
 }
@@ -3181,7 +3201,7 @@ fn page_live_text(
       fixed_placement_body(
         front,
         block,
-        reader_front.Flow,
+        page_live_cell(page, block),
         page_sources,
         "it",
         "it.vars",
@@ -3226,7 +3246,7 @@ fn page_live_text(
 /// `Live`(0.15)の検査。止めるもの(停止コード 4、宣言の矛盾):Layout の placements の `Live`(v0 は Page だけ)、
 /// 同じ Page に同じ Block の `Live` が 2 つ、端の名が読めない、Block が Service の Out を受けない・その Service が書き
 /// (`effect: Write`)・その Service に root の Entity が無い(合図の宛先が導けない)。警告(停止コード 0):Block の中の
-/// `el.each` の要素が interactive Component を持つ(鍵が無いと書きかけが別の行に化ける)、`edge: Bottom` の Block に
+/// 鍵の無い並び(`el.each`・`list.map`)の要素が interactive Component か `details` を持つ(鍵が無いと書きかけや開閉が別の行に化ける)、`edge: Bottom` の Block に
 /// `el.fresh` が無い。
 pub fn live_notes(
   app: model.App,
@@ -3375,12 +3395,12 @@ fn live_block_notes(
     ]
     False -> []
   }
-  let each_notes = case unkeyed_each_with_component(text) {
+  let each_notes = case unkeyed_list_with_state(text) {
     True -> [
       stop.Note(
         class: stop.Warning,
         text: at
-          <> " の Block の el.each の要素が interactive Component を持つ(鍵が無いと、前に行が入ったとき書きかけが別の行に化ける。el.each_keyed で鍵を付ける)",
+          <> " の Block の鍵の無い並び(el.each・list.map)の要素が interactive Component か details を持つ(鍵が無いと、前に行が入ったとき書きかけや開閉が別の行に化ける。el.each_keyed で鍵を付ける)",
       ),
     ]
     False -> []
@@ -3388,25 +3408,33 @@ fn live_block_notes(
   list.flatten([edge_notes, service_notes, fresh_notes, each_notes])
 }
 
-/// Block の字で、`el.each(` の呼び出しの中(引数の字)か、そこから名で呼ぶ同じ module の関数(推移的に)が
-/// `interactive.` の Component を呼ぶか。字で見る近似(Block は view の関数を並べるだけの module)。
-fn unkeyed_each_with_component(text: String) -> Bool {
+/// Block の字で、鍵の無い並び(`el.each(`・`list.map(`・`list.index_map(`・`list.flat_map(`)の呼び出しの中(引数の
+/// 字)か、そこから名で呼ぶ同じ module の関数(推移的に)が、`interactive.` の Component か素の `details`
+/// (`html.details`・`el.element("details"`)を描くか。字で見る近似(Block は view の関数を並べるだけの module)。
+fn unkeyed_list_with_state(text: String) -> Bool {
   let functions = module_functions(text)
-  let with_component =
+  let with_state =
     component_functions(
       functions,
       list.filter_map(functions, fn(row) {
-        case string.contains(row.1, "interactive.") {
+        case holds_user_state(row.1) {
           True -> Ok(row.0)
           False -> Error(Nil)
         }
       }),
     )
-  each_call_texts(text)
+  unkeyed_list_texts(text)
   |> list.any(fn(call) {
-    string.contains(call, "interactive.")
-    || list.any(with_component, fn(name) { mentions(call, name) })
+    holds_user_state(call)
+    || list.any(with_state, fn(name) { mentions(call, name) })
   })
+}
+
+/// 字が利用者の持ち物(書きかけ・開閉)を持つ要素を描くか。
+fn holds_user_state(text: String) -> Bool {
+  string.contains(text, "interactive.")
+  || string.contains(text, "html.details")
+  || string.contains(text, "el.element(\"details\"")
 }
 
 fn component_functions(
@@ -3482,11 +3510,14 @@ fn is_identifier(name: String) -> Bool {
   })
 }
 
-/// `el.each(` の呼び出しの引数の字(括弧の釣り合いで切る)。`el.each_keyed(` は入らない。
-fn each_call_texts(text: String) -> List(String) {
-  string.split(text, "el.each(")
-  |> list.drop(1)
-  |> list.map(fn(rest) { balanced(string.to_graphemes(rest), 1, []) })
+/// 鍵の無い並びの呼び出しの引数の字(括弧の釣り合いで切る)。`el.each_keyed(` は入らない。
+fn unkeyed_list_texts(text: String) -> List(String) {
+  ["el.each(", "list.map(", "list.index_map(", "list.flat_map("]
+  |> list.flat_map(fn(call) {
+    string.split(text, call)
+    |> list.drop(1)
+    |> list.map(fn(rest) { balanced(string.to_graphemes(rest), 1, []) })
+  })
 }
 
 fn balanced(chars: List(String), depth: Int, acc: List(String)) -> String {

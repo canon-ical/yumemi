@@ -195,6 +195,28 @@ pub fn live_edges_test() {
   )
 }
 
+/// 断片も置き場の cell で包む(r2、柏木 P2-1):`Span` / `At` の `Live` は頁と断片の HTML の形が同じ。
+pub fn live_fragment_keeps_the_cell_test() {
+  let text =
+    fixture_text(page_path)
+    |> string.replace(
+      "Fixed(area: \"page\", block: blocks.Article, cell: Flow)",
+      "Live(area: \"page\", block: blocks.Article, cell: Span(cols: 2, rows: 1), edge: Bottom)",
+    )
+    |> string.replace(
+      "SubjectHandle, Var, Widget,",
+      "SubjectHandle, Var, Widget, Live, Bottom, Span,",
+    )
+  let #(files, _) = emitted([unit(page_path, text)])
+  let loader = text_of(files, "public/src/gen/load/article/arg_slug/page.gleam")
+  // 頁の helper と断片の関数の 2 か所で同じ包み
+  string.split(loader, "\"grid-column: span 2; grid-row: span 1;\"")
+  |> list.length
+  |> should.equal(3)
+  let assert [_, fragment] = string.split(loader, "fn live_article_view(")
+  has(fragment, "\"grid-column: span 2; grid-row: span 1;\"")
+}
+
 /// `Live` の無い面は 0.14 までと同じ字(包み・断片の口・門の印・client の起こしが無い)。
 pub fn faces_without_live_are_unchanged_test() {
   let #(files, notes) = emitted([])
@@ -300,7 +322,8 @@ pub fn live_contradictions_stop_test() {
   |> should.be_true
 }
 
-/// 警告(停止コード 0):`el.each` の要素が interactive Component を持つ(関数を名で辿る)、`edge: Bottom` に `el.fresh`
+/// 警告(停止コード 0):鍵の無い並び(`el.each`・`list.map`)の要素が interactive Component か素の `details` を持つ
+/// (関数を名で辿る)、`edge: Bottom` に `el.fresh`
 /// が無い。`el.each_keyed` と `el.fresh` があれば出ない。
 pub fn live_warnings_test() {
   let warnings = fn(units) {
@@ -318,10 +341,43 @@ pub fn live_warnings_test() {
   list.any(unkeyed, fn(line) {
     string.contains(
       line,
-      "Live(block: Article) の Block の el.each の要素が interactive Component を持つ",
+      "Live(block: Article) の Block の鍵の無い並び(el.each・list.map)の要素が interactive Component か details を持つ",
     )
   })
   |> should.be_true
+  // r2(柏木 P1-4):`list.map` の並びと、Component の無い素の `details` も見る
+  let state_warning = fn(lines) {
+    list.any(lines, fn(line) {
+      string.contains(line, "Live(block: Article) の Block の鍵の無い並び")
+    })
+  }
+  warnings([
+    live_page("Bottom"),
+    article_block_with(
+      fresh_fn
+      <> "\npub fn likes(slugs: List(String)) -> el.Element {\n  el.fragment(list.map(slugs, fn(slug) {\n    interactive.like_button(article_publish.Args(slug: slug))\n  }))\n}\n",
+    ),
+  ])
+  |> state_warning
+  |> should.be_true
+  warnings([
+    live_page("Bottom"),
+    article_block_with(
+      fresh_fn
+      <> "\npub fn reports(slugs: List(String)) -> el.Element {\n  el.each(slugs, report)\n}\n\nfn report(slug: String) -> el.Element {\n  html.details_([], [el.text(slug)])\n}\n",
+    ),
+  ])
+  |> state_warning
+  |> should.be_true
+  warnings([
+    live_page("Bottom"),
+    article_block_with(
+      fresh_fn
+      <> "\npub fn names(slugs: List(String)) -> el.Element {\n  el.fragment(list.map(slugs, fn(slug) { el.text(slug) }))\n}\n",
+    ),
+  ])
+  |> state_warning
+  |> should.be_false
   list.any(unkeyed, fn(line) { string.contains(line, "el.fresh が無い") })
   |> should.be_false
   let keyed =
@@ -368,7 +424,8 @@ pub fn each_keyed_and_fresh_render_test() {
 }
 
 /// client の runtime(Playwright、Chromium と WebKit)。2 者の IME・details・3 つの edge・断片の CSS・stale・門・
-/// JS 無し・繋ぎ直し・期限・畳み・yumemi.block。
+/// JS 無し・繋ぎ直し・期限・畳み・yumemi.block。r2:時計のずれ・倍々の待ち・5xx と通信の失敗・遷移をまたぐ CSS・
+/// 前へ探す照合の守る節・別の URL の Block・開くたびの取り直し・揺らぎ。
 pub fn live_runtime_in_browsers_test() {
   let out = browser_check()
   string.split(out, "\n")
@@ -378,7 +435,7 @@ pub fn live_runtime_in_browsers_test() {
   string.split(out, "\n")
   |> list.filter(fn(line) { string.starts_with(line, "ok ") })
   |> list.length
-  |> should.equal(38)
+  |> should.equal(48)
 }
 
 /// 生成した面(article の写しの頁を Live に)の shell の断片の口を node で叩く。
@@ -391,5 +448,5 @@ pub fn generated_shell_serves_the_fragment_test() {
   string.split(out, "\n")
   |> list.filter(fn(line) { string.starts_with(line, "ok ") })
   |> list.length
-  |> should.equal(21)
+  |> should.equal(22)
 }
