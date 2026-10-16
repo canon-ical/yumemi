@@ -108,8 +108,10 @@ check("fragment: the Block's HTML is the same as in the page", inner(page.text).
 const cellWrap = '<div style="grid-column: span 2; grid-row: span 1;">';
 check("fragment: the Span cell's wrapper is in both the page and the fragment", inner(page.text).includes(cellWrap) && inner(frag.text).includes(cellWrap), inner(frag.text).slice(0, 200));
 
-const unknown = await get("/article/42", { "x-yumemi-block": "summary" });
-check("fragment: a Block that is not Live on the page is 404", unknown.status === 404, String(unknown.status));
+// 0.14.1 から頁の `Fixed` の Block(summary)にも答える。Layout の Block・Widget の Block・頁に無い名は 404
+const unknown = [];
+for (const name of ["site_header", "row_article", "feed", "nothing"]) unknown.push(await get("/article/42", { "x-yumemi-block": name }));
+check("fragment: a Layout, Widget or unknown Block name on the page is 404", unknown.every((item) => item.status === 404), unknown.map((item) => item.status).join(","));
 mode = { read: 404, token: "tok.en1" };
 const gone = await get("/article/42", { "x-yumemi-block": "article" });
 check("fragment: the root read 404 gives 404 (the client reloads the page)", gone.status === 404, String(gone.status));

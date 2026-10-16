@@ -117,3 +117,28 @@ fn layout_placement_1(it: Data) -> List(el.Element) {
 fn page_placement_0(_it: Data) -> List(el.Element) {
   [site_header.view(Nil)]
 }
+
+pub type BlockSiteHeader {
+  BlockSiteHeader(vars: Vars)
+}
+
+/// `Fixed` の Block SiteHeader の断片(shell の `x-yumemi-block: site_header` の口)。
+pub fn block_site_header(vars: Vars) -> el.Element {
+  el.styled(
+    fn() { el.fragment(block_site_header_view(BlockSiteHeader(vars: vars))) },
+    "",
+  )
+}
+
+fn block_site_header_view(it: BlockSiteHeader) -> List(el.Element) {
+  let block_children = {
+    [site_header.view(Nil)]
+  }
+  [
+    el.element(
+      "yumemi-block",
+      [el.attribute("name", "site_header")],
+      block_children,
+    ),
+  ]
+}

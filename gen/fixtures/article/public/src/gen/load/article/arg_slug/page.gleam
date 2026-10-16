@@ -230,3 +230,94 @@ fn render_page_placement_3(rows: List(widget_list.Row)) -> List(el.Element) {
       }
   }
 }
+
+pub type BlockArticle {
+  BlockArticle(vars: Vars, article_read: article_read.Out)
+}
+
+/// `Fixed` の Block Article の断片(shell の `x-yumemi-block: article` の口)。
+pub fn block_article(vars: Vars, article_read: article_read.Out) -> el.Element {
+  el.styled(
+    fn() {
+      el.fragment(
+        block_article_view(BlockArticle(vars: vars, article_read: article_read)),
+      )
+    },
+    "",
+  )
+}
+
+fn block_article_view(it: BlockArticle) -> List(el.Element) {
+  let block_children = {
+    [
+      article.view(
+        it.article_read,
+        article.Arg(
+          slug: it.vars.slug,
+          term: it.vars.term,
+          subject_handle: it.vars.subject_handle,
+          www_origin: it.vars.www_origin,
+          auth_origin: it.vars.auth_origin,
+          view_only: it.vars.view_only,
+        ),
+      ),
+    ]
+  }
+  [
+    el.element(
+      "yumemi-block",
+      [el.attribute("name", "article")],
+      block_children,
+    ),
+  ]
+}
+
+pub type BlockSummary {
+  BlockSummary(vars: Vars, article_read: article_read.Out)
+}
+
+/// `Fixed` の Block Summary の断片(shell の `x-yumemi-block: summary` の口)。
+pub fn block_summary(vars: Vars, article_read: article_read.Out) -> el.Element {
+  el.styled(
+    fn() {
+      el.fragment(
+        block_summary_view(BlockSummary(vars: vars, article_read: article_read)),
+      )
+    },
+    "",
+  )
+}
+
+fn block_summary_view(it: BlockSummary) -> List(el.Element) {
+  let block_children = {
+    [summary.view(it.article_read, summary.Arg(slug: it.vars.slug))]
+  }
+  [
+    el.element(
+      "yumemi-block",
+      [el.attribute("name", "summary")],
+      block_children,
+    ),
+  ]
+}
+
+pub type BlockNotice {
+  BlockNotice(vars: Vars)
+}
+
+/// `Fixed` の Block Notice の断片(shell の `x-yumemi-block: notice` の口)。
+pub fn block_notice(vars: Vars) -> el.Element {
+  el.styled(
+    fn() { el.fragment(block_notice_view(BlockNotice(vars: vars))) },
+    "",
+  )
+}
+
+fn block_notice_view(it: BlockNotice) -> List(el.Element) {
+  let block_children = {
+    [notice.view(Nil, notice.Arg(slug: it.vars.slug))]
+  }
+  [
+    el.element("yumemi-block", [el.attribute("name", "notice")], block_children),
+  ]
+}

@@ -98,3 +98,28 @@ fn styled_area(
 fn page_placement_0(it: Data) -> List(el.Element) {
   [admin_header.view(Nil, admin_header.Arg(subject: it.vars.subject))]
 }
+
+pub type BlockAdminHeader {
+  BlockAdminHeader(vars: Vars)
+}
+
+/// `Fixed` の Block AdminHeader の断片(shell の `x-yumemi-block: admin_header` の口)。
+pub fn block_admin_header(vars: Vars) -> el.Element {
+  el.styled(
+    fn() { el.fragment(block_admin_header_view(BlockAdminHeader(vars: vars))) },
+    "",
+  )
+}
+
+fn block_admin_header_view(it: BlockAdminHeader) -> List(el.Element) {
+  let block_children = {
+    [admin_header.view(Nil, admin_header.Arg(subject: it.vars.subject))]
+  }
+  [
+    el.element(
+      "yumemi-block",
+      [el.attribute("name", "admin_header")],
+      block_children,
+    ),
+  ]
+}

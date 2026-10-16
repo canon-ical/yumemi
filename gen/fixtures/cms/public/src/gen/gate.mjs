@@ -17,6 +17,7 @@ const cspRoutes = {
   "/status": "connect-src 'self' https://api.example; media-src 'self' https://media.example",
 };
 const pageviewRoutes = ["/article/:slug", "/status"];
+const blockHeader = "x-yumemi-block";
 const pageviewOnly = [{type: "declared", kind: "adult"}];
 
 const contexts = new WeakMap();
@@ -218,7 +219,7 @@ export async function after_response(request, env, response) {
     headers.set("content-security-policy", csp);
     output = new Response(output.body, {status: output.status, statusText: output.statusText, headers});
   }
-  if (!tracksPageview(context) || output.status !== 200 || !isHtml(output)) return output;
+  if (request.headers.has(blockHeader) || !tracksPageview(context) || output.status !== 200 || !isHtml(output)) return output;
   // 数える印は頁の読み込みでも client 遷移の fetch でも同じ meta だけ。送るのは client.mjs の送り手 1 つ
   const html = await output.text();
   const offset = html.indexOf("</head>");

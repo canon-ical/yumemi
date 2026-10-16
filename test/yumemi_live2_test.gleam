@@ -217,15 +217,14 @@ pub fn live_fragment_keeps_the_cell_test() {
   has(fragment, "\"grid-column: span 2; grid-row: span 1;\"")
 }
 
-/// `Live` の無い面は 0.14 までと同じ字(包み・断片の口・門の印・client の起こしが無い)。
+/// `Live` の無い面は札・socket・`<yumemi-live>` を持たない。0.14.1 から断片の口(`Fixed` の Block の
+/// `x-yumemi-block`)と門の数えない印は `Live` の無い面にもある(`yumemi_block_door_test.gleam`)。
 pub fn faces_without_live_are_unchanged_test() {
   let #(files, notes) = emitted([])
   let shell = text_of(files, "public/src/gen/shell.mjs")
   string.contains(shell, "yumemi-live") |> should.be_false
-  string.contains(shell, "x-yumemi-block") |> should.be_false
-  string.contains(shell, "to_fragment_string") |> should.be_false
-  string.contains(text_of(files, "public/src/gen/gate.mjs"), "blockHeader")
-  |> should.be_false
+  string.contains(shell, "withLiveToken") |> should.be_false
+  string.contains(shell, "lives: {") |> should.be_false
   string.contains(
     text_of(files, "public/priv/static/_yumemi/client.mjs"),
     "live_block",
@@ -236,6 +235,9 @@ pub fn faces_without_live_are_unchanged_test() {
   let assert Ok(fixture_shell) =
     simplifile.read(article_fixture <> "/public/src/gen/shell.mjs")
   shell |> should.equal(fixture_shell)
+  let assert Ok(fixture_gate) =
+    simplifile.read(article_fixture <> "/public/src/gen/gate.mjs")
+  text_of(files, "public/src/gen/gate.mjs") |> should.equal(fixture_gate)
 }
 
 /// 停止コード 4:Layout の Live・Block が Service の Out を受けない・書きの Service・root の Entity の無い Service・
