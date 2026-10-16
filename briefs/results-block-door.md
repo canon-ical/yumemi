@@ -67,7 +67,7 @@
 
 - **実の `wrangler dev` で api と面を立てた e2e**(生成した shell は偽の APP で、client は試験の node の server で見た)。musearch の day_swipe を乗せる M2 の便の持ち場
 - **musearch の `schedule_day` の頁そのもの**(root の Entity が無い読み)。断片の口は `Live` の検査(root の Entity が要る)を通らないので、読みの Service が root を持たなくても `Fixed` なら答える ── 生成器の上ではそうなっているが、musearch の ★ で生成して叩いてはいない
-- WebKit・Firefox(Chromium だけで回した)、Android / iOS の日本語入力(当て方は `Live` と同じ関数なので live-2 の確かめに乗っている)
+- `Fixed` の新規ブラウザ検証は Chromium のみ。`Live` の既存検証は Chromium と WebKit(WebKit は値・focus・選択範囲の保持)で実行済み。`Fixed` の WebKit、Firefox、Android / iOS の日本語入力は未確認(当て方は `Live` と同じ関数)
 - `pc` / `tablet` の Frame の placements は口に出さない(頁が描くのは sp だけ ── `Live` と同じ扱い)。sp に無く pc だけにある Block は 404
 - `yumemi.block` で取った `<yumemi-block>` の中の interactive Component・逃げ道は、接続で起きる(custom element)が、送った後の `ReloadPage` との重なりは見ていない
 - 束ねた `client.mjs` が逃げ道のある `Live` の無い面で約 14KB(未圧縮)増えること。逃げ道の無い面は増えない
