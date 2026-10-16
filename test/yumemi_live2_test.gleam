@@ -68,10 +68,34 @@ fn live_page(edge: String) -> source.Unit {
   unit(page_path, text)
 }
 
+const public_clause =
+  "    allow.Clause(
+      who: allow.Anyone,
+      at: allow.Only([article.Published]),
+      owner: allow.NoOwner,
+    ),
+"
+
+/// article の `article_read` から `Anyone` の句を外した写し(Staff だけが読む)。公開の読みの `Live` は exit 4
+/// (0.14.1)なので、`Live` の試験の Block の読みはこれにする。
+fn private_read() -> source.Unit {
+  let assert Ok(text) =
+    simplifile.read(article_fixture <> "/src/service/article_read.gleam")
+  string.contains(text, public_clause) |> should.be_true
+  unit("service/article_read", string.replace(text, public_clause, ""))
+}
+
 fn emitted(
   face_extra: List(source.Unit),
 ) -> #(List(#(String, String)), List(stop.Note)) {
   let assert Ok(back_units) = source.load(article_fixture)
+  emitted_with(replace(back_units, [private_read()]), face_extra)
+}
+
+fn emitted_with(
+  back_units: List(source.Unit),
+  face_extra: List(source.Unit),
+) -> #(List(#(String, String)), List(stop.Note)) {
   let assert Ok(app) = reader.read(back_units)
   let assert Ok(face_units) = source.load(article_fixture <> "/public")
   let face_units = replace(face_units, face_extra)
@@ -220,7 +244,8 @@ pub fn live_fragment_keeps_the_cell_test() {
 /// `Live` の無い面は札・socket・`<yumemi-live>` を持たない。0.14.1 から断片の口(`Fixed` の Block の
 /// `x-yumemi-block`)と門の数えない印は `Live` の無い面にもある(`yumemi_block_door_test.gleam`)。
 pub fn faces_without_live_are_unchanged_test() {
-  let #(files, notes) = emitted([])
+  let assert Ok(back_units) = source.load(article_fixture)
+  let #(files, notes) = emitted_with(back_units, [])
   let shell = text_of(files, "public/src/gen/shell.mjs")
   string.contains(shell, "yumemi-live") |> should.be_false
   string.contains(shell, "withLiveToken") |> should.be_false
@@ -322,6 +347,52 @@ pub fn live_contradictions_stop_test() {
   let in_layout = conflicts([layout])
   list.any(in_layout, fn(line) { string.contains(line, "は Layout に置けない") })
   |> should.be_true
+}
+
+/// 0.14.1:公開の読み(allow に `Anyone`)の Block の `Live` は exit 4 ── 札で、ログインしていない人も同じ root の
+/// 非公開の書きの時刻を聞けるため。fixture の `article_read` は `Anyone`(Published だけ)と Staff の句を持つ。
+pub fn live_on_a_public_read_stops_test() {
+  let assert Ok(back_units) = source.load(article_fixture)
+  let #(_, notes) = emitted_with(back_units, [live_page("Bottom")])
+  list.filter(notes, fn(note) { note.class == stop.Conflict })
+  |> texts
+  |> should.equal([
+    "[exit 4 宣言の矛盾] public pages/article/arg_slug/page: Live(block: Article) の Block の Service article_read の allow に Anyone がある(公開の読みの札では、ログインしていない人も同じ root の非公開の書きの時刻を聞ける。Live の Block は root の当事者だけが通る読みにする)",
+  ])
+  // 札の表にも載らない(止まるので生成物は書かれないが、表の側でも外す)
+  live_reads_of(back_units, [live_page("Bottom")]) |> should.equal([])
+}
+
+/// 0.14.1:札を出す読み(registry の `live` の読みの行)は、Page の sp で `Live` に置かれた Block の読みだけ。
+/// `Live` の無い面は空、公開でない読みの `Live` はその Service、root の無い Service(Feed = widget_list)は載らない。
+pub fn live_reads_are_the_live_blocks_reads_test() {
+  let assert Ok(back_units) = source.load(article_fixture)
+  let private = replace(back_units, [private_read()])
+  live_reads_of(private, []) |> should.equal([])
+  live_reads_of(private, [live_page("Bottom")])
+  |> should.equal(["article_read"])
+  live_reads_of(private, [
+    page_with(
+      "Live(area: \"page\", block: blocks.Article, cell: Flow, edge: Bottom),\n      Live(area: \"rail\", block: blocks.Feed, cell: Flow, edge: Anywhere)",
+    ),
+  ])
+  |> should.equal(["article_read"])
+  // Fixed の Block の読みは載らない(同じ Block でも Live でなければ札は無い)
+  live_reads_of(private, [
+    page_with("Fixed(area: \"page\", block: blocks.Article, cell: Flow)"),
+  ])
+  |> should.equal([])
+}
+
+fn live_reads_of(
+  back_units: List(source.Unit),
+  face_extra: List(source.Unit),
+) -> List(String) {
+  let assert Ok(app) = reader.read(back_units)
+  let assert Ok(face_units) = source.load(article_fixture <> "/public")
+  let assert Ok(front_model) =
+    reader_front.read("public", replace(face_units, face_extra), app.services)
+  front_emit.live_reads(app, front_model)
 }
 
 /// 警告(停止コード 0):鍵の無い並び(`el.each`・`list.map`)の要素が interactive Component か素の `details` を持つ
@@ -450,5 +521,5 @@ pub fn generated_shell_serves_the_fragment_test() {
   string.split(out, "\n")
   |> list.filter(fn(line) { string.starts_with(line, "ok ") })
   |> list.length
-  |> should.equal(22)
+  |> should.equal(24)
 }

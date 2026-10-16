@@ -1,8 +1,10 @@
 // yumemi yumemi/server ── 他人の書きを画面に届ける合図の札と宛先(0.14、yumemi-live-1)。
 // 合図の宛先は Service の root の Entity と、root の行の id の組(`<entity>:<id>`)。表は生成の `registry.mjs` の
-// `live`(Service -> [Entity の名, root の行の id の列])で、★ は書かない。
+// `live`(Service -> [Entity の名, root の行の id の列])で、★ は書かない。表の読みは、どこかの面の Page で `Live` に
+// 置かれた Block の読みだけ(0.14.1。公開の読みの札で同じ root の非公開の書きの時刻を聞かせないため)。書きは root の
+// Entity を持つ書き全部。
 //
-// - 札:読みの Service が通ったとき(allow と root が通った = その Entity を今読めた)、宛先・party・期限(1 時間)を
+// - 札:表に在る読みの Service が通ったとき(allow と root が通った = その Entity を今読めた)、宛先・party・期限(1 時間)を
 //   Worker secret `YUMEMI_LIVE_KEY` の HMAC-SHA256 で包み、応答の header `x-yumemi-live` に付ける。形は
 //   `<payload>.<署名>`(どちらも base64url)、payload は `{"to":"<entity>:<id>","party":<party か null>,"exp":<秒>}`。
 //   party が null(session の無い読み)の札は browser の印に結ぶ:payload に `browser`(browser の id の、同じ鍵の

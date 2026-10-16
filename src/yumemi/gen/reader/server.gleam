@@ -64,6 +64,7 @@ pub fn read(units: List(Unit)) -> Result(Read, String) {
           consents: consents,
           media: media,
           counted: [],
+          live_reads: [],
         ),
         attached: attached,
       ))

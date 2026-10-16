@@ -29,7 +29,8 @@
 // SHA-256 の行にも当てる(残すのは今の鍵の HMAC だけ)。
 //
 // 合図(0.14):`live`(生成の registry の表、Service -> [Entity, root の行の id の列])に在る読みの Service が通れば、
-// 応答に札の header `x-yumemi-live` を付ける。書きの Service が commit したら、応答の後に(`execution.waitUntil`)
+// 応答に札の header `x-yumemi-live` を付ける(表の読みは面の Page で `Live` に置かれた Block の読みだけ、0.14.1。
+// 表に無い読みは header ごと無い)。書きの Service が commit したら、応答の後に(`execution.waitUntil`)
 // 宛先の DO `YumemiLive` へ合図する。入口の prefix + `/_yumemi/live` の GET は socket の口で、札の署名・期限・
 // session の party(party の無い札は browser の印)・`Origin` を見てから、札の期限と party を載せて DO へ渡す(外れは
 // 403、理由を log に 1 行)。DO は期限の来た socket を閉じる。札・合図は `live.mjs`。
@@ -478,7 +479,7 @@ export function http(spec) {
  }
  // ── 合図(0.14)────────────────────────────────────────────────────────────
  const effectOf=s=>s.record?.module?c.tag(s.record.module.effect):null;
- // 読みの Service が通ったら札を作って `s.liveToken` に置く(`response` が 200 の応答に header で付ける)。binding が
+ // 表に在る読みの Service が通ったら札を作って `s.liveToken` に置く(`response` が 200 の応答に header で付ける)。binding が
  // 無ければ何もしない。鍵が無ければ札を付けず 1 行。API key の入口には付けない(socket の口が無い)
  async function liveIssue(s) {
   if(effectOf(s)!=='read'||!live.bound(s.env)||isApiKeyEntry(s.entry)) return;

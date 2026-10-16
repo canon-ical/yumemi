@@ -78,10 +78,14 @@ const registry = [
   }), root: { Root }, method: 'PUT', path: '/api/notes/:id', fields: ['id', 'title'], args: [['id', ['text']], ['title', ['text']]] },
   { name: 'note_read_ops', credential: 'api_key', module: service('read', ReadArgs, (_a, _r, args) => step.done({ id: args.id })), root: { Root }, method: 'GET', path: '/api/ops/notes/:id', fields: ['id'], args: [['id', ['text']]] },
   { name: 'note_public', module: service('read', ReadArgs, (_a, _r, args) => step.done({ id: args.id }), anyone), root: { Root }, method: 'GET', path: '/api/public/:id', fields: ['id'], args: [['id', ['text']]] },
+  // 0.14.1:表に無い読み(どの面の Page でも `Live` に置かれていない Block の読み)。札は付かない
+  { name: 'note_peek', module: service('read', ReadArgs, (_a, _r, args) => step.done({ id: args.id })), root: { Root }, method: 'GET', path: '/api/peek/:id', fields: ['id'], args: [['id', ['text']]] },
+  { name: 'note_open', module: service('read', ReadArgs, (_a, _r, args) => step.done({ id: args.id }), anyone), root: { Root }, method: 'GET', path: '/api/open/:id', fields: ['id'], args: [['id', ['text']]] },
 ];
 // 生成の registry の `live` と同じ形
+// (`note_peek`・`note_open` は root の Entity を持つ読みだが表に無い ── 0.14.1 の生成器は Live の Block の読みだけを書く)
 const live = { note_read: ['note', 'id'], note_edit: ['note', 'id'], note_public: ['note', 'id'], note_read_ops: ['note', 'id'] };
-const roots = { note_read: { sql: 'note/root', params: ['arg:id', 'party'], values: [] }, note_edit: { sql: 'note/root', params: ['arg:id', 'party'], values: [] }, note_public: { sql: 'note/public_root', params: ['arg:id'], values: [] }, note_read_ops: { sql: 'note/root', params: ['arg:id', 'party'], values: [] } };
+const roots = { note_read: { sql: 'note/root', params: ['arg:id', 'party'], values: [] }, note_edit: { sql: 'note/root', params: ['arg:id', 'party'], values: [] }, note_public: { sql: 'note/public_root', params: ['arg:id'], values: [] }, note_read_ops: { sql: 'note/root', params: ['arg:id', 'party'], values: [] }, note_peek: { sql: 'note/root', params: ['arg:id', 'party'], values: [] }, note_open: { sql: 'note/public_root', params: ['arg:id'], values: [] } };
 const SQL = { 'note/root': '-- root', 'note/public_root': '-- public root', 'verb/edit_note': '-- edit', 'verb/reject_note': '-- reject', 'framework/audit': '-- audit' };
 const rt = runtime({
   SQL, c, roots, actors: {}, manualVerbs: { names: new Set() }, connectors: {}, connectorNames: {}, folds: {}, enqueues: {},

@@ -3428,6 +3428,55 @@ pub fn live_notes(
   list.append(layout_notes, page_notes)
 }
 
+/// 札を出す読みの Service の名(0.14.1、registry の `live` の読みの行)。Page の sp の Frame で `Live` に置かれた
+/// Block の読みのうち、root の Entity を持ち公開でないもの(そうでない `Live` は `live_notes` が exit 4 で止める)。
+pub fn live_reads(app: model.App, front: reader_front.Front) -> List(String) {
+  list.flat_map(front.pages, page_lives)
+  |> list.filter_map(fn(row) {
+    case live_service(app, front, row.0) {
+      Some(service) ->
+        case
+          service.effect,
+          root.root_for(app, service),
+          public_read(app, service)
+        {
+          model.ReadEffect, Some(_), False -> Ok(service.module)
+          _, _, _ -> Error(Nil)
+        }
+      None -> Error(Nil)
+    }
+  })
+  |> list.unique
+}
+
+/// `Live` の Block の Out を返す読みの Service。
+fn live_service(
+  app: model.App,
+  front: reader_front.Front,
+  block: String,
+) -> Option(model.Service) {
+  block_source(front.blocks, block, app.services)
+  |> option.then(fn(module) {
+    list.find(app.services, fn(service) { service.module == module })
+    |> option.from_result
+  })
+}
+
+/// Service の allow に `Anyone` の句があるか(公開の読み)。
+fn public_read(app: model.App, service: model.Service) -> Bool {
+  list.contains(service.subjects, model.SubjectAnonymous)
+  || case list.key_find(app.clauses, service.module) {
+    Ok(clauses) ->
+      list.any(clauses, fn(clause) {
+        case clause {
+          model.Clause(who: "Anyone", ..) -> True
+          _ -> False
+        }
+      })
+    Error(_) -> False
+  }
+}
+
 fn live_block_notes(
   app: model.App,
   package: face.Package,
@@ -3446,12 +3495,7 @@ fn live_block_notes(
       ),
     ]
   }
-  let service =
-    block_source(front.blocks, block, app.services)
-    |> option.then(fn(module) {
-      list.find(app.services, fn(service) { service.module == module })
-      |> option.from_result
-    })
+  let service = live_service(app, front, block)
   let service_notes = case service {
     None -> [
       stop.Note(
@@ -3480,7 +3524,19 @@ fn live_block_notes(
               <> " の allow に Entity が無い(root の Entity が無く、合図の宛先が導けない)",
           ),
         ]
-        _, Some(_) -> []
+        _, Some(_) ->
+          case public_read(app, service) {
+            True -> [
+              stop.Note(
+                class: stop.Conflict,
+                text: at
+                  <> " の Block の Service "
+                  <> service.module
+                  <> " の allow に Anyone がある(公開の読みの札では、ログインしていない人も同じ root の非公開の書きの時刻を聞ける。Live の Block は root の当事者だけが通る読みにする)",
+              ),
+            ]
+            False -> []
+          }
       }
   }
   let text =

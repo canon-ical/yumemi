@@ -1,7 +1,8 @@
 // yumemi-live-2(0.14)── 生成した面の shell の断片の口を node で叩く。article の fixture の写しの頁の
 // `Fixed(.., blocks.Article, ..)` を `Live(.., cell: Span(..), edge: Bottom)` に替え、生成器を走らせ(compile 済みの
 // `build/dev/javascript/yumemi/yumemi/gen.mjs`)、面を `gleam build` し、生成の `shell.mjs` を偽の APP で叩く。
-// 1 行 1 件の ok / NG。写しは `build/live2-fx`(git の外)。
+// 1 行 1 件の ok / NG。写しは `build/live2-fx`(git の外)。0.14.1:fixture の `article_read` は公開の読みなので、まず
+// そのまま生成して止まる(停止コード 4)のを見て、Anyone の句を外した写しで生成し直す。
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -40,10 +41,24 @@ for (const face of ["public", "admin"]) {
 }
 const runner = path.join(work, "gen-run.mjs");
 fs.writeFileSync(runner, `import { main } from ${JSON.stringify(pathToFileURL(path.join(root, "build/dev/javascript/yumemi/yumemi/gen.mjs")).href)};\nmain();\n`);
+// 0.14.1:fixture の `article_read` は公開の読み(allow に Anyone)なので、そのまま Live にすると生成器が止まる
+const publicStatus = run(process.execPath, [runner, app, app], root, "gen-public.txt");
+const publicLog = fs.readFileSync(path.join(work, "gen-public.txt"), "utf8");
+check("generator: Live on a public read (allow has Anyone) stops with code 4", publicStatus !== 0 && publicLog.includes("停止コード: 4") && publicLog.includes("[exit 4 宣言の矛盾] public pages/article/arg_slug/page: Live(block: Article) の Block の Service article_read の allow に Anyone がある"), `status ${publicStatus} ${publicLog.slice(-400)}`);
+// Anyone の句を外した写し(Staff だけが読む)で生成する
+const readFile = path.join(app, "src/service/article_read.gleam");
+const readText = fs.readFileSync(readFile, "utf8");
+const publicClause = "    allow.Clause(\n      who: allow.Anyone,\n      at: allow.Only([article.Published]),\n      owner: allow.NoOwner,\n    ),\n";
+fs.writeFileSync(readFile, readText.replace(publicClause, ""));
 const genStatus = run(process.execPath, [runner, app, app], root, "gen.txt");
 const genLog = fs.readFileSync(path.join(work, "gen.txt"), "utf8");
 check("generator: the Live page generates with stop code 0", genStatus === 0 && genLog.includes("停止コード: 0"), genLog.slice(-400));
 check("generator: the warning names the missing el.fresh", genLog.includes("Live(block: Article) は edge: Bottom で、Block に el.fresh が無い"));
+// 札の表(api の registry の `live`):読みの行は Live の Block の読み `article_read` だけ、書きの行は fixture と同じ
+const liveTable = (text) => (text.match(/export const live = \{[^]*?\};\n/) ?? [""])[0];
+const copyTable = liveTable(fs.readFileSync(path.join(app, "src/gen/registry.mjs"), "utf8"));
+const fixtureTable = liveTable(fs.readFileSync(path.join(root, "gen/fixtures/article/src/gen/registry.mjs"), "utf8"));
+check("registry: the live table lists the Live Block's read (article_read) and no other read", readText.includes(publicClause) && copyTable.includes("  article_read: ['article', 'id'],\n") && !fixtureTable.includes("article_read:") && copyTable.replace("  article_read: ['article', 'id'],\n", "") === fixtureTable, `${copyTable} / ${fixtureTable}`);
 const buildStatus = run("gleam", ["build", "--target", "javascript"], path.join(app, "public"), "build.txt");
 check("face: the generated Gleam (loader with live_article) compiles", buildStatus === 0, fs.readFileSync(path.join(work, "build.txt"), "utf8").slice(-600));
 if (buildStatus !== 0) {
@@ -129,12 +144,14 @@ check("token: the attribute value is escaped", odd.text.includes('token="a&quot;
 // client.mjs:Live の runtime を起こし、逃げ道に yumemi.block を渡す
 const client = fs.readFileSync(path.join(app, "public/priv/static/_yumemi/client.mjs"), "utf8");
 check("client.mjs (bundled): defines yumemi-live, starts it with the socket path and passes yumemi.block to escapes", client.includes('customElements.define("yumemi-live"') && /start\w*\(\{ socket: "\/api\/_yumemi\/live", reload(: \w+)? \}\)/.test(client) && client.includes("yumemi: { block"));
-// admin の面(Live 無し)は今のまま
+// admin の面(Live 無し)は今のまま。1 行目の header の入力の hash だけは写しの `article_read` の字(Anyone の句を外した)で
+// 動くので伏せて比べる
+const unhashed = (text) => text.replace(/\[sha256:[0-9a-f]+\]/, "[sha256:…]");
 const adminShell = fs.readFileSync(path.join(app, "admin/src/gen/shell.mjs"), "utf8");
 const fixtureAdmin = fs.readFileSync(path.join(root, "gen/fixtures/article/admin/src/gen/shell.mjs"), "utf8");
-check("faces without Live: the admin shell is byte-identical to the committed fixture", adminShell === fixtureAdmin);
+check("faces without Live: the admin shell is the committed fixture (but the header's input hash)", unhashed(adminShell) === unhashed(fixtureAdmin));
 const adminGate = fs.readFileSync(path.join(app, "admin/src/gen/gate.mjs"), "utf8");
-check("faces without Live: the admin gate is byte-identical to the committed fixture", adminGate === fs.readFileSync(path.join(root, "gen/fixtures/article/admin/src/gen/gate.mjs"), "utf8"));
+check("faces without Live: the admin gate is the committed fixture (but the header's input hash)", unhashed(adminGate) === unhashed(fs.readFileSync(path.join(root, "gen/fixtures/article/admin/src/gen/gate.mjs"), "utf8")));
 
 console.log(out.join("\n"));
 process.exit(0);

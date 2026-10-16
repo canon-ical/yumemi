@@ -36,13 +36,11 @@ export const registry = [
 
 export const byName = Object.fromEntries(registry.filter((record) => !record.target && record.module).map((record) => [record.name, record]));
 
-// 合図の宛先(0.14):Service -> [root の Entity, root の行の id の列]
+// 合図の宛先(0.14):Service -> [root の Entity, root の行の id の列]。読みは面の Live の Block の読みだけ(0.14.1)
 export const live = {
   article_create: ['article', 'id'],
   article_publish: ['article', 'id'],
-  article_read: ['article', 'id'],
   article_retract: ['article', 'id'],
-  article_title: ['article', 'id'],
 };
 
 for (const record of registry) if(record.module) validateWho([...record.module.service.allow]);
