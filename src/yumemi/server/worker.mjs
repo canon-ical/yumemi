@@ -1,7 +1,7 @@
 // yumemi yumemi/server ── Cloudflare の adapter(WGy、0.11.1)。app の生成物 `gen/shell.mjs` が
 // fetch / queue の口と、AppSystem(service binding の RPC)、Durable Object の class をここから作る。
 // cron の式ごとの分岐(scheduled)は `src/server.gleam` の `cron` から生成物に書く。
-// 合図の器 `YumemiLive`(0.15)も生成の `shell.mjs` が export する(binding `YUMEMI_LIVE` を足した app だけが使う)。
+// 合図の器 `YumemiLive`(0.14)も生成の `shell.mjs` が export する(binding `YUMEMI_LIVE` を足した app だけが使う)。
 import { DurableObject, WorkerEntrypoint } from 'cloudflare:workers';
 import { recording } from './outbox.mjs';
 import { expHeader, partyHeader } from './live.mjs';
@@ -57,7 +57,7 @@ export function durableObject(Adapter, methods) {
 }
 
 /**
- * 合図の器(0.15)。宛先(`<entity>:<id>`)ごとに 1 つ(`idFromName`)。値を storage に持たず(使うのは alarm だけ)、
+ * 合図の器(0.14)。宛先(`<entity>:<id>`)ごとに 1 つ(`idFromName`)。値を storage に持たず(使うのは alarm だけ)、
  * Hibernation WebSocket で繋がっている socket を持つ。`fetch` は socket の受けで、入口の socket の口が札(署名・
  * Origin・party)を確かめた後の内部の要求だけが来る。要求の `x-yumemi-live-exp`(札の期限、秒)と party を socket の
  * attachment に持ち、期限の無い・過ぎた要求は 403。期限の来た socket は alarm が閉じる(close code 4001 `expired`)。

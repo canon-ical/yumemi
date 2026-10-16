@@ -431,7 +431,7 @@ var YumemiInteractive = class extends ElementBase {
 };
 var YumemiEscape = class _YumemiEscape extends ElementBase {
   static yumemiMounts = {};
-  /// 逃げ道の `mount` の 2 つ目の引数(0.15、`Live` のある面は `{ block }`、`yumemi/front/live_block.mjs`)
+  /// 逃げ道の `mount` の 2 つ目の引数(0.14、`Live` のある面は `{ block }`、`yumemi/front/live_block.mjs`)
   static yumemiApi = {};
   connectedCallback() {
     if (this.yumemiUnmount !== void 0) return;

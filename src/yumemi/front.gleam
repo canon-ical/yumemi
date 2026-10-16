@@ -236,12 +236,12 @@ pub type Placement(service, block) {
   Fixed(area: String, block: block, cell: Cell)
   Widget(area: String, of: service, render: Render(block))
   /// `Fixed` と同じ置き場で、Block の読みの root の Entity に誰かの書きが commit されたら、この Block だけを
-  /// 取り直して今の要素に当てる(0.15)。合図の宛先・socket・繋ぎ直し・書きかけの保護・スクロールは生成物と
+  /// 取り直して今の要素に当てる(0.14)。合図の宛先・socket・繋ぎ直し・書きかけの保護・スクロールは生成物と
   /// runtime が持つ。v0 は Page の placements だけ(Layout には置けない)。
   Live(area: String, block: block, cell: Cell, edge: Edge)
 }
 
-/// 新しいものが入る端(0.15)。`Bottom` は最下部にいれば追い、上を読んでいれば留まって `el.fresh` を出す。
+/// 新しいものが入る端(0.14)。`Bottom` は最下部にいれば追い、上を読んでいれば留まって `el.fresh` を出す。
 /// `Top` と `Anywhere` は留まる(見えている行の位置は browser の scroll anchoring が保つ)。
 pub type Edge {
   Bottom

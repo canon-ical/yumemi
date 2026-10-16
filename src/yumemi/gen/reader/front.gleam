@@ -214,7 +214,7 @@ pub type Area {
 }
 
 pub type Placement {
-  /// `live` は ★ の `Live(.., edge:)`(0.15)の端の名(`Bottom`・`Top`・`Anywhere`)。`Fixed` は None。
+  /// `live` は ★ の `Live(.., edge:)`(0.14)の端の名(`Bottom`・`Top`・`Anywhere`)。`Fixed` は None。
   /// 置き場と Block の読みは `Fixed` と同じなので、同じ構成子で持つ。
   Fixed(area: String, block: String, cell: Cell, live: Option(String))
   Widget(area: String, service: String, render: Render)

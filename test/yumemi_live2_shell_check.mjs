@@ -1,4 +1,4 @@
-// yumemi-live-2(0.15)── 生成した面の shell の断片の口を node で叩く。article の fixture の写しの頁の
+// yumemi-live-2(0.14)── 生成した面の shell の断片の口を node で叩く。article の fixture の写しの頁の
 // `Fixed(.., blocks.Article, ..)` を `Live(.., cell: Span(..), edge: Bottom)` に替え、生成器を走らせ(compile 済みの
 // `build/dev/javascript/yumemi/yumemi/gen.mjs`)、面を `gleam build` し、生成の `shell.mjs` を偽の APP で叩く。
 // 1 行 1 件の ok / NG。写しは `build/live2-fx`(git の外)。

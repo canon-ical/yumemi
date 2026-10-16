@@ -12,7 +12,7 @@
 // - `reloads`:単一の値は読みを叩いて out に入れる(前の読みは中断)、一覧は query を替えた URL へ履歴を積まずに移る
 // - 状態は `ElementInternals.states`(`:state()`)に立て、無ければ `data-yumemi-state` に同じ名を書く
 // - 逃げ道:`<yumemi-escape name>` の接続で `mount(element, yumemi)` を呼び、外れたら戻りの関数を呼ぶ(`yumemi` は
-//   `Live` のある面で `{ block }`、0.15。他の面は空の object)
+//   `Live` のある面で `{ block }`、0.14。他の面は空の object)
 // - dialog:invoker commands(`command` / `commandfor`)の無い browser では click で `showModal()` / `close()` を代わる
 // - notice:After の文言を sessionStorage の 1 つの鍵に置き、移った先(読み直した先)の `[data-yumemi-notice]` に 1 回出す
 // - 冪等キー(0.13):書きの送り(GET でも読みでも上げ口でもない)は、送る Args にキー(UUID)を 1 つ作って
@@ -490,7 +490,7 @@ class YumemiInteractive extends ElementBase {
 
 class YumemiEscape extends ElementBase {
   static yumemiMounts = {};
-  /// 逃げ道の `mount` の 2 つ目の引数(0.15、`Live` のある面は `{ block }`、`yumemi/front/live_block.mjs`)
+  /// 逃げ道の `mount` の 2 つ目の引数(0.14、`Live` のある面は `{ block }`、`yumemi/front/live_block.mjs`)
   static yumemiApi = {};
 
   connectedCallback() {

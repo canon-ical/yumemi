@@ -1,4 +1,4 @@
-// yumemi-live-2(0.15)── `Live` の Block の client の runtime(`src/yumemi/front/live_block.mjs`)を Playwright で回す。
+// yumemi-live-2(0.14)── `Live` の Block の client の runtime(`src/yumemi/front/live_block.mjs`)を Playwright で回す。
 // 試験の server(この process の node の HTTP)は、shell の形の頁(`<yumemi-live name edge token>` で包んだ Block)・
 // 断片の口(`x-yumemi-block`)・socket の口(札・Origin を見て `1` を流す、手で書いた WebSocket)・書きの口を持つ。
 // 頁の client は src の `interactive.mjs` と `live_block.mjs` をそのまま読む。1 行 1 件の ok / NG を出す。

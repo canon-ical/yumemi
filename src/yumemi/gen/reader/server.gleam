@@ -794,11 +794,11 @@ pub fn notes(app: model.App) -> List(stop.Note) {
         False -> Ok("subject_free の Service が無い: " <> name)
       }
     })
-  // 合図の器(0.15)の class の名は生成の shell.mjs が export するので、★ の器には使えない
+  // 合図の器(0.14)の class の名は生成の shell.mjs が export するので、★ の器には使えない
   let reserved_objects =
     list.filter_map(classes, fn(class) {
       case class == "YumemiLive" {
-        True -> Ok("durable_objects の class の名 YumemiLive は合図の器の名(0.15)")
+        True -> Ok("durable_objects の class の名 YumemiLive は合図の器の名(0.14)")
         False -> Error(Nil)
       }
     })

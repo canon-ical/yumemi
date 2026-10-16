@@ -525,7 +525,7 @@ fn registry_text(app: App, units: List(Unit), input: String) -> String {
   <> "for (const record of registry) if(record.module) validateWho([...record.module.service.allow]);\n"
 }
 
-/// 合図の宛先の表(0.15)。root の Entity を持つ Service -> [Entity の名, root の行の id の列]。読みは札の宛先、書きは
+/// 合図の宛先の表(0.14)。root の Entity を持つ Service -> [Entity の名, root の行の id の列]。読みは札の宛先、書きは
 /// commit の後の合図の宛先(`yumemi/server/live.mjs`)。★ は宛先を書かない ── 読みと書きの root が同じ Entity なら
 /// 同じ宛先になる。
 fn live_text(app: App, services: List(Service)) -> String {
@@ -543,7 +543,7 @@ fn live_text(app: App, services: List(Service)) -> String {
         None -> Error(Nil)
       }
     })
-  "// 合図の宛先(0.15):Service -> [root の Entity, root の行の id の列]\n"
+  "// 合図の宛先(0.14):Service -> [root の Entity, root の行の id の列]\n"
   <> case rows {
     [] -> "export const live = {};\n\n"
     _ -> "export const live = {\n" <> string.concat(rows) <> "};\n\n"
@@ -1343,7 +1343,7 @@ fn shell_text(app: App, input: String) -> String {
   <> "execution.waitUntil(sweep(db,env));\n"
   <> " }\n};\n"
   <> "export const AppSystem=appSystem({database,observe,issueSession,revokeParty,resolveSession,run});\n"
-  // 合図の器(0.15)。binding `YUMEMI_LIVE` と DO の migration を足した app だけが使う(宣言には現れない)
+  // 合図の器(0.14)。binding `YUMEMI_LIVE` と DO の migration を足した app だけが使う(宣言には現れない)
   <> "export { YumemiLive } from '"
   <> framework
   <> "worker.mjs';\n"

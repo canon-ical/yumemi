@@ -1,4 +1,4 @@
-//// yumemi-live-2(0.15)── `Live` の Block を取り直して当てる(面と client の側)。
+//// yumemi-live-2(0.14)── `Live` の Block を取り直して当てる(面と client の側)。
 //// ★ は Page の placements に `Live(area:, block:, cell:, edge:)` と書くだけ。生成器は loader の断片の関数・shell の
 //// 断片の口(`x-yumemi-block`)・`<yumemi-live>` の包み・門の数えない印・client.mjs の起こしを書き、宣言の矛盾を止める。
 //// client の runtime(`yumemi/front/live_block.mjs`)は Playwright で回す(`yumemi_live2_check.mjs`)。

@@ -457,7 +457,7 @@ export function runtime(spec) {
    if(state.eventId) pending.push(statement('framework/outbox_done',[state.eventId]));
    for(const stage of ['entry','resolve','decode','judge','execute','commit']) pending.push(statement('framework/audit',[seed,stage,record.name,state.resolved?.party??null,'ok',at]));
    const result=await transactionWithRetry(db,pending);
-   // 入口の合図(0.15)の印。commit した後に 1 回(写しの state でも入口の元の要求に立つ)
+   // 入口の合図(0.14)の印。commit した後に 1 回(写しの state でも入口の元の要求に立つ)
    state.afterCommit?.();
    for(let index=0;index<pending.length;index++) {
     const operation=pending[index],value=operation.created;

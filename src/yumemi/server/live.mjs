@@ -1,4 +1,4 @@
-// yumemi yumemi/server ── 他人の書きを画面に届ける合図の札と宛先(0.15、yumemi-live-1)。
+// yumemi yumemi/server ── 他人の書きを画面に届ける合図の札と宛先(0.14、yumemi-live-1)。
 // 合図の宛先は Service の root の Entity と、root の行の id の組(`<entity>:<id>`)。表は生成の `registry.mjs` の
 // `live`(Service -> [Entity の名, root の行の id の列])で、★ は書かない。
 //

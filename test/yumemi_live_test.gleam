@@ -1,4 +1,4 @@
-//// yumemi-live-1(0.15)── 他人の書き込みを画面に届ける合図の器と札(api の側)。
+//// yumemi-live-1(0.14)── 他人の書き込みを画面に届ける合図の器と札(api の側)。
 //// 生成器は registry に合図の宛先の表(`live`、root の Entity を持つ Service -> [Entity, root の行の id の列])を
 //// 書き、http_runtime がそれを入口へ渡し、shell が合図の器 `YumemiLive` を export する。★ の宣言と型は増えない。
 //// 器・札・socket の口は workerd で回す(`yumemi_live_check.mjs`)。

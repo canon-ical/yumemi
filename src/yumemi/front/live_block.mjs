@@ -1,4 +1,4 @@
-// yumemi yumemi/front ── `Live` の Block の runtime(0.15、87「案 (i′)」)。生成の `priv/static/_yumemi/client.mjs`
+// yumemi yumemi/front ── `Live` の Block の runtime(0.14、87「案 (i′)」)。生成の `priv/static/_yumemi/client.mjs`
 // が `start({socket, reload})` を呼ぶ。★ は Page の placements に `Live(.., edge:)` と書くだけで、ここは目に無い。
 //
 // - `<yumemi-live name edge token>`(`display: contents`)は shell が `Live` の Block の外に描く。接続すると札

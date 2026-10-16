@@ -1,4 +1,4 @@
-// yumemi-live-1(0.15)── 合図の器・札・socket の口を workerd で回す。`yumemi_live_test_ffi.mjs` が
+// yumemi-live-1(0.14)── 合図の器・札・socket の口を workerd で回す。`yumemi_live_test_ffi.mjs` が
 // `node test/yumemi_live_check.mjs` で走らせ、1 行 1 件の ok / NG を出す。
 // `yumemi_live_worker.mjs` を root の esbuild で束ね、root の workerd(devDependencies)に DO の namespace(`YumemiLive`)・
 // 鍵・host の binding を付けて載せ、node の WebSocket と HTTP で叩く。workerd の log(stderr)も読む。

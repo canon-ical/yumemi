@@ -36,7 +36,7 @@ export const registry = [
 
 export const byName = Object.fromEntries(registry.filter((record) => !record.target && record.module).map((record) => [record.name, record]));
 
-// 合図の宛先(0.15):Service -> [root の Entity, root の行の id の列]
+// 合図の宛先(0.14):Service -> [root の Entity, root の行の id の列]
 export const live = {
   article_create: ['article', 'id'],
   article_publish: ['article', 'id'],

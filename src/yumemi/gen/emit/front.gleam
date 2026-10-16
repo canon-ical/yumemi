@@ -3101,7 +3101,7 @@ fn fixed_placement_body(
   }
 }
 
-// ── Live(0.15)────────────────────────────────────────────────────────────
+// ── Live(0.14)────────────────────────────────────────────────────────────
 
 /// Page の sp の placements のうち `Live` のもの(Block の名と端)。
 fn page_lives(page: reader_front.Page) -> List(#(String, String)) {
@@ -3171,7 +3171,7 @@ fn live_wrap(body: String, block: String, live: Option(String)) -> String {
   }
 }
 
-/// loader の断片の関数(0.15):`live_<name>(vars, <Block の読み>)` が `<style>` と `<yumemi-live>` を返す。
+/// loader の断片の関数(0.14):`live_<name>(vars, <Block の読み>)` が `<style>` と `<yumemi-live>` を返す。
 /// 頁の Data の代わりに Block の読みと Vars だけの record を置き、置き場の本文は頁と同じ字を使う。
 fn page_live_text(
   app: model.App,
@@ -3243,7 +3243,7 @@ fn page_live_text(
   |> string.join("\n")
 }
 
-/// `Live`(0.15)の検査。止めるもの(停止コード 4、宣言の矛盾):Layout の placements の `Live`(v0 は Page だけ)、
+/// `Live`(0.14)の検査。止めるもの(停止コード 4、宣言の矛盾):Layout の placements の `Live`(v0 は Page だけ)、
 /// 同じ Page に同じ Block の `Live` が 2 つ、端の名が読めない、Block が Service の Out を受けない・その Service が書き
 /// (`effect: Write`)・その Service に root の Entity が無い(合図の宛先が導けない)。警告(停止コード 0):Block の中の
 /// 鍵の無い並び(`el.each`・`list.map`)の要素が interactive Component か `details` を持つ(鍵が無いと書きかけや開閉が別の行に化ける)、`edge: Bottom` の Block に
@@ -4362,7 +4362,7 @@ fn front_route_paths(front: reader_front.Front) -> List(String) {
   |> list.sort(route_order)
 }
 
-/// `Live` の Block の runtime を起こす client.mjs の行(0.15)。面に `Live` が無ければ ""。socket の口は面の入口の
+/// `Live` の Block の runtime を起こす client.mjs の行(0.14)。面に `Live` が無ければ ""。socket の口は面の入口の
 /// prefix + `/_yumemi/live`(api の口、yumemi-live-1)。頁ごと取り直すのは navigate の `reload`(route 表が無ければ
 /// 頁の読み込み)。
 fn live_client_text(
@@ -5575,7 +5575,7 @@ fn shell_runtime_text(
   <> "    }\n"
   <> case include_live {
     True ->
-      "    // 0.15:読みの札(`x-yumemi-live`)。`Live` の Block の読みのものを `<yumemi-live>` に差す\n"
+      "    // 0.14:読みの札(`x-yumemi-live`)。`Live` の Block の読みのものを `<yumemi-live>` に差す\n"
       <> "    const token = response.headers.get(\"x-yumemi-live\");\n"
       <> "    if (token) tokens.set(source.service, token);\n"
     False -> ""
@@ -5661,7 +5661,7 @@ fn shell_runtime_text(
   <> "  }\n"
   <> case include_live {
     True ->
-      "  // 0.15:`Live` の Block の断片の口。門は頁と同じ道を通った後(数える印は差さない)\n"
+      "  // 0.14:`Live` の Block の断片の口。門は頁と同じ道を通った後(数える印は差さない)\n"
       <> "  const block = request.headers.get(\"x-yumemi-block\");\n"
       <> "  if (block !== null) return renderBlock(request, env, matched, before.session, block);\n"
     False -> ""
@@ -5670,7 +5670,7 @@ fn shell_runtime_text(
   <> "});\n"
 }
 
-/// 頁の Vars を組む字(renderPage と、0.15 の断片の口 renderBlock が同じ字を使う)。
+/// 頁の Vars を組む字(renderPage と、0.14 の断片の口 renderBlock が同じ字を使う)。
 fn shell_vars_text(include_route: Bool) -> String {
   ""
   <> "  const vars = {};\n"
@@ -5731,7 +5731,7 @@ fn shell_vars_text(include_route: Bool) -> String {
   <> "  }\n"
 }
 
-/// 断片の口(0.15)。`x-yumemi-block: <name>` の要求で、その `Live` の Block の読み(と 404・403 の意味を保つ
+/// 断片の口(0.14)。`x-yumemi-block: <name>` の要求で、その `Live` の Block の読み(と 404・403 の意味を保つ
 /// root の読み)だけを叩き、`<style>` と `<yumemi-live>` だけを返す。Layout の読みと givens は叩かない。
 /// 頁の Block でない名・読めない(403・404)は頁と同じ status ── client は頁ごと取り直す。
 fn shell_block_text(include_route: Bool) -> String {

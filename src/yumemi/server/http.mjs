@@ -28,7 +28,7 @@
 // 無ければキーを持つ書きを 503 で断る(鍵の無い hash に戻らない)。比べは前の鍵(`_PREVIOUS`)と 0.13.1 までの印の無い
 // SHA-256 の行にも当てる(残すのは今の鍵の HMAC だけ)。
 //
-// 合図(0.15):`live`(生成の registry の表、Service -> [Entity, root の行の id の列])に在る読みの Service が通れば、
+// 合図(0.14):`live`(生成の registry の表、Service -> [Entity, root の行の id の列])に在る読みの Service が通れば、
 // 応答に札の header `x-yumemi-live` を付ける。書きの Service が commit したら、応答の後に(`execution.waitUntil`)
 // 宛先の DO `YumemiLive` へ合図する。入口の prefix + `/_yumemi/live` の GET は socket の口で、札の署名・期限・
 // session の party(party の無い札は browser の印)・`Origin` を見てから、札の期限と party を載せて DO へ渡す(外れは
@@ -277,7 +277,7 @@ export function http(spec) {
    s.pathArgs={};
    return;
   }
-  // socket の口(0.15):入口の prefix + `/_yumemi/live` の GET。API key の入口には無い(札は session の party に結ぶ)
+  // socket の口(0.14):入口の prefix + `/_yumemi/live` の GET。API key の入口には無い(札は session の party に結ぶ)
   if(s.request.method==='GET'&&s.url.pathname===s.entry.prefix+'/_yumemi/live'&&!isApiKeyEntry(s.entry)) {
    s.live=true;
    s.record={name:'_yumemi_live',method:'GET',path:s.url.pathname,who:'anyone'};
@@ -476,7 +476,7 @@ export function http(spec) {
    return failure(s,error);
   }
  }
- // ── 合図(0.15)────────────────────────────────────────────────────────────
+ // ── 合図(0.14)────────────────────────────────────────────────────────────
  const effectOf=s=>s.record?.module?c.tag(s.record.module.effect):null;
  // 読みの Service が通ったら札を作って `s.liveToken` に置く(`response` が 200 の応答に header で付ける)。binding が
  // 無ければ何もしない。鍵が無ければ札を付けず 1 行。API key の入口には付けない(socket の口が無い)
