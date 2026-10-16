@@ -138,7 +138,7 @@ pub fn text(
   let imports =
     string.concat([
       "import { Ok, Error } from '../gleam.mjs';\n",
-      "import { registry } from './registry.mjs';\n",
+      "import { registry, live } from './registry.mjs';\n",
       "import { attached } from './attached.mjs';\n",
       "import * as c from './codec.mjs';\n",
       "import * as runtime from './runtime.mjs';\n",
@@ -317,7 +317,7 @@ pub fn text(
         False -> "'[0-9a-f]{64}'"
       },
       ";\n",
-      "export const {sessionCookie,cookies,signBrowser,verifyBrowser,host,route,origin,browser,admit,resolve,subject,decode,judge,execute,apiEncode,logicFailureStatus}=http({Ok,Error,registry,attached,c,runtime,hosts,args,modules,phaseGates,accepted,ports,hooks,subjects,roles,browserCookie,pageviews,subjectFree,apiKeyPattern:keyPattern});\n",
+      "export const {sessionCookie,cookies,signBrowser,verifyBrowser,host,route,origin,browser,admit,resolve,subject,decode,judge,execute,apiEncode,logicFailureStatus}=http({Ok,Error,registry,live,attached,c,runtime,hosts,args,modules,phaseGates,accepted,ports,hooks,subjects,roles,browserCookie,pageviews,subjectFree,apiKeyPattern:keyPattern});\n",
     ])
   #(header <> imports <> body, notes)
 }

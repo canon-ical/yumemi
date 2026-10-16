@@ -1,6 +1,7 @@
 // yumemi yumemi/server ── Cloudflare の adapter(WGy、0.11.1)。app の生成物 `gen/shell.mjs` が
 // fetch / queue の口と、AppSystem(service binding の RPC)、Durable Object の class をここから作る。
 // cron の式ごとの分岐(scheduled)は `src/server.gleam` の `cron` から生成物に書く。
+// 合図の器 `YumemiLive`(0.15)も生成の `shell.mjs` が export する(binding `YUMEMI_LIVE` を足した app だけが使う)。
 import { DurableObject, WorkerEntrypoint } from 'cloudflare:workers';
 import { recording } from './outbox.mjs';
 
@@ -15,7 +16,7 @@ export function handlers({ dispatch, database, observe, sweep, consume }) {
    const db=database(env,observe);
    const writes=recording(db);
    let response;
-   try {response=await dispatch({request,env,db:writes.db,invocation:++invocation});}
+   try {response=await dispatch({request,env,db:writes.db,invocation:++invocation,execution});}
    finally {if(response?.status===202||writes.wrote()) execution.waitUntil(sweep(db,env));}
    return response;
   },
@@ -52,4 +53,33 @@ export function durableObject(Adapter, methods) {
   Object.defineProperty(Object_.prototype,name,{value(...args){return this[adapterOf][name](...args);},writable:true,configurable:true});
  }
  return Object_;
+}
+
+/**
+ * 合図の器(0.15)。宛先(`<entity>:<id>`)ごとに 1 つ(`idFromName`)。storage を持たず、Hibernation WebSocket で
+ * 繋がっている socket を持つだけ。`fetch` は socket の受け(札・Origin・party は入口の socket の口が確かめ済み)、
+ * `publish()` は繋がっている全部に `1` の 1 語を送り、送った数を返す。ping には pong を runtime が返す(DO を起こさない)。
+ * socket から来た他の字は読まない。
+ */
+export class YumemiLive extends DurableObject {
+ constructor(ctx,env) {
+  super(ctx,env);
+  ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping','pong'));
+ }
+ fetch(request) {
+  if((request.headers.get('upgrade')??'').toLowerCase()!=='websocket') return new Response(null,{status:426});
+  const [client,server]=Object.values(new WebSocketPair());
+  this.ctx.acceptWebSocket(server);
+  return new Response(null,{status:101,webSocket:client});
+ }
+ publish() {
+  let sent=0;
+  for(const socket of this.ctx.getWebSockets()) {
+   try { socket.send('1'); sent++; } catch {}
+  }
+  return sent;
+ }
+ webSocketMessage() {}
+ webSocketClose(socket) { try { socket.close(); } catch {} }
+ webSocketError(socket) { try { socket.close(); } catch {} }
 }

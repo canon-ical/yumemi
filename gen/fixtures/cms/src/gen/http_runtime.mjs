@@ -1,6 +1,6 @@
 //// GENERATED from entry.entries / service declarations / framework dispatch [sha256:6a5b1b1c95d8] — 手で編集しない
 import { Ok, Error } from '../gleam.mjs';
-import { registry } from './registry.mjs';
+import { registry, live } from './registry.mjs';
 import { attached } from './attached.mjs';
 import * as c from './codec.mjs';
 import * as runtime from './runtime.mjs';
@@ -31,4 +31,4 @@ const browserCookie={cookie:'_fx',binding:'FIXTURE_BROWSER_KEY',maxAgeDays:400,d
 const pageviews={'public':{only:[{type:'declared',kind:'adult'}],fields:[{type:'kind'},{type:'client_at'},{type:'path'},{type:'previous'},{type:'referrer'},{type:'query',name:'source_key',max:16}],sink:{type:'store',resolve:'page_resolve',rollupBy:['section'],excludeWhen:['own']}}};
 const subjectFree=[];
 const keyPattern='[0-9a-f]{64}';
-export const {sessionCookie,cookies,signBrowser,verifyBrowser,host,route,origin,browser,admit,resolve,subject,decode,judge,execute,apiEncode,logicFailureStatus}=http({Ok,Error,registry,attached,c,runtime,hosts,args,modules,phaseGates,accepted,ports,hooks,subjects,roles,browserCookie,pageviews,subjectFree,apiKeyPattern:keyPattern});
+export const {sessionCookie,cookies,signBrowser,verifyBrowser,host,route,origin,browser,admit,resolve,subject,decode,judge,execute,apiEncode,logicFailureStatus}=http({Ok,Error,registry,live,attached,c,runtime,hosts,args,modules,phaseGates,accepted,ports,hooks,subjects,roles,browserCookie,pageviews,subjectFree,apiKeyPattern:keyPattern});

@@ -1,7 +1,8 @@
 {
   "private": true,
-  "description": "yumemi の test だけが使う道具。生成器の test は面の node_modules の代わりにこの esbuild を指す(Hex の tarball には入らない)。",
+  "description": "yumemi の test だけが使う道具。生成器の test は面の node_modules の代わりにこの esbuild を指す。workerd は合図の器(0.15)の test が載せる(Hex の tarball には入らない)。",
   "devDependencies": {
-    "esbuild": "0.28.2"
+    "esbuild": "0.28.2",
+    "workerd": "1.20260915.1"
   }
 }

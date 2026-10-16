@@ -27,8 +27,14 @@
 // `request_hash` は env の鍵(`IDEMPOTENCY_HASH_KEY`)の HMAC-SHA256 に版の印 `h1:` を付けたもの(0.13.2)。鍵が
 // 無ければキーを持つ書きを 503 で断る(鍵の無い hash に戻らない)。比べは前の鍵(`_PREVIOUS`)と 0.13.1 までの印の無い
 // SHA-256 の行にも当てる(残すのは今の鍵の HMAC だけ)。
+//
+// 合図(0.15):`live`(生成の registry の表、Service -> [Entity, root の行の id の列])に在る読みの Service が通れば、
+// 応答に札の header `x-yumemi-live` を付ける。書きの Service が commit したら、応答の後に(`execution.waitUntil`)
+// 宛先の DO `YumemiLive` へ合図する。入口の prefix + `/_yumemi/live` の GET は socket の口で、札の署名・期限・
+// session の party・`Origin` を見てから DO へ渡す(外れは 403、理由を log に 1 行)。札・合図は `live.mjs`。
 import * as framework_entry from '../entry.mjs';
 import * as color from '../front/color.mjs';
+import * as live from './live.mjs';
 
 // request_hash の鍵の env の名。app は宣言しない(`IDEMPOTENCY_RETENTION_HOURS` と同じ)
 const idempotencyHashKey='IDEMPOTENCY_HASH_KEY';
@@ -179,6 +185,7 @@ export function http(spec) {
   if(status===401) headers.set('www-authenticate','Bearer');
   for(const cookie of s.setCookies) headers.append('set-cookie',cookie);
   if(s.env.ISOLATE_MARKER==='1') headers.set('x-isolate-marker',String(s.invocation??1));
+  if(s.liveToken&&status===200) headers.set(live.header,s.liveToken);
   return new Response(JSON.stringify(body??null),{status,headers});
  }
  function emptyResponse(s,status=202) {
@@ -198,6 +205,8 @@ export function http(spec) {
  function failure(s,error) {
   // 数える口の受け口は、どの段で落ちても本体無しの 202(送り手に理由を返さない)。想定外の失敗だけ log へ
   if(s.pageview) { pageviewLog(s,error); return emptyResponse(s,202); }
+  // socket の口は、門の段(session・入口)の拒否も 403 と log の 1 行。DB に届かないなどの 5xx は下の道
+  if(s.live&&error?.status!==undefined&&error.status<500) return liveRefused(s,error.message);
   if(error.connector) return response(s,{code:'upstream_unavailable',connector:error.connector},503);
   const custom=hook('failure')?.(s,error,{response});
   if(custom) return custom;
@@ -264,6 +273,13 @@ export function http(spec) {
   if(counted&&s.request.method==='POST'&&s.url.pathname===s.entry.prefix+'/_yumemi/pageviews') {
    s.pageview=counted;
    s.record={name:'_yumemi_pageviews',method:'POST',path:s.url.pathname,who:'anyone'};
+   s.pathArgs={};
+   return;
+  }
+  // socket の口(0.15):入口の prefix + `/_yumemi/live` の GET。API key の入口には無い(札は session の party に結ぶ)
+  if(s.request.method==='GET'&&s.url.pathname===s.entry.prefix+'/_yumemi/live'&&!isApiKeyEntry(s.entry)) {
+   s.live=true;
+   s.record={name:'_yumemi_live',method:'GET',path:s.url.pathname,who:'anyone'};
    s.pathArgs={};
    return;
   }
@@ -334,7 +350,7 @@ export function http(spec) {
   if(s.record?.module&&!(spec.subjectFree??[]).includes(s.record.name)&&s.resolved?.subject_kind&&c.tag(s.entry.subject)==='subjects'&&![...s.entry.subject[0]].some(x=>c.tag(x)===s.resolved.subject_kind)) fail('forbidden',403);
  });
  const decode=check('decode',8,async s=>{
-  if(s.pageview) return;
+  if(s.pageview||s.live) return;
   let body={};
   if(['POST','PUT','DELETE'].includes(s.request.method)) {
    const contentType=(s.request.headers.get('content-type')??'').split(';',1)[0].trim().toLowerCase();
@@ -385,7 +401,7 @@ export function http(spec) {
  }
  const judge=check('judge',9,s=>{
   const resolved=s.resolved,who=new Set(['anyone']);
-  if(s.pageview) return;
+  if(s.pageview||s.live) return;
   hook('judge')?.(s,{fail});
   if(resolved) who.add('party');
   if(resolved?.subject_kind) { who.add('as_'+resolved.subject_kind); who.add(resolved.subject_kind); }
@@ -405,6 +421,7 @@ export function http(spec) {
   s.trace.push('execute:10');
   try {
    if(s.pageview) return await pageview(s);
+   if(s.live) return await liveSocket(s);
    const declares=roleKinds(s.record.name,'declare');
    if(declares.length) {
     // 申告を印の上の欄として焼く。印が無ければ作り、他の種類の申告の欄はそのまま残す
@@ -441,16 +458,66 @@ export function http(spec) {
     if(prior) return prior;
     s.idempotency=keyed;
    }
-   const outcome=await spec.runtime.invoke(s);
+   // 書きの transaction が commit したら印を立てる(runtime の finish が呼ぶ。★ の db_error が写しで走らせ直しても元の s)
+   s.afterCommit=()=>{s.liveCommitted=true;};
+   let outcome;
+   try { outcome=await spec.runtime.invoke(s); }
+   finally { livePublish(s,outcome); }
+   if(!(outcome instanceof spec.runtime.step.Fail)) await liveIssue(s);
    if(keyed) return await idempotentOutcome(s,keyed,outcome);
    return outcomeResponse(s,outcome);
   } catch(error) {
    // 並んで来た 2 本目(一意の制約で落ちた)・commit の後に先に記録が入った要求は、引き直して 1 本目の応答
    if(s.idempotency) { const prior=await idempotentReplay(s,s.idempotency,true); if(prior) return prior; }
    const recovered=await hook('db_error')?.(s,error,{response,c,run:spec.runtime.run,invoke:spec.runtime.invoke,outcomeResponse});
+   livePublish(s);
    if(recovered) return recovered;
    return failure(s,error);
   }
+ }
+ // ── 合図(0.15)────────────────────────────────────────────────────────────
+ const effectOf=s=>s.record?.module?c.tag(s.record.module.effect):null;
+ // 読みの Service が通ったら札を作って `s.liveToken` に置く(`response` が 200 の応答に header で付ける)。binding が
+ // 無ければ何もしない。鍵が無ければ札を付けず 1 行。API key の入口には付けない(socket の口が無い)
+ async function liveIssue(s) {
+  if(effectOf(s)!=='read'||!live.bound(s.env)||isApiKeyEntry(s.entry)) return;
+  const to=live.destination(spec.live,s.record.name,s.row);
+  if(!to) return;
+  try {
+   const current=await live.keyOf(s.env);
+   if(current.missing) { live.keyLog(current.missing,s.record.name); return; }
+   s.liveToken=await live.issue(current.key,to,s.resolved?.party==null?null:String(s.resolved.party),Math.floor(Date.parse(s.at)/1000));
+  } catch { live.keyLog('unreadable',s.record.name); }
+ }
+ // 書きの Service の transaction が commit していたら、応答の後に宛先へ合図する(業務の失敗の応答では撃たない)。
+ // 1 要求で 1 回。binding か `waitUntil` が無ければ撃たない。鍵の確かめと DO の呼びは `waitUntil` の中で、落ちても投げない
+ function livePublish(s,outcome) {
+  try {
+   if(!s.liveCommitted||s.livePublished||effectOf(s)!=='write'||!live.bound(s.env)) return;
+   if(outcome instanceof spec.runtime.step.Fail) return;
+   const to=live.destination(spec.live,s.record.name,s.row);
+   if(!to||typeof s.execution?.waitUntil!=='function') return;
+   s.livePublished=true;
+   s.execution.waitUntil(live.publish(s.env,to,s.record.name));
+  } catch {}
+ }
+ // socket の口。upgrade・binding・鍵・Origin・札(署名・期限・party)を見て、通れば宛先の DO へ要求を渡す
+ async function liveSocket(s) {
+  if((s.request.headers.get('upgrade')??'').toLowerCase()!=='websocket') return liveRefused(s,'upgrade');
+  if(!live.bound(s.env)) return liveRefused(s,'binding');
+  const current=await live.keyOf(s.env);
+  if(current.missing) { live.keyLog(current.missing,null); return liveRefused(s,'key'); }
+  // Origin は面の host(この入口の host)だけ。cross-site の WebSocket の乗っ取りを塞ぐ。★ の origin の hook が在ればその値
+  const expected=hook('origin')?.(s)??'https://'+s.url.host;
+  if(s.request.headers.get('origin')!==expected) return liveRefused(s,'origin');
+  const verified=await live.verify(current.key,s.url.searchParams.get('token'),s.resolved?.party==null?null:String(s.resolved.party),Math.floor(Date.parse(s.at)/1000));
+  if(!verified.to) return liveRefused(s,verified.reason);
+  return live.stub(s.env,verified.to).fetch(s.request);
+ }
+ // 外れは 403。理由を 1 行(札・鍵・宛先の値は出さない)
+ function liveRefused(s,reason) {
+  try { console.error(JSON.stringify({yumemi:'live.refused',reason,entry:s.entry?.name??null})); } catch {}
+  return response(s,{code:'forbidden'},403);
  }
  // ── 冪等キー(0.13)─────────────────────────────────────────────────────
  // キーは 1〜255 字の印字できる ASCII(client は UUID を作る)。外れたキーは 400(field `idempotency_key`)
