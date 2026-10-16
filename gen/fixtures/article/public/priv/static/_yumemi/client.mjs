@@ -431,12 +431,14 @@ var YumemiInteractive = class extends ElementBase {
 };
 var YumemiEscape = class _YumemiEscape extends ElementBase {
   static yumemiMounts = {};
+  /// 逃げ道の `mount` の 2 つ目の引数(0.15、`Live` のある面は `{ block }`、`yumemi/front/live_block.mjs`)
+  static yumemiApi = {};
   connectedCallback() {
     if (this.yumemiUnmount !== void 0) return;
     const mount2 = _YumemiEscape.yumemiMounts[this.getAttribute("name") ?? ""];
     if (typeof mount2 !== "function") return;
     try {
-      const unmount = mount2(this);
+      const unmount = mount2(this, _YumemiEscape.yumemiApi);
       this.yumemiUnmount = typeof unmount === "function" ? unmount : null;
     } catch (_error) {
       this.yumemiUnmount = null;
@@ -466,7 +468,7 @@ function dialogFallback() {
     else if (command === "close" && dialog.open) dialog.close();
   });
 }
-function start({ components = {}, escapes = {}, go: go2 = null, reload: reload2 = null } = {}) {
+function start({ components = {}, escapes = {}, go: go2 = null, reload: reload2 = null, yumemi = {} } = {}) {
   if (typeof window === "undefined" || !globalThis.customElements) return;
   hooks = { go: go2, reload: reload2 };
   for (const [tag, spec] of Object.entries(components)) {
@@ -476,6 +478,7 @@ function start({ components = {}, escapes = {}, go: go2 = null, reload: reload2 
     });
   }
   YumemiEscape.yumemiMounts = { ...YumemiEscape.yumemiMounts, ...escapes };
+  YumemiEscape.yumemiApi = { ...YumemiEscape.yumemiApi, ...yumemi };
   if (!globalThis.customElements.get("yumemi-escape")) globalThis.customElements.define("yumemi-escape", YumemiEscape);
   dialogFallback();
   showNotice();

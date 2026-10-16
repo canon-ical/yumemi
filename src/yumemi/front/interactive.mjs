@@ -11,7 +11,8 @@
 // - Done:`ok` か `error`(と `refused-<code>`、断りの枝の無い失敗は `failed`)を立て、`data-yumemi-out` に Out の欄を textContent で入れ、After に従う
 // - `reloads`:単一の値は読みを叩いて out に入れる(前の読みは中断)、一覧は query を替えた URL へ履歴を積まずに移る
 // - 状態は `ElementInternals.states`(`:state()`)に立て、無ければ `data-yumemi-state` に同じ名を書く
-// - 逃げ道:`<yumemi-escape name>` の接続で `mount(element)` を呼び、外れたら戻りの関数を呼ぶ
+// - 逃げ道:`<yumemi-escape name>` の接続で `mount(element, yumemi)` を呼び、外れたら戻りの関数を呼ぶ(`yumemi` は
+//   `Live` のある面で `{ block }`、0.15。他の面は空の object)
 // - dialog:invoker commands(`command` / `commandfor`)の無い browser では click で `showModal()` / `close()` を代わる
 // - notice:After の文言を sessionStorage の 1 つの鍵に置き、移った先(読み直した先)の `[data-yumemi-notice]` に 1 回出す
 // - 冪等キー(0.13):書きの送り(GET でも読みでも上げ口でもない)は、送る Args にキー(UUID)を 1 つ作って
@@ -489,13 +490,15 @@ class YumemiInteractive extends ElementBase {
 
 class YumemiEscape extends ElementBase {
   static yumemiMounts = {};
+  /// 逃げ道の `mount` の 2 つ目の引数(0.15、`Live` のある面は `{ block }`、`yumemi/front/live_block.mjs`)
+  static yumemiApi = {};
 
   connectedCallback() {
     if (this.yumemiUnmount !== undefined) return;
     const mount = YumemiEscape.yumemiMounts[this.getAttribute("name") ?? ""];
     if (typeof mount !== "function") return;
     try {
-      const unmount = mount(this);
+      const unmount = mount(this, YumemiEscape.yumemiApi);
       this.yumemiUnmount = typeof unmount === "function" ? unmount : null;
     } catch (_error) {
       this.yumemiUnmount = null;
@@ -526,8 +529,8 @@ function dialogFallback() {
   });
 }
 
-/// `components` はタグ → `{services, reloads}`、`escapes` は名 → `mount`。
-export function start({ components = {}, escapes = {}, go = null, reload = null } = {}) {
+/// `components` はタグ → `{services, reloads}`、`escapes` は名 → `mount`、`yumemi` は `mount` の 2 つ目の引数。
+export function start({ components = {}, escapes = {}, go = null, reload = null, yumemi = {} } = {}) {
   if (typeof window === "undefined" || !globalThis.customElements) return;
   hooks = { go, reload };
   for (const [tag, spec] of Object.entries(components)) {
@@ -538,6 +541,7 @@ export function start({ components = {}, escapes = {}, go = null, reload = null 
     });
   }
   YumemiEscape.yumemiMounts = { ...YumemiEscape.yumemiMounts, ...escapes };
+  YumemiEscape.yumemiApi = { ...YumemiEscape.yumemiApi, ...yumemi };
   if (!globalThis.customElements.get("yumemi-escape")) globalThis.customElements.define("yumemi-escape", YumemiEscape);
   dialogFallback();
   showNotice();

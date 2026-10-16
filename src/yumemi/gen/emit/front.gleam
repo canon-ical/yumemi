@@ -20,6 +20,7 @@ import yumemi/gen/emit/entry
 import yumemi/gen/emit/gate as gate_emit
 import yumemi/gen/emit/hash
 import yumemi/gen/emit/media as media_emit
+import yumemi/gen/emit/root
 import yumemi/gen/emit/types.{type File, File}
 import yumemi/gen/face
 import yumemi/gen/glance_util as g
@@ -161,11 +162,12 @@ pub fn emit(
   // 0.12:数える口の送り手。門が `pageview` を宣言した面は、Component が無くても client.mjs を出す
   let pageview_client = pageview_client_text(app, back_units, package, model_)
   let escapes = escape_names(package)
+  let live_client = live_client_text(app, package, model_)
   let island_files = case
     placeable_components(model_, live),
     escapes,
     model_.shell.head.service_worker,
-    pageview_client
+    pageview_client <> live_client
   {
     [], [], None, "" -> []
     _, _, _, _ -> [
@@ -179,7 +181,8 @@ pub fn emit(
           hashes,
           navigation(app, back_units, package, model_),
         )
-          <> pageview_client,
+          <> pageview_client
+          <> live_client,
       ),
     ]
   }
@@ -1462,6 +1465,11 @@ fn client_text(
   )
   <> "\n"
   <> "import { start as startInteractive } from \"__YUMEMI_BUILD__/yumemi/yumemi/front/interactive.mjs\";\n"
+  <> case front_has_live(front) {
+    True ->
+      "import { block as liveBlock, start as startLive } from \"__YUMEMI_BUILD__/yumemi/yumemi/front/live_block.mjs\";\n"
+    False -> ""
+  }
   <> navigate_import
   <> string.concat(
     list.map(escapes, fn(name) {
@@ -1483,6 +1491,10 @@ fn client_text(
     ", ",
   )
   <> " },\n"
+  <> case front_has_live(front) {
+    True -> "  yumemi: { block: liveBlock },\n"
+    False -> ""
+  }
   <> "  "
   <> hooks
   <> ",\n"
@@ -2222,6 +2234,10 @@ fn load_page_text(
     <> page_render_text(front, page_sources, theme_background_blob)
     <> "\n"
     <> page_view_text(app, units, front, page, layout_sources, page_sources)
+    <> case page_lives(page) {
+      [] -> ""
+      _ -> "\n" <> page_live_text(app, front, page, page_sources)
+    }
   let imports =
     load_imports(
       front,
@@ -2961,7 +2977,7 @@ fn placement_helper_text(
 ) -> String {
   let helper = prefix <> "_" <> int.to_string(index)
   let body = case placement {
-    reader_front.Fixed(block: block_name, cell: cell, ..) ->
+    reader_front.Fixed(block: block_name, cell: cell, live: live, ..) ->
       fixed_placement_body(
         front,
         block_name,
@@ -2971,6 +2987,7 @@ fn placement_helper_text(
         vars_access,
         vars,
       )
+      |> live_wrap(block_name, live)
     reader_front.Widget(service: service_name, render: render, ..) ->
       widget_placement_body(
         app,
@@ -3081,6 +3098,478 @@ fn fixed_placement_body(
           <> int.to_string(row + rows)
           <> ";",
       )
+  }
+}
+
+// ── Live(0.15)────────────────────────────────────────────────────────────
+
+/// Page の sp の placements のうち `Live` のもの(Block の名と端)。
+fn page_lives(page: reader_front.Page) -> List(#(String, String)) {
+  case page.sp {
+    Some(frame) ->
+      list.filter_map(frame.placements, fn(placement) {
+        case placement {
+          reader_front.Fixed(block: block, live: Some(edge), ..) ->
+            Ok(#(block, edge))
+          _ -> Error(Nil)
+        }
+      })
+    None -> []
+  }
+}
+
+/// `Live` の Block の置き場の cell(断片も頁と同じ包みで描く)。
+fn page_live_cell(page: reader_front.Page, block: String) -> reader_front.Cell {
+  let cells = case page.sp {
+    Some(frame) ->
+      list.filter_map(frame.placements, fn(placement) {
+        case placement {
+          reader_front.Fixed(block: name, cell: cell, live: Some(_), ..)
+            if name == block
+          -> Ok(cell)
+          _ -> Error(Nil)
+        }
+      })
+    None -> []
+  }
+  case cells {
+    [cell, ..] -> cell
+    [] -> reader_front.Flow
+  }
+}
+
+fn front_has_live(front: reader_front.Front) -> Bool {
+  list.any(front.pages, fn(page) { page_lives(page) != [] })
+}
+
+/// `<yumemi-live name edge>` の name(Block の名の snake)。断片の口の `x-yumemi-block` の値。
+fn live_name(block: String) -> String {
+  naming.snake(block)
+}
+
+fn live_edge(edge: String) -> String {
+  case edge {
+    "Top" -> "top"
+    "Anywhere" -> "anywhere"
+    _ -> "bottom"
+  }
+}
+
+/// `Live` の placement の要素を `<yumemi-live name edge>`(`display: contents`)で包む。札(`token`)は shell が
+/// 読みの応答の header から差す。
+fn live_wrap(body: String, block: String, live: Option(String)) -> String {
+  case live {
+    None -> body
+    Some(edge) ->
+      "  let live_children = {\n"
+      <> body
+      <> "\n  }\n  [\n    el.element(\n      \"yumemi-live\",\n      [el.attribute(\"name\", "
+      <> quoted(live_name(block))
+      <> "), el.attribute(\"edge\", "
+      <> quoted(live_edge(edge))
+      <> ")],\n      live_children,\n    ),\n  ]"
+  }
+}
+
+/// loader の断片の関数(0.15):`live_<name>(vars, <Block の読み>)` が `<style>` と `<yumemi-live>` を返す。
+/// 頁の Data の代わりに Block の読みと Vars だけの record を置き、置き場の本文は頁と同じ字を使う。
+fn page_live_text(
+  app: model.App,
+  front: reader_front.Front,
+  page: reader_front.Page,
+  page_sources: List(LoadSource),
+) -> String {
+  let vars = list.append(page.vars, front.layout.vars)
+  page_lives(page)
+  |> list.map(fn(row) {
+    let #(block, edge) = row
+    let name = live_name(block)
+    let type_name = "Live" <> naming.pascal(name)
+    let source = case block_source(front.blocks, block, app.services) {
+      Some(service) -> load_source(page_sources, "service:" <> service)
+      None -> None
+    }
+    let #(params, fields, values) = case source {
+      Some(source) -> #(
+        ", " <> source.name <> ": " <> load_source_type(source),
+        ", " <> source.name <> ": " <> load_source_type(source),
+        ", " <> source.name <> ": " <> source.name,
+      )
+      None -> #("", "", "")
+    }
+    let body =
+      fixed_placement_body(
+        front,
+        block,
+        page_live_cell(page, block),
+        page_sources,
+        "it",
+        "it.vars",
+        vars,
+      )
+      |> live_wrap(block, Some(edge))
+    "pub type "
+    <> type_name
+    <> " {\n  "
+    <> type_name
+    <> "(vars: Vars"
+    <> fields
+    <> ")\n}\n\n"
+    <> "/// `Live` の Block "
+    <> block
+    <> " の断片(shell の `x-yumemi-block: "
+    <> name
+    <> "` の口)。\n"
+    <> "pub fn live_"
+    <> name
+    <> "(vars: Vars"
+    <> params
+    <> ") -> el.Element {\n"
+    <> "  el.styled(\n    fn() { el.fragment(live_"
+    <> name
+    <> "_view("
+    <> type_name
+    <> "(vars: vars"
+    <> values
+    <> "))) },\n    \"\",\n  )\n}\n\n"
+    <> "fn live_"
+    <> name
+    <> "_view(it: "
+    <> type_name
+    <> ") -> List(el.Element) {\n"
+    <> body
+    <> "\n}\n"
+  })
+  |> string.join("\n")
+}
+
+/// `Live`(0.15)の検査。止めるもの(停止コード 4、宣言の矛盾):Layout の placements の `Live`(v0 は Page だけ)、
+/// 同じ Page に同じ Block の `Live` が 2 つ、端の名が読めない、Block が Service の Out を受けない・その Service が書き
+/// (`effect: Write`)・その Service に root の Entity が無い(合図の宛先が導けない)。警告(停止コード 0):Block の中の
+/// 鍵の無い並び(`el.each`・`list.map`)の要素が interactive Component か `details` を持つ(鍵が無いと書きかけや開閉が別の行に化ける)、`edge: Bottom` の Block に
+/// `el.fresh` が無い。
+pub fn live_notes(
+  app: model.App,
+  package: face.Package,
+  front: reader_front.Front,
+) -> List(stop.Note) {
+  let layout_frames =
+    option_frame_list(front.layout.sp)
+    |> list.append(option_frame_list(front.layout.pc))
+    |> list.append(option_frame_list(front.layout.tablet))
+  let layout_notes =
+    layout_frames
+    |> list.flat_map(fn(frame) { frame.placements })
+    |> list.filter_map(fn(placement) {
+      case placement {
+        reader_front.Fixed(block: block, live: Some(_), ..) ->
+          Ok(stop.Note(
+            class: stop.Conflict,
+            text: front.face
+              <> " layout: Live(block: "
+              <> block
+              <> ") は Layout に置けない(v0 の Live は Page の placements だけ。Layout の Block は Fixed で置く)",
+          ))
+        _ -> Error(Nil)
+      }
+    })
+  let page_notes =
+    list.flat_map(front.pages, fn(page) {
+      let wide =
+        option_frame_list(page.pc)
+        |> list.append(option_frame_list(page.tablet))
+        |> list.flat_map(fn(frame) { frame.placements })
+        |> list.filter_map(fn(placement) {
+          case placement {
+            reader_front.Fixed(block: block, live: Some(_), ..) ->
+              Ok(stop.Note(
+                class: stop.Conflict,
+                text: front.face
+                  <> " "
+                  <> page.module
+                  <> ": Live(block: "
+                  <> block
+                  <> ") は sp の Frame の placements に置く(pc・tablet の Frame の placements は描かれない)",
+              ))
+            _ -> Error(Nil)
+          }
+        })
+      let lives = page_lives(page)
+      let names = list.map(lives, fn(row) { row.0 })
+      let duplicate =
+        list.filter(list.unique(names), fn(name) {
+          list.length(list.filter(names, fn(other) { other == name })) > 1
+        })
+        |> list.map(fn(name) {
+          stop.Note(
+            class: stop.Conflict,
+            text: front.face
+              <> " "
+              <> page.module
+              <> ": 同じ Block "
+              <> name
+              <> " の Live が 2 つある(断片の口の名が重なる)",
+          )
+        })
+      list.flatten([
+        wide,
+        duplicate,
+        list.flat_map(lives, fn(row) {
+          live_block_notes(app, package, front, page, row.0, row.1)
+        }),
+      ])
+    })
+  list.append(layout_notes, page_notes)
+}
+
+fn live_block_notes(
+  app: model.App,
+  package: face.Package,
+  front: reader_front.Front,
+  page: reader_front.Page,
+  block: String,
+  edge: String,
+) -> List(stop.Note) {
+  let at = front.face <> " " <> page.module <> ": Live(block: " <> block <> ")"
+  let edge_notes = case edge {
+    "Bottom" | "Top" | "Anywhere" -> []
+    _ -> [
+      stop.Note(
+        class: stop.Conflict,
+        text: at <> " の edge は Bottom・Top・Anywhere のどれか",
+      ),
+    ]
+  }
+  let service =
+    block_source(front.blocks, block, app.services)
+    |> option.then(fn(module) {
+      list.find(app.services, fn(service) { service.module == module })
+      |> option.from_result
+    })
+  let service_notes = case service {
+    None -> [
+      stop.Note(
+        class: stop.Conflict,
+        text: at
+          <> " の Block が読みの Service の Out を受けない(合図の宛先は Block の読みの root の Entity から導く)",
+      ),
+    ]
+    Some(service) ->
+      case service.effect, root.root_for(app, service) {
+        model.WriteEffect, _ -> [
+          stop.Note(
+            class: stop.Conflict,
+            text: at
+              <> " の Block の Service "
+              <> service.module
+              <> " が書き(Live の Block は読みの Service で取り直す)",
+          ),
+        ]
+        _, None -> [
+          stop.Note(
+            class: stop.Conflict,
+            text: at
+              <> " の Block の Service "
+              <> service.module
+              <> " の allow に Entity が無い(root の Entity が無く、合図の宛先が導けない)",
+          ),
+        ]
+        _, Some(_) -> []
+      }
+  }
+  let text =
+    list.find(package.units, fn(unit) {
+      unit.path == block_module(front, block)
+    })
+    |> result.map(fn(unit) { unit.text })
+    |> result.unwrap("")
+  let fresh_notes = case
+    edge == "Bottom" && !string.contains(text, "el.fresh(")
+  {
+    True -> [
+      stop.Note(
+        class: stop.Warning,
+        text: at
+          <> " は edge: Bottom で、Block に el.fresh が無い(上を読んでいる間に新着が来ても印が出ない)",
+      ),
+    ]
+    False -> []
+  }
+  let each_notes = case unkeyed_list_with_state(text) {
+    True -> [
+      stop.Note(
+        class: stop.Warning,
+        text: at
+          <> " の Block の鍵の無い並び(el.each・list.map)の要素が interactive Component か details を持つ(鍵が無いと、前に行が入ったとき書きかけや開閉が別の行に化ける。el.each_keyed で鍵を付ける)",
+      ),
+    ]
+    False -> []
+  }
+  list.flatten([edge_notes, service_notes, fresh_notes, each_notes])
+}
+
+/// Block の字で、鍵の無い並び(`el.each(`・`list.map(`・`list.index_map(`・`list.flat_map(`)の呼び出しの中(引数の
+/// 字)か、そこから名で呼ぶ同じ module の関数(推移的に)が、`interactive.` の Component か素の `details`
+/// (`html.details`・`el.element("details"`)を描くか。字で見る近似(Block は view の関数を並べるだけの module)。
+fn unkeyed_list_with_state(text: String) -> Bool {
+  let functions = module_functions(text)
+  let with_state =
+    component_functions(
+      functions,
+      list.filter_map(functions, fn(row) {
+        case holds_user_state(row.1) {
+          True -> Ok(row.0)
+          False -> Error(Nil)
+        }
+      }),
+    )
+  unkeyed_list_texts(text)
+  |> list.any(fn(call) {
+    holds_user_state(call)
+    || list.any(with_state, fn(name) { mentions(call, name) })
+  })
+}
+
+/// 字が利用者の持ち物(書きかけ・開閉)を持つ要素を描くか。
+fn holds_user_state(text: String) -> Bool {
+  string.contains(text, "interactive.")
+  || string.contains(text, "html.details")
+  || string.contains(text, "el.element(\"details\"")
+}
+
+fn component_functions(
+  functions: List(#(String, String)),
+  found: List(String),
+) -> List(String) {
+  let more =
+    list.filter_map(functions, fn(row) {
+      case
+        !list.contains(found, row.0)
+        && list.any(found, fn(name) { mentions(row.1, name) })
+      {
+        True -> Ok(row.0)
+        False -> Error(Nil)
+      }
+    })
+  case more {
+    [] -> found
+    _ -> component_functions(functions, list.append(found, more))
+  }
+}
+
+/// 字の中に名が語として現れるか(前後が名の字でない)。
+fn mentions(text: String, name: String) -> Bool {
+  string.split(text, name)
+  |> list.window_by_2
+  |> list.any(fn(pair) {
+    !ends_with_name_char(pair.0) && !starts_with_name_char(pair.1)
+  })
+}
+
+fn ends_with_name_char(text: String) -> Bool {
+  case string.last(text) {
+    Ok(char) -> is_name_char(char)
+    Error(_) -> False
+  }
+}
+
+fn starts_with_name_char(text: String) -> Bool {
+  case string.first(text) {
+    Ok(char) -> is_name_char(char)
+    Error(_) -> False
+  }
+}
+
+fn is_name_char(char: String) -> Bool {
+  string.contains(
+    "abcdefghijklmnopqrstuvwxyz0123456789_.",
+    string.lowercase(char),
+  )
+}
+
+/// module の `fn <name>(` から次の `fn ` の手前までを、その関数の字とする(名と字の組)。
+fn module_functions(text: String) -> List(#(String, String)) {
+  string.split(text, "fn ")
+  |> list.drop(1)
+  |> list.filter_map(fn(chunk) {
+    case string.split_once(chunk, "(") {
+      Ok(#(name, rest)) ->
+        case is_identifier(name) {
+          True -> Ok(#(name, rest))
+          False -> Error(Nil)
+        }
+      Error(_) -> Error(Nil)
+    }
+  })
+}
+
+fn is_identifier(name: String) -> Bool {
+  name != ""
+  && list.all(string.to_graphemes(name), fn(char) {
+    string.contains("abcdefghijklmnopqrstuvwxyz0123456789_", char)
+  })
+}
+
+/// 鍵の無い並びの呼び出しの引数の字(括弧の釣り合いで切る)。`el.each_keyed(` は入らない。
+fn unkeyed_list_texts(text: String) -> List(String) {
+  ["el.each(", "list.map(", "list.index_map(", "list.flat_map("]
+  |> list.flat_map(fn(call) {
+    string.split(text, call)
+    |> list.drop(1)
+    |> list.map(fn(rest) { balanced(string.to_graphemes(rest), 1, []) })
+  })
+}
+
+fn balanced(chars: List(String), depth: Int, acc: List(String)) -> String {
+  case chars {
+    [] -> string.concat(list.reverse(acc))
+    [char, ..rest] ->
+      case char {
+        "(" -> balanced(rest, depth + 1, [char, ..acc])
+        ")" ->
+          case depth - 1 {
+            0 -> string.concat(list.reverse(acc))
+            next -> balanced(rest, next, [char, ..acc])
+          }
+        _ -> balanced(rest, depth, [char, ..acc])
+      }
+  }
+}
+
+/// shell の Page の表の `lives`(Block の名 → 端・読みの Service・loader の断片の関数)。
+fn shell_live_rows(
+  app: model.App,
+  front: reader_front.Front,
+  page: reader_front.Page,
+  index: Int,
+) -> String {
+  case page_lives(page) {
+    [] -> ""
+    lives ->
+      "    lives: {\n"
+      <> string.concat(
+        list.map(lives, fn(row) {
+          let #(block, edge) = row
+          let name = live_name(block)
+          let service = case block_source(front.blocks, block, app.services) {
+            Some(service) ->
+              "service.Service$" <> naming.pascal(service) <> "$const"
+            None -> "null"
+          }
+          "      "
+          <> quoted(name)
+          <> ": { edge: "
+          <> quoted(live_edge(edge))
+          <> ", service: "
+          <> service
+          <> ", render: pageLoader"
+          <> int.to_string(index)
+          <> ".live_"
+          <> name
+          <> " },\n"
+        }),
+      )
+      <> "    },\n"
   }
 }
 
@@ -3792,7 +4281,9 @@ fn shell_text(
     // 0.12 段 C:逃げ道だけの面も client を読む(`yumemi-escape` の mount)
     front.components != []
       || option.is_some(front.shell.head.service_worker)
-      || has_escapes,
+      || has_escapes
+      || front_has_live(front),
+    front_has_live(front),
     uses_current_route(front),
     uses_page_theme(app, units, front),
     static_grid_css(front.layout)
@@ -3823,7 +4314,7 @@ fn gate_file(
     )
   File(
     path: package.name <> "/src/gen/gate.mjs",
-    text: gate_emit.text(
+    text: gate_emit.text_live(
       js_header(
         package.name
           <> "/src/{gate.gleam,pages/**} and src/{entry,server}.gleam",
@@ -3831,6 +4322,7 @@ fn gate_file(
       ),
       gate,
       front_route_paths(front),
+      front_has_live(front),
     ),
   )
 }
@@ -3868,6 +4360,34 @@ fn front_route_paths(front: reader_front.Front) -> List(String) {
   front.pages
   |> list.map(fn(page) { reader_front.route_path(page.path) })
   |> list.sort(route_order)
+}
+
+/// `Live` の Block の runtime を起こす client.mjs の行(0.15)。面に `Live` が無ければ ""。socket の口は面の入口の
+/// prefix + `/_yumemi/live`(api の口、yumemi-live-1)。頁ごと取り直すのは navigate の `reload`(route 表が無ければ
+/// 頁の読み込み)。
+fn live_client_text(
+  app: model.App,
+  package: face.Package,
+  front: reader_front.Front,
+) -> String {
+  case front_has_live(front) {
+    False -> ""
+    True -> {
+      let prefix =
+        list.find(app.entries, fn(entry) { entry.name == package.name })
+        |> result.map(fn(entry) { entry.prefix })
+        |> result.unwrap("")
+      let reload = case front_route_paths(front) {
+        [] -> "null"
+        _ -> "reloadPage"
+      }
+      "startLive({ socket: "
+      <> quoted(prefix <> "/_yumemi/live")
+      <> ", reload: "
+      <> reload
+      <> " });\n"
+    }
+  }
 }
 
 /// 数える口の送り手を起こす client.mjs の行(0.12)。門が `pageview` を宣言していなければ "".
@@ -3944,7 +4464,12 @@ fn shell_imports(
     "import {Some, Option$None$const} from \"../../gleam_stdlib/gleam/option.mjs\";",
     "import {Ok} from \"../gleam.mjs\";",
     "import {run as decodeRun} from \"../../gleam_stdlib/gleam/dynamic/decode.mjs\";",
-    "import {to_document_string} from \"../../yumemi/yumemi/front/el.mjs\";",
+    case front_has_live(front) {
+      True ->
+        "import {to_document_string, to_string as to_fragment_string} from \"../../yumemi/yumemi/front/el.mjs\";"
+      False ->
+        "import {to_document_string} from \"../../yumemi/yumemi/front/el.mjs\";"
+    },
     "import * as frontCss from \"../../yumemi/yumemi/front/css.mjs\";",
     "import * as api from \"./api.mjs\";",
     "import * as blocksPreview from \"./blocks_preview.mjs\";",
@@ -4062,6 +4587,7 @@ fn shell_page_tables(
       <> "    sources: [\n"
       <> shell_source_rows(app, units, front, page, sources)
       <> "    ],\n"
+      <> shell_live_rows(app, front, page, index)
       <> "  }],"
     })
     |> string.join("\n")
@@ -4253,7 +4779,12 @@ fn style_text(package: face.Package, front: reader_front.Front) -> String {
 }
 
 fn generated_front_css(front: reader_front.Front) -> String {
-  badge_css()
+  case front_has_live(front) {
+    True ->
+      "yumemi-live { display: contents; }\n[data-yumemi-fresh][hidden] { display: none !important; }\n"
+    False -> ""
+  }
+  <> badge_css()
   <> closed_dialog_css()
   <> case front_has_overlay(front) {
     True -> "[popover]::backdrop { background: rgba(0, 0, 0, 0.45); }\n"
@@ -4877,6 +5408,7 @@ fn uses_current_route(front: reader_front.Front) -> Bool {
 
 fn shell_runtime_text(
   include_client: Bool,
+  include_live: Bool,
   include_route: Bool,
   include_theme: Bool,
   grid_css: String,
@@ -5001,6 +5533,146 @@ fn shell_runtime_text(
   <> "  return new Response(body, {status, headers: {\"content-type\": \"text/plain; charset=utf-8\"}});\n"
   <> "}\n\n"
   <> "async function renderPage(request, env, matched, gateSession) {\n"
+  <> shell_vars_text(include_route)
+  <> "  const values = [vars];\n"
+  <> case include_live {
+    True -> "  const tokens = new Map();\n"
+    False -> ""
+  }
+  <> case include_theme {
+    True ->
+      "  const read = new Map();\n"
+      <> "  for (const source of matched.spec.sources) {\n"
+      <> "    if (source.theme) {\n"
+      <> "      values.push(pageTheme(source.path ?? [], read.get(source.from)));\n"
+      <> "      continue;\n"
+      <> "    }\n"
+    False ->
+      "  let root = null;\n"
+      <> "  for (const source of matched.spec.sources) {\n"
+      <> "    if (source.theme) {\n"
+      <> "      values.push(pageTheme(matched.definition, root));\n"
+      <> "      continue;\n"
+      <> "    }\n"
+  }
+  <> "    let response;\n"
+  <> "    try {\n"
+  <> "      response = await readFromApp(env.APP, request, source.service, argsFor(vars, source.args));\n"
+  <> "    } catch (error) {\n"
+  <> "      console.error(source.root ? \"yumemi shell: root read error\" : \"yumemi shell: widget read error\", 502, error);\n"
+  <> "      return failure(503, \"unavailable\");\n"
+  <> "    }\n"
+  <> "    if (!response.ok) {\n"
+  <> "      if (response.status === 403) return failure(403, \"forbidden\");\n"
+  <> "      if (response.status === 404 && !source.root) { values.push(Option$None$const); continue; }\n"
+  <> "      if (response.status === 404) return failure(404, \"not found\");\n"
+  <> "      // 読みの 5xx は門と同じ 503 の unavailable、元の status と原因は log へ(0.12)\n"
+  <> "      if (response.status >= 500) {\n"
+  <> "        console.error(source.root ? \"yumemi shell: root read error\" : \"yumemi shell: widget read error\", response.status, await response.text().catch(() => \"\"));\n"
+  <> "        return failure(503, \"unavailable\");\n"
+  <> "      }\n"
+  <> "      return failure(response.status, source.root ? \"root read failed\" : \"widget read failed\");\n"
+  <> "    }\n"
+  <> case include_live {
+    True ->
+      "    // 0.15:読みの札(`x-yumemi-live`)。`Live` の Block の読みのものを `<yumemi-live>` に差す\n"
+      <> "    const token = response.headers.get(\"x-yumemi-live\");\n"
+      <> "    if (token) tokens.set(source.service, token);\n"
+    False -> ""
+  }
+  <> "    const decoded = source.decoder(await response.json());\n"
+  <> case include_theme {
+    True -> "    read.set(source.service, decoded);\n"
+    False -> "    if (source.root) root = decoded;\n"
+  }
+  <> "    values.push(source.optional ? new Some(decoded) : decoded);\n"
+  <> "  }\n"
+  <> "  const givens = [];\n"
+  <> "  for (const given of matched.spec.givens) {\n"
+  <> "    const response = await readFromApp(env.APP, request, given.service, argsFor(vars, given.args));\n"
+  <> "    if (!response.ok) continue;\n"
+  <> "    const raw = await response.json();\n"
+  <> "    given.decoder(raw);\n"
+  <> "    givens.push({tag: given.tag, raw});\n"
+  <> "  }\n"
+  <> "  const html = to_document_string(matched.spec.loader.render(matched.spec.loader.load(...values)));\n"
+  <> case include_live {
+    True ->
+      "  let withGivens = addGivenAttributes(html, givens);\n"
+      <> "  for (const [name, live] of Object.entries(matched.spec.lives ?? {})) withGivens = withLiveToken(withGivens, name, tokens.get(live.service));\n"
+    False -> "  const withGivens = addGivenAttributes(html, givens);\n"
+  }
+  <> "  return new Response(htmlWithGridCss(withGivens, matched.spec.layout), {status: 200, headers: {\"content-type\": \"text/html; charset=utf-8\"}});\n"
+  <> "}\n\n"
+  <> case include_live {
+    True -> shell_block_text(include_route)
+    False -> ""
+  }
+  <> "function addGivenAttributes(html, givens) {\n"
+  <> "  let output = html;\n"
+  <> "  for (const given of givens) {\n"
+  <> "    let searchFrom = 0;\n"
+  <> "    const marker = `<${given.tag} `;\n"
+  <> "    let markerOffset = output.indexOf(marker, searchFrom);\n"
+  <> "    while (markerOffset >= 0) {\n"
+  <> "      const tagEnd = output.indexOf(\">\", markerOffset + marker.length);\n"
+  <> "      if (tagEnd < 0) break;\n"
+  <> "      const tagText = output.slice(markerOffset, tagEnd);\n"
+  <> "      searchFrom = tagEnd + 1;\n"
+  <> "      if (tagText.includes(\"data-yumemi-given\")) {\n"
+  <> "        markerOffset = output.indexOf(marker, searchFrom);\n"
+  <> "        continue;\n"
+  <> "      }\n"
+  <> "      const encoded = JSON.stringify(given.raw).replaceAll(\"&\", \"&amp;\").replaceAll(\"\\\"\", \"&quot;\").replaceAll(\"<\", \"&lt;\");\n"
+  <> "      const before = output.slice(0, markerOffset);\n"
+  <> "      const fromMarker = output.slice(markerOffset);\n"
+  <> "      output = before + fromMarker.replace(marker, () => `<${given.tag} data-yumemi-given=\"${encoded}\" `);\n"
+  <> "      searchFrom = markerOffset + `<${given.tag} data-yumemi-given=\"${encoded}\" `.length;\n"
+  <> "      break;\n"
+  <> "    }\n"
+  <> "  }\n"
+  <> "  return output;\n"
+  <> "}\n\n"
+  <> "function htmlWithGridCss(html, layout) {\n"
+  <> "  const marker = \"<style>\";\n"
+  <> "  const offset = html.indexOf(marker);\n"
+  <> "  if (offset < 0) throw new Error(\"SSR stylesheet is missing\");\n"
+  <> "  const insertion = offset + marker.length;\n"
+  <> "  const rendered = html.slice(0, insertion) + gridCssFromLayout(layout) + html.slice(insertion);\n"
+  <> case include_client {
+    True ->
+      "  return rendered.replace(\"</head>\", '<script type=\"module\" src=\"/_yumemi/client.mjs\"></script></head>');\n"
+    False -> "  return rendered;\n"
+  }
+  <> "}\n\n"
+  <> "\n\nfunction renderBlocksPreview() {\n"
+  <> "  const html = to_document_string(blocksPreview.render());\n"
+  <> "  const withStyle = html.includes(\"<style>\")\n"
+  <> "    ? html\n"
+  <> "    : html.replace(\"<head>\", \"<head><style></style>\");\n"
+  <> "  return new Response(withStyle.replace(\"</head>\", '<script type=\"module\" src=\"/_yumemi/client.mjs\"></script></head>'), {status: 200, headers: {\"content-type\": \"text/html; charset=utf-8\"}});\n"
+  <> "}\n\n"
+  <> "export default gate.serve(async (request, env, before) => {\n"
+  <> "  if (new URL(request.url).pathname === \"/_blocks\" && env.YUMEMI_DEV === \"1\") return renderBlocksPreview();\n"
+  <> "  const matched = matchPage(new URL(request.url).pathname);\n"
+  <> "  if (!matched) {\n"
+  <> "    if (env.SVELTE) return env.SVELTE.fetch(request);\n"
+  <> "    return failure(404, \"not found\");\n"
+  <> "  }\n"
+  <> case include_live {
+    True ->
+      "  // 0.15:`Live` の Block の断片の口。門は頁と同じ道を通った後(数える印は差さない)\n"
+      <> "  const block = request.headers.get(\"x-yumemi-block\");\n"
+      <> "  if (block !== null) return renderBlock(request, env, matched, before.session, block);\n"
+    False -> ""
+  }
+  <> "  return renderPage(request, env, matched, before.session);\n"
+  <> "});\n"
+}
+
+/// 頁の Vars を組む字(renderPage と、0.15 の断片の口 renderBlock が同じ字を使う)。
+fn shell_vars_text(include_route: Bool) -> String {
+  ""
   <> "  const vars = {};\n"
   <> "  const query = new URL(request.url).searchParams;\n"
   <> "  let sessionLoaded = gateSession !== undefined;\n"
@@ -5057,113 +5729,62 @@ fn shell_runtime_text(
   <> "    }\n"
   <> "    vars[field.name] = value;\n"
   <> "  }\n"
-  <> "  const values = [vars];\n"
-  <> case include_theme {
-    True ->
-      "  const read = new Map();\n"
-      <> "  for (const source of matched.spec.sources) {\n"
-      <> "    if (source.theme) {\n"
-      <> "      values.push(pageTheme(source.path ?? [], read.get(source.from)));\n"
-      <> "      continue;\n"
-      <> "    }\n"
-    False ->
-      "  let root = null;\n"
-      <> "  for (const source of matched.spec.sources) {\n"
-      <> "    if (source.theme) {\n"
-      <> "      values.push(pageTheme(matched.definition, root));\n"
-      <> "      continue;\n"
-      <> "    }\n"
-  }
+}
+
+/// 断片の口(0.15)。`x-yumemi-block: <name>` の要求で、その `Live` の Block の読み(と 404・403 の意味を保つ
+/// root の読み)だけを叩き、`<style>` と `<yumemi-live>` だけを返す。Layout の読みと givens は叩かない。
+/// 頁の Block でない名・読めない(403・404)は頁と同じ status ── client は頁ごと取り直す。
+fn shell_block_text(include_route: Bool) -> String {
+  "// `<yumemi-live>` の開きの tag のうち name の当たる 1 つに札を差す(属性の順は SSR が名の順に並べる)\n"
+  <> "function withLiveToken(html, name, token) {\n"
+  <> "  if (!token) return html;\n"
+  <> "  const encoded = token.replaceAll(\"&\", \"&amp;\").replaceAll(\"\\\"\", \"&quot;\").replaceAll(\"<\", \"&lt;\");\n"
+  <> "  const named = ' name=\"' + name + '\"';\n"
+  <> "  let done = false;\n"
+  <> "  return html.replace(/<yumemi-live\\b[^>]*>/g, (tag) => {\n"
+  <> "    if (done || !tag.includes(named) || tag.includes(' token=\"')) return tag;\n"
+  <> "    done = true;\n"
+  <> "    return '<yumemi-live token=\"' + encoded + '\"' + tag.slice('<yumemi-live'.length);\n"
+  <> "  });\n"
+  <> "}\n\n"
+  <> "async function renderBlock(request, env, matched, gateSession, name) {\n"
+  <> "  const lives = matched.spec.lives ?? {};\n"
+  <> "  if (!Object.hasOwn(lives, name)) return failure(404, \"not found\");\n"
+  <> "  const live = lives[name];\n"
+  <> shell_vars_text(include_route)
+  <> "  let value;\n"
+  <> "  let token = null;\n"
+  <> "  for (const source of matched.spec.sources) {\n"
+  <> "    if (source.theme || !(source.service === live.service || source.root)) continue;\n"
   <> "    let response;\n"
   <> "    try {\n"
   <> "      response = await readFromApp(env.APP, request, source.service, argsFor(vars, source.args));\n"
   <> "    } catch (error) {\n"
-  <> "      console.error(source.root ? \"yumemi shell: root read error\" : \"yumemi shell: widget read error\", 502, error);\n"
+  <> "      console.error(\"yumemi shell: block read error\", 502, error);\n"
   <> "      return failure(503, \"unavailable\");\n"
   <> "    }\n"
   <> "    if (!response.ok) {\n"
   <> "      if (response.status === 403) return failure(403, \"forbidden\");\n"
-  <> "      if (response.status === 404 && !source.root) { values.push(Option$None$const); continue; }\n"
+  <> "      if (response.status === 404 && !source.root) { value = Option$None$const; continue; }\n"
   <> "      if (response.status === 404) return failure(404, \"not found\");\n"
-  <> "      // 読みの 5xx は門と同じ 503 の unavailable、元の status と原因は log へ(0.12)\n"
   <> "      if (response.status >= 500) {\n"
-  <> "        console.error(source.root ? \"yumemi shell: root read error\" : \"yumemi shell: widget read error\", response.status, await response.text().catch(() => \"\"));\n"
+  <> "        console.error(\"yumemi shell: block read error\", response.status, await response.text().catch(() => \"\"));\n"
   <> "        return failure(503, \"unavailable\");\n"
   <> "      }\n"
-  <> "      return failure(response.status, source.root ? \"root read failed\" : \"widget read failed\");\n"
+  <> "      return failure(response.status, \"block read failed\");\n"
   <> "    }\n"
+  <> "    if (source.service !== live.service) {\n"
+  <> "      await response.body?.cancel();\n"
+  <> "      continue;\n"
+  <> "    }\n"
+  <> "    token = response.headers.get(\"x-yumemi-live\");\n"
   <> "    const decoded = source.decoder(await response.json());\n"
-  <> case include_theme {
-    True -> "    read.set(source.service, decoded);\n"
-    False -> "    if (source.root) root = decoded;\n"
-  }
-  <> "    values.push(source.optional ? new Some(decoded) : decoded);\n"
+  <> "    value = source.optional ? new Some(decoded) : decoded;\n"
   <> "  }\n"
-  <> "  const givens = [];\n"
-  <> "  for (const given of matched.spec.givens) {\n"
-  <> "    const response = await readFromApp(env.APP, request, given.service, argsFor(vars, given.args));\n"
-  <> "    if (!response.ok) continue;\n"
-  <> "    const raw = await response.json();\n"
-  <> "    given.decoder(raw);\n"
-  <> "    givens.push({tag: given.tag, raw});\n"
-  <> "  }\n"
-  <> "  const html = to_document_string(matched.spec.loader.render(matched.spec.loader.load(...values)));\n"
-  <> "  const withGivens = addGivenAttributes(html, givens);\n"
-  <> "  return new Response(htmlWithGridCss(withGivens, matched.spec.layout), {status: 200, headers: {\"content-type\": \"text/html; charset=utf-8\"}});\n"
+  <> "  if (value === undefined) return failure(500, \"block source is missing\");\n"
+  <> "  const html = withLiveToken(to_fragment_string(live.render(vars, value)), name, token);\n"
+  <> "  return new Response(html, {status: 200, headers: {\"content-type\": \"text/html; charset=utf-8\", \"cache-control\": \"no-store\", \"vary\": \"x-yumemi-block\"}});\n"
   <> "}\n\n"
-  <> "function addGivenAttributes(html, givens) {\n"
-  <> "  let output = html;\n"
-  <> "  for (const given of givens) {\n"
-  <> "    let searchFrom = 0;\n"
-  <> "    const marker = `<${given.tag} `;\n"
-  <> "    let markerOffset = output.indexOf(marker, searchFrom);\n"
-  <> "    while (markerOffset >= 0) {\n"
-  <> "      const tagEnd = output.indexOf(\">\", markerOffset + marker.length);\n"
-  <> "      if (tagEnd < 0) break;\n"
-  <> "      const tagText = output.slice(markerOffset, tagEnd);\n"
-  <> "      searchFrom = tagEnd + 1;\n"
-  <> "      if (tagText.includes(\"data-yumemi-given\")) {\n"
-  <> "        markerOffset = output.indexOf(marker, searchFrom);\n"
-  <> "        continue;\n"
-  <> "      }\n"
-  <> "      const encoded = JSON.stringify(given.raw).replaceAll(\"&\", \"&amp;\").replaceAll(\"\\\"\", \"&quot;\").replaceAll(\"<\", \"&lt;\");\n"
-  <> "      const before = output.slice(0, markerOffset);\n"
-  <> "      const fromMarker = output.slice(markerOffset);\n"
-  <> "      output = before + fromMarker.replace(marker, () => `<${given.tag} data-yumemi-given=\"${encoded}\" `);\n"
-  <> "      searchFrom = markerOffset + `<${given.tag} data-yumemi-given=\"${encoded}\" `.length;\n"
-  <> "      break;\n"
-  <> "    }\n"
-  <> "  }\n"
-  <> "  return output;\n"
-  <> "}\n\n"
-  <> "function htmlWithGridCss(html, layout) {\n"
-  <> "  const marker = \"<style>\";\n"
-  <> "  const offset = html.indexOf(marker);\n"
-  <> "  if (offset < 0) throw new Error(\"SSR stylesheet is missing\");\n"
-  <> "  const insertion = offset + marker.length;\n"
-  <> "  const rendered = html.slice(0, insertion) + gridCssFromLayout(layout) + html.slice(insertion);\n"
-  <> case include_client {
-    True ->
-      "  return rendered.replace(\"</head>\", '<script type=\"module\" src=\"/_yumemi/client.mjs\"></script></head>');\n"
-    False -> "  return rendered;\n"
-  }
-  <> "}\n\n"
-  <> "\n\nfunction renderBlocksPreview() {\n"
-  <> "  const html = to_document_string(blocksPreview.render());\n"
-  <> "  const withStyle = html.includes(\"<style>\")\n"
-  <> "    ? html\n"
-  <> "    : html.replace(\"<head>\", \"<head><style></style>\");\n"
-  <> "  return new Response(withStyle.replace(\"</head>\", '<script type=\"module\" src=\"/_yumemi/client.mjs\"></script></head>'), {status: 200, headers: {\"content-type\": \"text/html; charset=utf-8\"}});\n"
-  <> "}\n\n"
-  <> "export default gate.serve(async (request, env, before) => {\n"
-  <> "  if (new URL(request.url).pathname === \"/_blocks\" && env.YUMEMI_DEV === \"1\") return renderBlocksPreview();\n"
-  <> "  const matched = matchPage(new URL(request.url).pathname);\n"
-  <> "  if (!matched) {\n"
-  <> "    if (env.SVELTE) return env.SVELTE.fetch(request);\n"
-  <> "    return failure(404, \"not found\");\n"
-  <> "  }\n"
-  <> "  return renderPage(request, env, matched, before.session);\n"
-  <> "});\n"
 }
 
 fn method_variant(method: String) -> String {

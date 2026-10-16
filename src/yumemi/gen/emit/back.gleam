@@ -521,7 +521,33 @@ fn registry_text(app: App, units: List(Unit), input: String) -> String {
   <> string.concat(alias_rows)
   <> "];\n\n"
   <> "export const byName = Object.fromEntries(registry.filter((record) => !record.target && record.module).map((record) => [record.name, record]));\n\n"
+  <> live_text(app, services)
   <> "for (const record of registry) if(record.module) validateWho([...record.module.service.allow]);\n"
+}
+
+/// 合図の宛先の表(0.15)。root の Entity を持つ Service -> [Entity の名, root の行の id の列]。読みは札の宛先、書きは
+/// commit の後の合図の宛先(`yumemi/server/live.mjs`)。★ は宛先を書かない ── 読みと書きの root が同じ Entity なら
+/// 同じ宛先になる。
+fn live_text(app: App, services: List(Service)) -> String {
+  let rows =
+    list.filter_map(services, fn(service) {
+      case root.root_for(app, service) {
+        Some(entity) ->
+          Ok(
+            "  "
+            <> service.module
+            <> ": ["
+            <> quoted(entity.module)
+            <> ", 'id'],\n",
+          )
+        None -> Error(Nil)
+      }
+    })
+  "// 合図の宛先(0.15):Service -> [root の Entity, root の行の id の列]\n"
+  <> case rows {
+    [] -> "export const live = {};\n\n"
+    _ -> "export const live = {\n" <> string.concat(rows) <> "};\n\n"
+  }
 }
 
 // ── sql ─────────────────────────────────────────────────────────────────────
@@ -1317,6 +1343,10 @@ fn shell_text(app: App, input: String) -> String {
   <> "execution.waitUntil(sweep(db,env));\n"
   <> " }\n};\n"
   <> "export const AppSystem=appSystem({database,observe,issueSession,revokeParty,resolveSession,run});\n"
+  // 合図の器(0.15)。binding `YUMEMI_LIVE` と DO の migration を足した app だけが使う(宣言には現れない)
+  <> "export { YumemiLive } from '"
+  <> framework
+  <> "worker.mjs';\n"
   <> string.concat(objects)
 }
 

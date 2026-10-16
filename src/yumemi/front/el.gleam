@@ -47,6 +47,44 @@ pub fn each(items: List(a), view: fn(a) -> Element) -> Element {
   Fragment(list.map(items, view))
 }
 
+/// 並びの各要素の根に `data-yumemi-key` を付ける(0.15、`Live` の Block の当て方の鍵)。view の根が要素で
+/// なければ鍵は付かない。鍵は並びの中で一意にする(発言の id など)。
+pub fn each_keyed(
+  items: List(a),
+  key: fn(a) -> String,
+  view: fn(a) -> Element,
+) -> Element {
+  Fragment(list.map(items, fn(item) { keyed(view(item), key(item)) }))
+}
+
+fn keyed(element: Element, key: String) -> Element {
+  case element {
+    Node(namespace:, tag:, attributes:, children:) ->
+      Node(
+        namespace:,
+        tag:,
+        attributes: list.append(attributes, [Attribute("data-yumemi-key", key)]),
+        children:,
+      )
+    _ -> element
+  }
+}
+
+/// `Live` の Block の中に置く「新着」の印(0.15)。追っていない間に取り直しが入ったときだけ出て、押すと端へ
+/// 送る。JS 無しでは出ない(`hidden` のまま)。
+pub fn fresh(class: css.Class, children: List(Element)) -> Element {
+  element(
+    "button",
+    [
+      Attribute("type", "button"),
+      class_attribute(class),
+      Attribute("data-yumemi-fresh", ""),
+      Attribute("hidden", ""),
+    ],
+    children,
+  )
+}
+
 /// Prefix for area overlay ids. Append the exact area name to form the id.
 pub const overlay_id_prefix = "yumemi-overlay-"
 

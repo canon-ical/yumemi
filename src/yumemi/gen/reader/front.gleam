@@ -71,15 +71,16 @@ pub type ShellHead {
   )
 }
 
-pub const empty_shell_head = ShellHead(
-  manifest: None,
-  theme_color: None,
-  icon: None,
-  apple_touch_icon: None,
-  service_worker: None,
-  stylesheets: [],
-  invalid: [],
-)
+pub const empty_shell_head =
+  ShellHead(
+    manifest: None,
+    theme_color: None,
+    icon: None,
+    apple_touch_icon: None,
+    service_worker: None,
+    stylesheets: [],
+    invalid: [],
+  )
 
 pub type Layout {
   Layout(
@@ -213,7 +214,9 @@ pub type Area {
 }
 
 pub type Placement {
-  Fixed(area: String, block: String, cell: Cell)
+  /// `live` は ★ の `Live(.., edge:)`(0.15)の端の名(`Bottom`・`Top`・`Anywhere`)。`Fixed` は None。
+  /// 置き場と Block の読みは `Fixed` と同じなので、同じ構成子で持つ。
+  Fixed(area: String, block: String, cell: Cell, live: Option(String))
   Widget(area: String, service: String, render: Render)
 }
 
@@ -2246,6 +2249,18 @@ fn parse_placement(expression: glance.Expression) -> Option(Placement) {
         cell: g.labelled(expression, "cell")
           |> option.then(parse_cell)
           |> option.unwrap(Flow),
+        live: None,
+      ))
+    Some("Live") ->
+      Some(Fixed(
+        area: string_label(expression, "area") |> option.unwrap(""),
+        block: labelled_constructor(expression, "block") |> option.unwrap(""),
+        cell: g.labelled(expression, "cell")
+          |> option.then(parse_cell)
+          |> option.unwrap(Flow),
+        live: Some(
+          labelled_constructor(expression, "edge") |> option.unwrap(""),
+        ),
       ))
     Some("Widget") ->
       Some(Widget(
