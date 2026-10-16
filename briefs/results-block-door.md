@@ -60,8 +60,8 @@
 
 ## 0.14.0 の test を変えたところ
 
-- `test/yumemi_live2_test.gleam` の `faces_without_live_are_unchanged_test`:前提が「`Live` の無い面の shell と門は 0.14.0 と同じ字」だった。0.14.1 で口を開けるので、「札・socket・`<yumemi-live>`・`lives` の表が無い」と「生成の shell と門が commit した fixture と同じ」に替えた
-- `test/yumemi_live2_shell_check.mjs` の 1 件:「`Live` でない Block の名(`summary`)は 404」の前提が替わった(`summary` は頁の `Fixed` の Block で 200 になる)。名を Layout の Block・Widget の Block・頁に無い名(`site_header`・`row_article`・`feed`・`nothing`)に替えた。件数は 22 のまま
+- `test/yumemi_live2_test.gleam` の `faces_without_live_are_unchanged_test`(ゲート 2 で柏木が `faces_without_live_have_no_live_machinery_test` に改名):前提が「`Live` の無い面の shell と門は 0.14.0 と同じ字」だった。0.14.1 で口を開けるので、「札・socket・`<yumemi-live>`・`lives` の表が無い」と「生成の shell と門が commit した fixture と同じ」に替えた
+- `test/yumemi_live2_shell_check.mjs` の 1 件:「`Live` でない Block の名(`summary`)は 404」の前提が替わった(`summary` は頁の `Fixed` の Block で 200 になる)。名を Layout の Block・Widget の Block・頁に無い名(`site_header`・`row_article`・`feed`・`nothing`)に替えた。ゲート 2 で柏木が「`Live` の面の `summary` は `<yumemi-block name>` で返り札を持たない」の 1 件を足し、件数は 23
 
 ## 確かめていないこと
 

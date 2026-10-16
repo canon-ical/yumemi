@@ -127,6 +127,9 @@ check("fragment: the Span cell's wrapper is in both the page and the fragment", 
 const unknown = [];
 for (const name of ["site_header", "row_article", "feed", "nothing"]) unknown.push(await get("/article/42", { "x-yumemi-block": name }));
 check("fragment: a Layout, Widget or unknown Block name on the page is 404", unknown.every((item) => item.status === 404), unknown.map((item) => item.status).join(","));
+// 0.14.1:`Live` の面の `Fixed` の Block は `<yumemi-block>` で返り、読みが `x-yumemi-live` を返しても札を持たない
+const fixedOnLive = await get("/article/42", { "x-yumemi-block": "summary" });
+check("fragment (0.14.1): a Fixed Block on the Live face is <yumemi-block name> without a token", fixedOnLive.status === 200 && fixedOnLive.text.includes('<yumemi-block name="summary">') && !fixedOnLive.text.includes("<yumemi-live") && !fixedOnLive.text.includes("token="), fixedOnLive.text.slice(0, 200));
 mode = { read: 404, token: "tok.en1" };
 const gone = await get("/article/42", { "x-yumemi-block": "article" });
 check("fragment: the root read 404 gives 404 (the client reloads the page)", gone.status === 404, String(gone.status));

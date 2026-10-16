@@ -243,7 +243,7 @@ pub fn live_fragment_keeps_the_cell_test() {
 
 /// `Live` の無い面は札・socket・`<yumemi-live>` を持たない。0.14.1 から断片の口(`Fixed` の Block の
 /// `x-yumemi-block`)と門の数えない印は `Live` の無い面にもある(`yumemi_block_door_test.gleam`)。
-pub fn faces_without_live_are_unchanged_test() {
+pub fn faces_without_live_have_no_live_machinery_test() {
   let assert Ok(back_units) = source.load(article_fixture)
   let #(files, notes) = emitted_with(back_units, [])
   let shell = text_of(files, "public/src/gen/shell.mjs")
@@ -521,5 +521,5 @@ pub fn generated_shell_serves_the_fragment_test() {
   string.split(out, "\n")
   |> list.filter(fn(line) { string.starts_with(line, "ok ") })
   |> list.length
-  |> should.equal(24)
+  |> should.equal(25)
 }
