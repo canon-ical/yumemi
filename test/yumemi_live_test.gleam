@@ -73,9 +73,11 @@ pub fn the_class_name_is_reserved_test() {
 }
 
 /// workerd:札・socket の口(署名・期限・party・Origin)・合図・合図の失敗が書きの応答を変えないこと。
+/// r2:張った socket が札の期限で閉じる・party の無い札は browser に結ぶ・前の鍵・API key の入口・★ の origin
+/// hook・commit の後に投げた書き・DO の fetch が投げた socket。
 pub fn live_on_workerd_test() {
   let out = live_check()
   string.contains(out, "NG ") |> should.be_false
   string.contains(out, "STDERR") |> should.be_false
-  string.split(out, "\n") |> list.length |> should.equal(53)
+  string.split(out, "\n") |> list.length |> should.equal(89)
 }

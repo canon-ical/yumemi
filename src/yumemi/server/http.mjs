@@ -31,7 +31,8 @@
 // 合図(0.15):`live`(生成の registry の表、Service -> [Entity, root の行の id の列])に在る読みの Service が通れば、
 // 応答に札の header `x-yumemi-live` を付ける。書きの Service が commit したら、応答の後に(`execution.waitUntil`)
 // 宛先の DO `YumemiLive` へ合図する。入口の prefix + `/_yumemi/live` の GET は socket の口で、札の署名・期限・
-// session の party・`Origin` を見てから DO へ渡す(外れは 403、理由を log に 1 行)。札・合図は `live.mjs`。
+// session の party(party の無い札は browser の印)・`Origin` を見てから、札の期限と party を載せて DO へ渡す(外れは
+// 403、理由を log に 1 行)。DO は期限の来た socket を閉じる。札・合図は `live.mjs`。
 import * as framework_entry from '../entry.mjs';
 import * as color from '../front/color.mjs';
 import * as live from './live.mjs';
@@ -486,7 +487,8 @@ export function http(spec) {
   try {
    const current=await live.keyOf(s.env);
    if(current.missing) { live.keyLog(current.missing,s.record.name); return; }
-   s.liveToken=await live.issue(current.key,to,s.resolved?.party==null?null:String(s.resolved.party),Math.floor(Date.parse(s.at)/1000));
+   // session の無い読みは browser の印に結ぶ。印の無い読みには札を付けない(誰でも使える札にしない)
+   s.liveToken=await live.issue(current.key,to,s.resolved?.party==null?null:String(s.resolved.party),s.browser?.id??null,Math.floor(Date.parse(s.at)/1000))??undefined;
   } catch { live.keyLog('unreadable',s.record.name); }
  }
  // 書きの Service の transaction が commit していたら、応答の後に宛先へ合図する(業務の失敗の応答では撃たない)。
@@ -505,14 +507,15 @@ export function http(spec) {
  async function liveSocket(s) {
   if((s.request.headers.get('upgrade')??'').toLowerCase()!=='websocket') return liveRefused(s,'upgrade');
   if(!live.bound(s.env)) return liveRefused(s,'binding');
-  const current=await live.keyOf(s.env);
+  const current=await live.verifyingKeys(s.env,null);
   if(current.missing) { live.keyLog(current.missing,null); return liveRefused(s,'key'); }
   // Origin は面の host(この入口の host)だけ。cross-site の WebSocket の乗っ取りを塞ぐ。★ の origin の hook が在ればその値
   const expected=hook('origin')?.(s)??'https://'+s.url.host;
   if(s.request.headers.get('origin')!==expected) return liveRefused(s,'origin');
-  const verified=await live.verify(current.key,s.url.searchParams.get('token'),s.resolved?.party==null?null:String(s.resolved.party),Math.floor(Date.parse(s.at)/1000));
+  const verified=await live.verify(current.keys,s.url.searchParams.get('token'),s.resolved?.party==null?null:String(s.resolved.party),s.browser?.id??null,Math.floor(Date.parse(s.at)/1000));
   if(!verified.to) return liveRefused(s,verified.reason);
-  return live.stub(s.env,verified.to).fetch(s.request);
+  // 札の期限と party を DO へ渡す(DO が期限で閉じる。張った後も札の期限が上限)
+  return live.stub(s.env,verified.to).fetch(live.socketRequest(verified));
  }
  // 外れは 403。理由を 1 行(札・鍵・宛先の値は出さない)
  function liveRefused(s,reason) {
