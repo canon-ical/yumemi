@@ -527,12 +527,17 @@ fn registry_text(app: App, units: List(Unit), input: String) -> String {
 
 /// 合図の宛先の表(0.14)。root の Entity を持つ Service -> [Entity の名, root の行の id の列]。読みは札の宛先、書きは
 /// commit の後の合図の宛先(`yumemi/server/live.mjs`)。★ は宛先を書かない ── 読みと書きの root が同じ Entity なら
-/// 同じ宛先になる。
+/// 同じ宛先になる。読みの行は、どこかの面の Page で `Live` に置かれた Block の読み(`app.server.live_reads`)だけ
+/// (0.14.1)── 表に無い読みは札を返さない。書きの行は root の Entity を持つ書き全部。
 fn live_text(app: App, services: List(Service)) -> String {
   let rows =
     list.filter_map(services, fn(service) {
+      let listed = case service.effect {
+        model.ReadEffect -> list.contains(app.server.live_reads, service.module)
+        model.WriteEffect -> True
+      }
       case root.root_for(app, service) {
-        Some(entity) ->
+        Some(entity) if listed ->
           Ok(
             "  "
             <> service.module
@@ -540,10 +545,10 @@ fn live_text(app: App, services: List(Service)) -> String {
             <> quoted(entity.module)
             <> ", 'id'],\n",
           )
-        None -> Error(Nil)
+        _ -> Error(Nil)
       }
     })
-  "// 合図の宛先(0.14):Service -> [root の Entity, root の行の id の列]\n"
+  "// 合図の宛先(0.14):Service -> [root の Entity, root の行の id の列]。読みは面の Live の Block の読みだけ(0.14.1)\n"
   <> case rows {
     [] -> "export const live = {};\n\n"
     _ -> "export const live = {\n" <> string.concat(rows) <> "};\n\n"

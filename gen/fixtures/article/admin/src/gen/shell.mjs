@@ -12,7 +12,7 @@ import * as service from "./service.mjs";
 import {Ok} from "../gleam.mjs";
 import {Some, Option$None$const} from "../../gleam_stdlib/gleam/option.mjs";
 import {run as decodeRun} from "../../gleam_stdlib/gleam/dynamic/decode.mjs";
-import {to_document_string} from "../../yumemi/yumemi/front/el.mjs";
+import {to_document_string, to_string as to_fragment_string} from "../../yumemi/yumemi/front/el.mjs";
 
 const pageRoutes = [...route.routes];
 const pages = new Map([
@@ -29,6 +29,9 @@ const pageSpecs = new Map([
     ],
     sources: [
     ],
+    blocks: {
+      "admin_header": { service: null, render: pageLoader0.block_admin_header },
+    },
   }],
 ]);
 
@@ -243,6 +246,93 @@ async function renderPage(request, env, matched, gateSession) {
   return new Response(htmlWithGridCss(withGivens, matched.spec.layout), {status: 200, headers: {"content-type": "text/html; charset=utf-8"}});
 }
 
+async function renderBlock(request, env, matched, gateSession, name) {
+  const blocks = matched.spec.blocks ?? {};
+  const live = Object.hasOwn(blocks, name) ? blocks[name] : null;
+  if (live === null) return failure(404, "not found");
+  const vars = {};
+  const query = new URL(request.url).searchParams;
+  let sessionLoaded = gateSession !== undefined;
+  let session = gateSession ?? null;
+  for (const field of matched.spec.vars) {
+    const source = field.from;
+    let value;
+    if (source.type === "path") {
+      value = matched.params[source.name];
+    } else if (source.type === "query") {
+      const found = query.get(source.name);
+      value = found === null || found.trim() === "" ? Option$None$const : new Some(found);
+    } else if (source.type === "origin") {
+      const envName = "PUBLIC_" + source.name.toUpperCase() + "_ORIGIN";
+      const origin = env[envName];
+      if (typeof origin !== "string" || origin.length === 0) return failure(500, envName);
+      value = origin;
+    } else if (source.type === "auth-origin") {
+      const envName = "PUBLIC_IDP_ORIGIN";
+      const origin = env[envName];
+      if (typeof origin !== "string" || origin.length === 0) return failure(500, envName);
+      value = origin;
+    } else if (source.type === "session") {
+      if (!sessionLoaded) {
+        sessionLoaded = true;
+        // 読みの 5xx と例外は匿名に畳まず 503 の unavailable、元の status と原因は log へ(0.12)
+        let response;
+        try {
+          const target = new URL("/api/session", request.url);
+          response = await env.APP.fetch(new Request(target, request));
+          if (response.ok) session = await response.json();
+        } catch (error) {
+          console.error("yumemi shell: session read error", 502, error);
+          return failure(503, "unavailable");
+        }
+        if (response.status >= 500) {
+          console.error("yumemi shell: session read error", response.status, await response.text().catch(() => ""));
+          return failure(503, "unavailable");
+        }
+      }
+      const subject = session?.anonymous === true ? undefined : session?.subject;
+      const found = source.name === "SubjectHandle" ? subject?.handle : subject?.id;
+      if (typeof found === "string") value = field.optional ? new Some(found) : found;
+      else if (field.optional) value = Option$None$const;
+      else return failure(401, "unauthorized");
+    } else {
+      return failure(500, "invalid variable source");
+    }
+    vars[field.name] = value;
+  }
+  let value;
+  for (const source of matched.spec.sources) {
+    if (source.theme || !(source.service === live.service || source.root)) continue;
+    let response;
+    try {
+      response = await readFromApp(env.APP, request, source.service, argsFor(vars, source.args));
+    } catch (error) {
+      console.error("yumemi shell: block read error", 502, error);
+      return failure(503, "unavailable");
+    }
+    if (!response.ok) {
+      if (response.status === 403) return failure(403, "forbidden");
+      if (response.status === 404 && !source.root) { value = Option$None$const; continue; }
+      if (response.status === 404) return failure(404, "not found");
+      if (response.status >= 500) {
+        console.error("yumemi shell: block read error", response.status, await response.text().catch(() => ""));
+        return failure(503, "unavailable");
+      }
+      return failure(response.status, "block read failed");
+    }
+    if (source.service !== live.service) {
+      await response.body?.cancel();
+      continue;
+    }
+    const decoded = source.decoder(await response.json());
+    value = source.optional ? new Some(decoded) : decoded;
+  }
+  if (live.service !== null && value === undefined) return failure(500, "block source is missing");
+  const body = to_fragment_string(live.service === null ? live.render(vars) : live.render(vars, value));
+  const html = body;
+  return new Response(html, {status: 200, headers: {"content-type": "text/html; charset=utf-8", "cache-control": "no-store", "vary": "x-yumemi-block"}});
+}
+
 function addGivenAttributes(html, givens) {
   let output = html;
   for (const given of givens) {
@@ -295,5 +385,8 @@ export default gate.serve(async (request, env, before) => {
     if (env.SVELTE) return env.SVELTE.fetch(request);
     return failure(404, "not found");
   }
+  // 0.14:Block の断片の口(0.14.1 から `Fixed` の Block も)。門は頁と同じ道を通った後(数える印は差さない)
+  const block = request.headers.get("x-yumemi-block");
+  if (block !== null) return renderBlock(request, env, matched, before.session, block);
   return renderPage(request, env, matched, before.session);
 });

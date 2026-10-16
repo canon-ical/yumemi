@@ -9,6 +9,7 @@ import gleam/string
 import gleeunit/should
 import yumemi/gen/emit/back
 import yumemi/gen/emit/hash
+import yumemi/gen/model
 import yumemi/gen/reader
 import yumemi/gen/reader/server as server_reader
 import yumemi/gen/source
@@ -28,17 +29,19 @@ fn text_of(files: List(#(String, String)), path: String) -> String {
   text
 }
 
-/// 宛先は root の Entity を持つ Service だけ(読みも書きも)。作る Service(root の無い `note_create`)と
-/// 一覧(`note_list`)は表に無い。
+/// 宛先は root の Entity を持つ Service だけ。作る Service(root の無い `note_create`)と一覧(`note_list`)は表に無い。
+/// 0.14.1:読みの行は面の Page で `Live` に置かれた Block の読み(`server.live_reads`)だけ ── 面の無い notes では
+/// root を持つ読み `note_read` も表に無く、札を返さない。書きは root を持つもの全部。
 pub fn registry_has_the_live_table_test() {
   let assert Ok(units) = source.load("gen/fixtures/notes")
   let files = files_of(units)
   let registry = text_of(files, "src/gen/registry.mjs")
   string.contains(
     registry,
-    "export const live = {\n  note_delete: ['note', 'id'],\n  note_edit: ['note', 'id'],\n  note_read: ['note', 'id'],\n};\n",
+    "export const live = {\n  note_delete: ['note', 'id'],\n  note_edit: ['note', 'id'],\n};\n",
   )
   |> should.be_true
+  string.contains(registry, "note_read: [") |> should.be_false
   string.contains(registry, "note_create: [") |> should.be_false
   string.contains(registry, "note_list: [") |> should.be_false
   let http = text_of(files, "src/gen/http_runtime.mjs")
@@ -52,6 +55,28 @@ pub fn registry_has_the_live_table_test() {
     "export { YumemiLive } from '../../yumemi/yumemi/server/worker.mjs';\n",
   )
   |> should.be_true
+}
+
+/// 0.14.1:`server.live_reads` に在る読み(生成器が面の `Live` の Block から足す)だけが表に載る。root の無い読みは
+/// 名が在っても載らない。
+pub fn registry_lists_only_live_reads_test() {
+  let assert Ok(units) = source.load("gen/fixtures/notes")
+  let assert Ok(app) = reader.read(units)
+  let app =
+    model.App(
+      ..app,
+      server: model.Server(..app.server, live_reads: ["note_read", "note_list"]),
+    )
+  let registry =
+    back.emit(app, units, hash.of(units), [], []).files
+    |> list.map(fn(file) { #(file.path, file.text) })
+    |> text_of("src/gen/registry.mjs")
+  string.contains(
+    registry,
+    "export const live = {\n  note_delete: ['note', 'id'],\n  note_edit: ['note', 'id'],\n  note_read: ['note', 'id'],\n};\n",
+  )
+  |> should.be_true
+  string.contains(registry, "note_list: [") |> should.be_false
 }
 
 /// ★ の器に `YumemiLive` の名は使えない(生成の shell が同じ名を export する)── 宣言の矛盾(exit 4)。
@@ -74,10 +99,10 @@ pub fn the_class_name_is_reserved_test() {
 
 /// workerd:札・socket の口(署名・期限・party・Origin)・合図・合図の失敗が書きの応答を変えないこと。
 /// r2:張った socket が札の期限で閉じる・party の無い札は browser に結ぶ・前の鍵・API key の入口・★ の origin
-/// hook・commit の後に投げた書き・DO の fetch が投げた socket。
+/// hook・commit の後に投げた書き・DO の fetch が投げた socket。0.14.1:表に無い読み(公開のも)は札の header ごと無い。
 pub fn live_on_workerd_test() {
   let out = live_check()
   string.contains(out, "NG ") |> should.be_false
   string.contains(out, "STDERR") |> should.be_false
-  string.split(out, "\n") |> list.length |> should.equal(89)
+  string.split(out, "\n") |> list.length |> should.equal(93)
 }

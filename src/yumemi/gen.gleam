@@ -178,6 +178,10 @@ fn generate_with_faces(
       |> result.map_error(front_note)
     }),
   )
+  // 札を出す読み(0.14.1):どこかの面の Page で `Live` に置かれた Block の読みの Service だけ
+  let live_reads =
+    list.flat_map(front_models, fn(item) { front_emit.live_reads(app, item.1) })
+    |> list.unique
   // 面の門の数える口を back の入口の表(`http_runtime.mjs` の `pageviews`)へ渡す(0.12)
   let app =
     model.App(
@@ -197,6 +201,7 @@ fn generate_with_faces(
             None -> Error(Nil)
           }
         }),
+        live_reads: live_reads,
       ),
     )
   let hashes = hash.of(units)

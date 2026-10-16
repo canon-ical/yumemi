@@ -14,7 +14,9 @@ import yumemi/front/html
 import yumemi/gen/emit/front as front_emit
 import yumemi/gen/emit/hash
 import yumemi/gen/face
+import yumemi/gen/model
 import yumemi/gen/reader
+import yumemi/gen/reader/clauses
 import yumemi/gen/reader/front as reader_front
 import yumemi/gen/source
 import yumemi/gen/stop
@@ -68,10 +70,34 @@ fn live_page(edge: String) -> source.Unit {
   unit(page_path, text)
 }
 
+const public_clause =
+  "    allow.Clause(
+      who: allow.Anyone,
+      at: allow.Only([article.Published]),
+      owner: allow.NoOwner,
+    ),
+"
+
+/// article の `article_read` から `Anyone` の句を外した写し(Staff だけが読む)。公開の読みの `Live` は exit 4
+/// (0.14.1)なので、`Live` の試験の Block の読みはこれにする。
+fn private_read() -> source.Unit {
+  let assert Ok(text) =
+    simplifile.read(article_fixture <> "/src/service/article_read.gleam")
+  string.contains(text, public_clause) |> should.be_true
+  unit("service/article_read", string.replace(text, public_clause, ""))
+}
+
 fn emitted(
   face_extra: List(source.Unit),
 ) -> #(List(#(String, String)), List(stop.Note)) {
   let assert Ok(back_units) = source.load(article_fixture)
+  emitted_with(replace(back_units, [private_read()]), face_extra)
+}
+
+fn emitted_with(
+  back_units: List(source.Unit),
+  face_extra: List(source.Unit),
+) -> #(List(#(String, String)), List(stop.Note)) {
   let assert Ok(app) = reader.read(back_units)
   let assert Ok(face_units) = source.load(article_fixture <> "/public")
   let face_units = replace(face_units, face_extra)
@@ -217,15 +243,15 @@ pub fn live_fragment_keeps_the_cell_test() {
   has(fragment, "\"grid-column: span 2; grid-row: span 1;\"")
 }
 
-/// `Live` の無い面は 0.14 までと同じ字(包み・断片の口・門の印・client の起こしが無い)。
-pub fn faces_without_live_are_unchanged_test() {
-  let #(files, notes) = emitted([])
+/// `Live` の無い面は札・socket・`<yumemi-live>` を持たない。0.14.1 から断片の口(`Fixed` の Block の
+/// `x-yumemi-block`)と門の数えない印は `Live` の無い面にもある(`yumemi_block_door_test.gleam`)。
+pub fn faces_without_live_have_no_live_machinery_test() {
+  let assert Ok(back_units) = source.load(article_fixture)
+  let #(files, notes) = emitted_with(back_units, [])
   let shell = text_of(files, "public/src/gen/shell.mjs")
   string.contains(shell, "yumemi-live") |> should.be_false
-  string.contains(shell, "x-yumemi-block") |> should.be_false
-  string.contains(shell, "to_fragment_string") |> should.be_false
-  string.contains(text_of(files, "public/src/gen/gate.mjs"), "blockHeader")
-  |> should.be_false
+  string.contains(shell, "withLiveToken") |> should.be_false
+  string.contains(shell, "lives: {") |> should.be_false
   string.contains(
     text_of(files, "public/priv/static/_yumemi/client.mjs"),
     "live_block",
@@ -236,6 +262,9 @@ pub fn faces_without_live_are_unchanged_test() {
   let assert Ok(fixture_shell) =
     simplifile.read(article_fixture <> "/public/src/gen/shell.mjs")
   shell |> should.equal(fixture_shell)
+  let assert Ok(fixture_gate) =
+    simplifile.read(article_fixture <> "/public/src/gen/gate.mjs")
+  text_of(files, "public/src/gen/gate.mjs") |> should.equal(fixture_gate)
 }
 
 /// 停止コード 4:Layout の Live・Block が Service の Out を受けない・書きの Service・root の Entity の無い Service・
@@ -322,13 +351,224 @@ pub fn live_contradictions_stop_test() {
   |> should.be_true
 }
 
+/// 0.14.1:公開の読み(allow に `Anyone`)の Block の `Live` は exit 4 ── 札で、ログインしていない人も同じ root の
+/// 非公開の書きの時刻を聞けるため。fixture の `article_read` は `Anyone`(Published だけ)と Staff の句を持つ。
+pub fn live_on_a_public_read_stops_test() {
+  let assert Ok(back_units) = source.load(article_fixture)
+  let #(_, notes) = emitted_with(back_units, [live_page("Bottom")])
+  list.filter(notes, fn(note) { note.class == stop.Conflict })
+  |> texts
+  |> should.equal([
+    "[exit 4 宣言の矛盾] public pages/article/arg_slug/page: Live(block: Article) の Block の Service article_read の allow に Anyone がある(公開の読みの札では、ログインしていない人も同じ root の非公開の書きの時刻を聞ける。Live の Block は root の当事者だけが通る読みにする)",
+  ])
+  // 札の表にも載らない(止まるので生成物は書かれないが、表の側でも外す)
+  live_reads_of(back_units, [live_page("Bottom")]) |> should.equal([])
+}
+
+/// 0.14.1:札を出す読み(registry の `live` の読みの行)は、Page の sp で `Live` に置かれた Block の読みだけ。
+/// `Live` の無い面は空、公開でない読みの `Live` はその Service、root の無い Service(Feed = widget_list)は載らない。
+pub fn live_reads_are_the_live_blocks_reads_test() {
+  let assert Ok(back_units) = source.load(article_fixture)
+  let private = replace(back_units, [private_read()])
+  live_reads_of(private, []) |> should.equal([])
+  live_reads_of(private, [live_page("Bottom")])
+  |> should.equal(["article_read"])
+  live_reads_of(private, [
+    page_with(
+      "Live(area: \"page\", block: blocks.Article, cell: Flow, edge: Bottom),\n      Live(area: \"rail\", block: blocks.Feed, cell: Flow, edge: Anywhere)",
+    ),
+  ])
+  |> should.equal(["article_read"])
+  // Fixed の Block の読みは載らない(同じ Block でも Live でなければ札は無い)
+  live_reads_of(private, [
+    page_with("Fixed(area: \"page\", block: blocks.Article, cell: Flow)"),
+  ])
+  |> should.equal([])
+}
+
+/// 0.14.1 r2(柏木 ゲート 2 P1-1):`Party` × `NoOwner` の読みの `Live` も exit 4 ── session があれば誰でも root の
+/// どの行も通るので、ログインした第三者が同じ root の書きの時刻を聞ける。写しで `Anyone` の句を `Party` に替える。
+pub fn live_on_any_party_read_stops_test() {
+  let assert Ok(back_units) = source.load(article_fixture)
+  let assert Ok(text) =
+    simplifile.read(article_fixture <> "/src/service/article_read.gleam")
+  let party =
+    unit(
+      "service/article_read",
+      string.replace(
+        text,
+        public_clause,
+        string.replace(public_clause, "allow.Anyone", "allow.Party"),
+      ),
+    )
+  let units = replace(back_units, [party])
+  let #(_, notes) = emitted_with(units, [live_page("Bottom")])
+  list.filter(notes, fn(note) { note.class == stop.Conflict })
+  |> texts
+  |> should.equal([
+    "[exit 4 宣言の矛盾] public pages/article/arg_slug/page: Live(block: Article) の Block の Service article_read の allow の句 Party(owner: NoOwner)は session があれば誰でも root のどの行も通す(ログインした第三者が同じ root の書きの時刻を聞ける。owner を Self か Via<Entity>Party にする)",
+  ])
+  live_reads_of(units, [live_page("Bottom")]) |> should.equal([])
+}
+
+/// 写しの `article_read` の allow を `allow` の字に替えて、`Live(block: Article)` の allow の名指し(停止と警告)と
+/// 札の表(`live_reads`)を返す。句は `reader/clauses` で読み、App の `clauses` だけ差し替える(主体の Entity が
+/// article に無い musearch の句も、句の読みと判定の道をそのまま通す)。
+fn allow_notes(allow: String) -> #(List(String), List(String), List(String)) {
+  let assert Ok(back_units) = source.load(article_fixture)
+  let assert Ok(app) = reader.read(replace(back_units, [private_read()]))
+  let read =
+    clauses.read([
+      unit(
+        "service/article_read",
+        "pub const service = Service(allow: " <> allow <> ")\n",
+      ),
+    ])
+  let app =
+    model.App(
+      ..app,
+      clauses: list.append(
+        list.filter(app.clauses, fn(row) { row.0 != "article_read" }),
+        read,
+      ),
+    )
+  let assert Ok(face_units) = source.load(article_fixture <> "/public")
+  let face_units = replace(face_units, [live_page("Top")])
+  let assert Ok(front_model) =
+    reader_front.read("public", face_units, app.services)
+  let package =
+    face.Package(
+      name: "public",
+      path: article_fixture <> "/public",
+      pages: face.UndeclaredPages,
+      units: face_units,
+    )
+  let notes = front_emit.live_notes(app, package, front_model)
+  let of = fn(class) {
+    list.filter(notes, fn(note) { note.class == class }) |> texts
+  }
+  #(
+    of(stop.Conflict),
+    of(stop.Warning),
+    front_emit.live_reads(app, front_model),
+  )
+}
+
+const at =
+  "public pages/article/arg_slug/page: Live(block: Article) の Block の Service article_read の allow"
+
+/// 当事者の句(`owner` が `Self`・`Via<Entity>Party`)は通る:名指し無し、札の表に載る。musearch の `chat_read`
+/// (`~/yumemism_repo/musearch` の main の `api/src/service/chat_read.gleam` の allow を写した)も通る。
+pub fn live_allow_of_parties_passes_test() {
+  let musearch_chat_read =
+    "[
+    allow.Clause(
+      who: allow.AsMuse,
+      at: allow.AnyPhase,
+      owner: allow.ViaMuseParty,
+    ),
+    allow.Clause(who: allow.AsFan, at: allow.AnyPhase, owner: allow.ViaFanParty),
+  ]"
+  allow_notes(musearch_chat_read)
+  |> should.equal(#([], [], ["article_read"]))
+  allow_notes(
+    "[allow.Clause(who: allow.Party, at: allow.AnyPhase, owner: allow.Self)]",
+  )
+  |> should.equal(#([], [], ["article_read"]))
+  allow_notes(
+    "[allow.Clause(who: allow.Staff, at: allow.Only([article.Published]), owner: allow.ViaStaffParty)]",
+  )
+  |> should.equal(#([], [], ["article_read"]))
+  // System × NoOwner は browser から来ないので名指ししない
+  allow_notes("[allow.System]") |> should.equal(#([], [], ["article_read"]))
+}
+
+/// `Party` × `NoOwner` は略記・`Clause` の形・相で絞っても止まる。`Anyone` は従来どおり(小文字の略記も揃える)。
+pub fn live_allow_of_anyone_in_the_session_stops_test() {
+  let party =
+    "[exit 4 宣言の矛盾] "
+    <> at
+    <> " の句 Party(owner: NoOwner)は session があれば誰でも root のどの行も通す(ログインした第三者が同じ root の書きの時刻を聞ける。owner を Self か Via<Entity>Party にする)"
+  let anyone =
+    "[exit 4 宣言の矛盾] "
+    <> at
+    <> " に Anyone がある(公開の読みの札では、ログインしていない人も同じ root の非公開の書きの時刻を聞ける。Live の Block は root の当事者だけが通る読みにする)"
+  allow_notes("[allow.Party]") |> should.equal(#([party], [], []))
+  allow_notes("[allow.party]") |> should.equal(#([party], [], []))
+  allow_notes(
+    "[allow.Clause(who: allow.Party, at: allow.Only([article.Published]), owner: allow.NoOwner)]",
+  )
+  |> should.equal(#([party], [], []))
+  // 当事者の句と並んでいても、1 つでも Party × NoOwner があれば止まる
+  allow_notes(
+    "[allow.Clause(who: allow.AsFan, at: allow.AnyPhase, owner: allow.ViaFanParty), allow.Party]",
+  )
+  |> should.equal(#([party], [], []))
+  allow_notes("[allow.anyone]") |> should.equal(#([anyone], [], []))
+}
+
+/// 中身を読めない句(定数の参照・spread・List でない allow)は、root の当事者に絞るか判定できないので止まる。
+pub fn live_allow_unread_stops_test() {
+  let unread = fn(text) {
+    "[exit 4 宣言の矛盾] "
+    <> at
+    <> " の句が読めない: "
+    <> text
+    <> "(root の当事者だけが通る読みか判定できない。Live の Block の読みの allow は句を literal で書く)"
+  }
+  allow_notes("[party_only]")
+  |> should.equal(#([unread("allow の句 party_only")], [], []))
+  allow_notes(
+    "[allow.Clause(who: allow.AsFan, at: allow.AnyPhase, owner: allow.ViaFanParty), ..other.clauses]",
+  )
+  |> should.equal(#([unread("allow の spread(..)")], [], []))
+  allow_notes("other.clauses")
+  |> should.equal(#([unread("allow が List の literal でない")], [], []))
+}
+
+/// Entity の主体 × `NoOwner` は警告(停止コード 0)で名指しし、札の表には載せる ── その役が信頼された役か、
+/// 誰でも登録できる役かは生成器には分からない。fixture の略記 `allow.staff`(`gen/allow` の句)も同じ。
+pub fn live_allow_warns_test() {
+  let warned = fn(who) {
+    "[exit 0 警告] "
+    <> at
+    <> " の句 "
+    <> who
+    <> "(owner: NoOwner)は "
+    <> who
+    <> " なら誰でも root のどの行も通す("
+    <> who
+    <> " が誰でも登録できる役なら、同じ root の書きの時刻を聞ける。当事者に絞るなら owner を Self か Via<Entity>Party にする)"
+  }
+  allow_notes("[allow.staff]")
+  |> should.equal(#([], [warned("Staff")], ["article_read"]))
+  allow_notes(
+    "[allow.Clause(who: allow.AsFan, at: allow.AnyPhase, owner: allow.NoOwner), allow.Clause(who: allow.AsMuse, at: allow.AnyPhase, owner: allow.ViaMuseParty)]",
+  )
+  |> should.equal(#([], [warned("AsFan")], ["article_read"]))
+}
+
+fn live_reads_of(
+  back_units: List(source.Unit),
+  face_extra: List(source.Unit),
+) -> List(String) {
+  let assert Ok(app) = reader.read(back_units)
+  let assert Ok(face_units) = source.load(article_fixture <> "/public")
+  let assert Ok(front_model) =
+    reader_front.read("public", replace(face_units, face_extra), app.services)
+  front_emit.live_reads(app, front_model)
+}
+
 /// 警告(停止コード 0):鍵の無い並び(`el.each`・`list.map`)の要素が interactive Component か素の `details` を持つ
 /// (関数を名で辿る)、`edge: Bottom` に `el.fresh`
 /// が無い。`el.each_keyed` と `el.fresh` があれば出ない。
 pub fn live_warnings_test() {
+  // 写しの `article_read` の `allow.staff`(Staff × NoOwner)の警告は `live_allow_warns_test` が見る。ここは Block の警告だけ
   let warnings = fn(units) {
     let #(_, notes) = emitted(units)
-    list.filter(notes, fn(note) { note.class == stop.Warning }) |> texts
+    list.filter(notes, fn(note) { note.class == stop.Warning })
+    |> texts
+    |> list.filter(fn(line) { !string.contains(line, " の allow の句 ") })
   }
   let unkeyed =
     warnings([
@@ -448,5 +688,5 @@ pub fn generated_shell_serves_the_fragment_test() {
   string.split(out, "\n")
   |> list.filter(fn(line) { string.starts_with(line, "ok ") })
   |> list.length
-  |> should.equal(22)
+  |> should.equal(25)
 }

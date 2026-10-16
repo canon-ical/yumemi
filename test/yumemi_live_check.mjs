@@ -333,6 +333,20 @@ async function r2({ call, read, edit, tokenOf, socketUrl, open, refusal, until, 
   await refusedAs('browser: a forged anonymous token without a browser mark', await forge({ to: 'note:n3', party: null, exp: Math.floor(Date.now() / 1000) + 600 }), {}, 'browser');
   if (anonSocket.open) anonSocket.ws.close();
 
+  // ── 0.14.1 札は表に在る読みだけ(表に無い読みは header ごと無い)──
+  const peek = await call('GET', '/api/peek/n1', { session: 'sa' });
+  check('scope: a read not in the table answers 200 to its party and carries no token header', peek.status === 200 && !peek.headers.has('x-yumemi-live'), [peek.status, [...peek.headers.keys()]]);
+  const open1 = await call('GET', '/api/open/n3', { browser: b1 });
+  const open2 = await call('GET', '/api/open/n3', { session: 'sa', browser: b1 });
+  check('scope: a public read not in the table carries no token, with or without a session', open1.status === 200 && open2.status === 200 && !open1.headers.has('x-yumemi-live') && !open2.headers.has('x-yumemi-live'), [open1.status, open2.status, open1.headers.get('x-yumemi-live'), open2.headers.get('x-yumemi-live')]);
+  const listed = await read('n1', 'sa');
+  const listedToken = listed.headers.get('x-yumemi-live');
+  check('scope: the read in the table still carries a token bound to its party', listed.status === 200 && decode(listedToken ?? 'e30.x').party === 'party-a' && decode(listedToken ?? 'e30.x').to === 'note:n1', [listed.status, listedToken]);
+  const listedSocket = await open(listedToken, { session: 'sa' });
+  const peekWrite = await edit('n1', 'after-peek', 'sc');
+  check('scope: a write under the same root still signals the socket opened with that token', listedSocket.open && peekWrite.status === 200 && await until(() => listedSocket.messages.includes('1')), [listedSocket.open, peekWrite.status, listedSocket.messages]);
+  if (listedSocket.open) listedSocket.ws.close();
+
   // ── P1-4 鍵の差し替え(YUMEMI_LIVE_KEY_PREVIOUS)──
   const oldToken = await tokenOf('n1', 'sa');
   const rotatedRead = await read('n1', 'sa', 'rotated');

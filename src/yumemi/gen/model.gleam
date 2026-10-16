@@ -506,6 +506,9 @@ pub type Server {
     media: Option(Media),
     /// 面の門の数える口(0.12)。`src/server.gleam` の宣言でなく、生成器が面の `src/gate.gleam` から足す
     counted: List(Counted),
+    /// 札を出す読みの Service の名(0.14.1)。どこかの面の Page で `Live` に置かれた Block の読み。`src/server.gleam`
+    /// の宣言でなく、生成器が面の Page から足す(`counted` と同じ)
+    live_reads: List(String),
   )
 }
 
@@ -591,6 +594,7 @@ pub fn empty_server() -> Server {
     consents: [],
     media: None,
     counted: [],
+    live_reads: [],
   )
 }
 

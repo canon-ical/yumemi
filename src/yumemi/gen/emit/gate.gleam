@@ -70,8 +70,8 @@ pub fn text(header: String, gate: Gate, route_paths: List(String)) -> String {
   text_live(header, gate, route_paths, False)
 }
 
-/// `live`(0.14、面に `Live` の Block がある):断片の口の要求(header `x-yumemi-block`)には数える印を差さない。
-/// 門の判定(成人の申告・同意・session)は頁と同じに掛かる。
+/// `live`(0.14、面に断片の口がある ── 0.14.1 から `Live` に限らず Page の sp に `Fixed` の Block があれば):断片の口の
+/// 要求(header `x-yumemi-block`)には数える印を差さない。門の判定(成人の申告・同意・session)は頁と同じに掛かる。
 pub fn text_live(
   header: String,
   gate: Gate,

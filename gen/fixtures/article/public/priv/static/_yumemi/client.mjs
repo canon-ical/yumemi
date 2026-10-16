@@ -311,8 +311,8 @@ var YumemiInteractive = class extends ElementBase {
     if (!service || !Object.hasOwn(spec.services, service) || this.yumemiSending) return;
     const active = globalThis.document.activeElement;
     if (active && active !== submitter && form.contains(active) && typeof active.name === "string" && active.name.includes(".")) {
-      const focused = active.name.slice(0, active.name.indexOf("."));
-      if (focused !== service) return;
+      const focused2 = active.name.slice(0, active.name.indexOf("."));
+      if (focused2 !== service) return;
     }
     const serviceSpec = spec.services[service];
     const controls = controlsOf(form, service);
@@ -431,7 +431,7 @@ var YumemiInteractive = class extends ElementBase {
 };
 var YumemiEscape = class _YumemiEscape extends ElementBase {
   static yumemiMounts = {};
-  /// 逃げ道の `mount` の 2 つ目の引数(0.14、`Live` のある面は `{ block }`、`yumemi/front/live_block.mjs`)
+  /// 逃げ道の `mount` の 2 つ目の引数(`{ block }`、0.14 は `Live` のある面、0.14.1 から逃げ道のある面すべて)
   static yumemiApi = {};
   connectedCallback() {
     if (this.yumemiUnmount !== void 0) return;
@@ -483,6 +483,361 @@ function start({ components = {}, escapes = {}, go: go2 = null, reload: reload2 
   dialogFallback();
   showNotice();
   globalThis.navigation?.addEventListener?.("navigatesuccess", () => showNotice());
+}
+
+// public/build/dev/javascript/yumemi/yumemi/front/block.mjs
+var blockHeader = "x-yumemi-block";
+var adopted = null;
+function sheetRules(sheet) {
+  try {
+    return [...sheet.cssRules];
+  } catch (_error) {
+    return [];
+  }
+}
+function documentRules() {
+  const rules = /* @__PURE__ */ new Set();
+  for (const sheet of [...globalThis.document.styleSheets, ...globalThis.document.adoptedStyleSheets]) {
+    for (const rule of sheetRules(sheet)) rules.add(rule.cssText);
+  }
+  return rules;
+}
+function adopt(text) {
+  const document2 = globalThis.document;
+  if (!adopted) adopted = new CSSStyleSheet();
+  if (!document2.adoptedStyleSheets.includes(adopted)) document2.adoptedStyleSheets = [...document2.adoptedStyleSheets, adopted];
+  const knownRules = documentRules();
+  const incoming = new CSSStyleSheet();
+  try {
+    incoming.replaceSync(text);
+  } catch (_error) {
+    return 0;
+  }
+  let added = 0;
+  for (const rule of incoming.cssRules) {
+    if (knownRules.has(rule.cssText)) continue;
+    try {
+      adopted.insertRule(rule.cssText, adopted.cssRules.length);
+      knownRules.add(rule.cssText);
+      added += 1;
+    } catch (_error) {
+    }
+  }
+  return added;
+}
+async function fetchBlock(name, href = globalThis.location.href) {
+  let response;
+  try {
+    response = await globalThis.fetch(href, {
+      headers: { [blockHeader]: name },
+      redirect: "manual",
+      credentials: "same-origin",
+      cache: "no-store"
+    });
+  } catch (error) {
+    return { error };
+  }
+  const type = response.headers.get("content-type") ?? "";
+  const status = response.status;
+  if (response.type === "opaqueredirect" || status >= 300 && status < 400 || status === 403 || status === 404) return null;
+  if (status !== 200) return { error: new Error(`fragment ${status}`), status };
+  if (!type.startsWith("text/html")) return null;
+  let text;
+  try {
+    text = await response.text();
+  } catch (error) {
+    return { error };
+  }
+  const template = globalThis.document.createElement("template");
+  template.innerHTML = text;
+  let added = 0;
+  for (const style of template.content.querySelectorAll("style")) {
+    added += adopt(style.textContent ?? "");
+    style.remove();
+  }
+  const element = [...template.content.querySelectorAll("yumemi-live, yumemi-block")].find((item) => item.getAttribute("name") === name);
+  if (!element) return null;
+  return { element, adopted: added };
+}
+var snapshots = /* @__PURE__ */ new WeakMap();
+var owned = { details: ["open"], dialog: ["open"] };
+function isComponent(node) {
+  return node.nodeType === 1 && node.hasAttribute("data-yumemi-island");
+}
+function controlValue(control) {
+  if (control.type === "checkbox" || control.type === "radio") return String(control.checked);
+  if (control.type === "file") return String(control.files?.length ?? 0);
+  if (control.localName === "select") return [...control.options].map((option) => option.selected ? "1" : "0").join("");
+  return control.value;
+}
+function snapshot(component) {
+  return [...component.querySelectorAll("input,textarea,select")].map(controlValue).join("\0");
+}
+function remember(root) {
+  const components = isComponent(root) ? [root] : [...root.querySelectorAll("[data-yumemi-island]")];
+  for (const component of components) if (!snapshots.has(component)) snapshots.set(component, snapshot(component));
+}
+function keyOf(node) {
+  if (node.nodeType !== 1) return "#" + node.nodeType;
+  const key = node.getAttribute("data-yumemi-key");
+  if (key !== null) return node.localName + "|k:" + key;
+  if (isComponent(node)) return node.localName + "|c:" + (node.getAttribute("data-yumemi-args") ?? "");
+  return node.localName;
+}
+function looseKey(node) {
+  if (node.nodeType === 1 && isComponent(node) && node.getAttribute("data-yumemi-key") === null) return node.localName + "|c";
+  return null;
+}
+function focused(node) {
+  const active = globalThis.document.activeElement;
+  return Boolean(active) && (node === active || node.contains(active));
+}
+function setStale(component) {
+  const states = component.yumemiInternals?.states;
+  if (states && typeof states.add === "function") {
+    try {
+      states.add("stale");
+      return;
+    } catch (_error) {
+    }
+  }
+  const names = (component.getAttribute("data-yumemi-state") ?? "").split(" ").filter(Boolean);
+  if (!names.includes("stale")) component.setAttribute("data-yumemi-state", [...names, "stale"].join(" "));
+}
+function keptAttributes(node) {
+  const keep = [...owned[node.localName] ?? []];
+  if (node.hasAttribute("data-yumemi-fresh")) keep.push("hidden");
+  if (focused(node) && /^(input|textarea|select|option)$/.test(node.localName)) keep.push("value", "checked", "selected");
+  return keep;
+}
+function syncAttributes(from, to, log) {
+  const keep = keptAttributes(from);
+  for (const attribute of [...from.attributes]) {
+    if (!keep.includes(attribute.name) && !to.hasAttribute(attribute.name)) {
+      from.removeAttribute(attribute.name);
+      log.changed += 1;
+    }
+  }
+  for (const attribute of [...to.attributes]) {
+    if (!keep.includes(attribute.name) && from.getAttribute(attribute.name) !== attribute.value) {
+      from.setAttribute(attribute.name, attribute.value);
+      log.changed += 1;
+    }
+  }
+}
+function sameAttributes(old, incoming) {
+  return [...incoming.attributes].every((attribute) => old.getAttribute(attribute.name) === attribute.value);
+}
+function morphComponent(old, incoming, log) {
+  if (old.localName === incoming.localName && old.getAttribute("data-yumemi-args") === incoming.getAttribute("data-yumemi-args")) {
+    log.kept.push(old.localName);
+    return;
+  }
+  const before = snapshots.get(old);
+  const dirty = before !== void 0 && before !== snapshot(old);
+  if (dirty || focused(old)) {
+    setStale(old);
+    log.stale.push(old.localName);
+    return;
+  }
+  old.replaceWith(incoming);
+  remember(incoming);
+  log.replaced.push(old.localName);
+  log.changed += 1;
+}
+function morphNode(old, incoming, log, guards) {
+  if (old.nodeType === 3 || old.nodeType === 8) {
+    if (old.nodeValue !== incoming.nodeValue) {
+      old.nodeValue = incoming.nodeValue;
+      log.changed += 1;
+    }
+    return;
+  }
+  if (isComponent(old)) return morphComponent(old, incoming, log);
+  if (old.localName === "yumemi-escape") {
+    if (sameAttributes(old, incoming)) return;
+    old.replaceWith(incoming);
+    log.changed += 1;
+    return;
+  }
+  syncAttributes(old, incoming, log);
+  if (old.localName === "textarea" && focused(old)) return;
+  morphChildren(old, incoming, log, guards);
+}
+function isControl(node) {
+  return /^(input|textarea|select)$/.test(node.localName);
+}
+function controlDirty(control) {
+  if (control.localName === "select") return [...control.options].some((option) => option.selected !== option.defaultSelected);
+  if (control.type === "checkbox" || control.type === "radio") return control.checked !== control.defaultChecked;
+  if (control.type === "file") return (control.files?.length ?? 0) > 0;
+  return control.value !== control.defaultValue;
+}
+function componentDirty(component) {
+  const before = snapshots.get(component);
+  return before !== void 0 && before !== snapshot(component);
+}
+function guardsOf(live) {
+  const guards = [];
+  const document2 = globalThis.document;
+  const active = document2.activeElement;
+  for (const component of live.querySelectorAll("[data-yumemi-island]")) {
+    if (componentDirty(component) || focused(component)) guards.push({ node: component, selector: guardSelector(component) });
+  }
+  for (const control of live.querySelectorAll("input,textarea,select")) {
+    if (control.closest("[data-yumemi-island]")) continue;
+    if (controlDirty(control) || control === active) guards.push({ node: control, selector: guardSelector(control) });
+  }
+  if (active && active !== document2.body && live.contains(active) && !active.closest("[data-yumemi-island]") && !isControl(active)) {
+    guards.push({ node: active, selector: guardSelector(active) });
+  }
+  return guards;
+}
+function guardSelector(node) {
+  const escape = globalThis.CSS?.escape ?? ((value) => value.replace(/["\\]/g, "\\$&"));
+  let selector = node.localName;
+  const key = node.getAttribute("data-yumemi-key");
+  if (key !== null) selector += `[data-yumemi-key="${escape(key)}"]`;
+  if (isComponent(node)) selector += "[data-yumemi-island]";
+  else if (node.hasAttribute("name")) selector += `[name="${escape(node.getAttribute("name"))}"]`;
+  else if (node.id) selector += `#${escape(node.id)}`;
+  return selector;
+}
+function receives(old, incoming, guards) {
+  if (incoming.nodeType !== 1 || keyOf(old) !== keyOf(incoming)) return false;
+  return guards.every((guard) => !old.contains(guard.node) || incoming.matches(guard.selector) || incoming.querySelector(guard.selector) !== null);
+}
+function dropsGuarded(olds, at, found, incoming, later, guards) {
+  if (guards.length === 0) return false;
+  for (let index = at; index <= found; index += 1) {
+    const old = olds[index];
+    if (old.nodeType !== 1 || !guards.some((guard) => old.contains(guard.node))) continue;
+    if (index === found && receives(old, incoming, guards)) continue;
+    if (later.some((other) => receives(old, other, guards))) return true;
+  }
+  return false;
+}
+function findAhead(olds, from, key) {
+  for (let index = from; index < olds.length; index += 1) if (keyOf(olds[index]) === key) return index;
+  return -1;
+}
+function findLoose(olds, from, loose) {
+  for (let index = from; index < olds.length; index += 1) if (looseKey(olds[index]) === loose) return index;
+  return -1;
+}
+function morphChildren(oldParent, newParent, log, guards) {
+  const olds = [...oldParent.childNodes];
+  const news = [...newParent.childNodes];
+  let at = 0;
+  for (const [position, incoming] of news.entries()) {
+    let found = findAhead(olds, at, keyOf(incoming));
+    const loose = looseKey(incoming);
+    if (found < 0 && loose !== null) {
+      found = findLoose(olds, at, loose);
+      if (found >= 0 && news.some((other) => other !== incoming && keyOf(other) === keyOf(olds[found]))) found = -1;
+    }
+    if (found >= 0 && dropsGuarded(olds, at, found, incoming, news.slice(position + 1), guards)) found = -1;
+    if (found >= 0) {
+      for (let index = at; index < found; index += 1) {
+        olds[index].remove();
+        log.changed += 1;
+      }
+      morphNode(olds[found], incoming, log, guards);
+      at = found + 1;
+    } else {
+      oldParent.insertBefore(incoming, olds[at] ?? null);
+      if (incoming.nodeType === 1) remember(incoming);
+      log.inserted += 1;
+      log.changed += 1;
+    }
+  }
+  for (let index = at; index < olds.length; index += 1) {
+    olds[index].remove();
+    log.changed += 1;
+  }
+}
+function morph(current, incoming) {
+  const log = { changed: 0, inserted: 0, kept: [], stale: [], replaced: [] };
+  morphChildren(current, incoming, log, guardsOf(current));
+  return log;
+}
+var ElementBase2 = globalThis.HTMLElement ?? class {
+};
+var YumemiBlock = class extends ElementBase2 {
+  constructor() {
+    super();
+    this.yumemiFetching = null;
+    this.yumemiAgain = false;
+  }
+  connectedCallback() {
+    queueMicrotask(() => remember(this));
+  }
+  /// 取った URL(`href`)から取り直して当てる。当てたら true。取っている最中に呼ばれたら、終わった後にもう 1 回。
+  /// 断片が来ない(門の redirect・403・404、断片の形でない)・5xx・通信の失敗は頁に触らず false(`yumemi-block-failed`)。
+  refresh() {
+    if (this.yumemiFetching) {
+      this.yumemiAgain = true;
+      return this.yumemiFetching;
+    }
+    const run = async () => {
+      let applied = false;
+      do {
+        this.yumemiAgain = false;
+        applied = await this.yumemiApply();
+      } while (this.yumemiAgain && this.isConnected);
+      return applied;
+    };
+    this.yumemiFetching = run().finally(() => {
+      this.yumemiFetching = null;
+    });
+    return this.yumemiFetching;
+  }
+  async yumemiApply() {
+    const name = this.getAttribute("name") ?? "";
+    const result = await fetchBlock(name, this.getAttribute("href") ?? globalThis.location.href);
+    if (!this.isConnected) return false;
+    if (result === null || result.error) {
+      this.dispatchEvent(new CustomEvent("yumemi-block-failed", { detail: { status: result?.status ?? null } }));
+      return false;
+    }
+    const log = morph(this, result.element);
+    this.dispatchEvent(new CustomEvent("yumemi-block-applied", { detail: log }));
+    return true;
+  }
+};
+async function block(name, { href = globalThis.location.href } = {}) {
+  const here = globalThis.location.href;
+  const target = new URL(href, here);
+  const same = (element2) => {
+    const at = new URL(element2.getAttribute("href") ?? here, here);
+    return at.pathname === target.pathname && at.search === target.search;
+  };
+  const current = [...globalThis.document.querySelectorAll("yumemi-live, yumemi-block")].find((item) => item.getAttribute("name") === name && same(item));
+  if (current && typeof current.refresh === "function") {
+    if (current.localName === "yumemi-live") {
+      await current.refresh();
+      return current.isConnected ? current : null;
+    }
+    const applied = await current.refresh();
+    return applied && current.isConnected ? current : null;
+  }
+  const result = await fetchBlock(name, target.href);
+  if (result === null || result.error) return null;
+  const element = globalThis.document.importNode(result.element, true);
+  const local = new URL(here);
+  if (element.localName === "yumemi-block" || target.pathname !== local.pathname || target.search !== local.search) element.setAttribute("href", target.href);
+  return element;
+}
+function start2() {
+  if (typeof window === "undefined" || !globalThis.customElements) return;
+  if (globalThis.customElements.get("yumemi-block")) return;
+  globalThis.customElements.define("yumemi-block", YumemiBlock);
+  try {
+    const sheet = new CSSStyleSheet();
+    sheet.replaceSync("yumemi-block { display: contents; }");
+    globalThis.document.adoptedStyleSheets = [...globalThis.document.adoptedStyleSheets, sheet];
+  } catch (_error) {
+  }
 }
 
 // public/build/dev/javascript/yumemi/yumemi/front/navigate.mjs
@@ -687,7 +1042,7 @@ function table(routes, csp = {}) {
 function supported(scope = globalThis) {
   return typeof scope.navigation?.addEventListener === "function" && typeof scope.NavigateEvent?.prototype?.intercept === "function";
 }
-function start2({ routes: paths, csp = {} }) {
+function start3({ routes: paths, csp = {} }) {
   if (typeof window === "undefined" || !supported()) return;
   const navigation = globalThis.navigation;
   const routes = table(paths, csp);
@@ -838,7 +1193,9 @@ start({
     }
   },
   escapes: { clock: mount },
+  yumemi: { block },
   go,
   reload
 });
-start2({ routes: ["/article/:slug", "/status"] });
+start2();
+start3({ routes: ["/article/:slug", "/status"] });
