@@ -153,7 +153,8 @@ pub type Storage {
   InSchema(entity: String, schema: String)
   /// 表の列に持たない Property(読む SQL が別の表から渡す値)。生成器はこの Property を表の列として扱わない
   /// ── create・update の verb の列と値、RETURNING、Draft・Created から外す。手書きの root・読みの SQL が
-  /// Property 名の列で渡し、行の写し(codec・hook)は今の形で受ける。生成の読みはこの Entity の行を渡せない
+  /// Property 名の列で渡し、行の写し(codec・hook)は今の形で受ける。`ReadFrom` が無ければ、生成の読みはこの
+  /// Entity の行を渡せない
   Derived(entity: String, property: String)
   /// Entity の読みを表とは別の relation(view)から引く。`relation` は Entity の schema の中の名(`store_view`)。
   /// 生成の読み(from・join・矢印・`has`・allow の経路・with の子)はこの relation を書き、verb(create・update・
