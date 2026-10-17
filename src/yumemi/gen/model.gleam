@@ -129,6 +129,8 @@ pub type Entity {
     type_name: String,
     /// 表の名。module 名
     table: String,
+    /// 表が載る schema。`server.storage` の `InSchema` が無ければ `yumemi/schema.app`
+    schema: String,
     props: List(Prop),
     fields: List(FieldDef),
     /// verb SQL だけが使う補助列(例: Sealed の `<prop>_key_id`)。
@@ -473,6 +475,8 @@ pub type RootShape {
 /// `server.storage` の 1 行(Entity の器と列の写像)。entity は module 名。
 pub type Storage {
   InObject(entity: String, object: String)
+  InSchema(entity: String, schema: String)
+  DerivedProp(entity: String, property: String)
   ColumnName(entity: String, property: String, column: String)
   TextSum(entity: String, property: String, values: List(#(String, String)))
   SplitColumns(

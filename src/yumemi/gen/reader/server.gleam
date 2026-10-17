@@ -13,6 +13,7 @@ import yumemi/gen/model
 import yumemi/gen/naming
 import yumemi/gen/source.{type Unit}
 import yumemi/gen/stop
+import yumemi/schema
 
 pub type Read {
   Read(server: model.Server, attached: List(model.AttachedRoute))
@@ -463,6 +464,16 @@ fn storage_of(expression: glance.Expression) -> Result(model.Storage, String) {
       use object <- result.try(text(expression, "object"))
       Ok(model.InObject(entity: entity, object: object))
     }
+    Some("InSchema") -> {
+      use entity <- result.try(text(expression, "entity"))
+      use schema <- result.try(text(expression, "schema"))
+      Ok(model.InSchema(entity: entity, schema: schema))
+    }
+    Some("Derived") -> {
+      use entity <- result.try(text(expression, "entity"))
+      use property <- result.try(text(expression, "property"))
+      Ok(model.DerivedProp(entity: entity, property: property))
+    }
     Some("Column") -> {
       use entity <- result.try(text(expression, "entity"))
       use property <- result.try(text(expression, "property"))
@@ -491,7 +502,10 @@ fn storage_of(expression: glance.Expression) -> Result(model.Storage, String) {
       use element <- result.try(text(expression, "element"))
       Ok(model.ArrayColumn(entity: entity, property: property, element: element))
     }
-    _ -> Error("InObject / Column / Text / Split / Array でない項")
+    _ ->
+      Error(
+        "InObject / InSchema / Derived / Column / Text / Split / Array でない項",
+      )
   }
 }
 
@@ -750,6 +764,7 @@ pub fn notes(app: model.App) -> List(stop.Note) {
           }
       }
     })
+  let storage_conflicts = storage_notes(app)
   let unknown_reads =
     list.flat_map(app.server.reads, fn(read) {
       let label = "reads " <> read.service <> "/" <> read.query
@@ -814,16 +829,190 @@ pub fn notes(app: model.App) -> List(stop.Note) {
     unknown_aliases,
     unknown_jobs,
     unknown_storage,
+    storage_conflicts,
   ])
   |> list.map(fn(text) {
     stop.Note(class: stop.Conflict, text: "server.gleam: " <> text)
   })
 }
 
+/// `InSchema` と `Derived` の宣言の食い違い(0.14.5)。名の無い Entity / Property は `unknown_storage` が言うので、
+/// ここは在る Entity だけを見る。
+///
+/// - `InSchema`:schema の名が SQL の素の識別子(`[a-z_][a-z0-9_]*`)でない・`framework`(framework の持ち物)・
+///   同じ Entity に 2 つ・`InObject` の Entity(PG の表が無い)
+/// - `Derived`:同じ Property に `Column` / `Text` / `Split` / `Array` / `Derived` を重ねる・`InObject` の Entity・
+///   関係の Property(列 `<prop>_id` を生成の読みが辿る)・key / auto_key / put の鍵 / 並びの列 / `version` /
+///   Lifecycle の相・verb の宣言(`Update` の欄、`DeleteWhere` の欄)で書く Property
+fn storage_notes(app: model.App) -> List(String) {
+  let rows = app.server.storage
+  list.flat_map(app.entities, fn(entity) {
+    let module = entity.module
+    let in_object =
+      list.any(rows, fn(row) {
+        case row {
+          model.InObject(entity: name, ..) -> name == module
+          _ -> False
+        }
+      })
+    let schemas =
+      list.filter_map(rows, fn(row) {
+        case row {
+          model.InSchema(entity: name, schema: schema) if name == module ->
+            Ok(schema)
+          _ -> Error(Nil)
+        }
+      })
+    let schema_notes =
+      list.flatten([
+        list.filter_map(schemas, fn(name) {
+          case plain_identifier(name), name == schema.framework {
+            False, _ ->
+              Ok(
+                "storage "
+                <> module
+                <> " の InSchema の schema が SQL の素の識別子でない: "
+                <> name,
+              )
+            True, True ->
+              Ok(
+                "storage "
+                <> module
+                <> " の InSchema の schema "
+                <> name
+                <> " は framework の持ち物",
+              )
+            True, False -> Error(Nil)
+          }
+        }),
+        case schemas {
+          [_, _, ..] -> ["storage " <> module <> " に InSchema が 2 つ以上"]
+          _ -> []
+        },
+        case schemas, in_object {
+          [_, ..], True -> [
+            "storage " <> module <> " は InObject(PG の表が無い)なのに InSchema がある",
+          ]
+          _, _ -> []
+        },
+      ])
+    let derived =
+      list.filter_map(rows, fn(row) {
+        case row {
+          model.DerivedProp(entity: name, property: property)
+            if name == module
+          -> Ok(property)
+          _ -> Error(Nil)
+        }
+      })
+    let derived_notes =
+      list.flat_map(list.unique(derived), fn(property) {
+        let label = "storage " <> module <> " の Derived " <> property
+        let others =
+          list.filter(rows, fn(row) {
+            case row {
+              model.ColumnName(entity: name, property: other, ..)
+              | model.TextSum(entity: name, property: other, ..)
+              | model.SplitColumns(entity: name, property: other, ..)
+              | model.ArrayColumn(entity: name, property: other, ..)
+              | model.DerivedProp(entity: name, property: other) ->
+                name == module && other == property
+              _ -> False
+            }
+          })
+        let written =
+          list.filter_map(entity.verbs, fn(rule) {
+            case rule {
+              model.UpdateRule(name: verb, fields: fields, ..) ->
+                case list.contains(fields, property) {
+                  True -> Ok("verb の Update " <> verb)
+                  False -> Error(Nil)
+                }
+              model.DeleteWhereRule(field: field) if field == property ->
+                Ok("verb の DeleteWhere")
+              _ -> Error(Nil)
+            }
+          })
+        let ordered = case entity.ordered_by {
+          Some(order) ->
+            order.field == property || list.contains(order.within, property)
+          None -> False
+        }
+        let kind = list.find(entity.props, fn(prop) { prop.name == property })
+        let relation = case kind {
+          Ok(model.Prop(kind: model.RelProp(..), ..)) -> True
+          _ -> False
+        }
+        let phase = case model.field_for_prop(entity, property) {
+          Some(model.FieldDef(value: model.PhaseValue(_), ..)) -> True
+          _ -> False
+        }
+        list.flatten([
+          case others {
+            [_, _, ..] -> [
+              label
+              <> " に Column / Text / Split / Array / Derived を重ねている(表の列に持たない Property に列の写像は無い)",
+            ]
+            _ -> []
+          },
+          case in_object {
+            True -> [label <> " は InObject の Entity(PG の表が無い)"]
+            False -> []
+          },
+          case relation {
+            True -> [
+              label <> " は関係の Property(列 " <> property <> "_id を生成の読みが辿る)",
+            ]
+            False -> []
+          },
+          case
+            list.contains(entity.key_props, property)
+            || list.contains(entity.auto_key, property)
+          {
+            True -> [label <> " は key(表の列に要る)"]
+            False -> []
+          },
+          case list.contains(entity.upsert_key, property) {
+            True -> [label <> " は put の鍵(表の列に要る)"]
+            False -> []
+          },
+          case ordered {
+            True -> [label <> " は並び(OrderedBy)の列"]
+            False -> []
+          },
+          case property == "version" || phase {
+            True -> [label <> " は verb が書く列(version / Lifecycle の相)"]
+            False -> []
+          },
+          list.map(written, fn(by) {
+            label <> " を " <> by <> " で書こうとしている(表の列に持たない Property は verb で書けない)"
+          }),
+        ])
+      })
+    list.append(schema_notes, derived_notes)
+  })
+}
+
+/// SQL の素の識別子(引用符の要らない小文字の名)。
+fn plain_identifier(name: String) -> Bool {
+  case string.to_graphemes(name) {
+    [] -> False
+    [first, ..rest] ->
+      string.contains("abcdefghijklmnopqrstuvwxyz_", first)
+      && list.all(rest, fn(char) {
+        string.contains("abcdefghijklmnopqrstuvwxyz0123456789_", char)
+      })
+  }
+}
+
 fn storage_target(row: model.Storage) -> #(String, option.Option(String)) {
   case row {
-    model.InObject(entity: entity, ..) -> #(entity, None)
-    model.ColumnName(entity: entity, property: property, ..)
+    model.InObject(entity: entity, ..) | model.InSchema(entity: entity, ..) -> #(
+      entity,
+      None,
+    )
+    model.DerivedProp(entity: entity, property: property)
+    | model.ColumnName(entity: entity, property: property, ..)
     | model.TextSum(entity: entity, property: property, ..)
     | model.SplitColumns(entity: entity, property: property, ..)
     | model.ArrayColumn(entity: entity, property: property, ..) -> #(

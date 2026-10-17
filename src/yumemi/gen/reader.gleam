@@ -17,6 +17,7 @@ import yumemi/gen/relation
 import yumemi/gen/source.{type Unit}
 import yumemi/gen/stop
 import yumemi/gen/storage
+import yumemi/schema
 
 pub type Error {
   NoTypesModule
@@ -398,6 +399,7 @@ fn entity_of(
           name: entity_name,
           type_name: record_name,
           table: name,
+          schema: schema.app,
           props: props,
           fields: fields,
           verb_fields: verb_fields,

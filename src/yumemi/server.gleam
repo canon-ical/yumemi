@@ -148,6 +148,13 @@ pub type Storage {
   /// Entity を Neon でなく Durable Object の SQLite に置く。`object` は `durable_objects` の class 名。
   /// 生成器はこの Entity の PG 向けの SQL(verb・読み)を出さず、器の ★ adapter が持つ
   InObject(entity: String, object: String)
+  /// Entity の表を `app` でない schema に置く(`public`)。生成器はこの Entity の表を `<schema>.<表>` で書く。
+  /// 書かなければ `app`(`yumemi/schema.app`)
+  InSchema(entity: String, schema: String)
+  /// 表の列に持たない Property(読む SQL が別の表から渡す値)。生成器はこの Property を表の列として扱わない
+  /// ── create・update の verb の列と値、RETURNING、Draft・Created から外す。手書きの root・読みの SQL が
+  /// Property 名の列で渡し、行の写し(codec・hook)は今の形で受ける。生成の読みはこの Entity の行を渡せない
+  Derived(entity: String, property: String)
   /// Property の列名を替える(`type_` → `type`、`default` → `default_value`)
   Column(entity: String, property: String, column: String)
   /// payload の無い構成子だけの sum を text 1 列で持つ。`values` は (構成子, 列の値)。

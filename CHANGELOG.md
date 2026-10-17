@@ -2,6 +2,14 @@
 
 Releases before 0.14.1 are described in the README sections (each names the version that brought it) and in the git history.
 
+## 0.14.5 (2026-10-17)
+
+Adds two `server.Storage` declarations: **`InSchema`** puts an Entity's table in another schema than `app`, and **`Derived`** declares a Property the table has no column for. An app that declares neither generates what 0.14.4 generated, byte for byte.
+
+- **`InSchema(entity:, schema:)`.** The generated SQL names that Entity's table `<schema>.<table>` wherever it named `app.<table>`: verbs, reads, joins, `EXISTS`, `with` children, relation reads and `allow` clauses. A schema that is not a plain SQL identifier, `framework`, a second `InSchema` for the Entity, or `InSchema` on an `InObject` Entity stops the generator (exit 4).
+- **`Derived(entity:, property:)`.** The read SQL hands the value in from another table (a `JOIN`) under the Property's name; the row decoders read it as before. The generator leaves the Property out of the create and update verbs (columns, values, `RETURNING`), `Draft`, `Created` and the runtime's verb table, and writes no `update_<entity>_<property>`. A generated read that would hand the Entity's whole rows (`t.*`, `to_jsonb`, a `with` child or a relation read) or name the Property is not written and stops the generator (exit 4); write it by hand (`ManualRead`, the root statement) or pick the other columns with `q.Pick`. `Derived` on a key, `auto_key`, `upsert_key`, the `ordered_by` columns, `version`, the phase, a relation, a field of `verbs.Update` or `verbs.DeleteWhere`, an `InObject` Entity, or together with `Column`, `Text`, `Split`, `Array` or another `Derived` on the same Property stops the generator (exit 4).
+- **For apps that adopt `Derived`:** `Draft` and `Created` lose the field, so code that builds the Draft with it or reads it from `Created` stops compiling; `update_<entity>_<property>` is gone from `gen/verb`.
+
 ## 0.14.4 (2026-10-17)
 
 Adds **`PaddingLeft`**, a `SpaceProperty` that sets only the left inner padding (`padding-left`).

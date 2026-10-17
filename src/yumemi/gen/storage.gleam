@@ -4,12 +4,14 @@
 
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/result
 import gleam/string
 import yumemi/gen/model
 import yumemi/gen/naming
 
 /// 列名の上書き(`Column`)と、record を割る列(`Split`)を FieldDef の列に写す。
 /// 割った列は `a,b` の 1 つの綴りで持ち、INSERT / RETURNING はそのまま並び、UPDATE は組の代入にする。
+/// 表の schema(`InSchema`)を Entity に写す。
 pub fn apply(
   entities: List(model.Entity),
   rows: List(model.Storage),
@@ -22,8 +24,81 @@ pub fn apply(
           None -> field
         }
       })
-    model.Entity(..entity, fields: fields)
+    let schema =
+      list.find_map(rows, fn(row) {
+        case row {
+          model.InSchema(entity: module, schema: schema)
+            if module == entity.module
+          -> Ok(schema)
+          _ -> Error(Nil)
+        }
+      })
+      |> result.unwrap(entity.schema)
+    model.Entity(..entity, fields: fields, schema: schema)
   })
+}
+
+/// 表の名を schema つきで(`app.article`、`InSchema` があれば `public.course`)。
+pub fn table(entity: model.Entity) -> String {
+  entity.schema <> "." <> entity.table
+}
+
+/// `Derived` の Property の名(表の列に持たない)。無ければ空。
+pub fn derived(app: model.App, entity: model.Entity) -> List(String) {
+  list.filter_map(app.server.storage, fn(row) {
+    case row {
+      model.DerivedProp(entity: module, property: property)
+        if module == entity.module
+      -> Ok(property)
+      _ -> Error(Nil)
+    }
+  })
+}
+
+/// 列 1 本が `Derived` の Property のものか。
+pub fn derived_field(app: model.App, field: model.FieldDef) -> Bool {
+  case model.entity_by_name(app.entities, field.entity_name) {
+    None -> False
+    Some(entity) ->
+      list.any(derived(app, entity), fn(property) {
+        owns(entity, property, field)
+      })
+  }
+}
+
+/// 表の列だけの App ── `Derived` の Property と列を Entity から外す。verb と Draft・Created はこれで書く
+/// (create・update の列と値、RETURNING、Draft・Created に Derived を出さない)。
+/// `Derived` の宣言が無ければ App をそのまま返す。
+pub fn tabled(app: model.App) -> model.App {
+  let derived_rows =
+    list.filter(app.server.storage, fn(row) {
+      case row {
+        model.DerivedProp(..) -> True
+        _ -> False
+      }
+    })
+  case derived_rows {
+    [] -> app
+    _ ->
+      model.App(
+        ..app,
+        entities: list.map(app.entities, fn(entity) {
+          case derived(app, entity) {
+            [] -> entity
+            names ->
+              model.Entity(
+                ..entity,
+                props: list.filter(entity.props, fn(prop) {
+                  !list.contains(names, prop.name)
+                }),
+                fields: list.filter(entity.fields, fn(field) {
+                  !list.any(names, fn(name) { owns(entity, name, field) })
+                }),
+              )
+          }
+        }),
+      )
+  }
 }
 
 fn column_of(

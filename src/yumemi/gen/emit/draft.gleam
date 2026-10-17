@@ -9,8 +9,11 @@ import yumemi/gen/emit/render.{type Style, Style}
 import yumemi/gen/emit/types.{type File, File}
 import yumemi/gen/emit/typing
 import yumemi/gen/model
+import yumemi/gen/storage
 
 pub fn emit(app: model.App, hashes: hash.Hashes) -> List(File) {
+  // `Derived` の Property は verb で書かない ── Draft にも Created にも出さない
+  let app = storage.tabled(app)
   app.entities
   |> list.sort(fn(left, right) { string.compare(left.module, right.module) })
   |> list.map(one(_, app, hashes))

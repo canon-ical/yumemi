@@ -24,6 +24,8 @@ type Fn {
 }
 
 pub fn emit(app: model.App, hashes: hash.Hashes) -> List(File) {
+  // verb は表の列だけを書く ── `Derived` の Property は列にも穴にも出さない
+  let app = storage.tabled(app)
   let entities = entities_in_order(app)
   let functions = list.flat_map(entities, functions_for(_, app))
   let draft_paths =
@@ -82,6 +84,7 @@ pub fn emit(app: model.App, hashes: hash.Hashes) -> List(File) {
 /// (生成候補を持たない手書き verb は `manual_verbs` へ、と文言で名指しする)。
 /// `manual_verbs` は候補と一致しないことを宣言する語 ── 一致したら exit 4。
 pub fn notes(app: model.App) -> List(stop.Note) {
+  let app = storage.tabled(app)
   let global_candidates =
     app.entities
     |> list.flat_map(candidate_names)
@@ -160,6 +163,7 @@ fn handwritten_notes(
 }
 
 pub fn sql(app: model.App, hashes: hash.Hashes) -> List(File) {
+  let app = storage.tabled(app)
   app.entities
   |> list.filter(fn(entity) { !storage.in_object(app, entity.module) })
   |> list.sort(fn(left, right) { string.compare(left.module, right.module) })
@@ -2339,7 +2343,7 @@ fn first_key_column(entity: model.Entity) -> String {
 }
 
 fn table(entity: model.Entity) -> String {
-  schema.app <> "." <> entity.table
+  storage.table(entity)
 }
 
 fn returning(entity: model.Entity) -> String {
@@ -2530,6 +2534,7 @@ fn quoted(column: String) -> String {
 
 /// verb の名 -> JS の値(`{key, tuple, params, ...}`)。手書きの verb と Durable Object の Entity は出さない。
 pub fn runtime_table(app: model.App) -> List(#(String, String)) {
+  let app = storage.tabled(app)
   entities_in_order(app)
   |> list.filter(fn(entity) { !storage.in_object(app, entity.module) })
   |> list.flat_map(fn(entity) {

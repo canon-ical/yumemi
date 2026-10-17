@@ -15,7 +15,6 @@ import yumemi/gen/naming
 import yumemi/gen/relation
 import yumemi/gen/stop
 import yumemi/gen/storage
-import yumemi/schema
 
 /// SQL を出せない理由。`class` は 20 の exit code 表(`stop`)へそのまま写る。
 pub type Reason {
@@ -105,6 +104,7 @@ fn arrow_statement(app: App, arrow: model.Arrow) -> Result(String, Reason) {
     model.entity_by_name(app.entities, arrow.target_entity)
     |> option.to_result(clash("矢印の先が無い: " <> arrow.target_entity)),
   )
+  use _ <- try(whole_rows(app, target))
   use key_column <- try(case target.key_columns {
     [single] -> Ok(single)
     [] ->
@@ -122,9 +122,7 @@ fn arrow_statement(app: App, arrow: model.Arrow) -> Result(String, Reason) {
   }
   Ok(
     "SELECT t.*\nFROM jsonb_array_elements_text($1::jsonb) WITH ORDINALITY AS keys(value,ord)\nJOIN "
-    <> schema.app
-    <> "."
-    <> target.table
+    <> storage.table(target)
     <> " t ON t."
     <> quoted(key_column)
     <> "=keys.value"
@@ -317,16 +315,40 @@ fn column(
   case model.field_by_name(app.entities, field_name) {
     None -> Error(clash("列 " <> field_name <> " が Entity 宣言に無い"))
     Some(field) ->
-      case alias_of(scope, field.entity_name) {
-        None ->
+      case
+        storage.derived_field(app, field),
+        alias_of(scope, field.entity_name)
+      {
+        True, _ ->
+          Error(clash(
+            "列 "
+            <> field_name
+            <> " は Derived(表の列に持たない Property)── 生成の読みは引けない(手書きの読み ManualRead で渡す)",
+          ))
+        False, None ->
           Error(clash("列 " <> field_name <> " の Entity が from にも join にも無い"))
-        Some(alias) ->
+        False, Some(alias) ->
           Ok(Column(
             reference: alias <> "." <> quoted(field.column),
             kind: sql_type(app, field.value),
             optional: field.optional,
           ))
       }
+  }
+}
+
+/// 行をまるごと渡す読み(`t.*`・`to_jsonb(t)`)の Entity に `Derived` の Property があれば exit 4。
+/// 表の行にその列が無く、行の写しが落ちる ── 列を `q.Pick` で選ぶか、手書きの読み(ManualRead)で JOIN して渡す。
+fn whole_rows(app: App, entity: Entity) -> Result(Nil, Reason) {
+  case storage.derived(app, entity) {
+    [] -> Ok(Nil)
+    names ->
+      Error(clash(
+        entity.name
+        <> " の行を生成の読みで渡せない ── Derived の Property("
+        <> string.join(names, ", ")
+        <> ")は表の列に無い(列を q.Pick で選ぶか、手書きの読み ManualRead で JOIN して渡す)",
+      ))
   }
 }
 
@@ -394,9 +416,7 @@ fn statement(
       "SELECT ",
       selected,
       "\nFROM ",
-      schema.app,
-      ".",
-      from.table,
+      storage.table(from),
       " ",
       option.unwrap(alias_of(scope, from.name), "t"),
       case joins {
@@ -464,9 +484,7 @@ fn join_clauses(
       next,
       list.append(clauses, [
         "JOIN "
-        <> schema.app
-        <> "."
-        <> target.table
+        <> storage.table(target)
         <> " "
         <> alias
         <> " ON "
@@ -492,6 +510,19 @@ fn select_list(
   case select.group, select.agg {
     [], [] if select.columns != None -> picked_list(app, scope, select, from)
     [], [] -> {
+      use _ <- try(whole_rows(app, from))
+      use _ <- try(
+        list.try_each(select.join, fn(arrow_name) {
+          case model.arrow_by_name(app.arrows, arrow_name) {
+            Some(arrow) ->
+              case model.entity_by_name(app.entities, arrow.target_entity) {
+                Some(target) -> whole_rows(app, target)
+                None -> Ok(Nil)
+              }
+            None -> Ok(Nil)
+          }
+        }),
+      )
       let joined =
         list.filter_map(select.join, fn(arrow_name) {
           case model.arrow_by_name(app.arrows, arrow_name) {
@@ -816,9 +847,7 @@ fn has_clause(
     Scope(..scope, next_param: after.next_param),
     keyword
       <> "(\n  SELECT 1 FROM "
-      <> schema.app
-      <> "."
-      <> target.table
+      <> storage.table(target)
       <> " "
       <> target_alias
       <> "\n  WHERE "
@@ -835,6 +864,7 @@ type Allowed {
 }
 
 /// 関係を 1 本辿って allow 句の Entity を見る入れ子の EXISTS。
+/// `table` は schema つきの表の名(`storage.table`)。
 type Hop {
   Hop(table: String, alias: String, relation: String)
 }
@@ -1068,8 +1098,6 @@ fn restricted(
   let text =
     list.fold_right(hops, core, fn(inside, hop) {
       "EXISTS(SELECT 1 FROM "
-      <> schema.app
-      <> "."
       <> hop.table
       <> " "
       <> hop.alias
@@ -1173,7 +1201,7 @@ fn reach(
             next,
             list.append(hops, [
               Hop(
-                table: entity.table,
+                table: storage.table(entity),
                 alias: alias,
                 relation: alias
                   <> "."
@@ -1257,7 +1285,10 @@ fn with_clause(
     <> "."
     <> quoted(from.key_column)
   use value <- try(case picked {
-    [] -> Ok("to_jsonb(" <> child_alias <> ")")
+    [] -> {
+      use _ <- try(whole_rows(app, child))
+      Ok("to_jsonb(" <> child_alias <> ")")
+    }
     _ -> {
       use pairs <- try(
         list.try_map(picked, fn(field_name) {
@@ -1279,9 +1310,7 @@ fn with_clause(
     "COALESCE((SELECT "
       <> aggregate
       <> "\nFROM "
-      <> schema.app
-      <> "."
-      <> child.table
+      <> storage.table(child)
       <> " "
       <> child_alias
       <> "\nWHERE "
