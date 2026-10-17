@@ -201,6 +201,12 @@ pub fn a_declared_failure_page_reaches_the_shell_and_the_gate_test() {
     "pub type Vars {\n  Vars(\n    failure: String,\n    route: String,\n    www_origin: String,\n    auth_origin: String,\n  )\n}\n",
   )
   has(loader, "pub fn render(it: Data) -> el.Element {")
+  // r2:門が返す失敗の外枠なしの描画(中身の Block だけ)
+  has(loader, "pub fn render_bare(it: Data) -> el.Element {")
+  has(
+    loader,
+    "fn bare_view(it: Data) -> el.Element {\n  html.div_([el.attribute(\"data-yumemi-failure\", \"bare\")], page_children(it))\n}\n",
+  )
   string.contains(loader, "yumemi-block") |> should.be_false
   let shell = text_of(files, "public/src/gen/shell.mjs")
   has(
@@ -236,7 +242,16 @@ pub fn a_declared_failure_page_reaches_the_shell_and_the_gate_test() {
     shell,
     "  if (block !== null) return guarded(() => renderBlock(request, env, matched, before.session, block));\n",
   )
-  has(shell, "}, failurePage);\n\n")
+  // r2:門で止めた失敗は外枠なし、門を通った後(dispatch の中)の失敗は外枠つき
+  has(shell, "}, gateFailurePage);\n\n")
+  has(
+    shell,
+    "function gateFailurePage(request, env, response) {\n  return failurePage(request, env, response, false);\n}\n",
+  )
+  has(
+    shell,
+    "async function failurePage(request, env, response, framed = true) {\n",
+  )
   has(shell, "export {failureFor as failure};\n")
   // 頁の表と route 表に失敗の頁は入らない
   string.contains(text_of(files, "public/src/gen/route.gleam"), "failure")
@@ -252,6 +267,12 @@ pub fn a_declared_failure_page_reaches_the_shell_and_the_gate_test() {
     "    if (readsSession && wantsPage(request) && rules.some(coversEvery)) {\n",
   )
   has(gate, "export {text as plain};\n")
+  // r2:route に当たらない path の失敗の頁にも `Every` の CSP(この fixture の門は CSP を宣言しない)
+  has(gate, "const cspUnmatched = null;\n")
+  has(
+    gate,
+    "      if (before.route === null && response.headers.has(\"x-yumemi-failure\")) return withPolicy(before.request, response);\n",
+  )
   // 失敗の頁の格子の CSS は style.css にも出る
   has(
     text_of(files, "public/priv/static/_yumemi/style.css"),
@@ -359,7 +380,7 @@ pub fn generated_failure_page_serves_test() {
   string.split(out, "\n")
   |> list.filter(fn(line) { string.starts_with(line, "ok ") })
   |> list.length
-  |> should.equal(48)
+  |> should.equal(63)
 }
 
 /// 宣言の無い fixture(article・cms)を生成器で生成し直すと、commit した fixture と 1 字も違わない。

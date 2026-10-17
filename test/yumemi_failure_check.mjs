@@ -186,12 +186,19 @@ async function get(target, pathname, headers = pageHeaders, init = {}) {
   const response = await target.fetch(new Request("https://www.example" + pathname, { headers, ...init }), env, { waitUntil() {} });
   return { status: response.status, headers: response.headers, text: await response.text(), requests: [...requests] };
 }
-const isFailurePage = (item, status, kind) =>
+// framed:門を通った後の失敗は Layout つき(帯 `header` の area)。門が返す失敗(r2)は Layout なしで中身の Block だけ
+// (`data-yumemi-failure="bare"`、帯も Layout の Widget も無く、中身の「トップへ戻る」は残る)
+// 本文(SSR の `<style>` の後ろ)。style には Layout の grid の規則(`data-yumemi-area="header"` の字)が出るので本文で見る
+const bodyOf = (item) => item.text.slice(item.text.lastIndexOf("</style>"));
+const isFailurePage = (item, status, kind, framed = true) =>
   item.status === status
   && (item.headers.get("content-type") ?? "").startsWith("text/html")
   && item.headers.get("x-yumemi-failure") === String(status)
   && item.text.includes(`data-failure="${kind}"`)
-  && item.text.includes('data-yumemi-area="header"')
+  && item.text.includes("トップへ戻る")
+  && (framed
+    ? bodyOf(item).includes('data-yumemi-area="header"') && !bodyOf(item).includes('data-yumemi-failure="bare"')
+    : bodyOf(item).includes('data-yumemi-failure="bare"') && !bodyOf(item).includes('data-yumemi-area="header"') && !bodyOf(item).includes('data-yumemi-grid="layout"') && !bodyOf(item).includes("記事の件数") && !item.requests.includes("/api/widgets"))
   && item.text.includes('<script type="module" src="/_yumemi/client.mjs"></script>')
   && !item.text.includes("yumemi-pageview");
 const isPlain = (item, status, body) => item.status === status && (item.headers.get("content-type") ?? "").startsWith("text/plain") && item.text === body && !item.headers.has("x-yumemi-failure");
@@ -272,7 +279,7 @@ check("Origin env missing: the plain 500 (the env name stays out of HTML)", noOr
 // ── route に当たらない path ─────────────────────────────────────────────────────
 reset();
 const lost = await get(shell, "/nowhere/at/all");
-check("unmatched path, signed-in: the failure page 404 with the Layout (no route CSP)", isFailurePage(lost, 404, "not_found") && !lost.headers.has("content-security-policy"), summary(lost));
+check("unmatched path, signed-in (the gate passed): the failure page 404 with the Layout and the Every CSP", isFailurePage(lost, 404, "not_found") && lost.headers.get("content-security-policy") === CSP, summary(lost));
 const lostApi = await get(shell, "/nowhere/at/all", apiHeaders);
 check("unmatched path, not a page request: plain 404 without reading the session", isPlain(lostApi, 404, "not found") && lostApi.requests.length === 0, summary(lostApi));
 mode.signedIn = false;
@@ -287,17 +294,54 @@ check("unmatched path under an excepted page: Every still applies (except is for
 reset();
 mode.kind = "visitor";
 const deny = await get(shell, "/article/42");
-check("gate Deny: a page request gets the failure page 403 with the route's CSP", isFailurePage(deny, 403, "forbidden") && deny.headers.get("content-security-policy") === CSP, summary(deny));
+check("gate Deny: a page request gets the failure page 403 without the Layout, with the route's CSP", isFailurePage(deny, 403, "forbidden", false) && deny.headers.get("content-security-policy") === CSP, summary(deny));
 const denyApi = await get(shell, "/article/42", apiHeaders);
 check("gate Deny: a request that does not want a page keeps the Deny body", isPlain(denyApi, 403, "members only"), summary(denyApi));
 reset();
 mode.session = 500;
 const gateDown = await get(shell, "/article/42");
-check("gate session read 5xx: the failure page 503 (unavailable)", isFailurePage(gateDown, 503, "unavailable"), summary(gateDown));
+check("gate session read 5xx: the failure page 503 (unavailable) without the Layout", isFailurePage(gateDown, 503, "unavailable", false) && gateDown.headers.get("content-security-policy") === CSP, summary(gateDown));
 reset();
 mode.session = 404;
 const gateGone = await get(shell, "/article/42");
-check("gate session read 404: the failure page 404", isFailurePage(gateGone, 404, "not_found"), summary(gateGone));
+check("gate session read 404: the failure page 404 without the Layout", isFailurePage(gateGone, 404, "not_found", false), summary(gateGone));
+
+// ── r2:門が返す失敗は外枠なし、門を通った後の失敗は外枠あり(柏木のゲート 2 の probe の表) ─────────────
+// route に当たらない path で `Every` が止めたもの(session の読みの失敗)も、Layout なしで `Every` の CSP を付ける
+const gateRows = [
+  ["unmatched path, session read 500 (identity unknown)", { session: 500 }, 503, "unavailable"],
+  ["unmatched path, session read 404", { session: 404 }, 404, "not_found"],
+  ["unmatched path, session read 400", { session: 400 }, 403, "forbidden"],
+];
+for (const [name, set, status, kind] of gateRows) {
+  reset();
+  Object.assign(mode, set);
+  const page = await get(shell, "/nowhere");
+  check(`gate stops ${name}: the failure page ${status} without the Layout, with the Every CSP`, isFailurePage(page, status, kind, false) && page.headers.get("content-security-policy") === CSP, summary(page));
+}
+reset();
+mode.signedIn = false;
+const anonLost = await get(shell, "/nowhere");
+check("gate stops unmatched path, anonymous: 302 to sign-in, no frame", anonLost.status === 302 && !anonLost.text.includes("data-yumemi-area") && !anonLost.headers.has("x-yumemi-failure"), summary(anonLost));
+reset();
+mode.kind = "visitor";
+const denyRow = await get(shell, "/article/42");
+check("gate stops a signed-in party by Deny: 403 without the Layout and without reading the Layout's Widget", isFailurePage(denyRow, 403, "forbidden", false) && !denyRow.requests.includes("/api/widgets"), summary(denyRow));
+// 門を通った後の失敗は Layout つき(shell の読みの 403・404・5xx・例外、route に当たらない path で門を通った人の 404)
+const passedRows = [
+  ["shell read 403", { read: 403 }, "/article/42", 403, "forbidden"],
+  ["shell read 404", { read: 404 }, "/article/42", 404, "not_found"],
+  ["shell read 500", { read: 500 }, "/article/42", 503, "unavailable"],
+  ["shell read throws", { read: "throw" }, "/article/42", 503, "unavailable"],
+  ["unmatched path, signed-in member", {}, "/nowhere", 404, "not_found"],
+  ["unmatched path, signed-in visitor (Every passes)", { kind: "visitor" }, "/nowhere", 404, "not_found"],
+];
+for (const [name, set, pathname, status, kind] of passedRows) {
+  reset();
+  Object.assign(mode, set);
+  const page = await get(shell, pathname);
+  check(`after the gate, ${name}: the failure page ${status} with the Layout`, isFailurePage(page, status, kind) && page.headers.get("content-security-policy") === CSP, summary(page));
+}
 
 // ── 入口のための口 ────────────────────────────────────────────────────────────────
 reset();
@@ -363,8 +407,8 @@ try {
   mode.read = 200;
   await link(page, "/article/42");
   await page.waitForFunction(() => document.querySelector("[data-failure]") !== null, null, { timeout: 5000 }).catch(() => {});
-  const denied = await page.evaluate(() => document.querySelector("[data-failure]")?.getAttribute("data-failure") ?? null);
-  check("SPA: the gate's Deny swaps in the 403 failure page (same CSP) without a page load", denied === "forbidden" && state.documents.length === 0, JSON.stringify({ denied, documents: state.documents, fetches: state.fetches }));
+  const denied = await page.evaluate(() => ({ failure: document.querySelector("[data-failure]")?.getAttribute("data-failure") ?? null, header: document.querySelector('[data-yumemi-area="header"]') !== null, bare: document.querySelector('[data-yumemi-failure="bare"]') !== null }));
+  check("SPA: the gate's Deny swaps in the 403 failure page without the Layout (same CSP) without a page load", denied.failure === "forbidden" && !denied.header && denied.bare && state.documents.length === 0, JSON.stringify({ denied, documents: state.documents, fetches: state.fetches }));
   mode.kind = "member";
   await page.click("#top");
   await page.waitForFunction(() => document.querySelector("[data-failure]") === null && location.pathname === "/status", null, { timeout: 5000 }).catch(() => {});
@@ -374,6 +418,26 @@ try {
   const direct = await page.goto(base + "/article/40");
   const directShown = await page.evaluate(() => document.querySelector("[data-failure]")?.getAttribute("data-failure") ?? null);
   check("page load: a 404 opens the failure page with the original status", direct.status() === 404 && directShown === "not_found", String(direct.status()));
+  // r2:直に開いた頁でも、門が返す失敗は外枠なし、門を通った後の失敗は外枠あり
+  const frameOf = () => page.evaluate(() => ({ failure: document.querySelector("[data-failure]")?.getAttribute("data-failure") ?? null, header: document.querySelector('[data-yumemi-area="header"]') !== null, bare: document.querySelector('[data-yumemi-failure="bare"]') !== null, top: document.querySelector("#top") !== null }));
+  reset();
+  mode.session = 500;
+  const downLoad = await page.goto(base + "/nowhere");
+  const downShown = await frameOf();
+  check("page load: the gate's 503 on an unmatched path (session read 500) opens without the Layout", downLoad.status() === 503 && downShown.failure === "unavailable" && !downShown.header && downShown.bare && downShown.top, JSON.stringify({ status: downLoad.status(), downShown }));
+  reset();
+  mode.kind = "visitor";
+  const denyLoad = await page.goto(base + "/article/42");
+  const denyShown = await frameOf();
+  check("page load: the gate's Deny opens the 403 without the Layout", denyLoad.status() === 403 && denyShown.failure === "forbidden" && !denyShown.header && denyShown.bare && denyShown.top, JSON.stringify({ status: denyLoad.status(), denyShown }));
+  reset();
+  const lostLoad = await page.goto(base + "/nowhere");
+  const lostShown = await frameOf();
+  check("page load: an unmatched path after the gate opens the 404 with the Layout", lostLoad.status() === 404 && lostShown.failure === "not_found" && lostShown.header && !lostShown.bare, JSON.stringify({ status: lostLoad.status(), lostShown }));
+  mode.read = 403;
+  const readLoad = await page.goto(base + "/article/42");
+  const readShown = await frameOf();
+  check("page load: the shell's read 403 (after the gate) opens with the Layout", readLoad.status() === 403 && readShown.failure === "forbidden" && readShown.header && !readShown.bare, JSON.stringify({ status: readLoad.status(), readShown }));
   check("SPA: no page errors", errors.length === 0, errors.join(" | "));
   await context.close();
 } finally {

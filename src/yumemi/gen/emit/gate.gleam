@@ -25,12 +25,30 @@ import yumemi/gen/reader/gate.{
 /// media は同じ origin にある。外す口は持たない)。当たる宣言が無ければ None。client 遷移の route 表(`emit/front` の
 /// `navigation`)も同じ値を Page ごとに持つ。
 pub fn csp_for(gate: Gate, path: String) -> option.Option(String) {
-  let directives =
-    gate.csp
-    |> list.filter(fn(csp) {
-      list.any(csp.pages, fn(match) { gate.covers(match, path) })
+  gate.csp
+  |> list.filter(fn(csp) {
+    list.any(csp.pages, fn(match) { gate.covers(match, path) })
+  })
+  |> csp_value
+}
+
+/// route に当たらない path の CSP(0.14.3 r2、失敗の頁を宣言した面の門だけが使う)。`Every` を含む `csp` の宣言の
+/// 指令を、route の CSP と同じ規則で足し合わせる。無ければ None。
+pub fn csp_unmatched(gate: Gate) -> option.Option(String) {
+  gate.csp
+  |> list.filter(fn(csp) {
+    list.any(csp.pages, fn(match) {
+      case match {
+        gate.Every -> True
+        _ -> False
+      }
     })
-    |> list.flat_map(fn(csp) { csp.directives })
+  })
+  |> csp_value
+}
+
+fn csp_value(csps: List(gate.Csp)) -> option.Option(String) {
+  let directives = list.flat_map(csps, fn(csp) { csp.directives })
   let names = list.unique(list.map(directives, fn(directive) { directive.0 }))
   case names {
     [] -> None
@@ -206,7 +224,8 @@ fn runtime_for(gate: Gate, failure: Bool) -> String {
       with_keep
       |> string.replace(plain_text, failure_text)
       |> string.replace(unmatched, failure_unmatched)
-      |> string.replace(plain_serve, failure_serve)
+      |> string.replace(plain_serve, failure_serve(gate))
+      |> string.replace(plain_dispatch, failure_dispatch)
   }
 }
 
@@ -277,11 +296,32 @@ const plain_serve =
       if (before.response) return before.response;
 "
 
-const failure_serve =
-  "// 門で止めた失敗の頁にも、その route の CSP を付ける(client 遷移が照合する値と同じ)
-function withPolicy(request, response) {
+const plain_dispatch =
+  "      const response = await dispatch(before.request, env, before);
+      return after_response(before.request, env, response);
+"
+
+const failure_dispatch =
+  "      const response = await dispatch(before.request, env, before);
+      // route に当たらない path の失敗の頁にも `Every` の CSP を付ける(after_response が付けるのは route の CSP だけ)
+      if (before.route === null && response.headers.has(\"x-yumemi-failure\")) return withPolicy(before.request, response);
+      return after_response(before.request, env, response);
+"
+
+fn failure_serve(gate: Gate) -> String {
+  let csp = case csp_unmatched(gate) {
+    Some(value) -> quoted(value)
+    None -> "null"
+  }
+  "// 門で止めた失敗の頁にも、その route の CSP を付ける(client 遷移が照合する値と同じ)。route に当たらない path は
+// `Every` の CSP(0.14.3 r2)
+const cspUnmatched = " <> csp <> ";\n" <> failure_serve_tail
+}
+
+const failure_serve_tail =
+  "function withPolicy(request, response) {
   const matched = matchRoute(new URL(request.url).pathname);
-  const csp = matched !== null && Object.hasOwn(cspRoutes, matched.path) ? cspRoutes[matched.path] : null;
+  const csp = matched === null ? cspUnmatched : Object.hasOwn(cspRoutes, matched.path) ? cspRoutes[matched.path] : null;
   if (csp === null || !isHtml(response)) return response;
   const headers = new Headers(response.headers);
   headers.set(\"content-security-policy\", csp);

@@ -2250,7 +2250,7 @@ fn load_page_text(
     <> "\n"
     <> page_view_text(app, units, front, page, layout_sources, page_sources)
     <> case page_lives(page), page_fixed_blocks(page), page.module {
-      _, _, "failure" -> ""
+      _, _, "failure" -> "\n" <> failure_bare_text(front, page_sources)
       [], [], _ -> ""
       _, _, _ -> "\n" <> page_live_text(app, front, page, page_sources)
     }
@@ -2277,11 +2277,36 @@ fn page_render_text(
   page_sources: List(LoadSource),
   theme_background_blob: Bool,
 ) -> String {
+  render_function_text(front, page_sources, "render", "view")
+  <> theme_global_text(front, theme_background_blob)
+}
+
+/// 失敗の頁(0.14.3 r2)の外枠なしの描画。門が返す失敗(門がまだ通していない人)には Layout(帯・ナビ)を見せず、
+/// 失敗の頁の中身(Page の `Fixed` の Block)だけを同じ head で描く。Layout の Widget は読まない(Data の
+/// `layout` は使わない)。
+fn failure_bare_text(
+  front: reader_front.Front,
+  page_sources: List(LoadSource),
+) -> String {
+  render_function_text(front, page_sources, "render_bare", "bare_view")
+  <> "fn bare_view(it: Data) -> el.Element {\n"
+  <> "  html.div_([el.attribute(\"data-yumemi-failure\", \"bare\")], page_children(it))\n"
+  <> "}\n"
+}
+
+fn render_function_text(
+  front: reader_front.Front,
+  page_sources: List(LoadSource),
+  name: String,
+  view: String,
+) -> String {
   let theme_value = case theme_source(page_sources) {
     Some(_) -> "it.theme"
     None -> "None"
   }
-  "pub fn render(it: Data) -> el.Element {\n"
+  "pub fn "
+  <> name
+  <> "(it: Data) -> el.Element {\n"
   <> "  let page_theme = "
   <> theme_value
   <> "\n"
@@ -2301,13 +2326,14 @@ fn page_render_text(
   <> "    ]),\n"
   <> "    html.body_([theme_image_attribute(page_theme)], [\n"
   <> "      el.styled(\n"
-  <> "        fn() { view(it) },\n"
+  <> "        fn() { "
+  <> view
+  <> "(it) },\n"
   <> "        theme.body_rule(page_theme, theme_defaults(), theme_image_url),\n"
   <> "      ),\n"
   <> "    ]),\n"
   <> "  ])\n"
   <> "}\n\n"
-  <> theme_global_text(front, theme_background_blob)
 }
 
 /// shell の任意の const(0.11.12)を title の後ろに出す。無い const の要素は出さない。`stylesheets`(0.11.15)は
@@ -6029,7 +6055,7 @@ fn shell_runtime_text(
   <> case include_failure {
     True ->
       "  return failurePage(request, env, await guarded(() => renderPage(request, env, matched, before.session)));\n"
-      <> "}, failurePage);\n\n"
+      <> "}, gateFailurePage);\n\n"
       <> "// 0.14.3:面の入口が自分の平文の代わりに呼ぶ口(`failure(request, env, status)`)\n"
       <> "export {failureFor as failure};\n"
     False ->
@@ -6064,11 +6090,16 @@ fn shell_failure_text() -> String {
   <> "  }\n"
   <> "  return vars;\n"
   <> "}\n\n"
-  <> "// 失敗の頁を描く。Layout の Widget は読み、読めない(4xx・5xx・例外・decode の失敗)ならその Widget を描かない\n"
-  <> "async function renderFailure(request, env, status) {\n"
+  <> "// 失敗の頁を描く。Layout の Widget は読み、読めない(4xx・5xx・例外・decode の失敗)ならその Widget を描かない。\n"
+  <> "// framed が false(門が返す失敗)なら Layout を付けず中身の Block だけで描き、Widget も読まない\n"
+  <> "async function renderFailure(request, env, status, framed) {\n"
   <> "  const vars = failureVars(env, status);\n"
   <> "  if (vars === null) return null;\n"
   <> "  const values = [vars];\n"
+  <> "  if (!framed) {\n"
+  <> "    const html = to_document_string(failureSpec.loader.render_bare(failureSpec.loader.load(...values, ...failureSpec.sources.map(() => Option$None$const))));\n"
+  <> "    return htmlWithGridCss(html, failureSpec.layout);\n"
+  <> "  }\n"
   <> "  for (const source of failureSpec.sources) {\n"
   <> "    let value = Option$None$const;\n"
   <> "    try {\n"
@@ -6086,12 +6117,12 @@ fn shell_failure_text() -> String {
   <> "  const html = to_document_string(failureSpec.loader.render(failureSpec.loader.load(...values)));\n"
   <> "  return htmlWithGridCss(html, failureSpec.layout);\n"
   <> "}\n\n"
-  <> "// 平文の失敗を、頁を求める要求なら失敗の頁に替える。門で止めた失敗も `gate.serve` の 2 つ目の引数としてここを通る\n"
-  <> "async function failurePage(request, env, response) {\n"
+  <> "// 平文の失敗を、頁を求める要求なら失敗の頁に替える。門を通った後の失敗は Layout つき\n"
+  <> "async function failurePage(request, env, response, framed = true) {\n"
   <> "  if (!gate.isPlain(response) || !gate.wantsPage(request)) return response;\n"
   <> "  let html;\n"
   <> "  try {\n"
-  <> "    html = await renderFailure(request, env, response.status);\n"
+  <> "    html = await renderFailure(request, env, response.status, framed);\n"
   <> "  } catch (error) {\n"
   <> "    console.error(\"yumemi shell: failure page error\", error);\n"
   <> "    html = null;\n"
@@ -6099,6 +6130,10 @@ fn shell_failure_text() -> String {
   <> "  if (html === null) return response;\n"
   <> "  await response.body?.cancel();\n"
   <> "  return new Response(html, {status: response.status, headers: {\"content-type\": \"text/html; charset=utf-8\", \"cache-control\": \"no-store\", \"x-yumemi-failure\": String(response.status)}});\n"
+  <> "}\n\n"
+  <> "// 門で止めた失敗(`gate.serve` の 2 つ目の引数):門がまだ通していない人には外枠(Layout)を見せない\n"
+  <> "function gateFailurePage(request, env, response) {\n"
+  <> "  return failurePage(request, env, response, false);\n"
   <> "}\n\n"
   <> "async function failureFor(request, env, status) {\n"
   <> "  const kind = failureKind(status);\n"
