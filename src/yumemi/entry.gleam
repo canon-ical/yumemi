@@ -1,7 +1,7 @@
 //// Entry declarations; deployment values are resolved by the adapter.
 //// 2a-4 で `credential` を足した ── 主体を運ぶ**媒体**(session cookie か `Authorization: Bearer`)の宣言で、
-//// [26-dispatch](../../../../canonical/tech/_drafts/gleam-framework/26-dispatch.v0.md) 88〜113 行の起案(柏木 C1〜C3、人見の裁定 A / B / C)の実装。
-//// **`admit` には触らない** ── 変えるのは「誰か」の運び方であって「未ログインを通すか」ではない(人見 2026-09-10 の 2 値は据え置き)。
+//// [26-dispatch](../../../../canonical/tech/_drafts/gleam-framework/26-dispatch.v0.md) 88〜113 行の起案(柏木 C1〜C3、裁定 A / B / C)の実装。
+//// **`admit` には触らない** ── 変えるのは「誰か」の運び方であって「未ログインを通すか」ではない(2026-09-10 の裁定の 2 値は据え置き)。
 ////
 //// **既定 `Session` を 2 つ目の constructor で表す** ── Gleam の record は既定値を持てず、`credential` を
 //// `Http` に足すと既存 3 入口の宣言が全部書き換えになる(26 の負例 (o)「既存 3 入口に `credential` を書かないまま (a)〜(j) が通る」が成立しなくなる)。

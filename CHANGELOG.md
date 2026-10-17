@@ -6,7 +6,8 @@ Releases before 0.14.1 are described in the README sections (each names the vers
 
 Fixes the client navigation sending a GET twice when the link's target answers with a redirect.
 
-- **A redirect is followed once.** The navigation fetch used `redirect: "manual"`, so a 302 became an opaque response and the page was then loaded again from the *same* URL, which ran a side-effecting GET twice. The fetch is now `redirect: "follow"` with `mode: "same-origin"`; a redirected response is not swapped in but its final URL is opened as a page load (`location.replace`, keeping the original `#` when the final URL has none), so the URL and the CSP header are the final page's.
+- **A redirect is followed once.** The navigation fetch used `redirect: "manual"`, so a 302 became an opaque response and the page was then loaded again from the *same* URL, which ran a side-effecting GET twice. The fetch is now `redirect: "follow"` with `mode: "same-origin"`; a redirected response is not swapped in but its final URL is opened as a page load (`location.replace`), so the URL and the CSP header are the final page's. The original `#` is kept; `fetch` does not see a `#` in `Location`, so a redirect whose `Location` has one lands without it.
+- **The final page is requested twice instead.** On a same-origin redirect the server now sees the original URL and each URL on the way once, and the final URL twice: by the fetch (with `x-yumemi-navigate: 1`) and by the page load. In 0.14.6 the original URL was requested twice and the final URL once.
 - **Other origins.** `mode: "same-origin"` makes the fetch fail before a request leaves for another origin; the failure falls back to loading the original URL, as before.
 - Responses that do not redirect (200, failure pages, a CSP that differs, not HTML) and network failures or aborts behave as in 0.14.6.
 

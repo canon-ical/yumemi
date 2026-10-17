@@ -339,7 +339,8 @@ export function start({ routes: paths, csp = {} }) {
       if (latest === id) globalThis.location.reload();
     }, 0);
   };
-  // redirect した応答の最終の URL(同じ origin だけ。元の `#` は行き先に無ければ引き継ぐ ── ブラウザの redirect と同じ)
+  // redirect した応答の最終の URL(同じ origin だけ)。元の `#` を引き継ぐ ── Location に # の無い redirect でブラウザが
+  // するのと同じ。`response.url` は # を落とすので Location の # は見えず、その redirect では # が落ちる
   const landing = (url, response) => {
     try {
       const to = new URL(response.url);

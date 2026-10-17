@@ -15,7 +15,7 @@ import { createRequire } from "node:module";
 
 const navigatePath = path.resolve(process.argv[2] ?? new URL("../src/yumemi/front/navigate.mjs", import.meta.url).pathname);
 const require = createRequire(import.meta.url);
-const playwrightPath = process.argv[3] ?? path.join(os.homedir(), "yumemism_repo/yumemi/node_modules/playwright-core");
+const playwrightPath = process.argv[3] ?? "playwright-core";
 const { chromium } = require(playwrightPath);
 const cacheDir = path.join(os.homedir(), ".cache/ms-playwright");
 const chromiumPath = process.argv[4] ?? path.join(cacheDir, fs.readdirSync(cacheDir).filter((d) => /^chromium-\d+$/.test(d)).sort().pop(), "chrome-linux64/chrome");
@@ -51,11 +51,13 @@ const run = async (name, selector, expectUrl) => {
   await tab.goto(origin + "/");
   await tab.waitForFunction(() => globalThis.navigation !== undefined);
   for (const key of Object.keys(counts)) delete counts[key];
+  // 直す前も後も最後は頁の読み込みになるので、その load を待つ(URL の一致は click の前の `/` や取った `/go` でも成り立つ)
+  const loaded = tab.waitForEvent("load", { timeout: 5000 });
   await tab.click(selector);
-  await tab.waitForURL((u) => u.href.startsWith(expectUrl), { timeout: 5000 });
-  await tab.waitForLoadState("load");
+  await loaded;
   await new Promise((resolve) => setTimeout(resolve, 300));
-  console.log(`${name}: final=${tab.url()} requests=${JSON.stringify(counts)}`);
+  const final = tab.url();
+  console.log(`${name}: final=${final}${final === expectUrl ? "" : ` NG (expected ${expectUrl})`} requests=${JSON.stringify(counts)}`);
   await tab.close();
 };
 console.log(`navigate.mjs: ${navigatePath}`);
