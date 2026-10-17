@@ -78,6 +78,19 @@ pub fn text_live(
   route_paths: List(String),
   live: Bool,
 ) -> String {
+  text_failure(header, gate, route_paths, live, False)
+}
+
+/// `failure`(0.14.3、面が `src/failure.gleam` で失敗の頁を宣言した):門の平文の失敗(403・404・503・`Deny`)を
+/// `serve` の 2 つ目の引数(生成の shell の失敗の頁)へ渡し、route に当たらない path の頁を求める要求にも `Every` の
+/// 規則を掛ける。shell と共に使う `plain`・`isPlain`・`wantsPage` を export する。False の出力は 0.14.2 と同じ字。
+pub fn text_failure(
+  header: String,
+  gate: Gate,
+  route_paths: List(String),
+  live: Bool,
+  failure: Bool,
+) -> String {
   let reads_session = reads_session(gate)
   let #(pageview_routes, pageview_only) = case gate.pageview {
     Some(pageview) -> #(
@@ -136,11 +149,11 @@ pub fn text_live(
   <> case live {
     True ->
       string.replace(
-        runtime_for(gate),
+        runtime_for(gate, failure),
         "if (!tracksPageview(context) ||",
         "if (request.headers.has(blockHeader) || !tracksPageview(context) ||",
       )
-    False -> runtime_for(gate)
+    False -> runtime_for(gate, failure)
   }
 }
 
@@ -153,7 +166,7 @@ fn when_js(when: model.GateWhen) -> String {
 }
 
 /// 0.11.5 の語(`RedirectBack` / `FixedKeep`)を使う門だけ runtime に足す。使わない門の `gate.mjs` は 0.11.4 と同じ字。
-fn runtime_for(gate: Gate) -> String {
+fn runtime_for(gate: Gate, failure: Bool) -> String {
   let back =
     list.any(gate.rules, fn(rule) {
       list.any(rule.checks, fn(check) {
@@ -183,11 +196,107 @@ fn runtime_for(gate: Gate) -> String {
         redirect_back_fn <> redirect_for_head,
       )
   }
-  case keep {
+  let with_keep = case keep {
     False -> with_back
     True -> string.replace(with_back, fixed_location, fixed_keep_location)
   }
+  case failure {
+    False -> with_keep
+    True ->
+      with_keep
+      |> string.replace(plain_text, failure_text)
+      |> string.replace(unmatched, failure_unmatched)
+      |> string.replace(plain_serve, failure_serve)
+  }
 }
+
+const plain_text =
+  "function text(status, body) {
+  return new Response(body, {status, headers: {\"content-type\": \"text/plain; charset=utf-8\"}});
+}
+"
+
+const failure_text =
+  "// 0.14.3:門と生成の shell の平文の失敗。頁を求める要求なら、`serve` の 2 つ目の引数(失敗の頁)に替わる
+const plainFailures = new WeakSet();
+
+function text(status, body) {
+  const response = new Response(body, {status, headers: {\"content-type\": \"text/plain; charset=utf-8\"}});
+  plainFailures.add(response);
+  return response;
+}
+
+export {text as plain};
+
+export function isPlain(response) {
+  return plainFailures.has(response);
+}
+
+// 頁を求める要求:GET か HEAD で、断片の口(`x-yumemi-block`)でなく、`sec-fetch-dest: document` か `accept` に
+// `text/html` があるか client 遷移の fetch(`x-yumemi-navigate`)。それ以外(asset・島や test の fetch)は平文のまま
+export function wantsPage(request) {
+  if (request.method !== \"GET\" && request.method !== \"HEAD\") return false;
+  if (request.headers.has(\"x-yumemi-block\")) return false;
+  if (request.headers.has(\"x-yumemi-navigate\")) return true;
+  if (request.headers.get(\"sec-fetch-dest\") === \"document\") return true;
+  return (request.headers.get(\"accept\") ?? \"\").includes(\"text/html\");
+}
+
+function coversEvery(rule) {
+  return rule.pages.some((match) => match.type === \"every\");
+}
+"
+
+const unmatched =
+  "  if (!matched) return {request, route: null, session: undefined};
+"
+
+const failure_unmatched =
+  "  if (!matched) {
+    // 0.14.3:route に当たらない path の頁を求める要求にも `Every` の規則を掛ける(外枠つきの 404 を、その面を
+    // 使える人にだけ出す)。`except` と `Exact`・`Prefix` は route の綴りに掛かるので見ない
+    if (readsSession && wantsPage(request) && rules.some(coversEvery)) {
+      const read = await readSession(request, env);
+      for (const rule of rules) {
+        if (!coversEvery(rule)) continue;
+        for (const check of rule.checks) {
+          const response = checkFailure(check, read, request, env);
+          if (response) return {response};
+        }
+      }
+    }
+    return {request, route: null, session: undefined};
+  }
+"
+
+const plain_serve =
+  "export function serve(dispatch) {
+  return {
+    async fetch(request, env) {
+      const before = await before_route(request, env);
+      if (before.response) return before.response;
+"
+
+const failure_serve =
+  "// 門で止めた失敗の頁にも、その route の CSP を付ける(client 遷移が照合する値と同じ)
+function withPolicy(request, response) {
+  const matched = matchRoute(new URL(request.url).pathname);
+  const csp = matched !== null && Object.hasOwn(cspRoutes, matched.path) ? cspRoutes[matched.path] : null;
+  if (csp === null || !isHtml(response)) return response;
+  const headers = new Headers(response.headers);
+  headers.set(\"content-security-policy\", csp);
+  return new Response(response.body, {status: response.status, statusText: response.statusText, headers});
+}
+
+export function serve(dispatch, failure = null) {
+  return {
+    async fetch(request, env) {
+      const before = await before_route(request, env);
+      if (before.response) {
+        if (failure === null || !plainFailures.has(before.response)) return before.response;
+        return withPolicy(request, await failure(request, env, before.response));
+      }
+"
 
 const failed_tail = "  return redirectTo(302, fail.location);\n}\n"
 

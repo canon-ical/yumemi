@@ -20,6 +20,9 @@ pub type From {
   /// 知っている定数で、要求の URL の字(引数の実値・query)は入らない。Layout にも
   /// Page にも置ける ── Layout の帯の block がナビの今いる所を出すため。
   CurrentRoute
+  /// 失敗の種類(0.14.3)。値は `"forbidden"`(401・403)・`"not_found"`(404 とそれ以外の 4xx)・
+  /// `"unavailable"`(5xx と例外)の String。面の失敗の頁(`src/failure.gleam`)にだけ置ける。
+  Failure
 }
 
 pub type SessionKey {

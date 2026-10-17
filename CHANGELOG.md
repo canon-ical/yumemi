@@ -2,6 +2,17 @@
 
 Releases before 0.14.1 are described in the README sections (each names the version that brought it) and in the git history.
 
+## 0.14.3 (2026-10-17)
+
+Adds **the failure page**: a face that declares one in `src/failure.gleam` answers a failing page request (403, 404, 5xx, an exception) with that page, inside its Layout, with the original status code, also within client navigation. Faces that do not declare one generate what 0.14.2 generated.
+
+- **`src/failure.gleam`** holds `pub const page: Page(..)`. A new variable source, `Failure`, gives its Block `"forbidden"` (401, 403), `"not_found"` (other 4xx) or `"unavailable"` (5xx, exceptions). Article 45 keeps the page drawable from any URL without the API: `of: None`, `Fixed` placements whose Blocks read nothing, vars `Failure` and `CurrentRoute` (`""`), and no `Fixed` read in the Layout; `Failure` elsewhere stops the generator. The Layout's Widgets are read and left out when their read fails.
+- **Only page requests** (`GET` / `HEAD`, no `x-yumemi-block`, and `sec-fetch-dest: document`, `accept` with `text/html`, or `x-yumemi-navigate`) get the page. The fragment answer, assets, island and test fetches, and a `Deny`'s body for non-page requests stay plain text as before.
+- **Shell and gate.** The shell's failures, the gate's 403 / 404 / 503 and `Deny`, and exceptions (now caught and logged as a 500) become the page, with `x-yumemi-failure: <status>`, `cache-control: no-store` and the route's CSP. If the page itself cannot be drawn (a missing `Origin` env var, a throwing render), the plain text goes out; the page never wraps itself.
+- **Unmatched paths meet the gate** on a face with a failure page: a page request for a path no Page matches goes through the checks of the gate's `Every` rules first, so the Layout around a 404 is shown only to whom the face admits.
+- **Client navigation** (`navigate.mjs`) swaps in a response marked `x-yumemi-failure` like a 200, instead of reloading the page, so the failure shows in place with the Layout's navigation and back works. This is the one change faces without a failure page carry: their bundled `client.mjs` gets the new check, and they never send the header, so nothing they do changes.
+- **For entries:** `src/gen/shell.mjs` exports `failure(request, env, status)` (the page for a page request, plain text otherwise).
+
 ## 0.14.2 (2026-10-17)
 
 A patch to the generated CSS: **an element with the `hidden` attribute is hidden whatever `display` its class gives it.**

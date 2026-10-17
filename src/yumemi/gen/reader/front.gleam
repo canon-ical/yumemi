@@ -27,6 +27,10 @@ pub type Front {
     layout: Layout,
     shell: Shell,
     pages: List(Page),
+    /// 面の失敗の頁(0.14.3、`src/failure.gleam` の `pub const page`)。route を持たず、route 表・門の表に入らない。
+    failure: Option(Page),
+    /// `src/failure.gleam` はあるが `pub const page: Page(..)` が読めない(第 45 条)。
+    failure_unreadable: Bool,
     blocks: List(Block),
     components: List(Component),
     style: Style,
@@ -119,6 +123,8 @@ pub type From {
   Origin(String)
   AuthOrigin
   CurrentRoute
+  /// 失敗の種類(0.14.3)。失敗の頁にだけ置ける(第 45 条)。
+  Failure
   InvalidFrom(String)
 }
 
@@ -412,6 +418,12 @@ fn read_with_package_and_warning(
     units
     |> list.filter(fn(unit) { string.starts_with(unit.path, "pages/") })
     |> list.filter_map(fn(unit) { parse_page(unit, lengths) })
+  let failure_unit = list.find(units, fn(unit) { unit.path == "failure" })
+  let failure =
+    failure_unit
+    |> result.try(fn(unit) { parse_page(unit, lengths) })
+    |> result.map(fn(page) { Page(..page, path: [], url: "") })
+    |> option_from_result
   let blocks =
     units
     |> list.filter(fn(unit) { string.starts_with(unit.path, "blocks/") })
@@ -428,7 +440,7 @@ fn read_with_package_and_warning(
     |> option.unwrap(Style(tokens: [], media_variants: []))
   let services_used = service_references(layout, pages, blocks, components)
   let page_service_args =
-    list.map(pages, fn(page) {
+    list.map(list.append(pages, option_to_list(failure)), fn(page) {
       PageServiceArgs(
         page: page.module,
         services: resolve_page_service_args(layout, page, blocks, services),
@@ -451,6 +463,8 @@ fn read_with_package_and_warning(
     layout: layout,
     shell: shell,
     pages: pages,
+    failure: failure,
+    failure_unreadable: result.is_ok(failure_unit) && failure == None,
     blocks: blocks,
     components: components,
     style: style,
@@ -466,6 +480,8 @@ fn read_with_package_and_warning(
 
 /// model に対する停止診断。検査はここに集め、emit は呼ばない。
 pub fn notes(front: Front, services: List(model.Service)) -> List(stop.Note) {
+  // 失敗の頁(0.14.3)も Page の検査(Frame・変数・Block の入力と引数・Service の引数・of)に通す
+  let checked = with_failure(front)
   list.flatten([
     shell_notes(front),
     front.surface_notes,
@@ -482,18 +498,161 @@ pub fn notes(front: Front, services: List(model.Service)) -> List(stop.Note) {
       front.layout.tablet,
     ),
     list.flatten(
-      list.map(front.pages, fn(page) {
+      list.map(checked.pages, fn(page) {
         frame_notes(front.face, page.module, page.sp, page.pc, page.tablet)
       }),
     ),
-    variable_notes(front, services),
-    block_input_notes(front, services),
-    block_argument_notes(front, services),
-    service_argument_notes(front, services),
-    of_placement_notes(front, services),
+    variable_notes(checked, services),
+    block_input_notes(checked, services),
+    block_argument_notes(checked, services),
+    service_argument_notes(checked, services),
+    of_placement_notes(checked, services),
     layout_nested_notes(front.face, front.layout),
     unknown_service_notes(front.face, front.services, services),
+    failure_notes(front),
   ])
+}
+
+/// 検査と CSS・preview のために、失敗の頁を Page の並びの後ろに足した Front(route 表・門・shell の頁の表には使わない)。
+pub fn with_failure(front: Front) -> Front {
+  case front.failure {
+    Some(page) -> Front(..front, pages: list.append(front.pages, [page]))
+    None -> front
+  }
+}
+
+/// 第 45 条(0.14.3):失敗の頁の縛り。どの URL の失敗からでも API を読まずに中身を描けるよう、失敗の頁は
+/// `of: None`、placements は `Fixed`(`Live` でない)で Block は Service を読まない(`In = Nil`)、Page の Var は
+/// `Failure` と `CurrentRoute` だけ(`Origin`・`AuthOrigin` は Layout から受ける ── Page に置けないのは今の規則)。
+/// Layout は失敗の頁の外枠になるので、Layout の `Fixed` の Block も Service を読まない(Widget は読み、読めなければ
+/// その Widget を描かない。Layout の `Live` は今の規則が止める)。`Failure` は失敗の頁の外(Page・Layout)に置けない。
+fn failure_notes(front: Front) -> List(stop.Note) {
+  let note = fn(context, detail, class) {
+    stop.Note(
+      class: class,
+      text: front.face <> "/" <> context <> ": [第 45 条 失敗の頁] " <> detail,
+    )
+  }
+  let unreadable = case front.failure_unreadable {
+    True -> [
+      note(
+        "failure",
+        "src/failure.gleam に `pub const page: Page(..)`(型の注釈つきの Page の構成子)が無い",
+        stop.Missing,
+      ),
+    ]
+    False -> []
+  }
+  let outside =
+    [#("layout", front.layout.vars)]
+    |> list.append(
+      list.map(front.pages, fn(page) { #(page.module, page.vars) }),
+    )
+    |> list.flat_map(fn(item) {
+      let #(context, vars) = item
+      vars
+      |> list.filter(fn(var) { var.from == Failure })
+      |> list.map(fn(var) {
+        note(
+          context,
+          "Var." <> var.name <> " の Failure は失敗の頁(src/failure.gleam)にだけ置ける",
+          stop.Conflict,
+        )
+      })
+    })
+  let page = case front.failure {
+    None -> []
+    Some(page) -> {
+      let of = case page.of {
+        Some(name) -> [
+          note(
+            "failure",
+            "of: Some(" <> name <> ") ── 失敗の頁は of: None(root を読まない)",
+            stop.Conflict,
+          ),
+        ]
+        None -> []
+      }
+      let vars =
+        page.vars
+        |> list.filter_map(fn(var) {
+          case var.from {
+            Failure | CurrentRoute | InvalidFrom(_) | Origin(_) | AuthOrigin ->
+              Error(Nil)
+            Path(_) | Query(_) | Session(_) ->
+              Ok(note(
+                "failure",
+                "Var."
+                  <> var.name
+                  <> " ── 失敗の頁の Var は Failure・CurrentRoute だけ(Path・Query・Session は置けない)",
+                stop.Conflict,
+              ))
+          }
+        })
+      let placements =
+        page_frames(page)
+        |> list.flat_map(fn(frame) { frame.placements })
+        |> list.filter_map(fn(placement) {
+          case placement {
+            Widget(service: service, ..) ->
+              Ok(note(
+                "failure",
+                "Widget(of: " <> service <> ") ── 失敗の頁の placements は Fixed だけ",
+                stop.Conflict,
+              ))
+            Fixed(block: name, live: Some(_), ..) ->
+              Ok(note(
+                "failure",
+                "Live(block: " <> name <> ") ── 失敗の頁の placements は Fixed だけ",
+                stop.Conflict,
+              ))
+            Fixed(block: name, ..) ->
+              case reads_service(front.blocks, name) {
+                True ->
+                  Ok(note(
+                    "failure",
+                    "Fixed(block: "
+                      <> name
+                      <> ") の Block が Service の Out を受ける ── 失敗の頁の Block は読まない(In = Nil)",
+                    stop.Conflict,
+                  ))
+                False -> Error(Nil)
+              }
+          }
+        })
+      let layout =
+        layout_frames(front.layout)
+        |> list.flat_map(fn(frame) { frame.placements })
+        |> list.filter_map(fn(placement) {
+          case placement {
+            // Layout の `Live` は今の規則が止める
+            Fixed(live: Some(_), ..) -> Error(Nil)
+            Fixed(block: name, ..) ->
+              case reads_service(front.blocks, name) {
+                True ->
+                  Ok(note(
+                    "layout",
+                    "Fixed(block: "
+                      <> name
+                      <> ") の Block が Service の Out を受ける ── 失敗の頁を宣言した面の Layout の Fixed は読まない(読む物は Widget に置く)",
+                    stop.Conflict,
+                  ))
+                False -> Error(Nil)
+              }
+            Widget(..) -> Error(Nil)
+          }
+        })
+      list.flatten([of, vars, placements, layout])
+    }
+  }
+  list.flatten([unreadable, outside, page])
+}
+
+fn reads_service(blocks: List(Block), name: String) -> Bool {
+  case list.find(blocks, fn(block) { block.name == name }) {
+    Ok(Block(input_kind: ServiceOut(_), ..)) -> True
+    _ -> False
+  }
 }
 
 fn overlay_calls(units: List(Unit)) -> List(OverlayCall) {
@@ -1197,9 +1356,14 @@ fn parse_from(expression: glance.Expression) -> From {
         glance.Call(..) -> InvalidFrom("CurrentRoute は値を持たない構成子リテラルでなければならない")
         _ -> CurrentRoute
       }
+    Some("Failure") ->
+      case expression {
+        glance.Call(..) -> InvalidFrom("Failure は値を持たない構成子リテラルでなければならない")
+        _ -> Failure
+      }
     _ ->
       InvalidFrom(
-        "from は Path / Query / Session / Origin / AuthOrigin / CurrentRoute のリテラルではない",
+        "from は Path / Query / Session / Origin / AuthOrigin / CurrentRoute / Failure のリテラルではない",
       )
   }
 }

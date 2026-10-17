@@ -62,7 +62,7 @@ pub fn emit(
   let live = live_targets(app, back_units, package, model_, hashes)
   let live_decoder_services = []
   let page_decoder_services =
-    model_.pages
+    reader_front.with_failure(model_).pages
     |> list.flat_map(fn(page) {
       list.append(
         layout_sources(model_.layout, model_.blocks, app.services),
@@ -78,7 +78,7 @@ pub fn emit(
   let decoder_services =
     list.append(live_decoder_services, page_decoder_services)
     |> list.unique
-  let preview_blocks = referenced_blocks(model_)
+  let preview_blocks = referenced_blocks(reader_front.with_failure(model_))
   let skeleton_files =
     list.map(preview_blocks, fn(block) {
       skeleton_file(app, type_units, package, block)
@@ -201,7 +201,14 @@ pub fn emit(
       [load_layout_file(app, package, model_)],
       list.map(model_.pages, fn(page) {
         load_page_file(app, type_units, package, model_, page)
-      }),
+      })
+        // 0.14.3:失敗の頁の loader(`gen/load/failure.gleam`)。断片の口は持たない
+        |> list.append(case model_.failure {
+          Some(page) -> [
+            load_page_file(app, type_units, package, model_, page),
+          ]
+          None -> []
+        }),
     )
   list.append(
     list.append(
@@ -2242,9 +2249,10 @@ fn load_page_text(
     <> page_render_text(front, page_sources, theme_background_blob)
     <> "\n"
     <> page_view_text(app, units, front, page, layout_sources, page_sources)
-    <> case page_lives(page), page_fixed_blocks(page) {
-      [], [] -> ""
-      _, _ -> "\n" <> page_live_text(app, front, page, page_sources)
+    <> case page_lives(page), page_fixed_blocks(page), page.module {
+      _, _, "failure" -> ""
+      [], [], _ -> ""
+      _, _, _ -> "\n" <> page_live_text(app, front, page, page_sources)
     }
   let imports =
     load_imports(
@@ -4513,10 +4521,17 @@ fn shell_text(
       unit.path == "layout"
       || unit.path == "shell"
       || string.starts_with(unit.path, "pages/")
+      || unit.path == "failure"
     })
+  let failure_source = case front.failure {
+    Some(_) -> ",failure.gleam"
+    None -> ""
+  }
   js_header(
     package.name
-      <> "/src/{gen/route.gleam,gen/load/**,pages/**,layout.gleam,shell.gleam}",
+      <> "/src/{gen/route.gleam,gen/load/**,pages/**,layout.gleam,shell.gleam"
+      <> failure_source
+      <> "}",
     digest.short(hash.entry(hashes) <> source_hash),
   )
   <> "\n\n"
@@ -4534,11 +4549,12 @@ fn shell_text(
       || front_has_live(front),
     front_has_live(front),
     front_has_door(front),
+    option.is_some(front.failure),
     uses_current_route(front),
     uses_page_theme(app, units, front),
     static_grid_css(front.layout)
-      <> static_pages_grid_css(front.pages)
-      <> generated_front_css(front)
+      <> static_pages_grid_css(reader_front.with_failure(front).pages)
+      <> generated_front_css(reader_front.with_failure(front))
       // 0.12 段 C:interactive Component の `when` の枝を隠す規則(SSR の頁の `<style>` にも出す)
       <> state_css,
   )
@@ -4560,11 +4576,15 @@ fn gate_file(
         || string.starts_with(unit.path, "pages/")
         && string.ends_with(unit.path, "/page")
       })
-      <> string.inspect(gate.session_path),
+      <> string.inspect(gate.session_path)
+      <> case front.failure {
+        Some(_) -> "failure"
+        None -> ""
+      },
     )
   File(
     path: package.name <> "/src/gen/gate.mjs",
-    text: gate_emit.text_live(
+    text: gate_emit.text_failure(
       js_header(
         package.name
           <> "/src/{gate.gleam,pages/**} and src/{entry,server}.gleam",
@@ -4573,6 +4593,7 @@ fn gate_file(
       gate,
       front_route_paths(front),
       front_has_door(front),
+      option.is_some(front.failure),
     ),
   )
 }
@@ -4754,7 +4775,14 @@ fn shell_imports(
       ]
     })
     |> list.flatten
-  list.append(base, list.append(outs, pages))
+  let failure = case front.failure {
+    Some(_) -> [
+      "import * as failureDefinition from \"../failure.mjs\";",
+      "import * as failureLoader from \"./load/failure.mjs\";",
+    ]
+    None -> []
+  }
+  list.append(base, list.append(outs, list.append(pages, failure)))
   |> list.unique
   |> list.sort(string.compare)
   |> string.join("\n")
@@ -4791,7 +4819,17 @@ fn shell_services(
         }
       })
     })
-  let names = list.unique(list.append(from_pages, from_components))
+  let from_failure = case front.failure {
+    Some(_) ->
+      layout_sources(front.layout, front.blocks, app.services)
+      |> list.map(fn(source) { source.service })
+    None -> []
+  }
+  let names =
+    list.unique(list.append(
+      from_pages,
+      list.append(from_components, from_failure),
+    ))
   app.services
   |> list.filter(fn(service) { list.contains(names, service.module) })
 }
@@ -4829,7 +4867,7 @@ fn shell_page_tables(
       <> js_export_name(front.layout.name)
       <> ",\n"
       <> "    vars: [\n"
-      <> shell_var_rows(front, page)
+      <> shell_var_rows(front, page, reader_front.route_path(page.path))
       <> "    ],\n"
       <> "    givens: [\n"
       <> shell_given_rows(app, front, page)
@@ -4848,6 +4886,39 @@ fn shell_page_tables(
   <> "const pageSpecs = new Map([\n"
   <> spec_rows
   <> "\n]);\n"
+  <> case front.failure {
+    Some(page) -> failure_spec_text(app, units, front, page)
+    None -> ""
+  }
+}
+
+/// 失敗の頁(0.14.3)の表。Vars は `Failure`・`CurrentRoute`(空の字)と Layout の `Origin`・`AuthOrigin`、読みは
+/// Layout の Widget だけ(どれも optional。読めなければその Widget を描かない)。`failureDefinition` は宣言の module。
+fn failure_spec_text(
+  app: model.App,
+  units: List(Unit),
+  front: reader_front.Front,
+  page: reader_front.Page,
+) -> String {
+  let sources = layout_sources(front.layout, front.blocks, app.services)
+  "// 0.14.3:失敗の頁(`src/failure.gleam` の `page`)\n"
+  <> "const failureSpec = {\n"
+  <> "  definition: failureDefinition.page,\n"
+  <> "  loader: failureLoader,\n"
+  <> "  layout: layoutDefinition."
+  <> js_export_name(front.layout.name)
+  <> ",\n"
+  <> "  vars: [\n"
+  <> string.replace(shell_var_rows(front, page, ""), "      {", "    {")
+  <> "  ],\n"
+  <> "  sources: [\n"
+  <> string.replace(
+    shell_source_rows(app, units, front, page, sources),
+    "      {",
+    "    {",
+  )
+  <> "  ],\n"
+  <> "};\n"
 }
 
 /// 0.12 段 C:given は無くなった(`reloads` の戻りは out の span か頁の取り直し)。殻の runtime の givens の
@@ -4863,6 +4934,7 @@ fn shell_given_rows(
 fn shell_var_rows(
   front: reader_front.Front,
   page: reader_front.Page,
+  route: String,
 ) -> String {
   let vars = list.append(page.vars, front.layout.vars)
   let authenticated =
@@ -4881,7 +4953,7 @@ fn shell_var_rows(
     <> ", optional: "
     <> bool_text(optional)
     <> ", from: "
-    <> shell_var_source(var.from, reader_front.route_path(page.path))
+    <> shell_var_source(var.from, route)
     <> " },\n"
   })
   |> string.concat
@@ -4900,6 +4972,7 @@ fn shell_var_source(source: reader_front.From, route: String) -> String {
     reader_front.AuthOrigin -> "{ type: \"auth-origin\" }"
     reader_front.CurrentRoute ->
       "{ type: \"route\", value: " <> quoted(route) <> " }"
+    reader_front.Failure -> "{ type: \"failure\" }"
     reader_front.InvalidFrom(_) -> "{ type: \"invalid\" }"
   }
 }
@@ -5016,8 +5089,11 @@ fn bool_text(value: Bool) -> String {
 fn style_text(package: face.Package, front: reader_front.Front) -> String {
   let input_hash =
     source_hash(package.units, fn(unit) {
-      unit.path == "layout" || string.starts_with(unit.path, "pages/")
+      unit.path == "layout"
+      || string.starts_with(unit.path, "pages/")
+      || unit.path == "failure"
     })
+  let front = reader_front.with_failure(front)
   "/* GENERATED from "
   <> package.name
   <> "/src/layout.gleam [sha256:"
@@ -5030,8 +5106,7 @@ fn style_text(package: face.Package, front: reader_front.Front) -> String {
 
 fn generated_front_css(front: reader_front.Front) -> String {
   case front_has_live(front) {
-    True ->
-      "yumemi-live { display: contents; }\n"
+    True -> "yumemi-live { display: contents; }\n"
     False -> ""
   }
   <> badge_css()
@@ -5172,7 +5247,8 @@ fn closed_dialog_css() -> String {
 /// `display` でなく `content-visibility: hidden` で、`display: none` にすると browser 内検索と URL の fragment が
 /// 中身を見つけて開けなくなる。
 fn hidden_css() -> String {
-  let rule = "[hidden]:not([hidden=until-found i]) { display: none !important; }"
+  let rule =
+    "[hidden]:not([hidden=until-found i]) { display: none !important; }"
   rule <> "\n" <> "@layer yumemi-hidden { " <> rule <> " }\n"
 }
 
@@ -5671,6 +5747,7 @@ fn shell_runtime_text(
   include_client: Bool,
   include_live: Bool,
   include_door: Bool,
+  include_failure: Bool,
   include_route: Bool,
   include_theme: Bool,
   grid_css: String,
@@ -5791,9 +5868,17 @@ fn shell_runtime_text(
       <> "  return root[definition.theme[0]] ?? Option$None$const;\n"
       <> "}\n\n"
   }
-  <> "function failure(status, body) {\n"
-  <> "  return new Response(body, {status, headers: {\"content-type\": \"text/plain; charset=utf-8\"}});\n"
-  <> "}\n\n"
+  <> case include_failure {
+    // 0.14.3:平文は門の `plain`(頁を求める要求なら失敗の頁に替わる印を門と共に持つ)
+    True ->
+      "function failure(status, body) {\n"
+      <> "  return gate.plain(status, body);\n"
+      <> "}\n\n"
+    False ->
+      "function failure(status, body) {\n"
+      <> "  return new Response(body, {status, headers: {\"content-type\": \"text/plain; charset=utf-8\"}});\n"
+      <> "}\n\n"
+  }
   <> "async function renderPage(request, env, matched, gateSession) {\n"
   <> shell_vars_text(include_route)
   <> "  const values = [vars];\n"
@@ -5870,6 +5955,10 @@ fn shell_runtime_text(
     True -> shell_block_text(include_route, include_live)
     False -> ""
   }
+  <> case include_failure {
+    True -> shell_failure_text()
+    False -> ""
+  }
   <> "function addGivenAttributes(html, givens) {\n"
   <> "  let output = html;\n"
   <> "  for (const given of givens) {\n"
@@ -5919,17 +6008,111 @@ fn shell_runtime_text(
   <> "  const matched = matchPage(new URL(request.url).pathname);\n"
   <> "  if (!matched) {\n"
   <> "    if (env.SVELTE) return env.SVELTE.fetch(request);\n"
-  <> "    return failure(404, \"not found\");\n"
-  <> "  }\n"
-  <> case include_door {
+  <> case include_failure {
     True ->
+      "    return failurePage(request, env, failure(404, \"not found\"));\n"
+    False -> "    return failure(404, \"not found\");\n"
+  }
+  <> "  }\n"
+  <> case include_door, include_failure {
+    True, False ->
       "  // 0.14:Block の断片の口(0.14.1 から `Fixed` の Block も)。門は頁と同じ道を通った後(数える印は差さない)\n"
       <> "  const block = request.headers.get(\"x-yumemi-block\");\n"
       <> "  if (block !== null) return renderBlock(request, env, matched, before.session, block);\n"
-    False -> ""
+    True, True ->
+      "  // 0.14:Block の断片の口(0.14.1 から `Fixed` の Block も)。門は頁と同じ道を通った後(数える印は差さない)\n"
+      <> "  // 断片の口は頁を求める要求でないので、失敗は平文のまま(0.14.3)\n"
+      <> "  const block = request.headers.get(\"x-yumemi-block\");\n"
+      <> "  if (block !== null) return guarded(() => renderBlock(request, env, matched, before.session, block));\n"
+    False, _ -> ""
   }
-  <> "  return renderPage(request, env, matched, before.session);\n"
-  <> "});\n"
+  <> case include_failure {
+    True ->
+      "  return failurePage(request, env, await guarded(() => renderPage(request, env, matched, before.session)));\n"
+      <> "}, failurePage);\n\n"
+      <> "// 0.14.3:面の入口が自分の平文の代わりに呼ぶ口(`failure(request, env, status)`)\n"
+      <> "export {failureFor as failure};\n"
+    False ->
+      "  return renderPage(request, env, matched, before.session);\n" <> "});\n"
+  }
+}
+
+/// 失敗の頁(0.14.3)の runtime。平文の失敗(`gate.plain`)を、頁を求める要求(`gate.wantsPage`)なら面の失敗の頁で
+/// 返す(状態は元の値、印 `x-yumemi-failure: <status>`)。失敗の頁が描けない(Origin の env が無い・描画の例外)とき
+/// は平文のまま ── 失敗の頁から失敗の頁へ回さない。描画の例外は log に出して 500 の unavailable。
+fn shell_failure_text() -> String {
+  "// 0.14.3:失敗の種類(`Failure` の値)。401・403 は forbidden、5xx は unavailable、それ以外の 4xx は not_found\n"
+  <> "function failureKind(status) {\n"
+  <> "  if (status === 401 || status === 403) return \"forbidden\";\n"
+  <> "  if (status >= 500) return \"unavailable\";\n"
+  <> "  return \"not_found\";\n"
+  <> "}\n\n"
+  <> "// 失敗の頁の Vars。置けるのは Failure・CurrentRoute(空の字)と Layout の Origin・AuthOrigin(第 45 条)。\n"
+  <> "// Origin の env が無ければ null(平文に落とす。env の名を頁に出さない)\n"
+  <> "function failureVars(env, status) {\n"
+  <> "  const vars = {};\n"
+  <> "  for (const field of failureSpec.vars) {\n"
+  <> "    const source = field.from;\n"
+  <> "    let value;\n"
+  <> "    if (source.type === \"failure\") value = failureKind(status);\n"
+  <> "    else if (source.type === \"route\") value = source.value;\n"
+  <> "    else if (source.type === \"origin\" || source.type === \"auth-origin\") {\n"
+  <> "      value = env[source.type === \"origin\" ? \"PUBLIC_\" + source.name.toUpperCase() + \"_ORIGIN\" : \"PUBLIC_IDP_ORIGIN\"];\n"
+  <> "      if (typeof value !== \"string\" || value.length === 0) return null;\n"
+  <> "    } else return null;\n"
+  <> "    vars[field.name] = value;\n"
+  <> "  }\n"
+  <> "  return vars;\n"
+  <> "}\n\n"
+  <> "// 失敗の頁を描く。Layout の Widget は読み、読めない(4xx・5xx・例外・decode の失敗)ならその Widget を描かない\n"
+  <> "async function renderFailure(request, env, status) {\n"
+  <> "  const vars = failureVars(env, status);\n"
+  <> "  if (vars === null) return null;\n"
+  <> "  const values = [vars];\n"
+  <> "  for (const source of failureSpec.sources) {\n"
+  <> "    let value = Option$None$const;\n"
+  <> "    try {\n"
+  <> "      const response = await readFromApp(env.APP, request, source.service, argsFor(vars, source.args));\n"
+  <> "      if (response.ok) value = new Some(source.decoder(await response.json()));\n"
+  <> "      else {\n"
+  <> "        console.error(\"yumemi shell: failure widget read error\", response.status);\n"
+  <> "        await response.body?.cancel();\n"
+  <> "      }\n"
+  <> "    } catch (error) {\n"
+  <> "      console.error(\"yumemi shell: failure widget read error\", error);\n"
+  <> "    }\n"
+  <> "    values.push(value);\n"
+  <> "  }\n"
+  <> "  const html = to_document_string(failureSpec.loader.render(failureSpec.loader.load(...values)));\n"
+  <> "  return htmlWithGridCss(html, failureSpec.layout);\n"
+  <> "}\n\n"
+  <> "// 平文の失敗を、頁を求める要求なら失敗の頁に替える。門で止めた失敗も `gate.serve` の 2 つ目の引数としてここを通る\n"
+  <> "async function failurePage(request, env, response) {\n"
+  <> "  if (!gate.isPlain(response) || !gate.wantsPage(request)) return response;\n"
+  <> "  let html;\n"
+  <> "  try {\n"
+  <> "    html = await renderFailure(request, env, response.status);\n"
+  <> "  } catch (error) {\n"
+  <> "    console.error(\"yumemi shell: failure page error\", error);\n"
+  <> "    html = null;\n"
+  <> "  }\n"
+  <> "  if (html === null) return response;\n"
+  <> "  await response.body?.cancel();\n"
+  <> "  return new Response(html, {status: response.status, headers: {\"content-type\": \"text/html; charset=utf-8\", \"cache-control\": \"no-store\", \"x-yumemi-failure\": String(response.status)}});\n"
+  <> "}\n\n"
+  <> "async function failureFor(request, env, status) {\n"
+  <> "  const kind = failureKind(status);\n"
+  <> "  return failurePage(request, env, failure(status, kind === \"not_found\" ? \"not found\" : kind));\n"
+  <> "}\n\n"
+  <> "// 描画の例外(読みの decode・givens・render)は log に出して 500 の unavailable(Cloudflare の例外の頁を出さない)\n"
+  <> "async function guarded(render) {\n"
+  <> "  try {\n"
+  <> "    return await render();\n"
+  <> "  } catch (error) {\n"
+  <> "    console.error(\"yumemi shell: render error\", error);\n"
+  <> "    return failure(500, \"unavailable\");\n"
+  <> "  }\n"
+  <> "}\n\n"
 }
 
 /// 頁の Vars を組む字(renderPage と、0.14 の断片の口 renderBlock が同じ字を使う)。

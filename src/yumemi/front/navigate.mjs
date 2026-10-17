@@ -25,6 +25,10 @@
 // 新しく足す stylesheet と、来た頁の body にだけある stylesheet は、当たらない media で先に読み終えてから body を
 // 替える(body の側は、自分が読み終えるまで head の写しを残す)。
 //
+// 失敗の頁(0.14.3):面が失敗の頁を宣言していれば、shell は頁を求める要求の失敗(403・404・5xx)を失敗の頁の HTML
+// で、元の状態コードのまま、印の header `x-yumemi-failure: <status>` を付けて返す。印のある HTML は 200 と同じく
+// 差し替える(CSP の照合と `swappable` は同じ)── 頁の読み込みをもう 1 回しない。数える印は 200 にだけ差さる。
+//
 // pageview(0.12):fetch は印の header `x-yumemi-navigate: 1` を付け、門は数える Page の応答の head に
 // `<meta name="yumemi-pageview">` を差す。ここは送らない。差し替えでは印を毎回来た頁のものに替え(前の頁の印を
 // 残さない)、`navigatesuccess` の時点で今の document にあるのは来た頁の印だけ。送るのは client 側の送り手で、
@@ -48,6 +52,13 @@ const clientSrc = "/_yumemi/client.mjs";
 /// 門に「client 遷移の fetch」と知らせる header。門はこれを見て pageview の script の代わりに印を差す。
 export const navigateHeader = "x-yumemi-navigate";
 const pageviewName = "yumemi-pageview";
+/// shell が失敗の頁の応答に付ける印(値は元の状態コード)。
+export const failureHeader = "x-yumemi-failure";
+
+/// 取った応答を差し替えてよい状態か:200 か、印のある失敗の頁。
+export function swappableStatus(response) {
+  return response.status === 200 || (response.status >= 400 && response.headers.has(failureHeader));
+}
 
 /// route の綴り(`/muse/:handle/reserve`)に pathname が当たるか。門(`gen/gate.mjs` の matchRoute)と同じ規則:
 /// 節の数が同じ、`:` の節は空でない値、字の節は同じか `_` を `-` に替えたもの。
@@ -342,7 +353,7 @@ export function start({ routes: paths, csp = {} }) {
       return load(url);
     }
     const type = response.headers.get("content-type") ?? "";
-    if (response.type === "opaqueredirect" || response.status !== 200 || !type.startsWith("text/html") || !samePolicy(response.headers, csp)) {
+    if (response.type === "opaqueredirect" || !swappableStatus(response) || !type.startsWith("text/html") || !samePolicy(response.headers, csp)) {
       return load(url);
     }
     let html;

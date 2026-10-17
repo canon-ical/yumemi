@@ -489,6 +489,10 @@ function start({ components = {}, escapes = {}, go: go2 = null, reload: reload2 
 var clientSrc = "/_yumemi/client.mjs";
 var navigateHeader = "x-yumemi-navigate";
 var pageviewName = "yumemi-pageview";
+var failureHeader = "x-yumemi-failure";
+function swappableStatus(response) {
+  return response.status === 200 || response.status >= 400 && response.headers.has(failureHeader);
+}
 function matches(route, pathname) {
   const expected = route.split("/");
   const actual = pathname.split("/");
@@ -720,7 +724,7 @@ function start2({ routes: paths, csp = {} }) {
       return load(url);
     }
     const type = response.headers.get("content-type") ?? "";
-    if (response.type === "opaqueredirect" || response.status !== 200 || !type.startsWith("text/html") || !samePolicy(response.headers, csp2)) {
+    if (response.type === "opaqueredirect" || !swappableStatus(response) || !type.startsWith("text/html") || !samePolicy(response.headers, csp2)) {
       return load(url);
     }
     let html;
