@@ -155,6 +155,11 @@ pub type Storage {
   /// ── create・update の verb の列と値、RETURNING、Draft・Created から外す。手書きの root・読みの SQL が
   /// Property 名の列で渡し、行の写し(codec・hook)は今の形で受ける。生成の読みはこの Entity の行を渡せない
   Derived(entity: String, property: String)
+  /// Entity の読みを表とは別の relation(view)から引く。`relation` は Entity の schema の中の名(`store_view`)。
+  /// 生成の読み(from・join・矢印・`has`・allow の経路・with の子)はこの relation を書き、verb(create・update・
+  /// put・delete・RETURNING・行を掴む文)と FK は表のまま。この Entity の `Derived` の Property は relation が
+  /// 列で渡すものとして、生成の読みが行をまるごと渡し、名指しで引く
+  ReadFrom(entity: String, relation: String)
   /// Property の列名を替える(`type_` → `type`、`default` → `default_value`)
   Column(entity: String, property: String, column: String)
   /// payload の無い構成子だけの sum を text 1 列で持つ。`values` は (構成子, 列の値)。

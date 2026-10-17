@@ -474,6 +474,11 @@ fn storage_of(expression: glance.Expression) -> Result(model.Storage, String) {
       use property <- result.try(text(expression, "property"))
       Ok(model.DerivedProp(entity: entity, property: property))
     }
+    Some("ReadFrom") -> {
+      use entity <- result.try(text(expression, "entity"))
+      use relation <- result.try(text(expression, "relation"))
+      Ok(model.ReadFrom(entity: entity, relation: relation))
+    }
     Some("Column") -> {
       use entity <- result.try(text(expression, "entity"))
       use property <- result.try(text(expression, "property"))
@@ -504,7 +509,7 @@ fn storage_of(expression: glance.Expression) -> Result(model.Storage, String) {
     }
     _ ->
       Error(
-        "InObject / InSchema / Derived / Column / Text / Split / Array でない項",
+        "InObject / InSchema / Derived / ReadFrom / Column / Text / Split / Array でない項",
       )
   }
 }
@@ -836,7 +841,7 @@ pub fn notes(app: model.App) -> List(stop.Note) {
   })
 }
 
-/// `InSchema` と `Derived` の宣言の食い違い(0.14.5)。名の無い Entity / Property は `unknown_storage` が言うので、
+/// `InSchema`・`Derived`(0.14.5)と `ReadFrom`(0.14.6)の宣言の食い違い。名の無い Entity / Property は `unknown_storage` が言うので、
 /// ここは在る Entity だけを見る。
 ///
 /// - `InSchema`:schema の名が SQL の素の識別子(`[a-z_][a-z0-9_]*`)でない・`framework`(framework の持ち物)・
@@ -844,6 +849,7 @@ pub fn notes(app: model.App) -> List(stop.Note) {
 /// - `Derived`:同じ Property に `Column` / `Text` / `Split` / `Array` / `Derived` を重ねる・`InObject` の Entity・
 ///   関係の Property(列 `<prop>_id` を生成の読みが辿る)・key / auto_key / put の鍵 / 並びの列 / `version` /
 ///   Lifecycle の相・verb の宣言(`Update` の欄、`DeleteWhere` の欄)で書く Property
+/// - `ReadFrom`(0.14.6):relation の名が SQL の素の識別子でない・同じ Entity に 2 つ・`InObject` の Entity
 fn storage_notes(app: model.App) -> List(String) {
   let rows = app.server.storage
   list.flat_map(app.entities, fn(entity) {
@@ -989,7 +995,40 @@ fn storage_notes(app: model.App) -> List(String) {
           }),
         ])
       })
-    list.append(schema_notes, derived_notes)
+    let relations =
+      list.filter_map(rows, fn(row) {
+        case row {
+          model.ReadFrom(entity: name, relation: relation) if name == module ->
+            Ok(relation)
+          _ -> Error(Nil)
+        }
+      })
+    let read_notes =
+      list.flatten([
+        list.filter_map(relations, fn(name) {
+          case plain_identifier(name) {
+            False ->
+              Ok(
+                "storage "
+                <> module
+                <> " の ReadFrom の relation が SQL の素の識別子でない: "
+                <> name,
+              )
+            True -> Error(Nil)
+          }
+        }),
+        case relations {
+          [_, _, ..] -> ["storage " <> module <> " に ReadFrom が 2 つ以上"]
+          _ -> []
+        },
+        case relations, in_object {
+          [_, ..], True -> [
+            "storage " <> module <> " は InObject(PG の表が無い)なのに ReadFrom がある",
+          ]
+          _, _ -> []
+        },
+      ])
+    list.flatten([schema_notes, derived_notes, read_notes])
   })
 }
 
@@ -1007,10 +1046,9 @@ fn plain_identifier(name: String) -> Bool {
 
 fn storage_target(row: model.Storage) -> #(String, option.Option(String)) {
   case row {
-    model.InObject(entity: entity, ..) | model.InSchema(entity: entity, ..) -> #(
-      entity,
-      None,
-    )
+    model.InObject(entity: entity, ..)
+    | model.InSchema(entity: entity, ..)
+    | model.ReadFrom(entity: entity, ..) -> #(entity, None)
     model.DerivedProp(entity: entity, property: property)
     | model.ColumnName(entity: entity, property: property, ..)
     | model.TextSum(entity: entity, property: property, ..)

@@ -2,6 +2,15 @@
 
 Releases before 0.14.1 are described in the README sections (each names the version that brought it) and in the git history.
 
+## 0.14.6 (2026-10-17)
+
+Adds a `server.Storage` declaration, **`ReadFrom`**: an Entity's generated reads read another relation (a view) than its table, while the verbs and the foreign keys keep the table. An app that declares no `ReadFrom` generates what 0.14.5 generated, byte for byte.
+
+- **`ReadFrom(entity:, relation:)`.** `relation` is a name in the Entity's schema (`app`, or its `InSchema` schema). The generated reads name `<schema>.<relation>` wherever they named the table: `FROM`, `JOIN`, the relation reads (`to_<property>`), the `has` `EXISTS`, the `allow` clauses' nested `EXISTS` and the `with` children. The verbs (create, update, put, delete, `RETURNING`, the statements that lock rows) still write and lock the table.
+- **With `Derived`.** On an Entity with `ReadFrom`, the read-side stops of 0.14.5 are lifted: a generated read may hand the Entity's whole rows (`t.*`, `to_jsonb`, a `with` child, a relation read) and name a `Derived` Property (`where`, `order`, `group`, `Pick`, keyset, the `allow` owner's `party`, a `with` child's `order`), since the relation carries those columns. The write side is unchanged: `Derived` Properties stay out of the verbs, `Draft` and `Created`. An Entity with `Derived` and no `ReadFrom` stops as in 0.14.5. `ReadFrom` without `Derived` is allowed.
+- **Stops (exit 4).** A relation that is not a plain SQL identifier (`[a-z_][a-z0-9_]*`, so no schema prefix), a second `ReadFrom` for the Entity, `ReadFrom` on an `InObject` Entity, or one naming no Entity.
+- **The relation is the app's DDL.** Its columns must be the table's plus the `Derived` ones, under the Properties' column names; the row decoders read them as before. `FOR UPDATE` cannot lock a view over an outer join, which is why the verbs keep the table.
+
 ## 0.14.5 (2026-10-17)
 
 Adds two `server.Storage` declarations: **`InSchema`** puts an Entity's table in another schema than `app`, and **`Derived`** declares a Property the table has no column for. An app that declares neither generates what 0.14.4 generated, byte for byte.

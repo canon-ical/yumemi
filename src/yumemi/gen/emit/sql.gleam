@@ -122,7 +122,7 @@ fn arrow_statement(app: App, arrow: model.Arrow) -> Result(String, Reason) {
   }
   Ok(
     "SELECT t.*\nFROM jsonb_array_elements_text($1::jsonb) WITH ORDINALITY AS keys(value,ord)\nJOIN "
-    <> storage.table(target)
+    <> storage.read_table(app, target)
     <> " t ON t."
     <> quoted(key_column)
     <> "=keys.value"
@@ -316,7 +316,7 @@ fn column(
     None -> Error(clash("列 " <> field_name <> " が Entity 宣言に無い"))
     Some(field) ->
       case
-        storage.derived_field(app, field),
+        storage.unread_field(app, field),
         alias_of(scope, field.entity_name)
       {
         True, _ ->
@@ -339,8 +339,9 @@ fn column(
 
 /// 行をまるごと渡す読み(`t.*`・`to_jsonb(t)`)の Entity に `Derived` の Property があれば exit 4。
 /// 表の行にその列が無く、行の写しが落ちる ── 列を `q.Pick` で選ぶか、手書きの読み(ManualRead)で JOIN して渡す。
+/// `ReadFrom` のある Entity は relation が列で渡すので通す(0.14.6)。
 fn whole_rows(app: App, entity: Entity) -> Result(Nil, Reason) {
-  case storage.derived(app, entity) {
+  case storage.unread(app, entity) {
     [] -> Ok(Nil)
     names ->
       Error(clash(
@@ -416,7 +417,7 @@ fn statement(
       "SELECT ",
       selected,
       "\nFROM ",
-      storage.table(from),
+      storage.read_table(app, from),
       " ",
       option.unwrap(alias_of(scope, from.name), "t"),
       case joins {
@@ -484,7 +485,7 @@ fn join_clauses(
       next,
       list.append(clauses, [
         "JOIN "
-        <> storage.table(target)
+        <> storage.read_table(app, target)
         <> " "
         <> alias
         <> " ON "
@@ -847,7 +848,7 @@ fn has_clause(
     Scope(..scope, next_param: after.next_param),
     keyword
       <> "(\n  SELECT 1 FROM "
-      <> storage.table(target)
+      <> storage.read_table(app, target)
       <> " "
       <> target_alias
       <> "\n  WHERE "
@@ -864,7 +865,7 @@ type Allowed {
 }
 
 /// 関係を 1 本辿って allow 句の Entity を見る入れ子の EXISTS。
-/// `table` は schema つきの表の名(`storage.table`)。
+/// `table` は schema つきの読みの relation の名(`storage.read_table`)。
 type Hop {
   Hop(table: String, alias: String, relation: String)
 }
@@ -993,7 +994,7 @@ fn restricted(
       case model.field_for_prop(entity, "party") {
         // party の列は `column` を通らないので、`Derived` をここでも止める
         Some(field) ->
-          case storage.derived_field(app, field) {
+          case storage.unread_field(app, field) {
             True ->
               Error(clash(
                 "allow 句の owner "
@@ -1213,7 +1214,7 @@ fn reach(
             next,
             list.append(hops, [
               Hop(
-                table: storage.table(entity),
+                table: storage.read_table(app, entity),
                 alias: alias,
                 relation: alias
                   <> "."
@@ -1322,7 +1323,7 @@ fn with_clause(
     "COALESCE((SELECT "
       <> aggregate
       <> "\nFROM "
-      <> storage.table(child)
+      <> storage.read_table(app, child)
       <> " "
       <> child_alias
       <> "\nWHERE "
@@ -1341,7 +1342,7 @@ fn with_order(
   let key = alias <> "." <> quoted(child.key_column)
   case list.find(child.fields, fn(field) { field.column == "order" }) {
     Ok(field) ->
-      case storage.derived_field(app, field) {
+      case storage.unread_field(app, field) {
         True ->
           Error(clash(
             "with の子 "

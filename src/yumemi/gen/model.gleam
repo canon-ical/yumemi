@@ -477,6 +477,7 @@ pub type Storage {
   InObject(entity: String, object: String)
   InSchema(entity: String, schema: String)
   DerivedProp(entity: String, property: String)
+  ReadFrom(entity: String, relation: String)
   ColumnName(entity: String, property: String, column: String)
   TextSum(entity: String, property: String, values: List(#(String, String)))
   SplitColumns(

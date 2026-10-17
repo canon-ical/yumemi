@@ -43,6 +43,48 @@ pub fn table(entity: model.Entity) -> String {
   entity.schema <> "." <> entity.table
 }
 
+/// 生成の読みが引く relation を schema つきで。`ReadFrom` があれば `<schema>.<relation>`(`app.store_view`)、
+/// 無ければ表(`table`)。verb は表を書くので、これを使うのは読みだけ。
+pub fn read_table(app: model.App, entity: model.Entity) -> String {
+  case read_from(app, entity) {
+    Some(relation) -> entity.schema <> "." <> relation
+    None -> table(entity)
+  }
+}
+
+/// `ReadFrom` の relation の名(schema なし)。無ければ None。
+pub fn read_from(app: model.App, entity: model.Entity) -> Option(String) {
+  list.find_map(app.server.storage, fn(row) {
+    case row {
+      model.ReadFrom(entity: module, relation: relation)
+        if module == entity.module
+      -> Ok(relation)
+      _ -> Error(Nil)
+    }
+  })
+  |> option.from_result
+}
+
+/// 生成の読みが引けない `Derived` の Property の名 ── 読みが表を引く Entity の `Derived`。
+/// `ReadFrom` のある Entity は relation が列で渡すので空。
+pub fn unread(app: model.App, entity: model.Entity) -> List(String) {
+  case read_from(app, entity) {
+    Some(_) -> []
+    None -> derived(app, entity)
+  }
+}
+
+/// 列 1 本が、生成の読みが引けない `Derived` の Property のものか(`unread` の列版)。
+pub fn unread_field(app: model.App, field: model.FieldDef) -> Bool {
+  case model.entity_by_name(app.entities, field.entity_name) {
+    None -> False
+    Some(entity) ->
+      list.any(unread(app, entity), fn(property) {
+        owns(entity, property, field)
+      })
+  }
+}
+
 /// `Derived` の Property の名(表の列に持たない)。無ければ空。
 pub fn derived(app: model.App, entity: model.Entity) -> List(String) {
   list.filter_map(app.server.storage, fn(row) {
