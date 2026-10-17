@@ -16,3 +16,9 @@ export function runtime_read() {
 export function runtime_states() {
   return child("test/yumemi_0121_state_check.mjs");
 }
+
+/// 0.14.2 の `[hidden]` の規則を Chromium で(`css` は生成の style.css の全文を stdin で渡す)。
+export function hidden_in_chromium(css) {
+  const result = spawnSync(process.execPath, [path.resolve("test/yumemi_0142_hidden_check.mjs")], { input: css, encoding: "utf8", timeout: 120000 });
+  return `${result.stdout}${result.stderr ? `\nSTDERR ${result.stderr}` : ""}`.trim();
+}

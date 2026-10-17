@@ -108,7 +108,7 @@ async function get(pathname, headers = {}) {
 
 const page = await get("/article/42?widget=summary");
 check("page: 200 with the Block wrapped in <yumemi-live name edge token>", page.status === 200 && page.text.includes('<yumemi-live token="tok.en1" edge="bottom" name="article">'), page.text.slice(0, 300));
-check("page: display: contents for yumemi-live and the hidden el.fresh rule", page.text.includes("yumemi-live { display: contents; }") && page.text.includes("[data-yumemi-fresh][hidden] { display: none !important; }"));
+check("page: display: contents for yumemi-live and the [hidden] rule (el.fresh included)", page.text.includes("yumemi-live { display: contents; }") && page.text.includes("[hidden]:not([hidden=until-found i]) { display: none !important; }"));
 check("page: the counting mark is on the page", page.text.includes('<meta name="yumemi-pageview">'));
 check("page: the page reads the Layout's widget and the root", page.requests.some((p) => p.startsWith("/api/widgets")) && page.requests.some((p) => p.startsWith("/api/articles/")), JSON.stringify(page.requests));
 

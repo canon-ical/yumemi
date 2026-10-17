@@ -5031,11 +5031,12 @@ fn style_text(package: face.Package, front: reader_front.Front) -> String {
 fn generated_front_css(front: reader_front.Front) -> String {
   case front_has_live(front) {
     True ->
-      "yumemi-live { display: contents; }\n[data-yumemi-fresh][hidden] { display: none !important; }\n"
+      "yumemi-live { display: contents; }\n"
     False -> ""
   }
   <> badge_css()
   <> closed_dialog_css()
+  <> hidden_css()
   <> case front_has_overlay(front) {
     True -> "[popover]::backdrop { background: rgba(0, 0, 0, 0.45); }\n"
     False -> ""
@@ -5163,6 +5164,16 @@ fn is_ident_char(char: String) -> Bool {
 fn closed_dialog_css() -> String {
   "dialog:not([open]) { display: none !important; }\n"
   <> "@layer yumemi-closed-dialog { dialog:not([open]) { display: none !important; } }\n"
+}
+
+/// `hidden` の付いた要素を出さない(0.14.2)。UA の `[hidden] { display: none }` は作り手の Style の `display`
+/// (`Flow` ほか)に負けるので、閉じた dialog と同じ形で `!important` を、`@layer` の中にも置く。`el.fresh` の
+/// `[data-yumemi-fresh][hidden]` もこの規則に含まれる。`hidden="until-found"` だけは除く ── その値の UA の規則は
+/// `display` でなく `content-visibility: hidden` で、`display: none` にすると browser 内検索と URL の fragment が
+/// 中身を見つけて開けなくなる。
+fn hidden_css() -> String {
+  let rule = "[hidden]:not([hidden=until-found i]) { display: none !important; }"
+  rule <> "\n" <> "@layer yumemi-hidden { " <> rule <> " }\n"
 }
 
 fn badge_css() -> String {

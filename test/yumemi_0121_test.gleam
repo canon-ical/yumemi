@@ -33,6 +33,9 @@ fn runtime_read() -> String
 @external(javascript, "./yumemi_0121_test_ffi.mjs", "runtime_states")
 fn runtime_states() -> String
 
+@external(javascript, "./yumemi_0121_test_ffi.mjs", "hidden_in_chromium")
+fn hidden_in_chromium(css: String) -> String
+
 /// fixture の写しを `edits` で替えて生成し、(停止コード, 診断の文の並び, 書いた file)。
 fn generated(
   edits: List(#(String, String, String)),
@@ -227,6 +230,23 @@ pub fn closed_dialog_stays_hidden_test() {
   string.contains(style, rule <> "\n" <> layered) |> should.be_true
   let shell = text_of(files, "public/src/gen/shell.mjs")
   string.contains(shell, layered) |> should.be_true
+}
+
+// ── 3b hidden(0.14.2)───────────────────────────────────────────────────
+
+/// 生成の CSS が `hidden` の要素を `!important` で、`@layer` の中にも隠す(`until-found` を除く)。`el.fresh` の
+/// 専用の規則はこの規則に含まれる。class に `display:flex` を持つ要素は、Chromium の computed style で `none`。
+pub fn hidden_stays_hidden_test() {
+  let #(code, _, files) = generated([])
+  code |> should.equal(0)
+  let rule = "[hidden]:not([hidden=until-found i]) { display: none !important; }"
+  let layered = "@layer yumemi-hidden { " <> rule <> " }"
+  let style = text_of(files, "public/priv/static/_yumemi/style.css")
+  string.contains(style, rule <> "\n" <> layered) |> should.be_true
+  string.contains(style, "[data-yumemi-fresh][hidden]") |> should.be_false
+  let shell = text_of(files, "public/src/gen/shell.mjs")
+  string.contains(shell, layered) |> should.be_true
+  ok_lines(hidden_in_chromium(style), 14)
 }
 
 // ── 4 Failed と Refused ─────────────────────────────────────────────────

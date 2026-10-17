@@ -2,6 +2,15 @@
 
 Releases before 0.14.1 are described in the README sections (each names the version that brought it) and in the git history.
 
+## 0.14.2 (2026-10-17)
+
+A patch to the generated CSS: **an element with the `hidden` attribute is hidden whatever `display` its class gives it.**
+
+- **`[hidden]` wins over the author's `display`.** The browser's own `[hidden] { display: none }` loses to any `display` a Style gives the element (`Flow` writes `display: flex` or `grid`), so an element a page or an escape marked `hidden` stayed on screen. The generated CSS now carries `[hidden]:not([hidden=until-found i]) { display: none !important; }`, once outside a layer and once inside `@layer yumemi-hidden` (as the closed `<dialog>` rule of 0.12.1 does; a `!important` inside a layer beats one outside it). It applies to every face, with or without `Live`, in `style.css` and in the page's `<style>`.
+- **`hidden="until-found"` is left alone.** The browser hides that value with `content-visibility: hidden`, not `display: none`, so that find-in-page and URL fragments can open it; forcing `display: none` would stop that.
+- **`el.fresh`'s own rule is folded in.** The `[data-yumemi-fresh][hidden] { display: none !important; }` line of `Live` faces is gone; the new rule covers the same element, so it stays hidden exactly as before.
+- **What can change on screen.** An element that carries `hidden` and was shown anyway by its class's `display` (or by an inline `display`) is now hidden; remove the attribute to show it, as the `Live` refresh and the escapes already do. Regenerating a face rewrites `style.css`, the page's CSS in `src/gen/shell.mjs` and nothing else.
+
 ## 0.14.1 (2026-10-17)
 
 Adds to 0.14.0 and narrows one thing it did: **reads that are not a `Live` Block's read no longer carry a token.** The token's form, the socket, the signal and `YumemiLive` are as they were.
