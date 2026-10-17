@@ -23,6 +23,8 @@ pub type SafeArea {
 pub type SpaceProperty {
   Margin
   Padding
+  /// 左の辺の内側の余白だけ(`padding-left`、0.14.4)。見出しの帯と字の間など。
+  PaddingLeft
   Gap
   Width
   Height

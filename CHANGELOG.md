@@ -2,6 +2,12 @@
 
 Releases before 0.14.1 are described in the README sections (each names the version that brought it) and in the git history.
 
+## 0.14.4 (2026-10-17)
+
+Adds **`PaddingLeft`**, a `SpaceProperty` that sets only the left inner padding (`padding-left`).
+
+- Pair it with `Border(edge: LeftEdge, ..)` to open the gap between a bar and the text beside it without touching the top, bottom or right padding. `Padding` still writes all four sides, as before.
+
 ## 0.14.3 (2026-10-17)
 
 Adds **the failure page**: a face that declares one in `src/failure.gleam` answers a failing page request (403, 404, 5xx, an exception) with that page, with the original status code (inside its Layout once the gate has let the requester through), also within client navigation. Faces that do not declare one generate what 0.14.2 generated.

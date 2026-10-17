@@ -188,6 +188,7 @@ fn space(property: css.SpaceProperty, value: css.Length) -> sketch_css.Style {
   case property {
     css.Margin -> sketch_css.margin_(length_to_string(value))
     css.Padding -> sketch_css.padding_(length_to_string(value))
+    css.PaddingLeft -> sketch_css.padding_left_(length_to_string(value))
     css.Gap -> sketch_css.gap_(length_to_string(value))
     css.Width -> sketch_css.width_(length_to_string(value))
     css.Height -> sketch_css.height_(length_to_string(value))
