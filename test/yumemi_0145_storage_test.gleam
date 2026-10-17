@@ -4,6 +4,7 @@
 
 import glance
 import gleam/list
+import gleam/result
 import gleam/string
 import gleeunit/should
 import yumemi/gen/emit/draft
@@ -214,6 +215,164 @@ pub fn derived_stops_test() {
   ]
   |> list.each(fn(text) { has_note(notes, text) |> should.be_true })
   list.length(notes) |> should.equal(13)
+}
+
+/// 柏木 ゲート 2 P2:`column` を通らずに列を書く 2 か所 ── allow 句の owner の `party` と with の子の `order`。
+/// `Derived` なら SQL を出さず exit 4、宣言が無ければ今の SQL。
+fn read_service(
+  name: String,
+  face: String,
+  allow: String,
+  select: String,
+) -> source.Unit {
+  let allow_import = case allow {
+    "" -> ""
+    _ -> "import gen/allow/article as allow\n"
+  }
+  unit("service/" <> name, "import yumemi/effect.{type Effect, Read}
+import yumemi/step.{type Start, type Step}
+" <> allow_import <> "import gen/face.{type Face, " <> face <> "}
+import gen/query as q
+import gen/root/" <> name <> ".{type Actor, type Root, type Service, Service}
+
+pub const effect: Effect = Read
+
+pub const faces: List(Face) = [" <> face <> "]
+
+pub type Args {
+  Args(name: String)
+}
+
+pub type Out {
+  Out
+}
+
+pub type Error
+
+pub type P {
+  Name
+}
+
+pub const items: q.Select(P) = " <> select <> "
+
+pub const service: Service(Args, Out, Error) = Service(allow: [" <> allow <> "], logic: logic)
+
+pub fn logic(_by: Actor, _it: Root, _args: Args) -> Step(Out, Error, Start) {
+  step.done(Out)
+}
+")
+}
+
+fn with_storage(
+  app_dir: String,
+  extra: List(source.Unit),
+  storage: String,
+) -> List(source.Unit) {
+  let assert Ok(units) = source.load(app_dir)
+  let paths = ["server", ..list.map(extra, fn(item) { item.path })]
+  list.flatten([
+    list.filter(units, fn(item) { !list.contains(paths, item.path) }),
+    extra,
+    [
+      unit(
+        "server",
+        "import yumemi/server.{Derived}\n\npub const storage: List(server.Storage) = "
+          <> storage
+          <> "\n",
+      ),
+    ],
+  ])
+}
+
+fn read_sql(units: List(source.Unit), path: String) -> Result(String, Nil) {
+  let assert Ok(app) = reader.read(units)
+  sql.emit(app, hash.of(units))
+  |> list.find(fn(file) { file.path == path })
+  |> result.map(fn(file) { file.text })
+}
+
+fn sql_note(units: List(source.Unit), text: String) -> Bool {
+  let assert Ok(app) = reader.read(units)
+  sql.notes(app, hash.of(units))
+  |> list.any(fn(note) { string.contains(note.text, text) })
+}
+
+pub fn derived_party_stops_the_allow_owner_test() {
+  let memo =
+    unit(
+      "entity/memo",
+      "import yumemi/party.{type PartyId}
+import gen/types/title.{type Title}
+
+pub type Memo {
+  Memo(title: Title, party: PartyId)
+}
+
+pub fn key(it: Memo) -> Title {
+  it.title
+}
+
+pub const collection: String = \"memos\"
+",
+    )
+  // 行を渡さない集計(whole_rows を通らない)の allow 句が m.party を書く
+  let service =
+    read_service(
+      "memo_count",
+      "Public",
+      "allow.Clause(who: allow.Anyone, at: allow.AnyPhase, owner: allow.ViaMemoParty)",
+      "q.Select(from: q.Memo, join: [], where: [], group: [], having: [], agg: [q.Count], along: [], with: [], order: [], limit: q.NoLimit)",
+    )
+  let plain = with_storage(article_fixture, [memo, service], "[]")
+  let assert Ok(text) = read_sql(plain, "db/queries/memo_count/items.sql")
+  string.contains(text, "m.party=$") |> should.be_true
+  let declared =
+    with_storage(
+      article_fixture,
+      [memo, service],
+      "[Derived(entity: \"memo\", property: \"party\")]",
+    )
+  notes_of(declared) |> should.equal([])
+  read_sql(declared, "db/queries/memo_count/items.sql") |> should.be_error
+  sql_note(
+    declared,
+    "allow 句の owner ViaMemoParty の Memo の party は Derived(表の列に持たない Property)",
+  )
+  |> should.be_true
+}
+
+pub fn derived_order_stops_the_with_child_order_test() {
+  let assert Ok(units) = source.load("gen/fixtures/relation")
+  let assert Ok(photo) =
+    list.find(units, fn(item) { item.path == "entity/photo" })
+  // order を並び(OrderedBy)にしない Photo ── 並びの列は Derived にできない(条文)ので外す
+  let assert [head, ..] = string.split(photo.text, "\n/// 順序列は値域つき")
+  let photo = unit("entity/photo", head <> "\n")
+  // 子の列を選んだ with(to_jsonb(p) でなく jsonb_build_object)── whole_rows を通らない
+  let service =
+    read_service(
+      "album_pick",
+      "Test",
+      "",
+      "q.Pick(columns: [q.AlbumId, q.AlbumTitle, q.PhotoCaption], select: q.Select(from: q.Album, join: [], where: [], group: [], having: [], agg: [], along: [], with: [q.AlbumToPhotos], order: [q.Asc(q.AlbumTitle)], limit: q.NoLimit))",
+    )
+  let plain = with_storage("gen/fixtures/relation", [photo, service], "[]")
+  let assert Ok(text) = read_sql(plain, "db/queries/album_pick/items.sql")
+  string.contains(
+    text,
+    "jsonb_build_object('caption',p.caption) ORDER BY p.\"order\",p.id",
+  )
+  |> should.be_true
+  let declared =
+    with_storage(
+      "gen/fixtures/relation",
+      [photo, service],
+      "[Derived(entity: \"photo\", property: \"order\")]",
+    )
+  notes_of(declared) |> should.equal([])
+  read_sql(declared, "db/queries/album_pick/items.sql") |> should.be_error
+  sql_note(declared, "with の子 Photo の order は Derived(表の列に持たない Property)")
+  |> should.be_true
 }
 
 /// `Split` / `Text` / `Array` との重ね掛けと、同じ `Derived` の 2 度書きも止める。

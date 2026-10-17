@@ -991,7 +991,19 @@ fn restricted(
     list.try_map(owners, fn(owner) {
       use entity <- try(party_of(app, owner))
       case model.field_for_prop(entity, "party") {
-        Some(field) -> Ok(#(owner, entity, field.column))
+        // party の列は `column` を通らないので、`Derived` をここでも止める
+        Some(field) ->
+          case storage.derived_field(app, field) {
+            True ->
+              Error(clash(
+                "allow 句の owner "
+                <> owner
+                <> " の "
+                <> entity.name
+                <> " の party は Derived(表の列に持たない Property)── 生成の読みは引けない(手書きの読み ManualRead で渡す)",
+              ))
+            False -> Ok(#(owner, entity, field.column))
+          }
         None ->
           Error(clash(
             "allow 句の owner "
@@ -1274,7 +1286,7 @@ fn with_clause(
     alias_of(nested, child.name)
     |> option.to_result(undone("with の関係先に別名が付かない: " <> child.name)),
   )
-  let order = with_order(child, child_alias)
+  use order <- try(with_order(app, child, child_alias))
   let output = relation.with_output(from, name)
   let relation =
     child_alias
@@ -1320,11 +1332,25 @@ fn with_clause(
   ))
 }
 
-fn with_order(child: Entity, alias: String) -> String {
+/// 子の `order` の列は `column` を通らないので、`Derived` をここでも止める。
+fn with_order(
+  app: App,
+  child: Entity,
+  alias: String,
+) -> Result(String, Reason) {
   let key = alias <> "." <> quoted(child.key_column)
   case list.find(child.fields, fn(field) { field.column == "order" }) {
-    Ok(_) -> " ORDER BY " <> alias <> ".\"order\"," <> key
-    Error(_) -> " ORDER BY " <> key
+    Ok(field) ->
+      case storage.derived_field(app, field) {
+        True ->
+          Error(clash(
+            "with の子 "
+            <> child.name
+            <> " の order は Derived(表の列に持たない Property)── 生成の読みは並べられない(手書きの読み ManualRead で渡す)",
+          ))
+        False -> Ok(" ORDER BY " <> alias <> ".\"order\"," <> key)
+      }
+    Error(_) -> Ok(" ORDER BY " <> key)
   }
 }
 
