@@ -43,3 +43,14 @@
 ## 作業木の補足
 
 root の `node_modules` は作業木に無かったので、メインの checkout のそれへ symlink を張った(`node_modules` は ignore)。fixture の面に置いた esbuild の symlink は、test が自分で張るので戻した。
+
+## 柏木のゲート 2 と鷹野の検収(2026-10-18)
+
+柏木 opus のゲート 2:P0 0。P2 は柏木が `3d6ec8f` で直した(README の「Which responses」、CHANGELOG に最終の頁が 2 回取られる項、`landing` の注記、台本の待ちを click の後の load に、`src/yumemi/entry.gleam` の注記から役員の名を外す)。上の「確かめたこと 3」の 2 件はこれで 0 件。
+
+P1(直さない、後の便で):
+1. `load(url)` が `#` 付きで今と同じ URL を開くと `#` の移動になり読み込まれず、前の頁の中身が残る。0.14.6 から在る穴で、この便で直ったのは最終の URL が元と違う redirect だけ。元の URL へ戻る redirect(`/loop#h` → `/set` → `/loop`)と、redirect でない取れない応答(`/plain200#h`)に残る。直し方は `load` で行き先が今の href と同じで `#` を持つとき `location.reload()`(`stopped` と同じ形)
+2. `Location` に付いた `#` は落ちる(`response.url` は fragment を持たない)。門の `RedirectBack`・`FixedKeep` は `#` を許さないので、効くのは app が自分で返す 302 だけ。CHANGELOG と README に書いた
+3. 別の origin への redirect は元の URL が 2 回のまま(`mode: "same-origin"` で別の origin へは 1 回)。副作用のある GET の道は同じ origin で閉じること
+
+鷹野の検収:`git diff d5002ba..3d6ec8f` と実ファイル、root の `gleam test`(MemoryMax 6G)`553 passed, no failures`・`Framework checks passed: 25 groups`、実ブラウザの台本を直す前と後で回して `/go` が 2 → 1(`{"main /go (fetch)":1,"main /go":1,"main /":1}` → `{"main /go (fetch)":1,"main / (fetch)":1,"main /":1}`)。
