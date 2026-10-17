@@ -1063,13 +1063,24 @@ function start3({ routes: paths, csp = {} }) {
       if (latest === id) globalThis.location.reload();
     }, 0);
   };
+  const landing = (url, response) => {
+    try {
+      const to = new URL(response.url);
+      if (to.origin !== url.origin) return url;
+      if (to.hash === "" && url.hash !== "") to.hash = url.hash;
+      return to;
+    } catch (_error) {
+      return url;
+    }
+  };
   const swap = async (url, signal, id, focus) => {
     const csp2 = policy(routes, url.pathname);
     let response;
     try {
       response = await fetch(url.href, {
         credentials: "same-origin",
-        redirect: "manual",
+        redirect: "follow",
+        mode: "same-origin",
         cache: "no-store",
         headers: { accept: "text/html", [navigateHeader]: "1" },
         signal
@@ -1078,6 +1089,7 @@ function start3({ routes: paths, csp = {} }) {
       if (signal.aborted) return stopped(id);
       return load(url);
     }
+    if (response.redirected) return load(landing(url, response));
     const type = response.headers.get("content-type") ?? "";
     if (response.type === "opaqueredirect" || !swappableStatus(response) || !type.startsWith("text/html") || !samePolicy(response.headers, csp2)) {
       return load(url);

@@ -14,6 +14,6 @@ pub fn navigation_goes_through_navigation_api_test() {
   let out = navigation_start()
   string.contains(out, "NG ") |> should.be_false
   string.contains(out, "STDERR") |> should.be_false
-  // 0.12 段 C:止まった取りの 2 通り(開き直す・新しい遷移に任せる)で 1 件増えて 19
-  string.split(out, "\n") |> list.length |> should.equal(19)
+  // 0.12 段 C:止まった取りの 2 通りで 19。0.14.7:redirect を follow して最終の URL を開く check が 7 件増えて 26
+  string.split(out, "\n") |> list.length |> should.equal(26)
 }

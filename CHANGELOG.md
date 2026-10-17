@@ -2,6 +2,14 @@
 
 Releases before 0.14.1 are described in the README sections (each names the version that brought it) and in the git history.
 
+## 0.14.7 (2026-10-18)
+
+Fixes the client navigation sending a GET twice when the link's target answers with a redirect.
+
+- **A redirect is followed once.** The navigation fetch used `redirect: "manual"`, so a 302 became an opaque response and the page was then loaded again from the *same* URL, which ran a side-effecting GET twice. The fetch is now `redirect: "follow"` with `mode: "same-origin"`; a redirected response is not swapped in but its final URL is opened as a page load (`location.replace`, keeping the original `#` when the final URL has none), so the URL and the CSP header are the final page's.
+- **Other origins.** `mode: "same-origin"` makes the fetch fail before a request leaves for another origin; the failure falls back to loading the original URL, as before.
+- Responses that do not redirect (200, failure pages, a CSP that differs, not HTML) and network failures or aborts behave as in 0.14.6.
+
 ## 0.14.6 (2026-10-17)
 
 Adds a `server.Storage` declaration, **`ReadFrom`**: an Entity's generated reads read another relation (a view) than its table, while the verbs and the foreign keys keep the table. An app that declares no `ReadFrom` generates what 0.14.5 generated, byte for byte.

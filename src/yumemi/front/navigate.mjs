@@ -16,9 +16,11 @@
 // Component の再起動・pageview の印。再起動は呼び出しでなく、来た body の custom element が define 済みの class で
 // 接続時に起きること(0.12 段 C、`boot()` の呼び直しは無くなった)。次の頁は server に 1 回の request で取りに行き(門・成人の申告・session の判定は server の
 // 今までの道を通る)、200 の HTML で、応答の CSP の header が表と同じ値で、同じ面の client を持ち、差し替えられる形
-// なら head と body を差し替える。取れない(redirect・200 でない・HTML でない・CSP の header が表と違う・
+// なら head と body を差し替える。取れない(200 でない・HTML でない・CSP の header が表と違う・
 // script を持つ)ときは、行き先を頁の読み込みで開き直す(URL は取った時点で行き先に
-// 替わっているので、履歴は積まない `location.replace`)。
+// 替わっているので、履歴は積まない `location.replace`)。redirect(0.14.7)は `follow` で辿り、差し替えずに最終の URL を
+// 頁の読み込みで開く ── entry の URL は元の(副作用のある)URL のままなので、最終の頁を差し替えに使うと再読み込みで
+// 元の GET がもう一度届く。`mode: "same-origin"` は別の origin への redirect を、要求を送る前に失敗させる(元の URL を開き直す)。
 //
 // head の差し替え(0.11.15):今の head と来た head で同じ要素(outerHTML が同じ)は残し、順を保って差分だけ
 // 足し引きする(同じ stylesheet の `<link>` を作り直さない ── 作り直すと確かめ直しの往復の間に素の頁が出る)。
@@ -337,13 +339,25 @@ export function start({ routes: paths, csp = {} }) {
       if (latest === id) globalThis.location.reload();
     }, 0);
   };
+  // redirect した応答の最終の URL(同じ origin だけ。元の `#` は行き先に無ければ引き継ぐ ── ブラウザの redirect と同じ)
+  const landing = (url, response) => {
+    try {
+      const to = new URL(response.url);
+      if (to.origin !== url.origin) return url;
+      if (to.hash === "" && url.hash !== "") to.hash = url.hash;
+      return to;
+    } catch (_error) {
+      return url;
+    }
+  };
   const swap = async (url, signal, id, focus) => {
     const csp = policy(routes, url.pathname);
     let response;
     try {
       response = await fetch(url.href, {
         credentials: "same-origin",
-        redirect: "manual",
+        redirect: "follow",
+        mode: "same-origin",
         cache: "no-store",
         headers: { accept: "text/html", [navigateHeader]: "1" },
         signal,
@@ -352,6 +366,7 @@ export function start({ routes: paths, csp = {} }) {
       if (signal.aborted) return stopped(id);
       return load(url);
     }
+    if (response.redirected) return load(landing(url, response));
     const type = response.headers.get("content-type") ?? "";
     if (response.type === "opaqueredirect" || !swappableStatus(response) || !type.startsWith("text/html") || !samePolicy(response.headers, csp)) {
       return load(url);
